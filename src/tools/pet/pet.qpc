@@ -1,0 +1,55 @@
+// ---------------------------------------------------------------
+// Engine Tool - Pet
+// ---------------------------------------------------------------
+macro PROJECT_NAME	"Pet"
+macro SRCDIR		"../.."
+
+include "$SRCDIR/_qpc_scripts/base_tool.qpc"
+
+configuration
+{
+	general
+	{
+		include_directories
+		{
+			"./"
+			"$SRCDIR/game/shared"
+		}
+	}
+
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"PET_EXPORTS"
+		}
+	}
+
+	linker
+	{
+		libraries
+		{
+			"dmxloader"
+			"particles"
+		}
+	}
+}
+
+files
+{
+	folder "Source Files"
+	{
+		"particlesystemdefinitionbrowser.cpp"
+		"particlesystempropertiescontainer.cpp"
+		"petdoc.cpp"
+		"pettool.cpp"
+	}
+
+	folder "Header Files"
+	{
+		"particlesystemdefinitionbrowser.h"
+		"particlesystempropertiescontainer.h"
+		"petdoc.h"
+		"pettool.h"
+	}
+}

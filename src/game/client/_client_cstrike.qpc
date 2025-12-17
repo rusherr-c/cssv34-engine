@@ -1,0 +1,213 @@
+// ---------------------------------------------------------------
+// Auto Generated QPC Script - Fix if needed before using
+// ---------------------------------------------------------------
+macro PROJECT_NAME "Client (Cstrike)"
+
+macro SRCDIR "../.."
+macro GAMENAME "mod_cstrike"
+
+include "$SRCDIR/game/client/_client_base.qpc"
+
+configuration
+{
+	general
+	{
+		include_directories
+		{
+			"$SRCDIR/game/shared/cstrike/control"
+			"./cstrike"
+			"./cstrike/control"
+			"./cstrike/vgui"
+			"$SRCDIR/game/shared/cstrike"
+		}
+	}
+	
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"CSTRIKE_DLL"
+		}
+	}
+}
+
+files
+{
+	folder "Source Files"
+	{
+		- "$SRCDIR/game/shared/weapon_parse_default.cpp"
+		"c_team_objectiveresource.cpp"
+		"c_team_objectiveresource.h"
+		"hud_base_account.cpp"
+		"hud_base_account.h"
+		"hud_voicestatus.cpp"
+		"$SRCDIR/game/shared/predicted_viewmodel.cpp"
+		"$SRCDIR/game/shared/predicted_viewmodel.h"
+		"hud_lcd.cpp"
+
+		folder "CounterStrike DLL"
+		{
+			"$SRCDIR/game/shared/cstrike/basecsgrenade_projectile.cpp"
+			"cstrike/buy_presets/buy_preset.cpp"
+			"cstrike/buy_presets/buy_preset_debug.cpp"
+			"cstrike/buy_presets/buy_preset_debug.h"
+			"cstrike/buy_presets/buy_preset_weapon_info.cpp"
+			"cstrike/buy_presets/buy_presets.cpp"
+			"cstrike/buy_presets/buy_presets.h"
+			"cstrike/c_cs_hostage.cpp"
+			"cstrike/c_cs_hostage.h"
+			"cstrike/c_cs_player.cpp"
+			"cstrike/c_cs_player.h"
+			"cstrike/c_cs_playerresource.cpp"
+			"cstrike/c_cs_playerresource.h"
+			"cstrike/c_cs_team.cpp"
+			"cstrike/c_cs_team.h"
+			"cstrike/c_csrootpanel.cpp"
+			"cstrike/c_csrootpanel.h"
+			"cstrike/c_plantedc4.cpp"
+			"cstrike/c_plantedc4.h"
+			"cstrike/c_te_radioicon.cpp"
+			"cstrike/c_te_shotgun_shot.cpp"
+			"cstrike/clientmode_csnormal.cpp"
+			"cstrike/clientmode_csnormal.h"
+			"$SRCDIR/game/shared/cstrike/cs_ammodef.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_ammodef.h"
+			"$SRCDIR/game/shared/cstrike/cs_gamemovement.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_gamerules.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_gamerules.h"
+			"cstrike/cs_hud_ammo.cpp"
+			"cstrike/cs_hud_chat.cpp"
+			"cstrike/cs_hud_chat.h"
+			"cstrike/cs_hud_damageindicator.cpp"
+			"cstrike/cs_hud_health.cpp"
+			"cstrike/cs_hud_scope.cpp"
+			"cstrike/cs_hud_target_id.cpp"
+			"cstrike/cs_hud_weaponselection.cpp"
+			"cstrike/cs_in_main.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_player_shared.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_playeranimstate.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_playeranimstate.h"
+			"cstrike/cs_prediction.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_shareddefs.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_usermessages.cpp"
+			"cstrike/cs_view_scene.cpp"
+			"cstrike/cs_view_scene.h"
+			"$SRCDIR/game/shared/cstrike/cs_weapon_parse.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_weapon_parse.h"
+			"cstrike/fx_cs_blood.cpp"
+			"cstrike/fx_cs_impacts.cpp"
+			"cstrike/fx_cs_knifeslash.cpp"
+			"cstrike/fx_cs_muzzleflash.cpp"
+			"$SRCDIR/game/shared/cstrike/fx_cs_shared.cpp"
+			"cstrike/fx_cs_weaponfx.cpp"
+			"cstrike/hud_account.cpp"
+			"cstrike/hud_armor.cpp"
+			"cstrike/hud_c4.cpp"
+			"cstrike/hud_deathnotice.cpp"
+			"cstrike/hud_defuser.cpp"
+			"cstrike/hud_flashbang.cpp"
+			"cstrike/hud_hostagerescue.cpp"
+			"cstrike/hud_progressbar.cpp"
+			"cstrike/hud_radar.cpp"
+			"cstrike/hud_roundtimer.cpp"
+			"cstrike/hud_scenarioicon.cpp"
+			"cstrike/hud_shopping_cart.cpp"
+			"cstrike/radio_status.cpp"
+			"cstrike/radio_status.h"
+			"$SRCDIR/game/shared/cstrike/bot/shared_util.cpp"
+			"$SRCDIR/game/shared/cstrike/bot/shared_util.h"
+			"cstrike/vgui_rootpanel_cs.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_ak47.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_aug.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_awp.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_basecsgrenade.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_basecsgrenade.h"
+			"$SRCDIR/game/shared/cstrike/weapon_c4.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_c4.h"
+			"$SRCDIR/game/shared/cstrike/weapon_csbase.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_csbase.h"
+			"$SRCDIR/game/shared/cstrike/weapon_csbasegun.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_csbasegun.h"
+			"$SRCDIR/game/shared/cstrike/weapon_deagle.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_elite.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_famas.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_fiveseven.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_flashbang.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_g3sg1.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_galil.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_glock.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_hegrenade.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_knife.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_knife.h"
+			"$SRCDIR/game/shared/cstrike/weapon_m249.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_m3.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_m4a1.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_mac10.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_mp5navy.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_p228.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_p90.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_scout.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_sg550.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_sg552.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_smokegrenade.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_smokegrenade.h"
+			"$SRCDIR/game/shared/cstrike/weapon_tmp.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_ump45.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_usp.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_xm1014.cpp"
+
+			folder "vgui"
+			{
+				"cstrike/VGUI/backgroundpanel.cpp"
+				"cstrike/VGUI/backgroundpanel.h"
+				"cstrike/VGUI/buymouseoverpanelbutton.h"
+				"cstrike/Vgui/buypreset_imageinfo.cpp"
+				"cstrike/Vgui/buypreset_listbox.cpp"
+				"cstrike/Vgui/buypreset_listbox.h"
+				"cstrike/Vgui/buypreset_panel.cpp"
+				"cstrike/Vgui/buypreset_weaponsetlabel.h"
+				"cstrike/Vgui/career_box.cpp"
+				"cstrike/Vgui/career_box.h"
+				"cstrike/Vgui/career_button.cpp"
+				"cstrike/Vgui/career_button.h"
+				"cstrike/VGUI/counterstrikeviewport.cpp"
+				"cstrike/VGUI/counterstrikeviewport.h"
+				"cstrike/VGUI/cstrikebuyequipmenu.cpp"
+				"cstrike/VGUI/cstrikebuyequipmenu.h"
+				"cstrike/VGUI/cstrikebuymenu.cpp"
+				"cstrike/VGUI/cstrikebuymenu.h"
+				"cstrike/VGUI/cstrikebuysubmenu.h"
+				"cstrike/VGUI/cstrikeclassmenu.cpp"
+				"cstrike/VGUI/cstrikeclassmenu.h"
+				"cstrike/VGUI/cstrikeclientscoreboard.cpp"
+				"cstrike/VGUI/cstrikeclientscoreboard.h"
+				"cstrike/VGUI/cstrikespectatorgui.cpp"
+				"cstrike/VGUI/cstrikespectatorgui.h"
+				"cstrike/VGUI/cstriketeammenu.cpp"
+				"cstrike/VGUI/cstriketeammenu.h"
+				"cstrike/VGUI/cstriketextwindow.cpp"
+				"cstrike/VGUI/cstriketextwindow.h"
+				"cstrike/vgui_c4panel.cpp"
+				"cstrike/vgui_viewc4panel.cpp"
+			}
+		}
+
+		folder "game_controls"
+		{
+			"game_controls/buymenu.cpp"
+			"game_controls/buysubmenu.cpp"
+			"game_controls/classmenu.cpp"
+		}
+	}
+
+	folder "Header Files"
+	{
+		folder "game_controls header files"
+		{
+			"game_controls/buymenu.h"
+			"game_controls/buysubmenu.h"
+			"game_controls/classmenu.h"
+			"hud_lcd.h"
+		}
+	}
+}

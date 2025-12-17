@@ -1,0 +1,5 @@
+// ---------------------------------------------------------------
+// Auto Generated QPC Script - Fix if needed before using
+// ---------------------------------------------------------------
+include "$SRCDIR/_qpc_scripts/posix_base.qpc"
+

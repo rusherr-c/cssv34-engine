@@ -1,0 +1,81 @@
+// ---------------------------------------------------------------
+// vscript.qpc
+// ---------------------------------------------------------------
+macro PROJECT_NAME "vscript"
+
+macro SRCDIR ".."
+
+include "$SRCDIR/_qpc_scripts/source_lib_base.qpc"
+
+configuration
+{
+	general
+	{
+		include_directories
+		{
+			"./squirrel/include"
+			"./squirrel/squirrel"
+			"./squirrel/sqstdlib"
+			"./sqdbg/include"
+		}
+	}
+	
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"MAPBASE_VSCRIPT"
+		}
+	}
+}
+
+files
+{
+	folder "Source Files"
+	{
+		"vscript.cpp"
+		"vscript_squirrel.cpp"
+		"vscript_squirrel.nut"
+		"vscript_bindings_base.cpp"
+		"vscript_bindings_base.h"
+		"vscript_bindings_math.cpp"
+		"vscript_bindings_math.h"
+
+		folder "squirrel"
+		{
+
+			"./squirrel/sqstdlib/sqstdaux.cpp"	\
+			"./squirrel/sqstdlib/sqstdblob.cpp"	\
+			"./squirrel/sqstdlib/sqstdio.cpp"	\
+			"./squirrel/sqstdlib/sqstdmath.cpp"	\
+			"./squirrel/sqstdlib/sqstdrex.cpp"	\
+			"./squirrel/sqstdlib/sqstdstream.cpp"	\
+			"./squirrel/sqstdlib/sqstdstring.cpp"	\
+			"./squirrel/sqstdlib/sqstdsystem.cpp"	\
+			"./squirrel/squirrel/sqapi.cpp"	\
+			"./squirrel/squirrel/sqbaselib.cpp"	\
+			"./squirrel/squirrel/sqclass.cpp"	\
+			"./squirrel/squirrel/sqcompiler.cpp"	\
+			"./squirrel/squirrel/sqdebug.cpp"	\
+			"./squirrel/squirrel/sqfuncstate.cpp"	\
+			"./squirrel/squirrel/sqlexer.cpp"	\
+			"./squirrel/squirrel/sqmem.cpp"	\
+			"./squirrel/squirrel/sqobject.cpp"	\
+			"./squirrel/squirrel/sqstate.cpp"	\
+			"./squirrel/squirrel/sqtable.cpp"	\
+			"./squirrel/squirrel/sqvm.cpp"
+		}
+
+		folder "sqdbg"
+		{
+			"./sqdbg/sqdbg/server.cpp"
+			{
+				preprocessor_definitions
+				{
+					"_CRT_SECURE_NO_WARNINGS"
+					"_WINSOCK_DEPRECATED_NO_WARNINGS"
+				}
+			}
+		}
+	}
+}

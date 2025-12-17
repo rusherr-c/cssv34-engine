@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------
+// Engine Tool - Actbusy Script Editor
+// ---------------------------------------------------------------
+macro PROJECT_NAME	"Actbusy"
+macro SRCDIR		"../.."
+
+include "$SRCDIR/_qpc_scripts/base_tool.qpc"
+
+files
+{
+	folder "Source Files"
+	{
+		"actbusydoc.cpp"
+		"actbusytool.cpp"
+		"$SRCDIR/public/movieobjects/movieobjects.cpp"
+	}
+
+	folder "Header Files"
+	{
+		"actbusydoc.h"
+		"actbusytool.h"
+	}
+}

@@ -1,0 +1,42 @@
+// ---------------------------------------------------------------
+// Engine Tool - Map Editor
+// ---------------------------------------------------------------
+macro PROJECT_NAME	"MapEdit"
+macro SRCDIR		"../.."
+
+include "$SRCDIR/_qpc_scripts/base_tool.qpc"
+
+configuration
+{
+	general
+	{
+		include_directories
+		{
+			"./"
+			"../common"
+			"$SRCDIR/game/shared"
+		}
+	}
+
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"SAMPLETOOL_EXPORTS"
+		}
+	}
+}
+
+files
+{
+	folder "Source Files"
+	{
+		"mapedit.cpp"
+		"menus.cpp"
+	}
+
+	folder "Header Files"
+	{
+		"menus.h"
+	}
+}

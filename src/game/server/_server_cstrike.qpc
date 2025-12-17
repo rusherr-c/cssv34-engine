@@ -1,0 +1,234 @@
+// ---------------------------------------------------------------
+// Auto Generated QPC Script - Fix if needed before using
+// ---------------------------------------------------------------
+macro PROJECT_NAME "Server (Cstrike)"
+
+macro SRCDIR "../.."
+macro GAMENAME "mod_cstrike"
+
+include "$SRCDIR/game/server/_server_base.qpc"
+
+configuration
+{
+	general
+	{
+		include_directories
+		{
+			"$SRCDIR/game/shared/cstrike/control"
+			"$SRCDIR/game/shared/cstrike"
+			"./cstrike"
+			"./cstrike/bot"
+			"./cstrike/bot/states"
+			"$SRCDIR/game/shared/cstrike/bot"
+			"./cstrike/hostage"
+			"./cstrike/control"
+		}
+	}
+	
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"BOTS"
+			"CSTRIKE_DLL"
+		}
+	}
+	
+	linker
+	{
+		libraries
+		{
+			"ws2_32.lib" [$WIN32]
+		}
+	}
+}
+
+files
+{
+	folder "Source Files"
+	{
+		"hl2/Func_Monitor.cpp"
+		"h_cycler.cpp"
+		"h_cycler.h"
+		"$SRCDIR/game/shared/predicted_viewmodel.cpp"
+		"$SRCDIR/game/shared/predicted_viewmodel.h"
+		"$SRCDIR/game/shared/hl2/survival_gamerules.cpp"
+		"team_objectiveresource.cpp"
+		"team_objectiveresource.h"
+		"team_spawnpoint.cpp"
+		"team_spawnpoint.h"
+		"$SRCDIR/game/shared/teamplayroundbased_gamerules.cpp"
+
+		folder "CounterStrike DLL"
+		{
+			"$SRCDIR/game/shared/cstrike/basecsgrenade_projectile.cpp"
+			"$SRCDIR/game/shared/cstrike/basecsgrenade_projectile.h"
+			"$SRCDIR/game/shared/cstrike/cs_ammodef.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_ammodef.h"
+			"cstrike/cs_autobuy.cpp"
+			"cstrike/cs_autobuy.h"
+			"$SRCDIR/game/shared/cstrike/cs_blackmarket.cpp"
+			"cstrike/cs_client.cpp"
+			"cstrike/cs_client.h"
+			"cstrike/cs_eventlog.cpp"
+			"cstrike/cs_gameinterface.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_gamemovement.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_gamerules.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_gamerules.h"
+			"cstrike/cs_gamestats.cpp"
+			"cstrike/cs_hltvdirector.cpp"
+			"cstrike/cs_player.cpp"
+			"cstrike/cs_player.h"
+			"cstrike/cs_player_resource.cpp"
+			"cstrike/cs_player_resource.h"
+			"$SRCDIR/game/shared/cstrike/cs_player_shared.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_playeranimstate.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_playeranimstate.h"
+			"cstrike/cs_playermove.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_shareddefs.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_shareddefs.h"
+			"cstrike/cs_team.cpp"
+			"cstrike/cs_team.h"
+			"$SRCDIR/game/shared/cstrike/cs_usermessages.cpp"
+			"cstrike/cs_vehicle_jeep.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_weapon_parse.cpp"
+			"$SRCDIR/game/shared/cstrike/cs_weapon_parse.h"
+			"$SRCDIR/game/shared/cstrike/flashbang_projectile.cpp"
+			"$SRCDIR/game/shared/cstrike/flashbang_projectile.h"
+			"cstrike/func_bomb_target.cpp"
+			"cstrike/func_bomb_target.h"
+			"cstrike/func_buy_zone.cpp"
+			"cstrike/func_hostage_rescue.cpp"
+			"$SRCDIR/game/shared/cstrike/fx_cs_shared.cpp"
+			"$SRCDIR/game/shared/cstrike/fx_cs_shared.h"
+			"$SRCDIR/game/shared/cstrike/hegrenade_projectile.cpp"
+			"$SRCDIR/game/shared/cstrike/hegrenade_projectile.h"
+			"cstrike/info_view_parameters.cpp"
+			"cstrike/item_ammo.cpp"
+			"cstrike/item_assaultsuit.cpp"
+			"cstrike/item_defuser.cpp"
+			"cstrike/item_kevlar.cpp"
+			"cstrike/item_nvgs.cpp"
+			"cstrike/mapinfo.cpp"
+			"cstrike/mapinfo.h"
+			"cstrike/point_surroundtest.cpp"
+			"cstrike/smokegrenade_projectile.cpp"
+			"cstrike/smokegrenade_projectile.h"
+			"cstrike/te_radioicon.cpp"
+			"cstrike/te_shotgun_shot.cpp"
+			"cstrike/te_shotgun_shot.h"
+			"$SRCDIR/game/shared/cstrike/cs_urlretrieveprices.cpp"
+			{
+				precompiled_header "none"
+			}
+
+			"$SRCDIR/game/shared/cstrike/cs_urlretrieveprices.h"
+			"$SRCDIR/game/shared/cstrike/weapon_ak47.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_aug.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_awp.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_basecsgrenade.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_basecsgrenade.h"
+			"$SRCDIR/game/shared/cstrike/weapon_c4.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_c4.h"
+			"$SRCDIR/game/shared/cstrike/weapon_csbase.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_csbase.h"
+			"$SRCDIR/game/shared/cstrike/weapon_csbasegun.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_csbasegun.h"
+			"$SRCDIR/game/shared/cstrike/weapon_deagle.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_elite.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_famas.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_fiveseven.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_flashbang.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_flashbang.h"
+			"$SRCDIR/game/shared/cstrike/weapon_g3sg1.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_galil.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_glock.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_hegrenade.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_hegrenade.h"
+			"$SRCDIR/game/shared/cstrike/weapon_knife.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_m249.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_m3.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_m4a1.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_mac10.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_mp5navy.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_p228.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_p90.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_scout.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_sg550.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_sg552.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_smokegrenade.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_tmp.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_ump45.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_usp.cpp"
+			"$SRCDIR/game/shared/cstrike/weapon_xm1014.cpp"
+
+			folder "Bot"
+			{
+				"cstrike/bot/cs_bot.cpp"
+				"cstrike/bot/cs_bot.h"
+				"cstrike/bot/cs_bot_chatter.cpp"
+				"cstrike/bot/cs_bot_chatter.h"
+				"cstrike/bot/cs_bot_event.cpp"
+				"cstrike/bot/cs_bot_event_bomb.cpp"
+				"cstrike/bot/cs_bot_event_player.cpp"
+				"cstrike/bot/cs_bot_event_weapon.cpp"
+				"cstrike/bot/cs_bot_init.cpp"
+				"cstrike/bot/cs_bot_listen.cpp"
+				"cstrike/bot/cs_bot_manager.cpp"
+				"cstrike/bot/cs_bot_manager.h"
+				"cstrike/bot/cs_bot_nav.cpp"
+				"cstrike/bot/cs_bot_pathfind.cpp"
+				"cstrike/bot/cs_bot_radio.cpp"
+				"cstrike/bot/cs_bot_statemachine.cpp"
+				"cstrike/bot/cs_bot_update.cpp"
+				"cstrike/bot/cs_bot_vision.cpp"
+				"cstrike/bot/cs_bot_weapon.cpp"
+				"cstrike/bot/cs_bot_weapon_id.cpp"
+				"cstrike/bot/cs_gamestate.cpp"
+				"cstrike/bot/cs_gamestate.h"
+
+				folder "States"
+				{
+					"cstrike/bot/states/cs_bot_attack.cpp"
+					"cstrike/bot/states/cs_bot_buy.cpp"
+					"cstrike/bot/states/cs_bot_defuse_bomb.cpp"
+					"cstrike/bot/states/cs_bot_escape_from_bomb.cpp"
+					"cstrike/bot/states/cs_bot_fetch_bomb.cpp"
+					"cstrike/bot/states/cs_bot_follow.cpp"
+					"cstrike/bot/states/cs_bot_hide.cpp"
+					"cstrike/bot/states/cs_bot_hunt.cpp"
+					"cstrike/bot/states/cs_bot_idle.cpp"
+					"cstrike/bot/states/cs_bot_investigate_noise.cpp"
+					"cstrike/bot/states/cs_bot_move_to.cpp"
+					"cstrike/bot/states/cs_bot_open_door.cpp"
+					"cstrike/bot/states/cs_bot_plant_bomb.cpp"
+					"cstrike/bot/states/cs_bot_use_entity.cpp"
+				}
+
+				folder "Shared"
+				{
+					"$SRCDIR/game/shared/cstrike/bot/bot.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/bot.h"
+					"$SRCDIR/game/shared/cstrike/bot/bot_constants.h"
+					"$SRCDIR/game/shared/cstrike/bot/bot_hide.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/bot_manager.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/bot_manager.h"
+					"$SRCDIR/game/shared/cstrike/bot/bot_profile.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/bot_profile.h"
+					"$SRCDIR/game/shared/cstrike/bot/bot_util.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/bot_util.h"
+					"$SRCDIR/game/shared/cstrike/bot/nav_path.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/nav_path.h"
+					"$SRCDIR/game/shared/cstrike/bot/shared_util.cpp"
+					"$SRCDIR/game/shared/cstrike/bot/shared_util.h"
+				}
+			}
+
+			folder "Hostage"
+			{
+				"cstrike/hostage/cs_simple_hostage.cpp"
+				"cstrike/hostage/cs_simple_hostage.h"
+			}
+		}
+	}
+}

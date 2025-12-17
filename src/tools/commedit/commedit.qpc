@@ -1,0 +1,49 @@
+// ---------------------------------------------------------------
+// Engine Tool - Commentary Editor
+// ---------------------------------------------------------------
+macro PROJECT_NAME	"Commedit"
+macro SRCDIR		"../.."
+
+include "$SRCDIR/_qpc_scripts/base_tool.qpc"
+
+configuration
+{
+	general
+	{
+		include_directories
+		{
+			"./"
+			"../common"
+			"$SRCDIR/game/shared"
+		}
+	}
+
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"COMMEDIT_EXPORTS"
+		}
+	}
+}
+
+files
+{
+	folder "Source Files"
+	{
+		"commeditdoc.cpp"
+		"commedittool.cpp"
+		"commentarynodebrowserpanel.cpp"
+		"commentarypropertiespanel.cpp"
+		"dmecommentarynodeentity.cpp"
+	}
+
+	folder "Header Files"
+	{
+		"commeditdoc.h"
+		"commedittool.h"
+		"commentarynodebrowserpanel.h"
+		"commentarypropertiespanel.h"
+		"dmecommentarynodeentity.h"
+	}
+}

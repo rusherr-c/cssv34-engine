@@ -1,0 +1,24 @@
+// ---------------------------------------------------------------
+// Base Static Library Settings for Visual Studio
+// ---------------------------------------------------------------
+configuration
+{
+	compiler
+	{
+		preprocessor_definitions
+		{
+			"_LIB"
+		}
+
+		options
+		{
+			"/Z7" 	[$RELEASE]
+			"/Gm" 	[$WIN64 && $DEBUG]
+		}
+	}
+	
+	linker
+	{
+		output_file "$OUTLIBDIR/$OUTLIBNAME" [!$VISUAL_STUDIO]
+	}
+}

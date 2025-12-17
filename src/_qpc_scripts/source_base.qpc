@@ -1,0 +1,91 @@
+// ---------------------------------------------------------------
+// Base file included in all projects
+// ---------------------------------------------------------------
+macro WIN32		"1"		[$WINDOWS && $I386]
+macro WIN64		"1"		[$WINDOWS && $AMD64]
+
+macro LINUX32	"1"		[$LINUX && $I386]
+macro LINUX64	"1"		[$LINUX && $AMD64]
+
+macro 32BITS	"1"		[$I386 || $ARM]
+macro 64BITS	"1"		[$AMD64 || $ARM64]
+
+macro PLAT_DIR	"win32"		[$WIN32]
+macro PLAT_DIR	"win64"		[$WIN64]
+macro PLAT_DIR	"linux32"	[$LINUX32]
+macro PLAT_DIR	"linux64"	[$LINUX64]
+macro PLAT_DIR	"macos"		[$MACOS]
+
+macro LIBPUBLIC	"$SRCDIR/lib/public/$PLAT_DIR" [$WIN64]
+macro LIBCOMMON	"$SRCDIR/lib/common/$PLAT_DIR" [$WIN64]
+
+macro LIBPUBLIC	"$SRCDIR/lib/public" [$WIN32]
+macro LIBCOMMON	"$SRCDIR/lib/common" [$WIN32]
+
+macro GAMENAME
+macro _SUBDIRSUFFIX		"$GAMENAME" [$WIN32]
+macro _SUBDIRSUFFIX		"$PLAT_DIR/$GAMENAME" [$WIN64]
+
+macro BINDEFAULT		"$SRCDIR/../game/bin/$_SUBDIRSUFFIX"
+macro EXEDEFAULT		"$SRCDIR/../game"
+
+macro OUT_DIR           "$CONFIG/$_SUBDIRSUFFIX"    [!$OUT_DIR]
+macro BUILD_DIR         "$CONFIG/$_SUBDIRSUFFIX"    [!$BUILD_DIR]
+
+include "$SRCDIR/_qpc_scripts/win/base_vstudio.qpc"	[$WINDOWS]
+include "$SRCDIR/_qpc_scripts/posix_base.qpc"		[$POSIX]
+
+build_event "copy_file" "INFILE" "OUTFILE"
+{
+	"copy $INFILE $OUTFILE" [$WINDOWS]
+	"cp $INFILE $OUTFILE" [!$WINDOWS]
+}
+
+configuration
+{
+	general
+	{
+		language "cpp"
+		include_directories { "$SRCDIR/common" "$SRCDIR/public" "$SRCDIR/public/tier0" "$SRCDIR/public/tier1" }
+	}
+	
+	compiler
+	{
+		preprocessor_definitions
+		{			
+			"STAGING_ONLY" [$STAGING_ONLY]
+			
+			"_X64_" "_x64_" "PLATFORM_64BITS" "_x86_64_" "_X86_64_"		[$64BITS]
+			"_X86_" "_x86_" "PLATFORM_32BITS" "_I386_" "_I386"			[$32BITS]
+			
+			"_HAS_ITERATOR_DEBUGGING=0" "_DEBUG" "DEBUG"	[$DEBUG]
+			"NDEBUG"										[$RELEASE]
+			
+			"DEV_BUILD"			[!$PUBLISH]
+			"_PROFILE"			[$PROFILE && !$RETAIL]
+			"RETAIL_ASSERTS"	[$RETAIL && $RETAILASSERTS]
+			
+			"_DLL_EXT=$_BIN_EXT"
+			"FRAME_POINTER_OMISSION_DISABLED" "VPC"
+		}
+	}
+}
+
+dependencies [!$IS_LIB_PROJECT]
+{
+	"tier0/tier0.qpc"
+	"tier1/tier1.qpc"
+	"vstdlib/vstdlib.qpc"
+}
+
+files [!$IS_LIB_PROJECT]
+{
+	folder "Source Files"
+	{
+		"$SRCDIR/public/tier0/memoverride.cpp"
+		{
+			precompiled_header "none"
+		}
+	}
+}
+
