@@ -1,6 +1,6 @@
 /*==========================================================================;
  *
- *  Copyright (C) 1995-1997 Microsoft Corporation.  All Rights Reserved.
+ *  Copyright (c) Microsoft Corporation.  All rights reserved.
  *
  *  File:       d3drm.h
  *  Content:    Direct3DRM include file
@@ -108,17 +108,17 @@ DEFINE_GUID(CLSID_CDirect3DRMAnimation,     0x4fa35698, 0x623f, 0x11cf, 0xac, 0x
 DEFINE_GUID(CLSID_CDirect3DRMAnimationSet,  0x4fa35699, 0x623f, 0x11cf, 0xac, 0x4a, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
 DEFINE_GUID(CLSID_CDirect3DRMUserVisual,    0x4fa3569a, 0x623f, 0x11cf, 0xac, 0x4a, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
 DEFINE_GUID(CLSID_CDirect3DRMShadow,        0x4fa3569b, 0x623f, 0x11cf, 0xac, 0x4a, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
-DEFINE_GUID(CLSID_CDirect3DRMViewportInterpolator, 
+DEFINE_GUID(CLSID_CDirect3DRMViewportInterpolator,
 0xde9eaa1, 0x3b84, 0x11d0, 0x9b, 0x6d, 0x0, 0x0, 0xc0, 0x78, 0x1b, 0xc3);
-DEFINE_GUID(CLSID_CDirect3DRMFrameInterpolator, 
+DEFINE_GUID(CLSID_CDirect3DRMFrameInterpolator,
 0xde9eaa2, 0x3b84, 0x11d0, 0x9b, 0x6d, 0x0, 0x0, 0xc0, 0x78, 0x1b, 0xc3);
-DEFINE_GUID(CLSID_CDirect3DRMMeshInterpolator, 
+DEFINE_GUID(CLSID_CDirect3DRMMeshInterpolator,
 0xde9eaa3, 0x3b84, 0x11d0, 0x9b, 0x6d, 0x0, 0x0, 0xc0, 0x78, 0x1b, 0xc3);
-DEFINE_GUID(CLSID_CDirect3DRMLightInterpolator, 
+DEFINE_GUID(CLSID_CDirect3DRMLightInterpolator,
 0xde9eaa6, 0x3b84, 0x11d0, 0x9b, 0x6d, 0x0, 0x0, 0xc0, 0x78, 0x1b, 0xc3);
-DEFINE_GUID(CLSID_CDirect3DRMMaterialInterpolator, 
+DEFINE_GUID(CLSID_CDirect3DRMMaterialInterpolator,
 0xde9eaa7, 0x3b84, 0x11d0, 0x9b, 0x6d, 0x0, 0x0, 0xc0, 0x78, 0x1b, 0xc3);
-DEFINE_GUID(CLSID_CDirect3DRMTextureInterpolator, 
+DEFINE_GUID(CLSID_CDirect3DRMTextureInterpolator,
 0xde9eaa8, 0x3b84, 0x11d0, 0x9b, 0x6d, 0x0, 0x0, 0xc0, 0x78, 0x1b, 0xc3);
 DEFINE_GUID(CLSID_CDirect3DRMProgressiveMesh, 0x4516ec40, 0x8f20, 0x11d0, 0x9b, 0x6d, 0x00, 0x00, 0xc0, 0x78, 0x1b, 0xc3);
 DEFINE_GUID(CLSID_CDirect3DRMClippedVisual,   0x5434e72d, 0x6d66, 0x11d1, 0xbb, 0xb, 0x0, 0x0, 0xf8, 0x75, 0x86, 0x5a);
@@ -163,7 +163,7 @@ DEFINE_GUID(IID_IDirect3DRMVisualArray,     0xeb16cb13, 0xd271, 0x11ce, 0xac, 0x
 DEFINE_GUID(IID_IDirect3DRMLightArray,      0xeb16cb14, 0xd271, 0x11ce, 0xac, 0x48, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
 DEFINE_GUID(IID_IDirect3DRMPickedArray,     0xeb16cb16, 0xd271, 0x11ce, 0xac, 0x48, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
 DEFINE_GUID(IID_IDirect3DRMFaceArray,       0xeb16cb17, 0xd271, 0x11ce, 0xac, 0x48, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
-DEFINE_GUID(IID_IDirect3DRMAnimationArray, 
+DEFINE_GUID(IID_IDirect3DRMAnimationArray,
 0xd5f1cae0, 0x4bd7, 0x11d1, 0xb9, 0x74, 0x0, 0x60, 0x8, 0x3e, 0x45, 0xf3);
 DEFINE_GUID(IID_IDirect3DRMUserVisual,      0x59163de0, 0x6d43, 0x11cf, 0xac, 0x4a, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
 DEFINE_GUID(IID_IDirect3DRMShadow,          0xaf359780, 0x6ba3, 0x11cf, 0xac, 0x4a, 0x0, 0x0, 0xc0, 0x38, 0x25, 0xa1);
@@ -675,7 +675,7 @@ DECLARE_INTERFACE_(IDirect3DRMFrame2, IDirect3DRMFrame)
     STDMETHOD(SetQuaternion)(THIS_ LPDIRECT3DRMFRAME reference, D3DRMQUATERNION *q) PURE;
 
     STDMETHOD(RayPick)(THIS_ LPDIRECT3DRMFRAME reference, LPD3DRMRAY ray, DWORD dwFlags, LPDIRECT3DRMPICKED2ARRAY *return_visuals) PURE;
-    STDMETHOD(Save)(THIS_ LPCSTR filename, D3DRMXOFFORMAT d3dFormat, 
+    STDMETHOD(Save)(THIS_ LPCSTR filename, D3DRMXOFFORMAT d3dFormat,
                     D3DRMSAVEOPTIONS d3dSaveFlags);
 };
 
@@ -767,7 +767,7 @@ DECLARE_INTERFACE_(IDirect3DRMFrame3, IDirect3DRMVisual)
     STDMETHOD(SetQuaternion)(THIS_ LPDIRECT3DRMFRAME3 reference, D3DRMQUATERNION *q) PURE;
 
     STDMETHOD(RayPick)(THIS_ LPDIRECT3DRMFRAME3 reference, LPD3DRMRAY ray, DWORD dwFlags, LPDIRECT3DRMPICKED2ARRAY *return_visuals) PURE;
-    STDMETHOD(Save)(THIS_ LPCSTR filename, D3DRMXOFFORMAT d3dFormat, 
+    STDMETHOD(Save)(THIS_ LPCSTR filename, D3DRMXOFFORMAT d3dFormat,
                     D3DRMSAVEOPTIONS d3dSaveFlags);
     STDMETHOD(TransformVectors)(THIS_ LPDIRECT3DRMFRAME3 reference,
                                 DWORD dwNumVectors,
@@ -829,13 +829,13 @@ DECLARE_INTERFACE_(IDirect3DRMProgressiveMesh, IDirect3DRMVisual)
     /*
      * IDirect3DRMProgressiveMesh methods
      */
-    STDMETHOD(Load) (THIS_ LPVOID lpObjLocation, LPVOID lpObjId, 
+    STDMETHOD(Load) (THIS_ LPVOID lpObjLocation, LPVOID lpObjId,
                      D3DRMLOADOPTIONS dloLoadflags, D3DRMLOADTEXTURECALLBACK lpCallback,
                      LPVOID lpArg) PURE;
     STDMETHOD(GetLoadStatus) (THIS_ LPD3DRMPMESHLOADSTATUS lpStatus) PURE;
     STDMETHOD(SetMinRenderDetail) (THIS_ D3DVALUE d3dVal) PURE;
     STDMETHOD(Abort) (THIS_ DWORD dwFlags) PURE;
-    
+
     STDMETHOD(GetFaceDetail) (THIS_ LPDWORD lpdwCount) PURE;
     STDMETHOD(GetVertexDetail) (THIS_ LPDWORD lpdwCount) PURE;
     STDMETHOD(SetFaceDetail) (THIS_ DWORD dwCount) PURE;
@@ -1174,7 +1174,7 @@ DECLARE_INTERFACE_(IDirect3DRMMeshBuilder3, IDirect3DRMVisual)
     STDMETHOD(SetNormals)(THIS_ DWORD dwIndexFirst, DWORD dwCount, LPD3DVECTOR) PURE;
     STDMETHOD(GetNormals)(THIS_ DWORD dwIndexFirst, LPDWORD lpdwCount, LPD3DVECTOR) PURE;
     STDMETHOD_(int, GetNormalCount)(THIS) PURE;
-};  
+};
 
 #undef INTERFACE
 #define INTERFACE IDirect3DRMLight

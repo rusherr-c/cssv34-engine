@@ -1,6 +1,6 @@
 /*==========================================================================;
  *
- *  Copyright (C) 1995-1997 Microsoft Corporation.  All Rights Reserved.
+ *  Copyright (c) Microsoft Corporation.  All rights reserved.
  *
  *  File:       d3drm.h
  *  Content:    Direct3DRM include file
@@ -80,7 +80,7 @@ DECLARE_INTERFACE_(IDirect3DRM, IUnknown)
         int width, int height, LPDIRECT3DRMDEVICE *) PURE;
 
     STDMETHOD(CreateTextureFromSurface)(THIS_ LPDIRECTDRAWSURFACE lpDDS, LPDIRECT3DRMTEXTURE *) PURE;
-   
+
     STDMETHOD(CreateShadow)
     (   THIS_ LPDIRECT3DRMVISUAL, LPDIRECT3DRMLIGHT,
         D3DVALUE px, D3DVALUE py, D3DVALUE pz,
@@ -103,19 +103,19 @@ DECLARE_INTERFACE_(IDirect3DRM, IUnknown)
     STDMETHOD(CreateUserVisual) (THIS_ D3DRMUSERVISUALCALLBACK, LPVOID lPArg, LPDIRECT3DRMUSERVISUAL *) PURE;
     STDMETHOD(LoadTexture)      (THIS_ const char *, LPDIRECT3DRMTEXTURE *) PURE;
     STDMETHOD(LoadTextureFromResource)  (THIS_ HRSRC rs, LPDIRECT3DRMTEXTURE *) PURE;
-   
+
     STDMETHOD(SetSearchPath)    (THIS_ LPCSTR) PURE;
     STDMETHOD(AddSearchPath)    (THIS_ LPCSTR) PURE;
     STDMETHOD(GetSearchPath)    (THIS_ DWORD *size_return, LPSTR path_return) PURE;
     STDMETHOD(SetDefaultTextureColors)(THIS_ DWORD) PURE;
     STDMETHOD(SetDefaultTextureShades)(THIS_ DWORD) PURE;
-   
+
     STDMETHOD(GetDevices)       (THIS_ LPDIRECT3DRMDEVICEARRAY *) PURE;
     STDMETHOD(GetNamedObject)   (THIS_ const char *, LPDIRECT3DRMOBJECT *) PURE;
-   
+
     STDMETHOD(EnumerateObjects) (THIS_ D3DRMOBJECTCALLBACK, LPVOID) PURE;
-   
-    STDMETHOD(Load)             
+
+    STDMETHOD(Load)
     (   THIS_ LPVOID, LPVOID, LPIID *, DWORD, D3DRMLOADOPTIONS,
         D3DRMLOADCALLBACK, LPVOID, D3DRMLOADTEXTURECALLBACK, LPVOID,
         LPDIRECT3DRMFRAME
@@ -162,7 +162,7 @@ DECLARE_INTERFACE_(IDirect3DRM2, IUnknown)
         int width, int height, LPDIRECT3DRMDEVICE2 *) PURE;
 
     STDMETHOD(CreateTextureFromSurface)(THIS_ LPDIRECTDRAWSURFACE lpDDS, LPDIRECT3DRMTEXTURE2 *) PURE;
-   
+
     STDMETHOD(CreateShadow)
     (   THIS_ LPDIRECT3DRMVISUAL, LPDIRECT3DRMLIGHT,
         D3DVALUE px, D3DVALUE py, D3DVALUE pz,
@@ -185,19 +185,19 @@ DECLARE_INTERFACE_(IDirect3DRM2, IUnknown)
     STDMETHOD(CreateUserVisual) (THIS_ D3DRMUSERVISUALCALLBACK, LPVOID lPArg, LPDIRECT3DRMUSERVISUAL *) PURE;
     STDMETHOD(LoadTexture)      (THIS_ const char *, LPDIRECT3DRMTEXTURE2 *) PURE;
     STDMETHOD(LoadTextureFromResource)  (THIS_ HMODULE hModule, LPCTSTR strName, LPCTSTR strType, LPDIRECT3DRMTEXTURE2 *) PURE;
-   
+
     STDMETHOD(SetSearchPath)    (THIS_ LPCSTR) PURE;
     STDMETHOD(AddSearchPath)    (THIS_ LPCSTR) PURE;
     STDMETHOD(GetSearchPath)    (THIS_ DWORD *size_return, LPSTR path_return) PURE;
     STDMETHOD(SetDefaultTextureColors)(THIS_ DWORD) PURE;
     STDMETHOD(SetDefaultTextureShades)(THIS_ DWORD) PURE;
-   
+
     STDMETHOD(GetDevices)       (THIS_ LPDIRECT3DRMDEVICEARRAY *) PURE;
     STDMETHOD(GetNamedObject)   (THIS_ const char *, LPDIRECT3DRMOBJECT *) PURE;
-   
+
     STDMETHOD(EnumerateObjects) (THIS_ D3DRMOBJECTCALLBACK, LPVOID) PURE;
-   
-    STDMETHOD(Load)             
+
+    STDMETHOD(Load)
     (   THIS_ LPVOID, LPVOID, LPIID *, DWORD, D3DRMLOADOPTIONS,
         D3DRMLOADCALLBACK, LPVOID, D3DRMLOADTEXTURECALLBACK, LPVOID,
         LPDIRECT3DRMFRAME
@@ -246,7 +246,7 @@ DECLARE_INTERFACE_(IDirect3DRM3, IUnknown)
         int width, int height, LPDIRECT3DRMDEVICE3 *) PURE;
 
     STDMETHOD(CreateTextureFromSurface)(THIS_ LPDIRECTDRAWSURFACE lpDDS, LPDIRECT3DRMTEXTURE3 *) PURE;
-   
+
     STDMETHOD(CreateShadow)
     (   THIS_ LPUNKNOWN, LPDIRECT3DRMLIGHT,
         D3DVALUE px, D3DVALUE py, D3DVALUE pz,
@@ -269,19 +269,19 @@ DECLARE_INTERFACE_(IDirect3DRM3, IUnknown)
     STDMETHOD(CreateUserVisual) (THIS_ D3DRMUSERVISUALCALLBACK, LPVOID lPArg, LPDIRECT3DRMUSERVISUAL *) PURE;
     STDMETHOD(LoadTexture)      (THIS_ const char *, LPDIRECT3DRMTEXTURE3 *) PURE;
     STDMETHOD(LoadTextureFromResource)  (THIS_ HMODULE hModule, LPCTSTR strName, LPCTSTR strType, LPDIRECT3DRMTEXTURE3 *) PURE;
-   
+
     STDMETHOD(SetSearchPath)    (THIS_ LPCSTR) PURE;
     STDMETHOD(AddSearchPath)    (THIS_ LPCSTR) PURE;
     STDMETHOD(GetSearchPath)    (THIS_ DWORD *size_return, LPSTR path_return) PURE;
     STDMETHOD(SetDefaultTextureColors)(THIS_ DWORD) PURE;
     STDMETHOD(SetDefaultTextureShades)(THIS_ DWORD) PURE;
-   
+
     STDMETHOD(GetDevices)       (THIS_ LPDIRECT3DRMDEVICEARRAY *) PURE;
     STDMETHOD(GetNamedObject)   (THIS_ const char *, LPDIRECT3DRMOBJECT *) PURE;
-   
+
     STDMETHOD(EnumerateObjects) (THIS_ D3DRMOBJECTCALLBACK, LPVOID) PURE;
-   
-    STDMETHOD(Load)             
+
+    STDMETHOD(Load)
     (   THIS_ LPVOID, LPVOID, LPIID *, DWORD, D3DRMLOADOPTIONS,
         D3DRMLOADCALLBACK, LPVOID, D3DRMLOADTEXTURE3CALLBACK, LPVOID,
         LPDIRECT3DRMFRAME3

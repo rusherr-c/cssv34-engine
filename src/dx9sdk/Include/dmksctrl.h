@@ -2,8 +2,7 @@
 *                                                                       *
 *   dmksctrl.h -- Definition of IKsControl                              *
 *                                                                       *
-*   Copyright (c) 1998, Microsoft Corp. All rights reserved.            *
-*                                                                       *
+*   Copyright (c) Microsoft Corporation.  All rights reserved.          *
 *                                                                       *
 *   This header file contains the definition of IKsControl, which       *
 *   duplicates definitions from ks.h and ksproxy.h. Your code should    *
@@ -16,7 +15,9 @@
 #ifndef _DMKSCTRL_
 #define _DMKSCTRL_
 
+#if _MSC_VER >= 1200
 #pragma warning(push)
+#endif
 #pragma warning(disable:4201)   /* Disable warnings on anonymous unions */
 
 #include <pshpack8.h>
@@ -155,7 +156,9 @@ DEFINE_GUID(KSDATAFORMAT_SUBTYPE_DIRECTMUSIC, 0x1a82f8bc,  0x3f8b, 0x11d2, 0xb7,
 
 #endif
 
+#if _MSC_VER >= 1200
 #pragma warning(pop)
+#endif
 
 #endif /* _DMKSCTRL */
 

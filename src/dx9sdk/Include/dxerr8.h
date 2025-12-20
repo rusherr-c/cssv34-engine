@@ -68,8 +68,8 @@ const WCHAR* WINAPI DXGetErrorDescription8W(HRESULT hr);
 //
 //  Return: The hr that was passed in.  
 //
-HRESULT WINAPI DXTraceA( char* strFile, DWORD dwLine, HRESULT hr, char* strMsg, BOOL bPopMsgBox );
-HRESULT WINAPI DXTraceW( char* strFile, DWORD dwLine, HRESULT hr, WCHAR* strMsg, BOOL bPopMsgBox );
+HRESULT WINAPI DXTraceA( const char* strFile, DWORD dwLine, HRESULT hr, const char* strMsg, BOOL bPopMsgBox );
+HRESULT WINAPI DXTraceW( const char* strFile, DWORD dwLine, HRESULT hr, const WCHAR* strMsg, BOOL bPopMsgBox );
 
 #ifdef UNICODE
 #define DXTrace DXTraceW

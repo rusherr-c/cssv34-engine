@@ -4,16 +4,22 @@
 include "$SRCDIR/_qpc_scripts/win/vstudio_analyze.qpc" 	[$ANALYZE]
 include "$SRCDIR/_qpc_scripts/win/base_exe_dll.qpc" 	[!$IS_LIB_PROJECT]
 
+macro VS2026 "1" // SET THE COMPILER VERSION
+
 macro _MSC_VER "1800" [$VS2013 && $WIN32]
 macro _MSC_VER "1900" [$VS2015 && $WIN32]
 macro _MSC_VER "1910" [$VS2017 && $WIN32]
-macro _MSC_VER "1920" [($VS2019|| $VSTUDIO || $VISUAL_STUDIO) && $WIN32]
+macro _MSC_VER "1920" [$VS2019 && $WIN32]
+macro _MSC_VER "1940" [$VS2022 && $WIN32]
+macro _MSC_VER "1950" [$VS2026 && $WIN32]
 
 configuration
 {
 	general
-	{
-		compiler "msvc_142" [$VS2019 || $VSTUDIO || $VISUAL_STUDIO]
+	{	
+		compiler "msvc_145" [$VS2026]
+		compiler "msvc_143" [$VS2022]
+		compiler "msvc_142" [$VS2019]
 		compiler "msvc_141" [$VS2017]
 		compiler "msvc_140" [$VS2015]
 		compiler "msvc_120" [$VS2013]

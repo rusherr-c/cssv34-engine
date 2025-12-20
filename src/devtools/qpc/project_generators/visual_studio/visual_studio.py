@@ -327,7 +327,8 @@ def setup_globals(vcxproj, project_list):
     
     
 COMPILER_DICT = {
-    "msvc":	    "v143", # latest
+    "msvc":	    "v145", # latest
+    "msvc_145":     "v145",
     "msvc_143":     "v143",
     "msvc_142":     "v142",
     "msvc_141":     "v141",
@@ -359,16 +360,13 @@ def setup_property_group_configurations(vcxproj, project_passes: list):
         
         toolset = et.SubElement(property_group, "PlatformToolset")
         
-        #if config.general.compiler:
-        #    if config.general.compiler in COMPILER_DICT:
-        #        toolset.text = COMPILER_DICT[config.general.compiler]
-        #    else:
-        #        toolset.text = config.general.compiler
-        #else:
-        #    toolset.text = COMPILER_DICT["msvc"]
-        # --- fuck it ---
-        
-        toolset.text = COMPILER_DICT["msvc"]
+        if config.general.compiler:
+            if config.general.compiler in COMPILER_DICT:
+                toolset.text = COMPILER_DICT[config.general.compiler]
+            else:
+                toolset.text = config.general.compiler
+        else:
+            toolset.text = COMPILER_DICT["msvc"]
 
         defs = config.compiler.preprocessor_definitions
         if "MBCS" in defs or "_MBCS" in defs:

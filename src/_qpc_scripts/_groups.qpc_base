@@ -300,7 +300,6 @@ group "game_base" "game" "dedicated" "everything"
 		"studiorender"
 		"unicode"
 		"vphysics"
-		"vscript"
 		"steam_api"
 	}
 }

@@ -251,8 +251,6 @@ project "vice"						"utils/vice/vice.qpc" [$WINDOWS]
 
 project "vlocalize"					"vgui2/vlocalize/vlocalize.qpc" [$WINDOWS]
 
-project "vscript"					"vscript/vscript.qpc" [$WINDOWS]
-
 project "vmpi"						"utils/vmpi/vmpi.qpc" [$WINDOWS]
 
 project "vmpi_job_search"			"utils/vmpi/vmpi_job_search/vmpi_job_search.qpc" [$WINDOWS]

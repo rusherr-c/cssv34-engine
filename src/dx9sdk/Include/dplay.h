@@ -13,6 +13,9 @@
 #include <ole2.h>       // for DECLARE_INTERFACE and HRESULT
 
 /* avoid warnings in MSVC at Level4 */
+#if _MSC_VER >= 1200
+#pragma warning(push)
+#endif
 #pragma warning(disable:4201)
 
 
@@ -360,6 +363,21 @@ typedef const DPSESSIONDESC2 FAR *LPCDPSESSIONDESC2;
  */
 #define DPSESSION_OPTIMIZELATENCY		0x00008000
 
+/*
+ * This flag allows lobby launched games that aren't voice enabled
+ * to get voice capabilities.
+ */
+#define DPSESSION_ALLOWVOICERETRO		0x00010000
+
+/*
+ * This flag supresses transmission of session desc changes.
+ * DPSESSION_NODATAMESSAGES was supposed to do that, but SetSessionDesc
+ * was ignoring the flag and some apps depended on the broken behavior, this
+ * flag allows applications to get the right behaviour without breaking apps depending
+ * on old broken behavior.
+ */
+#define DPSESSION_NOSESSIONDESCMESSAGES		0x00020000
+ 
 /*
  * DPNAME
  * Used to hold the name of a DirectPlay entity
@@ -1242,8 +1260,6 @@ DECLARE_INTERFACE_( IDirectPlay4, IDirectPlay3 )
 #define DPENUMSESSIONS_ALL          0x00000002
 
 
-
-
 /*
  * Start an asynchronous enum sessions
  */
@@ -1320,7 +1336,6 @@ DECLARE_INTERFACE_( IDirectPlay4, IDirectPlay3 )
  * any status dialogs.
  */
  #define DPOPEN_RETURNSTATUS		DPENUMSESSIONS_RETURNSTATUS
-
 
 
 /****************************************************************************
@@ -2027,8 +2042,8 @@ DECLARE_INTERFACE_( IDirectPlay, IUnknown )
     STDMETHOD(DestroyGroup)         (THIS_ DPID) PURE;
     STDMETHOD(EnableNewPlayers)     (THIS_ BOOL) PURE;
     STDMETHOD(EnumGroupPlayers)     (THIS_ DPID, LPDPENUMPLAYERSCALLBACK,LPVOID,DWORD) PURE;
-    STDMETHOD(EnumGroups)           (THIS_ DWORD, LPDPENUMPLAYERSCALLBACK,LPVOID,DWORD) PURE;
-    STDMETHOD(EnumPlayers)          (THIS_ DWORD, LPDPENUMPLAYERSCALLBACK,LPVOID,DWORD) PURE;
+    STDMETHOD(EnumGroups)           (THIS_ DWORD_PTR, LPDPENUMPLAYERSCALLBACK,LPVOID,DWORD) PURE;
+    STDMETHOD(EnumPlayers)          (THIS_ DWORD_PTR, LPDPENUMPLAYERSCALLBACK,LPVOID,DWORD) PURE;
     STDMETHOD(EnumSessions)         (THIS_ LPDPSESSIONDESC,DWORD,LPDPENUMSESSIONSCALLBACK,LPVOID,DWORD) PURE;
     STDMETHOD(GetCaps)              (THIS_ LPDPCAPS) PURE;
     STDMETHOD(GetMessageCount)      (THIS_ DPID, LPDWORD) PURE;
@@ -2124,13 +2139,16 @@ DEFINE_GUID(IID_IDirectPlay, 0x5454e9a0, 0xdb65, 0x11ce, 0x92, 0x1c, 0x00, 0xaa,
 
 #endif // IDirectPlay interface macros 
 
-
-
-
 #ifdef __cplusplus
 };
 #endif
 
+/* restore warning settings */
+#if _MSC_VER >= 1200
+#pragma warning(pop)
+#else
 #pragma warning(default:4201)
+#endif
 
 #endif
+
