@@ -1,6 +1,5 @@
 # CSSv34 Engine
-Modified version of CSGO Engine Branch with CSS v34 server-connection support<br>
-Based on https://github.com/EpicSentry/HL2-CSGO
+Modified version of Source Engine 2013 with CSS v34 server-connection support<br>
 
 Partially used code from:
 * https://github.com/uvbs/source-2007
