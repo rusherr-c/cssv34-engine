@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "datamodel/idatamodel.h"
 #include "datamodel/dmelement.h"
 #include "tier1/KeyValues.h"
-#include "tier1/UtlBuffer.h"
+#include "tier1/utlbuffer.h"
 #include "datamodel/dmattribute.h"
 
 
@@ -205,13 +205,14 @@ bool CImportVMF::SerializeEntityEditorKey( CUtlBuffer &buf, DmElementHandle_t hE
 	buf.Printf( "{\n" );
 	buf.PushTab();
 
-	CDmAttribute *pAttribute = pEditorElement->GetAttribute( "color" );
-	if ( pAttribute )
 	{
-		Color c = pAttribute->GetValue<Color>( );
-		buf.Printf( "\"color\" \"%d %d %d\"\n", c.r(), c.g(), c.b() );
+		CDmAttribute *pAttribute = pEditorElement->GetAttribute( "color" );
+		if ( pAttribute )
+		{
+			Color c = pAttribute->GetValue<Color>();
+			buf.Printf( "\"color\" \"%d %d %d\"\n", c.r(), c.g(), c.b() );
+		}
 	}
-
 	PrintIntAttribute( pEditorElement, buf, "id" ); // FIXME - id is a DmObjectId_t!!! This should never print anything!
 	PrintStringAttribute( pEditorElement, buf, "comments" );
 	PrintBoolAttribute( pEditorElement, buf, "visgroupshown" );

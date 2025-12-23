@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,6 +15,7 @@
 
 #include "materialsystem/itexture.h"
 #include "shaderapi/ishaderapi.h"
+#include "tier1/utlmap.h"
 
 class Vector;
 enum Sampler_t;
@@ -33,6 +34,13 @@ enum RenderTargetType_t
 	RENDER_TARGET_ONLY_DEPTH = 4,
 };
 
+enum ResidencyType_t
+{
+	RESIDENT_NONE,
+	RESIDENT_PARTIAL,
+	RESIDENT_FULL
+};
+
 abstract_class ITextureInternal : public ITexture
 {
 public:
@@ -49,20 +57,21 @@ public:
 	virtual bool SetRenderTarget( int nRenderTargetID ) = 0;
 
 	// Releases the texture's hw memory
-	virtual void Release() = 0;
+	virtual void ReleaseMemory() = 0;
 
 	// Called before Download() on restore. Gives render targets a change to change whether or
 	// not they force themselves to have a separate depth buffer due to AA.
 	virtual void OnRestore() = 0;
 
 	// Resets the texture's filtering and clamping mode
-	virtual void SetFilteringAndClampingMode() = 0;
+	virtual void SetFilteringAndClampingMode( bool bOnlyLodValues = false ) = 0;
 
 	// Used by tools.... loads up the non-fallback information about the texture 
 	virtual void Precache() = 0;
 
 	// Stretch blit the framebuffer into this texture.
 	virtual void CopyFrameBufferToMe( int nRenderTargetID = 0, Rect_t *pSrcRect = NULL, Rect_t *pDstRect = NULL ) = 0;
+	virtual void CopyMeToFrameBuffer( int nRenderTargetID = 0, Rect_t *pSrcRect = NULL, Rect_t *pDstRect = NULL ) = 0;
 
 	virtual ITexture *GetEmbeddedTexture( int nIndex ) = 0;
 
@@ -85,7 +94,8 @@ public:
 		int					h,
 		int					d,
 		ImageFormat			fmt, 
-		int					nFlags );
+		int					nFlags,
+		ITextureRegenerator *generator = NULL);
 
 	static ITextureInternal *CreateRenderTarget( 
 		const char *pRTName, // NULL for an auto-generated name.
@@ -112,7 +122,7 @@ public:
 		const char *pTextureGroupName,
 		ShaderAPITextureHandle_t hTexture );
 
-	static void Destroy( ITextureInternal *pTexture );
+	static void Destroy( ITextureInternal *pTexture, bool bSkipTexMgrCheck = false );
 
 	// Set this as the render target, return false for failure
 	virtual bool SetRenderTarget( int nRenderTargetID, ITexture* pDepthTexture ) = 0;
@@ -130,6 +140,19 @@ public:
 
 	// Reload any files the texture is responsible for.
 	virtual void ReloadFilesInList( IFileList *pFilesToReload ) = 0;
+
+	virtual bool AsyncReadTextureFromFile( IVTFTexture* pVTFTexture, unsigned int nAdditionalCreationFlags ) = 0;
+	virtual void AsyncCancelReadTexture() = 0;
+
+	// Map and unmap. These can fail. And can cause a very significant perf penalty. Be very careful with them.
+	virtual void Map( void** pOutDst, int* pOutPitch ) = 0;
+	virtual void Unmap() = 0;
+
+	// Texture streaming!
+	virtual ResidencyType_t GetCurrentResidence() const = 0;
+	virtual ResidencyType_t GetTargetResidence() const = 0;
+	virtual bool MakeResident( ResidencyType_t newResidence ) = 0;
+	virtual void UpdateLodBias() = 0;
 };
 
 inline bool IsTextureInternalEnvCubemap( const ITextureInternal *pTexture )
@@ -160,5 +183,8 @@ inline char *NormalizeTextureName( const char *pName, char *pOutName, int nOutNa
 
 	return pOutName;
 }
+
+extern ConVar mat_texture_tracking;
+extern CUtlMap<ITexture*, CInterlockedInt> *g_pTextureRefList;
 
 #endif // ITEXTUREINTERNAL_H

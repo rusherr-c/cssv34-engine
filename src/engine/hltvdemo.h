@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -39,6 +39,7 @@ public:
 	void	RecordMessages( bf_read &data, int bits );
 	void	RecordPacket( void ); 
 	void	RecordServerClasses( ServerClass *pClasses );
+	void	RecordStringTables(); 
 
 	void	ResetDemoInterpolation( void ) {};
 

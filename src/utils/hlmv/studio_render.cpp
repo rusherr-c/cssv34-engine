@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,7 +29,7 @@
 #include "utldict.h"
 #include "filesystem.h"
 #include "studio_render.h"
-#include "materialsystem/IMesh.h"
+#include "materialsystem/imesh.h"
 #include "bone_setup.h"
 #include "materialsystem/MaterialSystem_Config.h"
 #include "MDLViewer.h"
@@ -59,6 +59,7 @@ int				g_smodels_total;				// cookie
 
 matrix3x4_t		g_viewtransform;				// view transformation
 //matrix3x4_t	g_posetoworld[MAXSTUDIOBONES];	// bone transformation matrix
+matrix3x4_t		g_mCachedViewTransform;			// copy of view transform for boneMerge passes
 
 static int			maxNumVertices;
 static int			first = 1;
@@ -422,9 +423,11 @@ void StudioModel::SetUpBones( bool mergeBones )
 		pIK = &m_ik;
 	}
 
-	InitPose( pStudioHdr, pos, q, BoneMask() );
+	IBoneSetup boneSetup( pStudioHdr, BoneMask(), m_poseparameter );
+
+	boneSetup.InitPose( pos, q );
 	
-	AccumulatePose( pStudioHdr, pIK, pos, q, m_sequence, m_cycle, m_poseparameter, BoneMask( ), 1.0, GetRealtimeTime() );
+	boneSetup.AccumulatePose( pos, q, m_sequence, m_cycle, 1.0, GetRealtimeTime(), pIK );
 
 	if ( g_viewerSettings.blendSequenceChanges &&
 		m_sequencetime < m_blendtime && 
@@ -441,7 +444,7 @@ void StudioModel::SetUpBones( bool mergeBones )
 		float s = 1.0 - ( m_sequencetime / m_blendtime );
 		s = 3 * s * s - 2 * s * s * s;
 
-		AccumulatePose( pStudioHdr, NULL, pos, q, m_prevsequence, m_prevcycle, m_poseparameter, BoneMask( ), s, GetRealtimeTime() );
+		boneSetup.AccumulatePose( pos, q, m_prevsequence, m_prevcycle, s, GetRealtimeTime(), NULL );
 		// Con_DPrintf("%d %f : %d %f : %f\n", pev->sequence, f, pev->prevsequence, pev->prevframe, s );
 	}
 	else
@@ -464,7 +467,7 @@ void StudioModel::SetUpBones( bool mergeBones )
 		{
 			if (m_Layer[i].m_priority == j && m_Layer[i].m_weight > 0)
 			{
-				AccumulatePose( pStudioHdr, pIK, pos, q, m_Layer[i].m_sequence, m_Layer[i].m_cycle, m_poseparameter, BoneMask( ), m_Layer[i].m_weight, GetRealtimeTime() );
+				boneSetup.AccumulatePose( pos, q, m_Layer[i].m_sequence, m_Layer[i].m_cycle, m_Layer[i].m_weight, GetRealtimeTime(), pIK );
 			}
 		}
 	}
@@ -478,10 +481,9 @@ void StudioModel::SetUpBones( bool mergeBones )
 
 	CIKContext auto_ik;
 	auto_ik.Init( pStudioHdr, a1, p1, 0.0, 0, BoneMask( ) );
+	boneSetup.CalcAutoplaySequences( pos, q, GetAutoPlayTime(), &auto_ik );
 
-	CalcAutoplaySequences( pStudioHdr, &auto_ik, pos, q, m_poseparameter, BoneMask( ), GetAutoPlayTime() );
-
-	CalcBoneAdj( pStudioHdr, pos, q, m_controller, BoneMask( ) );
+	boneSetup.CalcBoneAdj( pos, q, m_controller );
 
 	CBoneBitList boneComputed;
 	if (pIK)
@@ -534,7 +536,7 @@ void StudioModel::SetUpBones( bool mergeBones )
 						wirecolor[0] = 1.0 - pTarget->est.flWeight;
 					}
 
-					float r = max(pTarget->est.radius,1);
+					float r = max(pTarget->est.radius,1.f);
 					Vector p0 = tmp + Vector( -r, -r, 0 );
 					Vector p2 = tmp + Vector( r, r, 0 );
 					drawTransparentBox( p0, p2, g_viewtransform, color, wirecolor );
@@ -667,6 +669,16 @@ void StudioModel::SetUpBones( bool mergeBones )
 				MatrixCopy( boneCache[j], m_pBoneToWorld[ i ] );
 			}
 		}
+	}
+
+	if ( mergeBones )
+	{
+		Studio_RunBoneFlexDrivers( m_flexweight, pStudioHdr, pos, m_pBoneToWorld, g_mCachedViewTransform );
+	}
+	else
+	{
+		MatrixCopy( g_viewtransform, g_mCachedViewTransform );
+		Studio_RunBoneFlexDrivers( m_flexweight, pStudioHdr, pos, m_pBoneToWorld, g_viewtransform );
 	}
 
 	if (g_viewerSettings.showAttachments)
@@ -1254,6 +1266,80 @@ void StudioModel::DrawAttachments( )
 }
 
 
+//-----------------------------------------------------------------------------
+// Draws Axis
+//-----------------------------------------------------------------------------
+void StudioModel::DrawOriginAxis( )
+{
+	if ( !g_viewerSettings.showOriginAxis )
+			return;
+
+	const float fAxisLength = g_viewerSettings.originAxisLength;
+	if ( fAxisLength <= 0.0f )
+		return;
+
+	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
+	pRenderContext->Bind( g_materialBones );
+
+	pRenderContext->MatrixMode(MATERIAL_MODEL);
+	pRenderContext->PushMatrix();;
+	pRenderContext->LoadIdentity();
+
+	pRenderContext->MatrixMode(MATERIAL_VIEW);
+	pRenderContext->PushMatrix();;
+	pRenderContext->LoadIdentity();
+
+	pRenderContext->MatrixMode( MATERIAL_VIEW );
+	pRenderContext->LoadIdentity( );
+
+	pRenderContext->Rotate( -90,  1, 0, 0 );	    // put Z going up
+	pRenderContext->Rotate( -90,  0, 0, 1 );
+
+    pRenderContext->Translate( -g_pStudioModel->m_origin[0],  -g_pStudioModel->m_origin[1],  -g_pStudioModel->m_origin[2] );
+
+	pRenderContext->Rotate( g_pStudioModel->m_angles[1],  0, 0, 1 );
+    pRenderContext->Rotate( g_pStudioModel->m_angles[0],  0, 1, 0 );
+    pRenderContext->Rotate( g_pStudioModel->m_angles[2],  1, 0, 0 );
+
+	IMesh *pMesh = pRenderContext->GetDynamicMesh( );
+
+	CMeshBuilder meshBuilder;
+	meshBuilder.Begin( pMesh, MATERIAL_LINES, 3 );
+
+	meshBuilder.Position3f( 0.0f, 0.0f, 0.0f );
+	meshBuilder.Color4ub( 255, 0, 0, 255 );
+	meshBuilder.AdvanceVertex();
+
+	meshBuilder.Position3f( fAxisLength, 0.0f, 0.0f );
+	meshBuilder.Color4ub( 255, 0, 0, 255 );
+	meshBuilder.AdvanceVertex();
+
+	meshBuilder.Position3f( 0.0f, 0.0f, 0.0f );
+	meshBuilder.Color4ub( 0, 255, 0, 255 );
+	meshBuilder.AdvanceVertex();
+
+	meshBuilder.Position3f( 0.0f, fAxisLength, 0.0f );
+	meshBuilder.Color4ub( 0, 255, 0, 255 );
+	meshBuilder.AdvanceVertex();
+
+	meshBuilder.Position3f( 0.0f, 0.0f, 0.0f );
+	meshBuilder.Color4ub( 0, 0, 255, 255 );
+	meshBuilder.AdvanceVertex();
+
+	meshBuilder.Position3f( 0.0f, 0.0f, fAxisLength );
+	meshBuilder.Color4ub( 0, 0, 255, 255 );
+	meshBuilder.AdvanceVertex();
+
+	meshBuilder.End();
+	pMesh->Draw();
+
+	pRenderContext->MatrixMode(MATERIAL_MODEL);
+	pRenderContext->PopMatrix();
+	pRenderContext->MatrixMode(MATERIAL_VIEW);
+	pRenderContext->PopMatrix();
+}
+
+
 void StudioModel::DrawEditAttachment()
 {
 	CStudioHdr *pStudioHdr = GetStudioHdr();
@@ -1297,20 +1383,25 @@ void StudioModel::DrawHitboxes( )
 	if (!g_pAlpha)
 	{
 		g_pAlpha = g_pMaterialSystem->FindMaterial("debug/debughitbox", TEXTURE_GROUP_OTHER, false);
+		if ( g_pAlpha )
+		{
+			g_pAlpha->AddRef();
+		}
 	}
 
 	if (g_viewerSettings.showHitBoxes || (g_viewerSettings.highlightHitbox >= 0))
 	{
 		int hitboxset = g_MDLViewer->GetCurrentHitboxSet();
 
-		for (unsigned short j = m_HitboxSets[ hitboxset ].Head(); j != m_HitboxSets[ hitboxset ].InvalidIndex(); j = m_HitboxSets[ hitboxset ].Next(j) )
+		HitboxList_t &list = g_pStudioModel->m_HitboxSets[ hitboxset ].m_Hitboxes;
+		for (unsigned short j = list.Head(); j != list.InvalidIndex(); j = list.Next(j) )
 		{
 			// Only draw one hitbox if we've selected it.
 			if ((g_viewerSettings.highlightHitbox >= 0) && 
 				(g_viewerSettings.highlightHitbox != j))
 				continue;
 
-			mstudiobbox_t *pBBox = &m_HitboxSets[ hitboxset ][j];
+			mstudiobbox_t *pBBox = &list[j].m_BBox;
 
 			float interiorcolor[4];
 			int c = pBBox->group % 8;
@@ -1786,6 +1877,27 @@ float StudioModel::SetHeadPosition( matrix3x4_t& attToWorld, Vector const &vTarg
 DrawModelInfo_t g_DrawModelInfo;
 DrawModelResults_t g_DrawModelResults;
 bool g_bDrawModelInfoValid = false;
+
+
+void StudioModel::GetModelTransform( matrix3x4_t &mat )
+{
+	AngleMatrix( m_angles, mat );
+
+	Vector vecModelOrigin;
+	VectorMultiply( m_origin, -1.0f, vecModelOrigin );
+	MatrixSetColumn( vecModelOrigin, 3, mat );
+}
+
+void StudioModel::SetModelTransform( const matrix3x4_t &mat )
+{
+	m_origin.x = -mat.m_flMatVal[0][3];
+	m_origin.y = -mat.m_flMatVal[1][3];
+	m_origin.z = -mat.m_flMatVal[2][3];
+
+	MatrixAngles( mat, m_angles );
+}
+
+
 /*
 ================
 StudioModel::DrawModel
@@ -1815,11 +1927,13 @@ int StudioModel::DrawModel( bool mergeBones )
 		return 0;
 
 	// Construct a transform to apply to the model. The camera is stuck in a fixed position
-	AngleMatrix( m_angles, g_viewtransform );
-
-	Vector vecModelOrigin;
-	VectorMultiply( m_origin, -1.0f, vecModelOrigin );
-	MatrixSetColumn( vecModelOrigin, 3, g_viewtransform );
+	static Vector vecModelOrigin;
+	if ( !mergeBones )
+	{
+		AngleMatrix( m_angles, g_viewtransform );
+		VectorMultiply( m_origin, -1.0f, vecModelOrigin );
+		MatrixSetColumn( vecModelOrigin, 3, g_viewtransform );
+	}
 	
 	// These values HAVE to be sent down for LOD to work correctly.
 	Vector viewOrigin, viewRight, viewUp, viewPlaneNormal;
@@ -1874,6 +1988,8 @@ int StudioModel::DrawModel( bool mergeBones )
 	memset( &g_DrawModelInfo, 0, sizeof( g_DrawModelInfo ) );
 	g_DrawModelInfo.m_pStudioHdr = (studiohdr_t *)pStudioHdr->GetRenderHdr();
 	g_DrawModelInfo.m_pHardwareData = GetHardwareData();
+	if ( !g_DrawModelInfo.m_pHardwareData )
+		return 0;
 	g_DrawModelInfo.m_Decals = STUDIORENDER_DECAL_INVALID;
 	g_DrawModelInfo.m_Skin = m_skinnum;
 	g_DrawModelInfo.m_Body = m_bodynum;
@@ -1882,11 +1998,12 @@ int StudioModel::DrawModel( bool mergeBones )
 	g_DrawModelInfo.m_Lod = g_viewerSettings.autoLOD ? -1 : g_viewerSettings.lod;
 	g_DrawModelInfo.m_pColorMeshes = NULL;
 
+
 	if( g_viewerSettings.renderMode == RM_SHOWBADVERTEXDATA )
 	{
-		DebugDrawModelBadVerts( g_pStudioRender, g_DrawModelInfo, m_pBoneToWorld, vecModelOrigin, &m_LodUsed, &m_LodMetric );
+		DebugDrawModelBadVerts( g_pStudioRender, g_DrawModelInfo, m_pBoneToWorld, vecModelOrigin );
 
-		DebugDrawModelWireframe( g_pStudioRender, g_DrawModelInfo, m_pBoneToWorld, vecModelOrigin, &m_LodUsed, &m_LodMetric, Vector( 0.2f, 0.2f, 0.2f ) );
+		DebugDrawModelWireframe( g_pStudioRender, g_DrawModelInfo, m_pBoneToWorld, vecModelOrigin, Vector( 0.2f, 0.2f, 0.2f ) );
 
 		g_DrawModelInfo.m_Lod = m_LodUsed;
 		g_pStudioRender->GetPerfStats( &g_DrawModelResults, g_DrawModelInfo, NULL );
@@ -1913,9 +2030,20 @@ int StudioModel::DrawModel( bool mergeBones )
 	else if( g_viewerSettings.renderMode == RM_BONEWEIGHTS )
 	{
 		g_DrawModelInfo.m_Lod = 0;
-		DebugDrawModelBoneWeights( g_pStudioRender, g_DrawModelInfo, m_pBoneToWorld, vecModelOrigin, &m_LodUsed, &m_LodMetric );
+		DebugDrawModelBoneWeights( g_pStudioRender, g_DrawModelInfo, m_pBoneToWorld, vecModelOrigin );
 		g_DrawModelInfo.m_Lod = m_LodUsed;
 		g_pStudioRender->GetPerfStats( &g_DrawModelResults, g_DrawModelInfo, NULL );
+	}
+	else if( g_viewerSettings.renderMode == RM_TEXCOORDS )
+	{
+		const char *pMatName = "";
+		if ( g_DrawModelInfo.m_pHardwareData->m_pLODs && g_viewerSettings.materialIndex < g_DrawModelInfo.m_pHardwareData->m_pLODs[0].numMaterials )
+		{
+			pMatName = g_DrawModelInfo.m_pHardwareData->m_pLODs[0].ppMaterials[g_viewerSettings.materialIndex]->GetName();
+		}
+		DebugDrawModelTexCoord( g_pStudioRender, pMatName, g_DrawModelInfo, m_pBoneToWorld, g_viewerSettings.width, g_viewerSettings.height );
+		g_pStudioRender->GetPerfStats( &g_DrawModelResults, g_DrawModelInfo, NULL );
+		m_LodUsed = g_DrawModelInfo.m_Lod;
 	}
 	else
 	{
@@ -1948,6 +2076,7 @@ int StudioModel::DrawModel( bool mergeBones )
 
 	DrawBones();
 	DrawAttachments();
+	DrawOriginAxis();
 	DrawEditAttachment();
 	DrawHitboxes();
 	DrawPhysicsModel();

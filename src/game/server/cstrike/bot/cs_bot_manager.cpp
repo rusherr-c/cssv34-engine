@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -691,6 +691,7 @@ CON_COMMAND_F( bot_kill, "bot_kill <all> <t|ct> <type> <difficulty> <name> - Kil
 			continue;
 
 		bot->CommitSuicide();
+		
 		if ( !all )
 		{
 			return;
@@ -1157,7 +1158,7 @@ void CCSBotManager::MaintainBotQuota( void )
 		// unless the round is already in progress, in which case we play with what we've been dealt
 		if ( !isRoundInProgress )
 		{
-			desiredBotCount = max( 0, desiredBotCount - humanPlayersInGame );
+			desiredBotCount = MAX( 0, desiredBotCount - humanPlayersInGame );
 		}
 		else
 		{
@@ -1170,7 +1171,7 @@ void CCSBotManager::MaintainBotQuota( void )
 		// unless the round is already in progress, in which case we play with what we've been dealt
 		if ( !isRoundInProgress )
 		{
-			desiredBotCount = (int)max( 0, cv_bot_quota.GetFloat() * humanPlayersInGame );
+			desiredBotCount = (int)MAX( 0, cv_bot_quota.GetFloat() * humanPlayersInGame );
 		}
 		else
 		{
@@ -1194,9 +1195,9 @@ void CCSBotManager::MaintainBotQuota( void )
 
 	// if bots will auto-vacate, we need to keep one slot open to allow players to join
 	if (cv_bot_auto_vacate.GetBool())
-		desiredBotCount = min( desiredBotCount, gpGlobals->maxClients - (humanPlayersInGame + 1) );
+		desiredBotCount = MIN( desiredBotCount, gpGlobals->maxClients - (humanPlayersInGame + 1) );
 	else
-		desiredBotCount = min( desiredBotCount, gpGlobals->maxClients - humanPlayersInGame );
+		desiredBotCount = MIN( desiredBotCount, gpGlobals->maxClients - humanPlayersInGame );
 
 	// Try to balance teams, if we are in the first 20 seconds of a round and bots can join either team.
 	if ( botsInGame > 0 && desiredBotCount == botsInGame && CSGameRules()->m_bFirstConnected )
@@ -1300,7 +1301,8 @@ public:
 
 	bool operator() ( CNavArea *area )
 	{
-		const Extent &areaExtent = area->GetExtent();
+		Extent areaExtent;
+		area->GetExtent(&areaExtent);
 
 		if (areaExtent.hi.x >= m_zone->m_extent.lo.x && areaExtent.lo.x <= m_zone->m_extent.hi.x &&
 			areaExtent.hi.y >= m_zone->m_extent.lo.y && areaExtent.lo.y <= m_zone->m_extent.hi.y &&
@@ -1539,12 +1541,13 @@ const Vector *CCSBotManager::GetRandomPositionInZone( const Zone *zone ) const
 	}
 	else
 	{
-		const Extent &areaExtent = area->GetExtent();
+		Extent areaExtent;
+		area->GetExtent(&areaExtent);
 		Extent overlap;
-		overlap.lo.x = max( areaExtent.lo.x, zone->m_extent.lo.x );
-		overlap.lo.y = max( areaExtent.lo.y, zone->m_extent.lo.y );
-		overlap.hi.x = min( areaExtent.hi.x, zone->m_extent.hi.x );
-		overlap.hi.y = min( areaExtent.hi.y, zone->m_extent.hi.y );
+		overlap.lo.x = MAX( areaExtent.lo.x, zone->m_extent.lo.x );
+		overlap.lo.y = MAX( areaExtent.lo.y, zone->m_extent.lo.y );
+		overlap.hi.x = MIN( areaExtent.hi.x, zone->m_extent.hi.x );
+		overlap.hi.y = MIN( areaExtent.hi.y, zone->m_extent.hi.y );
 
 		pos.x = (overlap.lo.x + overlap.hi.x)/2.0f;
 		pos.y = (overlap.lo.y + overlap.hi.y)/2.0f;
@@ -1913,7 +1916,8 @@ public:
 
 	bool operator() ( CNavArea *area )
 	{
-		const Extent &areaExtent = area->GetExtent();
+		Extent areaExtent;
+		area->GetExtent(&areaExtent);
 
 		if (areaExtent.hi.x >= m_breakableExtent.lo.x && areaExtent.lo.x <= m_breakableExtent.hi.x &&
 			areaExtent.hi.y >= m_breakableExtent.lo.y && areaExtent.lo.y <= m_breakableExtent.hi.y &&
@@ -2250,9 +2254,9 @@ void CCSBotManager::ResetRadioMessageTimestamps( void )
  */
 void DrawOccupyTime( void )
 {
-	FOR_EACH_LL( TheNavAreaList, it )
+	FOR_EACH_VEC( TheNavAreas, it )
 	{
-		CNavArea *area = TheNavAreaList[ it ];
+		CNavArea *area = TheNavAreas[ it ];
 
 		int r, g, b;
 		
@@ -2298,9 +2302,9 @@ void DrawBattlefront( void )
 	const float epsilon = 1.0f;
 	int r = 255, g = 50, b = 0;
 	
-	FOR_EACH_LL( TheNavAreaList, it )
+	FOR_EACH_VEC( TheNavAreas, it )
 	{
-		CNavArea *area = TheNavAreaList[ it ];
+		CNavArea *area = TheNavAreas[ it ];
 
 		if ( fabs(area->GetEarliestOccupyTime( TEAM_TERRORIST ) - area->GetEarliestOccupyTime( TEAM_CT )) > epsilon )
 		{
@@ -2370,9 +2374,9 @@ CON_COMMAND_F( nav_check_connectivity, "Checks to be sure every (or just the mar
 	{
 		// Otherwise, loop through every area, and make sure they can all get to the goal.
 		float start = engine->Time();
-		FOR_EACH_LL( TheNavAreaList, nit )
+		FOR_EACH_VEC( TheNavAreas, nit )
 		{
-			CheckAreaAgainstAllZoneAreas(TheNavAreaList[ nit ]);
+			CheckAreaAgainstAllZoneAreas(TheNavAreas[ nit ]);
 		}
 
 		float end = engine->Time();

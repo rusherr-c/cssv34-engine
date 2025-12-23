@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,6 +20,11 @@
 #include "vstdlib/jobthread.h"
 #include "cmatnullrendercontext.h"
 #include "filesystem/IQueuedLoader.h"
+#include "datacache/idatacache.h"
+#include "materialsystem/imaterialproxy.h"
+#include "vstdlib/IKeyValuesSystem.h"
+#include "ctexturecompositor.h"
+
 #if defined( _X360 )
 #include "xbox/xbox_console.h"
 #include "xbox/xbox_win32stubs.h"
@@ -28,29 +33,49 @@
 // NOTE: This must be the last file included!!!
 #include "tier0/memdbgon.h"
 
-#ifdef _LINUX
+#ifdef POSIX
 #define _finite finite
 #endif
 
 // this is hooked into the engines convar
 ConVar mat_debugalttab( "mat_debugalttab", "0", FCVAR_CHEAT );
 
-ConVar mat_forcemanagedtextureintohardware( "mat_forcemanagedtextureintohardware", "1" );
+ConVar mat_forcemanagedtextureintohardware( "mat_forcemanagedtextureintohardware", "1", FCVAR_HIDDEN | FCVAR_ALLOWED_IN_COMPETITIVE );
 
-ConVar mat_supportflashlight( "mat_supportflashlight", "-1", 0, "0 - do not support flashlight (don't load flashlight shader combos), 1 - flashlight is supported" );
+ConVar mat_supportflashlight( "mat_supportflashlight", "-1", FCVAR_HIDDEN, "0 - do not support flashlight (don't load flashlight shader combos), 1 - flashlight is supported" );
+#ifdef OSX
+#define CV_FRAME_SWAP_WORKAROUND_DEFAULT "1"
+#else
+#define CV_FRAME_SWAP_WORKAROUND_DEFAULT "0"
+#endif
+ConVar mat_texture_reload_frame_swap_workaround( "mat_texture_reload_frame_swap_workaround", CV_FRAME_SWAP_WORKAROUND_DEFAULT, FCVAR_INTERNAL_USE,
+                                                 "Workaround certain GL drivers holding unnecessary amounts of data when loading many materials by forcing synthetic frame swaps" );
+
+// This ConVar allows us to skip ~40% of our map load time, but it doesn't work on GPUs older
+// than ~2005. We set it automatically and don't expose it to players. 
+ConVar mat_requires_rt_alloc_first( "mat_requires_rt_alloc_first", "0", FCVAR_HIDDEN );
+
+// Make sure this convar gets created before videocfg.lib is initialized, so it can be driven by dxsupport.cfg
+static ConVar mat_tonemapping_occlusion_use_stencil( "mat_tonemapping_occlusion_use_stencil", "0" );
+
+#ifdef DX_TO_GL_ABSTRACTION
+// In GL mode, we currently require mat_dxlevel to be between 90-92
+static ConVar mat_dxlevel( "mat_dxlevel", "92", 0, "", true, 90, true, 92, NULL );
+#else
+static ConVar mat_dxlevel( "mat_dxlevel", "0", 0, "Current DirectX Level. Competitive play requires at least mat_dxlevel 90", false, 0, false, 0, true, 90, false, 0, NULL  );
+#endif
 
 IMaterialInternal *g_pErrorMaterial = NULL;
 
 CreateInterfaceFn g_fnMatSystemConnectCreateInterface = NULL;  
 
+static int ReadListFromFile(CUtlVector<char*>* outReplacementMaterials, const char *pszPathName);
 
 //#define PERF_TESTING 1
 
 //-----------------------------------------------------------------------------
 // Implementational structures
 //-----------------------------------------------------------------------------
-
-#define MATERIAL_MAX_TREE_DEPTH 256
 
 
 //-----------------------------------------------------------------------------
@@ -111,6 +136,11 @@ EXPOSE_INTERFACE_FN( GetICVar, ICVar, CVAR_INTERFACE_VERSION );
 IMaterialSystemInternal *g_pInternalMaterialSystem = &g_MaterialSystem;
 IShaderUtil *g_pShaderUtil = &g_MaterialSystem;
 
+#if defined(USE_SDL)
+#include "appframework/ilaunchermgr.h"
+ILauncherMgr *g_pLauncherMgr = NULL;	// set in CMaterialSystem::Connect
+#endif
+
 //-----------------------------------------------------------------------------
 // Factory used to get at internal interfaces (used by shaderapi + shader dlls)
 //-----------------------------------------------------------------------------
@@ -129,6 +159,11 @@ void *ShaderFactory( const char *pName, int *pReturnCode )
 
 	if ( !Q_stricmp( pName, SHADER_UTIL_INTERFACE_VERSION ))
 		return g_pShaderUtil;
+
+#ifdef USE_SDL
+	if ( !Q_stricmp( pName, "SDLMgrInterface001" /*SDLMGR_INTERFACE_VERSION*/ ))
+		return g_pLauncherMgr;
+#endif
 
 	void * pInterface = g_MaterialSystem.QueryInterface( pName );
 	if ( pInterface )
@@ -162,6 +197,13 @@ class CResourcePreloadMaterial : public CResourcePreload
 				// force material's textures to create now
 				pMatInternal->Precache();
 				return true;
+			}
+			else
+			{
+				if ( IsPosix() )
+				{
+					printf("\n ##### CResourcePreloadMaterial::CreateResource can't find material %s\n", pName);
+				}
 			}
 		}
 
@@ -340,15 +382,43 @@ void CMaterialSystem::CreateDebugMaterials()
 
 		pVMTKeyValues = new KeyValues( "BufferClearObeyStencil" );
 		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$clearalpha", 1 );
+		pVMTKeyValues->SetInt( "$vertexcolor", 1 );
+		m_pBufferClearObeyStencil[BUFFER_CLEAR_ALPHA] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil2.vmt", pVMTKeyValues ))->GetRealTimeVersion();
+
+		pVMTKeyValues = new KeyValues( "BufferClearObeyStencil" );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$clearcolor", 1 );
+		pVMTKeyValues->SetInt( "$clearalpha", 1 );
+		pVMTKeyValues->SetInt( "$vertexcolor", 1 );
+		m_pBufferClearObeyStencil[BUFFER_CLEAR_COLOR_AND_ALPHA] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil3.vmt", pVMTKeyValues ))->GetRealTimeVersion();
+
+		pVMTKeyValues = new KeyValues( "BufferClearObeyStencil" );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
 		pVMTKeyValues->SetInt( "$cleardepth", 1 );
-		m_pBufferClearObeyStencil[BUFFER_CLEAR_DEPTH] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil2.vmt", pVMTKeyValues ))->GetRealTimeVersion();
+		m_pBufferClearObeyStencil[BUFFER_CLEAR_DEPTH] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil4.vmt", pVMTKeyValues ))->GetRealTimeVersion();
 
 		pVMTKeyValues = new KeyValues( "BufferClearObeyStencil" );
 		pVMTKeyValues->SetInt( "$nocull", 1 );
 		pVMTKeyValues->SetInt( "$cleardepth", 1 );
 		pVMTKeyValues->SetInt( "$clearcolor", 1 );
 		pVMTKeyValues->SetInt( "$vertexcolor", 1 );
-		m_pBufferClearObeyStencil[BUFFER_CLEAR_COLOR_AND_DEPTH] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil3.vmt", pVMTKeyValues ))->GetRealTimeVersion();
+		m_pBufferClearObeyStencil[BUFFER_CLEAR_COLOR_AND_DEPTH] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil5.vmt", pVMTKeyValues ))->GetRealTimeVersion();
+
+		pVMTKeyValues = new KeyValues( "BufferClearObeyStencil" );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$cleardepth", 1 );
+		pVMTKeyValues->SetInt( "$clearalpha", 1 );
+		pVMTKeyValues->SetInt( "$vertexcolor", 1 );
+		m_pBufferClearObeyStencil[BUFFER_CLEAR_ALPHA_AND_DEPTH] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil6.vmt", pVMTKeyValues ))->GetRealTimeVersion();
+
+		pVMTKeyValues = new KeyValues( "BufferClearObeyStencil" );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$cleardepth", 1 );
+		pVMTKeyValues->SetInt( "$clearcolor", 1 );
+		pVMTKeyValues->SetInt( "$clearalpha", 1 );
+		pVMTKeyValues->SetInt( "$vertexcolor", 1 );
+		m_pBufferClearObeyStencil[BUFFER_CLEAR_COLOR_AND_ALPHA_AND_DEPTH] = static_cast<IMaterialInternal*>(CreateMaterial( "___buffer_clear_obey_stencil7.vmt", pVMTKeyValues ))->GetRealTimeVersion();
 
 		if ( IsX360() )
 		{
@@ -360,6 +430,46 @@ void CMaterialSystem::CreateDebugMaterials()
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Creates compositor materials
+//-----------------------------------------------------------------------------
+void CMaterialSystem::CreateCompositorMaterials()
+{
+	// precache composite materials
+	for ( int i = ECO_FirstPrecacheMaterial; i < ECO_LastPrecacheMaterial; i++ )
+	{
+		const char *pszMaterial = GetCombinedMaterialName( ( ECombineOperation ) i );
+		if ( pszMaterial[ 0 ] == '\0' )
+			continue;
+
+		IMaterialInternal *pMatqf = assert_cast< IMaterialInternal* >( FindMaterial( pszMaterial, TEXTURE_GROUP_RUNTIME_COMPOSITE ) );
+		Assert( pMatqf );
+		Assert( !pMatqf->IsErrorMaterial() );
+		IMaterialInternal *pMatrt = pMatqf->GetRealTimeVersion();
+		Assert( pMatrt );
+		pMatrt->IncrementReferenceCount(); // Hold a ref.
+
+		m_pCompositorMaterials.AddToTail( pMatrt );
+	}
+
+}
+
+//-----------------------------------------------------------------------------
+// Cleanup compositor materials
+//-----------------------------------------------------------------------------
+void CMaterialSystem::CleanUpCompositorMaterials()
+{
+	FOR_EACH_VEC( m_pCompositorMaterials, i )
+	{
+		if ( m_pCompositorMaterials[ i ] == NULL )
+			continue;
+
+		m_pCompositorMaterials[ i ]->DecrementReferenceCount();
+		RemoveMaterial( m_pCompositorMaterials[ i ] );
+	}
+
+	m_pCompositorMaterials.RemoveAll();
+}
 
 //-----------------------------------------------------------------------------
 // Creates the debugging materials
@@ -368,13 +478,8 @@ void CMaterialSystem::CleanUpDebugMaterials()
 {
 	if ( m_pDrawFlatMaterial )
 	{
-		g_pErrorMaterial->DecrementReferenceCount();
 		m_pDrawFlatMaterial->DecrementReferenceCount();
-
-		RemoveMaterial( g_pErrorMaterial );
 		RemoveMaterial( m_pDrawFlatMaterial );
-
-		g_pErrorMaterial = NULL;
 		m_pDrawFlatMaterial = NULL;
 
 		for ( int i = BUFFER_CLEAR_NONE; i < BUFFER_CLEAR_TYPE_COUNT; ++i )
@@ -396,12 +501,24 @@ void CMaterialSystem::CleanUpDebugMaterials()
 }
 
 
+void CMaterialSystem::CleanUpErrorMaterial()
+{
+	// Destruction of g_pErrorMaterial is deferred until after CMaterialDict::Shutdown.
+	// The global g_pErrorMaterial is set to NULL so that IsErrorMaterial() will return false and
+	//  RemoveMaterial() / DestroyMaterial() will delete it.
+	IMaterialInternal *pErrorMaterial = g_pErrorMaterial;
+	g_pErrorMaterial = NULL;
+	pErrorMaterial->DecrementReferenceCount();
+	RemoveMaterial( pErrorMaterial );
+}
+
 //-----------------------------------------------------------------------------
 // Constructor
 //-----------------------------------------------------------------------------
 CMaterialSystem::CMaterialSystem()
 {
 	m_nRenderThreadID = 0xFFFFFFFF;
+	m_hAsyncLoadFileCache = NULL;
 	m_ShaderHInst = 0;
 	m_pMaterialProxyFactory = NULL;
 	m_nAdapter = 0;
@@ -410,6 +527,8 @@ CMaterialSystem::CMaterialSystem()
 	m_bCanUseEditorMaterials = false;
 	m_StandardTexturesAllocated = false;
 	m_bInFrame = false;
+	m_bThreadHasOwnership = false;
+	m_ThreadOwnershipID = 0;
 	m_pShaderDLL = NULL;
 	m_FullbrightLightmapTextureHandle = INVALID_SHADERAPI_TEXTURE_HANDLE;
 	m_FullbrightBumpedLightmapTextureHandle = INVALID_SHADERAPI_TEXTURE_HANDLE;
@@ -427,10 +546,23 @@ CMaterialSystem::CMaterialSystem()
 	m_bAllocatingRenderTargets = false;
 	m_pRenderContext.Set( &m_HardwareRenderContext );
 	m_iCurQueuedContext = 0;
+#if defined(DEDICATED)
+	m_bThreadingNotAvailable = true;
+	m_bForcedSingleThreaded = true;
+	m_bAllowQueuedRendering = false;
+#else
+	m_bThreadingNotAvailable =  false;
+	m_bForcedSingleThreaded = false;
+	m_bAllowQueuedRendering = true;
+#endif
 	m_bGeneratedConfig = false;
 	m_pActiveAsyncJob = NULL;
+	m_pMatQueueThreadPool = NULL;
 	m_IdealThreadMode = m_ThreadMode = MATERIAL_SINGLE_THREADED;
 	m_nServiceThread = 0;
+	m_nRenderTargetFrameBufferHeightOverride = m_nRenderTargetFrameBufferWidthOverride = 0;
+
+	m_bReplacementFilesValid = false;
 }
 
 CMaterialSystem::~CMaterialSystem()
@@ -510,8 +642,11 @@ void CMaterialSystem::SetShaderAPI( char const *pShaderAPIDLL )
 //-----------------------------------------------------------------------------
 // Connect/disconnect
 //-----------------------------------------------------------------------------
+
 bool CMaterialSystem::Connect( CreateInterfaceFn factory )
 {
+//	__stop__();
+	
 	if ( !factory )
 		return false;
 
@@ -531,6 +666,17 @@ bool CMaterialSystem::Connect( CreateInterfaceFn factory )
 	g_pHWConfig = (IHardwareConfigInternal*)m_ShaderAPIFactory( MATERIALSYSTEM_HARDWARECONFIG_INTERFACE_VERSION, 0 );
 	if ( !g_pHWConfig )
 		return false;
+	
+#if !defined(DEDICATED)
+#if defined( USE_SDL )
+	g_pLauncherMgr = (ILauncherMgr *)factory( "SDLMgrInterface001" /*SDL_MGR_INTERFACE_VERSION*/, NULL );		
+	if ( !g_pLauncherMgr )
+	{
+		return false;
+	}
+#endif // USE_SDL
+#endif // !DEDICATED
+
 
 	// FIXME: ShaderAPI, ShaderDevice, and ShaderShadow should only come in after setting mode
 	g_pShaderAPI = (IShaderAPI*)m_ShaderAPIFactory( SHADERAPI_INTERFACE_VERSION, 0 );
@@ -679,6 +825,10 @@ InitReturnVal_t CMaterialSystem::Init()
 	// Set up debug materials...
 	CreateDebugMaterials();	
 
+#if !defined(DEDICATED)
+	CreateCompositorMaterials();
+#endif
+
 	if ( IsX360() )
 	{
 		g_pQueuedLoader->InstallLoader( RESOURCEPRELOAD_MATERIAL, &s_ResourcePreloadMaterial );
@@ -688,6 +838,30 @@ InitReturnVal_t CMaterialSystem::Init()
 	// Set up a default material system config
 //	GenerateConfigFromConfigKeyValues( &g_config, false );
 //	UpdateConfig( false );
+
+	// JAY: Added this command line parameter to force creating <32x32 mips
+	// to test for reported performance regressions on some systems
+	if ( CommandLine()->FindParm("-forceallmips") )
+	{
+		extern bool g_bForceTextureAllMips;
+		g_bForceTextureAllMips = true;
+	}
+
+#if defined(DEDICATED)
+    m_bThreadingNotAvailable = true;
+#else
+	for ( int i = 0; i < ARRAYSIZE( m_QueuedRenderContexts ); i++ )
+	{
+		if ( !m_QueuedRenderContexts[i].IsInitialized() )
+		{
+			if ( !m_QueuedRenderContexts[i].Init( this, &m_HardwareRenderContext ) )
+			{
+				m_bThreadingNotAvailable = true;
+				break;
+			}
+		}
+	}
+#endif
 
 	return m_HardwareRenderContext.Init( this );
 }
@@ -743,10 +917,14 @@ CreateInterfaceFn CMaterialSystem::Init( char const* pShaderAPIDLL,
 
 void CMaterialSystem::Shutdown( )
 {
+	DestroyMatQueueThreadPool();
+
 	m_HardwareRenderContext.Shutdown();
 
 	// Clean up standard textures
 	ReleaseStandardTextures();
+
+	CleanUpCompositorMaterials();
 
 	// Clean up the debug materials
 	CleanUpDebugMaterials();
@@ -756,6 +934,8 @@ void CMaterialSystem::Shutdown( )
 
 	GetLightmaps()->Shutdown();
 	m_MaterialDict.Shutdown();
+
+	CleanUpErrorMaterial();
 
 	// Shader system!
 	ShaderSystem()->Shutdown();
@@ -785,6 +965,9 @@ void CMaterialSystem::ModShutdown()
 {
 	// Shader system!
 	ShaderSystem()->ModShutdown();
+
+	// HACK - this is here to unhook ourselves from the client interface, since we're not actually notified when it happens
+	m_pMaterialProxyFactory = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -806,6 +989,15 @@ int CMaterialSystem::GetCurrentAdapter() const
 
 
 //-----------------------------------------------------------------------------
+// Returns the device name for the current adapter
+//-----------------------------------------------------------------------------
+char *CMaterialSystem::GetDisplayDeviceName() const 
+{
+	return g_pShaderDevice->GetDisplayDeviceName();
+}
+
+
+//-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
 void CMaterialSystem::SetThreadMode( MaterialThreadMode_t nextThreadMode, int nServiceThread ) 
@@ -819,6 +1011,53 @@ MaterialThreadMode_t CMaterialSystem::GetThreadMode()
 	return m_ThreadMode; 
 }
 
+
+bool CMaterialSystem::IsRenderThreadSafe( )
+{
+	return	( m_ThreadMode != MATERIAL_QUEUED_THREADED && ThreadInMainThread() ) ||
+			( m_ThreadMode == MATERIAL_QUEUED_THREADED && m_nRenderThreadID == ThreadGetCurrentId() );
+}
+
+
+bool CMaterialSystem::AllowThreading( bool bAllow, int nServiceThread )
+{
+#if defined(DEDICATED)
+	return false;
+#else
+	if ( CommandLine()->ParmValue( "-threads", 2 ) < 2 ) // if -threads specified on command line to restrict all the pools then obey and not turn on QMS
+		bAllow = false;
+
+	bool bOldAllow = m_bAllowQueuedRendering;
+
+	if ( GetCPUInformation()->m_nPhysicalProcessors >= 2 )
+	{
+		m_bAllowQueuedRendering = bAllow;
+		bool bQueued = m_IdealThreadMode != MATERIAL_SINGLE_THREADED;
+		if ( bAllow && !bQueued )
+		{
+			// go into queued mode
+			DevMsg( "Queued Material System: ENABLED!\n" );
+			SetThreadMode( MATERIAL_QUEUED_THREADED, nServiceThread );
+		}
+		else if ( !bAllow && bQueued )
+		{
+			// disabling queued mode just needs to stop the queuing of drawing
+			// but still allow other threaded access to the Material System
+			// flush the queue
+			DevMsg( "Queued Material System: DISABLED!\n" );
+			ForceSingleThreaded();
+			MaterialLock_t hMaterialLock = Lock();
+			SetThreadMode( MATERIAL_SINGLE_THREADED, -1 );
+			Unlock( hMaterialLock );
+		}
+	}
+	else
+	{
+		m_bAllowQueuedRendering = false;
+	}
+	return bOldAllow;
+#endif // !DEDICATED
+}
 void CMaterialSystem::ExecuteQueued() 
 {
 }
@@ -859,6 +1098,7 @@ IMatRenderContext *CMaterialSystem::CreateRenderContext( MaterialContextType_t t
 	case MATERIAL_NULL_CONTEXT:
 		{
 			CMatRenderContextBase *pNullContext = CreateNullRenderContext();
+			pNullContext->Init();
 			pNullContext->InitializeFrom( &m_HardwareRenderContext );
 			return pNullContext;
 		}
@@ -949,7 +1189,7 @@ static void ConvertModeStruct( ShaderDeviceInfo_t *pMode, const MaterialSystem_C
 	pMode->m_nBackBufferCount = 1;			
 	pMode->m_nAASamples = config.m_nAASamples;
 	pMode->m_nAAQuality = config.m_nAAQuality;
-	pMode->m_nDXLevel = config.dxSupportLevel;					
+	pMode->m_nDXLevel = MAX( ABSOLUTE_MINIMUM_DXLEVEL, config.dxSupportLevel );
 	pMode->m_nWindowedSizeLimitWidth = (int)config.m_WindowedSizeLimitWidth;	
 	pMode->m_nWindowedSizeLimitHeight = (int)config.m_WindowedSizeLimitHeight;
 
@@ -967,7 +1207,7 @@ static void ConvertModeStruct( MaterialVideoMode_t *pMode, const ShaderDisplayMo
 	pMode->m_Width = info.m_nWidth;					
 	pMode->m_Height = info.m_nHeight;
 	pMode->m_Format = info.m_Format;			
-	pMode->m_RefreshRate = info.m_nRefreshRateNumerator / info.m_nRefreshRateDenominator;
+	pMode->m_RefreshRate = info.m_nRefreshRateDenominator ? ( info.m_nRefreshRateNumerator / info.m_nRefreshRateDenominator ) : 0;
 }
 
 
@@ -992,6 +1232,41 @@ void CMaterialSystem::GetDisplayMode( MaterialVideoMode_t& info ) const
 	ConvertModeStruct( &info, shaderInfo );
 }
 
+void CMaterialSystem::ForceSingleThreaded()
+{
+	if ( !ThreadInMainThread() )
+	{
+		Error("Can't force single thread from within thread!\n");
+	}
+	if ( GetThreadMode() != MATERIAL_SINGLE_THREADED )
+	{
+		if ( m_pActiveAsyncJob && !m_pActiveAsyncJob->IsFinished() )
+		{
+			m_pActiveAsyncJob->WaitForFinish();
+		}
+		SafeRelease( m_pActiveAsyncJob );
+
+		ThreadRelease();
+
+		g_pShaderAPI->EnableShaderShaderMutex( false );
+		m_HardwareRenderContext.InitializeFrom(&m_QueuedRenderContexts[m_iCurQueuedContext]);
+		m_pRenderContext.Set( &m_HardwareRenderContext );
+		for ( int i = 0; i < ARRAYSIZE( m_QueuedRenderContexts ); i++ )
+		{
+			Assert( m_QueuedRenderContexts[i].IsInitialized() );
+			m_QueuedRenderContexts[i].EndQueue(true);
+		}
+		if( mat_debugalttab.GetBool() )
+		{
+			Warning("Forcing queued mode off!\n");
+		}
+
+		// NOTE: Must happen after EndQueue or proxies get bound again, which is bad.
+		m_ThreadMode = MATERIAL_SINGLE_THREADED;
+
+		m_bForcedSingleThreaded = true;
+	}
+}
 
 //-----------------------------------------------------------------------------
 // Sets the mode...
@@ -1000,13 +1275,28 @@ bool CMaterialSystem::SetMode( void* hwnd, const MaterialSystem_Config_t &config
 {
 	Assert( m_bGeneratedConfig );
 
+	ForceSingleThreaded();
+
 	ShaderDeviceInfo_t info;
 	ConvertModeStruct( &info, config );
 
 	bool bPreviouslyUsingGraphics = g_pShaderDevice->IsUsingGraphics();
+	if( config.m_nVRModeAdapter != -1 && config.m_nVRModeAdapter < GetDisplayAdapterCount() && !bPreviouslyUsingGraphics )
+	{
+		// if this is init-time, we need to override the adapter with the
+		// VR mode adapter
+		m_nAdapter = config.m_nVRModeAdapter;
+	}
+
 	bool bOk = g_pShaderAPI->SetMode( hwnd, m_nAdapter, info );
 	if ( !bOk )
 		return false;
+	
+#if defined( USE_SDL )
+	uint width = info.m_DisplayMode.m_nWidth;
+	uint height = info.m_DisplayMode.m_nHeight;
+	g_pLauncherMgr->RenderedSize( width, height, true ); // true = set
+#endif
 
 	TextureManager()->FreeStandardRenderTargets();
 	TextureManager()->AllocateStandardRenderTargets();
@@ -1028,8 +1318,10 @@ bool CMaterialSystem::SetMode( void* hwnd, const MaterialSystem_Config_t &config
 				// HACK!
 				// NOTE! : Overbright is 1.0 so that Hammer will work properly with the white bumped and unbumped lightmaps.
 				MathLib_Init( 2.2f, 2.2f, 0.0f, OVERBRIGHT );
-				AllocateStandardTextures();
 			}
+
+			AllocateStandardTextures();
+			TextureManager()->WarmTextureCache();
 		}
 
 		if ( IsX360() )
@@ -1047,6 +1339,7 @@ bool CMaterialSystem::SetMode( void* hwnd, const MaterialSystem_Config_t &config
 	g_config.m_VideoMode = config.m_VideoMode;
 	g_config.SetFlag( MATSYS_VIDCFG_FLAGS_WINDOWED, config.Windowed() );
 	g_config.SetFlag( MATSYS_VIDCFG_FLAGS_STENCIL, config.Stencil() );
+	g_config.SetFlag( MATSYS_VIDCFG_FLAGS_VR_MODE, config.VRMode() );
 	WriteConfigIntoConVars( config );
 
 	extern void SetupDirtyDiskReportFunc(); 
@@ -1207,7 +1500,7 @@ int CMaterialSystem::GetMemRequired( int width, int height, int depth, ImageForm
 //-----------------------------------------------------------------------------
 MaterialSystem_Config_t& CMaterialSystem::GetConfig()
 {
-	Assert( m_bGeneratedConfig );
+//hushed	Assert( m_bGeneratedConfig );
 	return g_config;
 }
 
@@ -1248,17 +1541,93 @@ static void LoadFlags( KeyValues *pGroup, const char *pName, bool bDefaultValue,
 	}
 }
 
+#define ASPECT_4x3		0
+#define ASPECT_16x9		1
+#define ASPECT_16x10	2
+
+
+//-----------------------------------------------------------------------------
+// Purpose: aspect ratio mappings (for normal/widescreen combo)
+//-----------------------------------------------------------------------------
+struct RatioToAspectMode_t
+{
+	int nAspectCode;
+	float flAspectRatio;
+};
+
+RatioToAspectMode_t g_RatioToAspectModes[] =
+{
+	{	ASPECT_4x3,   4.0f / 3.0f },
+	{	ASPECT_16x9,  16.0f / 9.0f },
+	{	ASPECT_16x10, 16.0f / 10.0f },
+	{	ASPECT_16x10, 1.0f },
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: returns the aspect ratio mode number for the given resolution
+//-----------------------------------------------------------------------------
+int GetScreenAspectMode( int width, int height )
+{
+	float flAspectRatio = (float)width / (float)height;
+
+	// Just find the closest ratio
+	float flClosestAspectRatioDist = 99999.0f;
+	int nClosestAspectCode = ASPECT_4x3;
+	for ( int i = 0; i < ARRAYSIZE(g_RatioToAspectModes); i++ )
+	{
+		float flDist = fabs( g_RatioToAspectModes[i].flAspectRatio - flAspectRatio );
+		if ( flDist < flClosestAspectRatioDist )
+		{
+			flClosestAspectRatioDist = flDist;
+			nClosestAspectCode = g_RatioToAspectModes[i].nAspectCode;
+		}
+	}
+
+	return nClosestAspectCode;
+}
+
+
+// Heuristic similar to one we put into L4D
+bool BetterResolution( int nRecommendedNumPixels, int nBestNumPixels, int nNewNumPixels )
+{
+	float flRecommendedNumPixels = (float) nRecommendedNumPixels;
+	float flBestNumPixels = (float) nBestNumPixels;
+	float flNewNumPixels = (float) nNewNumPixels;
+
+	// Give ourselves a little head room
+	float flTooBig = flRecommendedNumPixels * 1.1f;
+
+	// If our best is too big and the new resolution is no bigger, pick it
+	if ( ( flBestNumPixels > flTooBig ) && ( flNewNumPixels < flBestNumPixels ) )
+		return true;
+
+	// Don't allow resolutions which are too big
+	if ( flNewNumPixels > flTooBig )
+		return false;
+
+	// Finally, just check for nearness to desired number of pixels
+	float flDelta = fabs( flRecommendedNumPixels - flNewNumPixels );
+	float flBestDelta = fabs( flRecommendedNumPixels - flBestNumPixels );
+	if ( flDelta >= flBestDelta )
+		return false;
+
+	return true;
+}
+
 
 //-----------------------------------------------------------------------------
 // This is called when the config changes
 //-----------------------------------------------------------------------------
 void CMaterialSystem::GenerateConfigFromConfigKeyValues( MaterialSystem_Config_t *pConfig, bool bOverwriteCommandLineValues )
 {
+	if ( !g_pShaderDeviceMgr || !pConfig )
+		return;
+
 	// Look for the default recommended dx support level
 	MaterialAdapterInfo_t adapterInfo;
 	g_pShaderDeviceMgr->GetAdapterInfo( m_nAdapter, adapterInfo );
 
-	pConfig->dxSupportLevel = adapterInfo.m_nDXSupportLevel;
+	pConfig->dxSupportLevel = MAX( ABSOLUTE_MINIMUM_DXLEVEL, adapterInfo.m_nDXSupportLevel );
 	KeyValues *pKeyValues = new KeyValues( "config" );
 	if ( !GetRecommendedConfigurationInfo( pConfig->dxSupportLevel, pKeyValues ) )
 	{
@@ -1268,8 +1637,75 @@ void CMaterialSystem::GenerateConfigFromConfigKeyValues( MaterialSystem_Config_t
 
 	pConfig->m_Flags = 0;
 
-	ReadInt( pKeyValues, "DefaultRes", 640, -1, &pConfig->m_VideoMode.m_Width );
-	pConfig->m_VideoMode.m_Height = ( pConfig->m_VideoMode.m_Width * 3 ) / 4;
+#ifdef LINUX
+
+	uint width = 0;
+	uint height = 0;
+	uint refreshHz = 0; // Not used
+
+#ifdef USE_SDL
+	// query backbuffer size (window size whether FS or windowed)
+	if( g_pLauncherMgr )
+	{
+		g_pLauncherMgr->GetNativeDisplayInfo( -1, width, height, refreshHz );
+	}
+#endif
+
+	pConfig->m_VideoMode.m_Width = width;
+	pConfig->m_VideoMode.m_Height = height;
+
+#else
+
+	// Get the recommended resolution from dxsupport.cfg, this assumes a 4:3 aspect ratio
+	int nRecommendedWidth, nRecommendedHeight;
+	ReadInt( pKeyValues, "DefaultRes", 640, -1, &nRecommendedWidth );
+	nRecommendedHeight = ( nRecommendedWidth * 3 ) / 4;
+	int nRecommendedPixels = nRecommendedHeight * nRecommendedWidth;
+
+	// Get the desktop resolution and aspect ratio
+	ShaderDisplayMode_t displayMode;
+	g_pShaderDeviceMgr->GetCurrentModeInfo( &displayMode, 0 );
+	int nCurrentScreenAspect = GetScreenAspectMode( displayMode.m_nWidth, displayMode.m_nHeight );
+
+	// Let's see what the device supports and pick the most appropriate mode
+	g_pShaderDeviceMgr->GetModeInfo( &displayMode, 0, 0 );
+	int nBestMode, nBestWidth, nBestHeight;
+	nBestMode = nBestWidth = nBestHeight = -1;
+	int nBestPixels = displayMode.m_nHeight * displayMode.m_nWidth;
+
+	int nNumVideoModes = g_pShaderDeviceMgr->GetModeCount( 0 );
+
+	// Pick the resolution with the right aspect ratio which matches the recommended resolution most closely
+	for ( int i=0; i<nNumVideoModes; i++ )
+	{
+		g_pShaderDeviceMgr->GetModeInfo( &displayMode, 0, i );
+
+		if ( nCurrentScreenAspect == GetScreenAspectMode( displayMode.m_nWidth, displayMode.m_nHeight ) )
+		{
+			int nNumPixels = displayMode.m_nWidth * displayMode.m_nHeight;
+
+			// Initially select the first mode we find of the correct aspect ratio for the display
+			if ( ( nBestMode == -1) || BetterResolution( nRecommendedPixels, nBestPixels, nNumPixels ) )
+			{
+				nBestMode = i;
+				nBestPixels = nNumPixels;
+				nBestWidth = displayMode.m_nWidth;
+				nBestHeight = displayMode.m_nHeight;
+			}
+		}
+	}
+
+	// We found a good mode
+	if ( nBestMode != -1 )
+	{
+		pConfig->m_VideoMode.m_Width = nBestWidth;
+		pConfig->m_VideoMode.m_Height = nBestHeight;
+	}
+	else // Fall back to 4:3 mode from the cfg file.  This should never happen
+	{
+		pConfig->m_VideoMode.m_Width = nRecommendedWidth;
+		pConfig->m_VideoMode.m_Height = nRecommendedHeight;
+	}
 
 #if defined( _X360 )
 	pConfig->m_VideoMode.m_Width = GetSystemMetrics( SM_CXSCREEN );
@@ -1278,10 +1714,11 @@ void CMaterialSystem::GenerateConfigFromConfigKeyValues( MaterialSystem_Config_t
 
 	pKeyValues->deleteThis();
 
+#endif // LINUX
+
 	WriteConfigurationInfoToConVars( bOverwriteCommandLineValues );
 	m_bGeneratedConfig = true;
 }
-
 
 //-----------------------------------------------------------------------------
 // If mat_proxy goes to 0, we need to reload all materials, because their shader
@@ -1301,15 +1738,22 @@ static void MatProxyCallback( IConVar *pConVar, const char *old, float flOldValu
 //-----------------------------------------------------------------------------
 // Convars that control the config record
 //-----------------------------------------------------------------------------
-static ConVar mat_vsync(			"mat_vsync", "0", 0, "Force sync to vertical retrace", true, 0.0, true, 1.0 );
-static ConVar mat_forcehardwaresync( "mat_forcehardwaresync", IsPC() ? "1" : "0" );
+static ConVar mat_vsync(			"mat_vsync", "0", FCVAR_ALLOWED_IN_COMPETITIVE, "Force sync to vertical retrace", true, 0.0, true, 1.0 );
+static ConVar mat_forcehardwaresync( "mat_forcehardwaresync", IsPC() ? "1" : "0", FCVAR_ALLOWED_IN_COMPETITIVE );
 
 // Texture-related
-static ConVar mat_trilinear(		"mat_trilinear", "0" );
-static ConVar mat_forceaniso(		"mat_forceaniso", "1" );
+static ConVar mat_trilinear(		"mat_trilinear", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
+#ifdef _X360 // The code that reads this out of moddefaults.txt is #if'd out for the 360, so force aniso to 2 here.
+	static ConVar mat_forceaniso( "mat_forceaniso", "2", FCVAR_ARCHIVE ); // 0 = Bilinear, 1 = Trilinear, 2+ = Aniso
+#elif defined ( OSX )
+	static ConVar mat_forceaniso( "mat_forceaniso", "1", FCVAR_ARCHIVE, "Filtering level", true, 0, true, 8 ); // 0 = Bilinear, 1 = Trilinear, 2+ = Aniso
+#else
+	static ConVar mat_forceaniso( "mat_forceaniso", "1", FCVAR_ARCHIVE ); // 0 = Bilinear, 1 = Trilinear, 2+ = Aniso
+#endif
 static ConVar mat_filterlightmaps(	"mat_filterlightmaps", "1" );
 static ConVar mat_filtertextures(	"mat_filtertextures", "1" );
 static ConVar mat_mipmaptextures(	"mat_mipmaptextures", "1" );
+static ConVar mat_vrmode_adapter(	"mat_vrmode_adapter", "-1" );
 
 static void mat_showmiplevels_Callback_f( IConVar *var, const char *pOldValue, float flOldValue )
 {
@@ -1317,23 +1761,29 @@ static void mat_showmiplevels_Callback_f( IConVar *var, const char *pOldValue, f
 	mat_filtertextures.SetValue( ( ( ConVar * )var )->GetInt() == 0 );
 }
 // Debugging textures
-static ConVar mat_showmiplevels(	"mat_showmiplevels", "0", 0, "color-code miplevels 2: normalmaps, 1: everything else", mat_showmiplevels_Callback_f );
+static ConVar mat_showmiplevels(	"mat_showmiplevels", "0", FCVAR_CHEAT, "color-code miplevels 2: normalmaps, 1: everything else", mat_showmiplevels_Callback_f );
 
-static ConVar mat_specular(			"mat_specular", "1", 0, "Enable/Disable specularity for perf testing.  Will cause a material reload upon change." );
-static ConVar mat_bumpmap(			"mat_bumpmap", "1" );
-static ConVar mat_parallaxmap(		"mat_parallaxmap", "1" );
-static ConVar mat_reducefillrate(	"mat_reducefillrate", "0" );
-static ConVar mat_dxlevel(			"mat_dxlevel", "0" );
-static ConVar mat_picmip(			"mat_picmip", "0", FCVAR_NONE, "", true, -10, true, 4 );
+static ConVar mat_specular(			"mat_specular", "1", FCVAR_ALLOWED_IN_COMPETITIVE, "Enable/Disable specularity for perf testing.  Will cause a material reload upon change." );
+static ConVar mat_bumpmap(			"mat_bumpmap", "1", FCVAR_ALLOWED_IN_COMPETITIVE );
+static ConVar mat_phong(			"mat_phong", "1" );
+static ConVar mat_parallaxmap(		"mat_parallaxmap", "1", FCVAR_HIDDEN | FCVAR_ALLOWED_IN_COMPETITIVE );
+static ConVar mat_reducefillrate(	"mat_reducefillrate", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
+
+#if defined( OSX ) && !defined( STAGING_ONLY ) && !defined( _DEBUG )
+// OSX users are currently running OOM. We limit them to texture quality high here, which avoids the problem while we come up with a real solution.
+static ConVar mat_picmip(			"mat_picmip", "1", FCVAR_ARCHIVE, "", true, 0, true, 4 );
+#else
+static ConVar mat_picmip(			"mat_picmip", "0", FCVAR_ARCHIVE, "", true, -1, true, 4 );
+#endif
 static ConVar mat_slopescaledepthbias_normal( "mat_slopescaledepthbias_normal", "0.0f", FCVAR_CHEAT );
-static ConVar mat_depthbias_normal( "mat_depthbias_normal", "0.0f", FCVAR_CHEAT );
+static ConVar mat_depthbias_normal( "mat_depthbias_normal", "0.0f", FCVAR_CHEAT | FCVAR_ALLOWED_IN_COMPETITIVE );
 static ConVar mat_slopescaledepthbias_decal( "mat_slopescaledepthbias_decal", "-0.5", FCVAR_CHEAT );		// Reciprocals of these biases sent to API
-static ConVar mat_depthbias_decal(	"mat_depthbias_decal", "-262144", FCVAR_CHEAT  );						//
+static ConVar mat_depthbias_decal(	"mat_depthbias_decal", "-262144", FCVAR_CHEAT | FCVAR_ALLOWED_IN_COMPETITIVE );						//
 
-//static ConVar mat_slopescaledepthbias_shadowmap( "mat_slopescaledepthbias_shadowmap", "16", FCVAR_CHEAT );
-//static ConVar mat_depthbias_shadowmap(	"mat_depthbias_shadowmap", "0.0005", FCVAR_CHEAT  );
+static ConVar mat_slopescaledepthbias_shadowmap( "mat_slopescaledepthbias_shadowmap", "16", FCVAR_CHEAT );
+static ConVar mat_depthbias_shadowmap(	"mat_depthbias_shadowmap", "0.0005", FCVAR_CHEAT  );
 
-static ConVar mat_monitorgamma(		"mat_monitorgamma", "2.2", 0, "monitor gamma (typically 2.2 for CRT and 1.7 for LCD)", true, 1.6f, true, 2.6f  );
+static ConVar mat_monitorgamma(		"mat_monitorgamma", "2.2", FCVAR_ARCHIVE, "monitor gamma (typically 2.2 for CRT and 1.7 for LCD)", true, 1.6f, true, 2.6f  );
 static ConVar mat_monitorgamma_tv_range_min( "mat_monitorgamma_tv_range_min", "16" );
 static ConVar mat_monitorgamma_tv_range_max( "mat_monitorgamma_tv_range_max", "255" );
 // TV's generally have a 2.5 gamma, so we need to convert our 2.2 frame buffer into a 2.5 frame buffer for display on a TV
@@ -1344,18 +1794,30 @@ static ConVar mat_monitorgamma_tv_enabled( "mat_monitorgamma_tv_enabled", "1", F
 static ConVar mat_monitorgamma_tv_enabled( "mat_monitorgamma_tv_enabled", "0", FCVAR_ARCHIVE, "" );
 #endif
 
-static ConVar mat_antialias(		"mat_antialias", "0" );
-static ConVar mat_aaquality(		"mat_aaquality", "0" );
-static ConVar mat_diffuse(			"mat_diffuse", "1" );
-static ConVar mat_showlowresimage(	"mat_showlowresimage", "0" );
+static ConVar mat_antialias(		"mat_antialias", "0", FCVAR_ARCHIVE );
+static ConVar mat_aaquality(		"mat_aaquality", "0", FCVAR_ARCHIVE );
+static ConVar mat_diffuse(			"mat_diffuse", "1", FCVAR_CHEAT );
+//=============================================================================
+// HPE_BEGIN:
+// [Forrest] Make this a cheat variable because low res textures makes enemy
+// players and bullet impacts stand out more.
+//=============================================================================
+static ConVar mat_showlowresimage(	"mat_showlowresimage", "0", FCVAR_CHEAT );
+//=============================================================================
+// HPE_END
+//=============================================================================
 static ConVar mat_fullbright(		"mat_fullbright","0", FCVAR_CHEAT );
 static ConVar mat_normalmaps(		"mat_normalmaps", "0", FCVAR_CHEAT );
 static ConVar mat_measurefillrate(	"mat_measurefillrate", "0", FCVAR_CHEAT );
 static ConVar mat_fillrate(			"mat_fillrate", "0", FCVAR_CHEAT );
 static ConVar mat_reversedepth(		"mat_reversedepth", "0", FCVAR_CHEAT );
+#ifdef DX_TO_GL_ABSTRACTION
+static ConVar mat_bufferprimitives( "mat_bufferprimitives", "0" );	// I'm not seeing any benefit speed wise for buffered primitives on GLM/POSIX (checked via TF2 timedemo) - default to zero
+#else
 static ConVar mat_bufferprimitives( "mat_bufferprimitives", "1" );
+#endif
 static ConVar mat_drawflat(			"mat_drawflat","0", FCVAR_CHEAT );
-static ConVar mat_softwarelighting( "mat_softwarelighting", "0" );
+static ConVar mat_softwarelighting( "mat_softwarelighting", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
 static ConVar mat_proxy(			"mat_proxy", "0", FCVAR_CHEAT, "", MatProxyCallback );
 static ConVar mat_norendering(		"mat_norendering", "0", FCVAR_CHEAT );
 static ConVar mat_compressedtextures(  "mat_compressedtextures", "1" );
@@ -1363,13 +1825,13 @@ static ConVar mat_fastspecular(		"mat_fastspecular", "1", 0, "Enable/Disable spe
 static ConVar mat_fastnobump(		"mat_fastnobump", "0", FCVAR_CHEAT ); // Binds 1-texel normal map for quick internal testing
 
 // These are not controlled by the material system, but are limited by settings in the material system
-static ConVar r_shadowrendertotexture(		"r_shadowrendertotexture", "0" );
+static ConVar r_shadowrendertotexture(		"r_shadowrendertotexture", "0", FCVAR_ARCHIVE );
 static ConVar r_flashlightdepthtexture(		"r_flashlightdepthtexture", "1" );
 #ifndef _X360
-static ConVar r_waterforceexpensive(		"r_waterforceexpensive", "0" );
+static ConVar r_waterforceexpensive(		"r_waterforceexpensive", "0", FCVAR_ARCHIVE );
 #endif
-static ConVar r_waterforcereflectentities(	"r_waterforcereflectentities", "0" );
-static ConVar mat_motion_blur_enabled( "mat_motion_blur_enabled", "1" );
+static ConVar r_waterforcereflectentities(	"r_waterforcereflectentities", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
+static ConVar mat_motion_blur_enabled( "mat_motion_blur_enabled", "0", FCVAR_ARCHIVE );
 
 
 uint32 g_nDebugVarsSignature = 0;
@@ -1384,24 +1846,25 @@ void CMaterialSystem::ReadConfigFromConVars( MaterialSystem_Config_t *pConfig )
 		return;
 
 	// video panel config items
+#ifndef CSS_PERF_TEST
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_NO_WAIT_FOR_VSYNC, !mat_vsync.GetBool() );
+#endif
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_FORCE_TRILINEAR, mat_trilinear.GetBool() );
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_DISABLE_SPECULAR, !mat_specular.GetBool() );
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_DISABLE_BUMPMAP, !mat_bumpmap.GetBool() );
+	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_DISABLE_PHONG, !mat_phong.GetBool() );
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_ENABLE_PARALLAX_MAPPING, mat_parallaxmap.GetBool() );
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_REDUCE_FILLRATE, mat_reducefillrate.GetBool() );
 	pConfig->m_nForceAnisotropicLevel = max( mat_forceaniso.GetInt(), 1 );
-	pConfig->dxSupportLevel = mat_dxlevel.GetInt();
+	pConfig->dxSupportLevel = MAX( ABSOLUTE_MINIMUM_DXLEVEL, mat_dxlevel.GetInt() );
 	pConfig->skipMipLevels = mat_picmip.GetInt();
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_FORCE_HWSYNC, mat_forcehardwaresync.GetBool() );
 	pConfig->m_SlopeScaleDepthBias_Decal = mat_slopescaledepthbias_decal.GetFloat();
 	pConfig->m_DepthBias_Decal = mat_depthbias_decal.GetFloat();
 	pConfig->m_SlopeScaleDepthBias_Normal = mat_slopescaledepthbias_normal.GetFloat();
 	pConfig->m_DepthBias_Normal = mat_depthbias_normal.GetFloat();
-	//pConfig->m_SlopeScaleDepthBias_ShadowMap = mat_slopescaledepthbias_shadowmap.GetFloat();
-	pConfig->m_SlopeScaleDepthBias_ShadowMap = g_pMaterialSystemHardwareConfig->GetShadowSlopeScaleDepthBias();
-	//pConfig->m_DepthBias_ShadowMap = mat_depthbias_shadowmap.GetFloat();
-	pConfig->m_DepthBias_ShadowMap = g_pMaterialSystemHardwareConfig->GetShadowDepthBias();
+	pConfig->m_SlopeScaleDepthBias_ShadowMap = mat_slopescaledepthbias_shadowmap.GetFloat();
+	pConfig->m_DepthBias_ShadowMap = mat_depthbias_shadowmap.GetFloat();
 
 	pConfig->m_fMonitorGamma = mat_monitorgamma.GetFloat();
 	pConfig->m_fGammaTVRangeMin = mat_monitorgamma_tv_range_min.GetFloat();
@@ -1438,7 +1901,7 @@ void CMaterialSystem::ReadConfigFromConVars( MaterialSystem_Config_t *pConfig )
 	pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_ENABLE_HDR, HardwareConfig() && HardwareConfig()->GetHDREnabled() );
 
 	// Render-to-texture shadows are disabled for dxlevel 70 because of material issues
-	/*if ( pConfig->dxSupportLevel < 80 )
+	if ( pConfig->dxSupportLevel < 80 )
 	{
 		r_shadowrendertotexture.SetValue( 0 );
 #ifndef _X360
@@ -1448,12 +1911,24 @@ void CMaterialSystem::ReadConfigFromConVars( MaterialSystem_Config_t *pConfig )
 	}
 	if ( pConfig->dxSupportLevel < 90 )
 	{
+		mat_requires_rt_alloc_first.SetValue( 1 );
 		r_flashlightdepthtexture.SetValue( 0 );
 		mat_motion_blur_enabled.SetValue( 0 );
 		pConfig->m_bShadowDepthTexture = false;
 		pConfig->m_bMotionBlur = false;
 		pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_ENABLE_HDR, false );
-	}*/
+	}
+
+	// VR mode adapter will generally be -1 if VR mode is not disabled
+	pConfig->m_nVRModeAdapter = mat_vrmode_adapter.GetInt();
+	if( pConfig->m_nVRModeAdapter != -1 )
+	{
+		// we must always be windowed in the config in VR mode
+		// so that we will start up on the main display. Once
+		// VR overrides the adapter the only place we can go
+		// full screen is on the HMD.
+		pConfig->SetFlag( MATSYS_VIDCFG_FLAGS_WINDOWED, true );
+	}
 }
 
 
@@ -1490,6 +1965,7 @@ static const char *pConvarsAllowedInDXSupport[]={
 	"mat_parallaxmap",
 	"mat_picmip",
 	"mat_reducefillrate",
+	"mat_reduceparticles",
 	"mat_slopescaledepthbias_decal",
 	"mat_slopescaledepthbias_normal",
 	"mat_softwarelighting",
@@ -1538,7 +2014,8 @@ static const char *pConvarsAllowedInDXSupport[]={
 	"mem_max_heapsize_dedicated",
 	"snd_spatialize_roundrobin",
 	"snd_cull_duplicates",
-	"cl_particle_retire_cost"
+	"cl_particle_retire_cost",
+	"mat_phong"
 };
 
 //-----------------------------------------------------------------------------
@@ -1620,18 +2097,19 @@ void CMaterialSystem::WriteConfigIntoConVars( const MaterialSystem_Config_t &con
 	mat_trilinear.SetValue( config.ForceTrilinear() );
 	mat_specular.SetValue( config.UseSpecular() );
 	mat_bumpmap.SetValue( config.UseBumpmapping() );
+	mat_phong.SetValue( config.UsePhong() );
 	mat_parallaxmap.SetValue( config.UseParallaxMapping() );
 	mat_reducefillrate.SetValue( config.ReduceFillrate() );
 	mat_forceaniso.SetValue( config.m_nForceAnisotropicLevel );
-	mat_dxlevel.SetValue( config.dxSupportLevel );
+	mat_dxlevel.SetValue( MAX( ABSOLUTE_MINIMUM_DXLEVEL, config.dxSupportLevel ) );
 	mat_picmip.SetValue( config.skipMipLevels );
 	mat_forcehardwaresync.SetValue( config.ForceHWSync() );
 	mat_slopescaledepthbias_normal.SetValue( config.m_SlopeScaleDepthBias_Normal );
 	mat_depthbias_normal.SetValue( config.m_DepthBias_Normal );
 	mat_slopescaledepthbias_decal.SetValue( config.m_SlopeScaleDepthBias_Decal );
 	mat_depthbias_decal.SetValue( config.m_DepthBias_Decal );
-	//mat_slopescaledepthbias_shadowmap.SetValue( config.m_SlopeScaleDepthBias_ShadowMap );
-	//mat_depthbias_shadowmap.SetValue( config.m_DepthBias_ShadowMap );
+	mat_slopescaledepthbias_shadowmap.SetValue( config.m_SlopeScaleDepthBias_ShadowMap );
+	mat_depthbias_shadowmap.SetValue( config.m_DepthBias_ShadowMap );
 
 	mat_monitorgamma.SetValue( config.m_fMonitorGamma );
 	mat_monitorgamma_tv_range_min.SetValue( config.m_fGammaTVRangeMin );
@@ -1661,7 +2139,8 @@ void CMaterialSystem::WriteConfigIntoConVars( const MaterialSystem_Config_t &con
 	mat_fastspecular.SetValue( config.bShowSpecular ? 1 : 0 );
 	mat_fullbright.SetValue( config.nFullbright );
 	mat_fastnobump.SetValue( config.m_bFastNoBump ? 1 : 0 );
-	HardwareConfig()->SetHDREnabled( config.HDREnabled() );
+	bool hdre = config.HDREnabled();
+	HardwareConfig()->SetHDREnabled( hdre );
 	r_flashlightdepthtexture.SetValue( config.m_bShadowDepthTexture ? 1 : 0 );
 	mat_motion_blur_enabled.SetValue( config.m_bMotionBlur ? 1 : 0 );
 	mat_supportflashlight.SetValue( config.m_bSupportFlashlight ? 1 : 0 );
@@ -1767,6 +2246,11 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 		recomputeSnapshots = true;
 	}
 
+	if ( config.VRMode() != g_config.VRMode() || config.m_nVRModeAdapter != g_config.m_nVRModeAdapter )
+	{
+		bVideoModeChange = true;
+	}
+
 	// Don't use compressed textures for the moment if we don't support them
 	if ( HardwareConfig() && !HardwareConfig()->SupportsCompressedTextures() )
 	{
@@ -1788,7 +2272,7 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 	}
 
 	// toggle bump mapping
-	if ( config.UseBumpmapping() != g_config.UseBumpmapping() )
+	if ( config.UseBumpmapping() != g_config.UseBumpmapping() || config.UsePhong() != g_config.UsePhong() )
 	{
 		if( mat_debugalttab.GetBool() )
 		{
@@ -1969,6 +2453,8 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 	}
 
 	// toggle wait for vsync
+	// In GL, we just check this and it's just a function call--no need for device shenanigans.
+#if !defined( DX_TO_GL_ABSTRACTION )
 	if ( (IsX360() || !config.Windowed()) && (config.WaitForVSync() != g_config.WaitForVSync()) )
 	{
 #		if ( !defined( _X360 ) )
@@ -1985,7 +2471,7 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 		}
 #		endif
 	}
-
+#endif
 
 	g_config = config;
 #ifndef _X360
@@ -2009,6 +2495,17 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 	}
 
 	// 360 does not support various configuration changes and cannot reload materials
+	if ( !IsX360() )
+	{
+		if ( bResetAnisotropy || recomputeSnapshots || bRedownloadLightmaps ||
+			bRedownloadTextures || bResetAnisotropy || bVideoModeChange ||
+			bSetStandardVertexShaderConstants || bResetTextureFilter )
+		{
+			Unlock( hLock );
+			ForceSingleThreaded();
+			hLock = Lock();
+		}
+	}
 	if ( bReloadMaterials && !IsX360() )
 	{
 		if ( mat_debugalttab.GetBool() )
@@ -2027,8 +2524,12 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 		{
 			Warning( "mat_debugalttab: redownloading textures\n" );
 		}
-		TextureManager()->RestoreRenderTargets();
-		TextureManager()->RestoreNonRenderTargetTextures();
+
+		if ( g_pShaderAPI->CanDownloadTextures() )
+		{
+			TextureManager()->RestoreRenderTargets();
+			TextureManager()->RestoreNonRenderTargetTextures();
+		}
 	}
 	else if ( bResetTextureFilter )
 	{
@@ -2086,6 +2587,12 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 		ShaderDeviceInfo_t info;
 		ConvertModeStruct( &info, config );
 		g_pShaderAPI->ChangeVideoMode( info );
+
+#if defined( USE_SDL )
+		uint width = info.m_DisplayMode.m_nWidth;
+		uint height = info.m_DisplayMode.m_nHeight;
+		g_pLauncherMgr->RenderedSize( width, height, true ); // true = set
+#endif
 	}
 
 	if ( bForceAltTab )
@@ -2096,6 +2603,10 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 	}
 
 	Unlock( hLock );
+	if ( bVideoModeChange )
+	{
+		ForceSingleThreaded();
+	}
 	return bRedownloadLightmaps;
 }
 
@@ -2105,6 +2616,13 @@ bool CMaterialSystem::OverrideConfig( const MaterialSystem_Config_t &_config, bo
 //-----------------------------------------------------------------------------
 bool CMaterialSystem::UpdateConfig( bool forceUpdate )
 {
+	int nUpdateFlags = 0;
+	if ( g_pCVar && g_pCVar->HasQueuedMaterialThreadConVarSets() )
+	{
+		ForceSingleThreaded();
+		nUpdateFlags = g_pCVar->ProcessQueuedMaterialThreadConVarSets();
+	}
+
 	MaterialSystem_Config_t config = g_config;
 	ReadConfigFromConVars( &config );
 	return OverrideConfig( config, forceUpdate );
@@ -2153,6 +2671,16 @@ bool CMaterialSystem::OnDrawMesh( IMesh *pMesh, CPrimList *pLists, int nLists )
 	}
 
 	return GetRenderContextInternal()->OnDrawMesh( pMesh, pLists, nLists );
+}
+
+void CMaterialSystem::OnThreadEvent( uint32 threadEvent )
+{
+	m_threadEvents.AddToTail( threadEvent );
+}
+
+ShaderAPITextureHandle_t CMaterialSystem::GetShaderAPITextureBindHandle( ITexture *pTexture, int nFrame, int nTextureChannel )
+{
+	  return ShaderSystem()->GetShaderAPITextureBindHandle( pTexture, nFrame, nTextureChannel );
 }
 
 //-----------------------------------------------------------------------------
@@ -2205,7 +2733,6 @@ IMaterial *CMaterialSystem::FindProceduralMaterial( const char *pMaterialName, c
 	else
 	{
 		pMaterial = IMaterialInternal::CreateMaterial( pMaterialName, pTextureGroupName, pVMTKeyValues );
-		pMaterial->IncrementReferenceCount();
 		AddMaterialToMaterialList( static_cast<IMaterialInternal*>( pMaterial ) );
 	}
 
@@ -2216,23 +2743,56 @@ IMaterial *CMaterialSystem::FindProceduralMaterial( const char *pMaterialName, c
 //-----------------------------------------------------------------------------
 // Search by name
 //-----------------------------------------------------------------------------
-IMaterial* CMaterialSystem::FindMaterial( char const *pMaterialName, const char *pTextureGroupName, bool bComplain, const char *pComplainPrefix )
+bool CMaterialSystem::IsMaterialLoaded( char const *pMaterialName )
 {
-	// Hammer incorrectly puts a slash in front of the material name if it's in the materials\ folder.
-	// If we don't get rid of it, we'll get a filename like materials\\blah.vmt and it can cause
-	// problems in other systems.
-	if ( (pMaterialName[0] == '/' || pMaterialName[0] == '\\') &&
-		!(pMaterialName[1] == '/' || pMaterialName[1] == '\\') )
-	{
-		pMaterialName++;			
-	}
-
 	// We need lower-case symbols for this to work
 	int nLen = Q_strlen( pMaterialName ) + 1;
+	char *pFixedNameTemp = (char*)stackalloc( nLen );
 	char *pTemp = (char*)stackalloc( nLen );
-	Q_StripExtension( pMaterialName, pTemp, nLen );
-	Q_strlower( pTemp );
+	Q_strncpy( pFixedNameTemp, pMaterialName, nLen );
+	Q_strlower( pFixedNameTemp );
+#ifdef POSIX
+	// strip extensions needs correct slashing for the OS, so fix it up early for Posix
+	Q_FixSlashes( pFixedNameTemp, '/' );
+#endif
+	Q_StripExtension( pFixedNameTemp, pTemp, nLen );
+#ifndef POSIX
 	Q_FixSlashes( pTemp, '/' );
+#endif
+
+	Assert( nLen >= Q_strlen( pTemp ) + 1 );
+
+	return m_MaterialDict.FindMaterial( pTemp, false ) != NULL;	// 'false' causes the search to find only file-created materials
+}
+
+//-----------------------------------------------------------------------------
+// Search by name
+//-----------------------------------------------------------------------------
+IMaterial* CMaterialSystem::FindMaterial( char const *pMaterialName, const char *pTextureGroupName, bool bComplain, const char *pComplainPrefix )
+{
+	return FindMaterialEx( pMaterialName, pTextureGroupName, MATERIAL_FINDCONTEXT_NONE, bComplain, pComplainPrefix );
+}
+
+//-----------------------------------------------------------------------------
+// Search by name
+//-----------------------------------------------------------------------------
+IMaterial* CMaterialSystem::FindMaterialEx( char const* pMaterialName, const char *pTextureGroupName, int nContext, bool bComplain, const char *pComplainPrefix )
+{
+	// We need lower-case symbols for this to work
+	int nLen = Q_strlen( pMaterialName ) + 1;
+	char *pFixedNameTemp = (char*)stackalloc( nLen );
+	char *pTemp = (char*)stackalloc( nLen );
+	Q_strncpy( pFixedNameTemp, pMaterialName, nLen );
+	Q_strlower( pFixedNameTemp );
+#ifdef POSIX
+	// strip extensions needs correct slashing for the OS, so fix it up early for Posix
+	Q_FixSlashes( pFixedNameTemp, '/' );
+#endif
+	Q_StripExtension( pFixedNameTemp, pTemp, nLen );
+#ifndef POSIX
+	Q_FixSlashes( pTemp, '/' );
+#endif
+	
 	Assert( nLen >= Q_strlen( pTemp ) + 1 );
 
 	IMaterialInternal *pExistingMaterial = m_MaterialDict.FindMaterial( pTemp, false );	// 'false' causes the search to find only file-created materials
@@ -2250,6 +2810,8 @@ IMaterial* CMaterialSystem::FindMaterial( char const *pMaterialName, const char 
 	{
 		Q_strncpy( vmtName, "materials/", nLen );
 		Q_strncat( vmtName, pTemp, nLen, COPY_ALL_CHARACTERS );
+		
+		V_FixDoubleSlashes( vmtName );
 	}
 	else
 	{
@@ -2291,12 +2853,13 @@ IMaterial* CMaterialSystem::FindMaterial( char const *pMaterialName, const char 
 				{
 					m_pForcedTextureLoadPathID = "GAME";
 				}
-				pMat->PrecacheVars( pKeyValues, pPatchKeyValues, &includes );
+				pMat->PrecacheVars( pKeyValues, pPatchKeyValues, &includes, nContext );
 				m_pForcedTextureLoadPathID = NULL;
 			}
 		}
 		pKeyValues->deleteThis();
 		pPatchKeyValues->deleteThis();
+
 		return pMat->GetQueueFriendlyVersion();
 	}
 
@@ -2323,6 +2886,12 @@ IMaterial* CMaterialSystem::FindMaterial( char const *pMaterialName, const char 
 	return g_pErrorMaterial->GetRealTimeVersion();
 }
 
+void CMaterialSystem::SetAsyncTextureLoadCache( void* h )
+{
+	Assert( !h || !m_hAsyncLoadFileCache );
+	m_hAsyncLoadFileCache = ( FileCacheHandle_t ) h;
+}
+
 static char const *TextureAliases[] = 
 {
 	// this table is only here for backwards compatibility where a render target change was made,
@@ -2331,9 +2900,25 @@ static char const *TextureAliases[] =
 	"_rt_FullFrameFB1", "_rt_FullScreen"
 };
 
-ITexture *CMaterialSystem::FindTexture( char const *pTextureName, const char *pTextureGroupName, bool bComplain )
+ITexture *CMaterialSystem::FindTexture( char const *pTextureName, const char *pTextureGroupName, bool bComplain /* = false */, int nAdditionalCreationFlags /* = 0 */ )
 {
- 	ITextureInternal *pTexture = TextureManager()->FindOrLoadTexture( pTextureName, pTextureGroupName );
+	if ( m_hAsyncLoadFileCache && !TextureManager()->IsTextureLoaded( pTextureName ) )
+	{
+		bool bIsUNCName = ( pTextureName[0] == '/' && pTextureName[1] == '/' && pTextureName[2] != '/' );
+		if ( !bIsUNCName )
+		{
+			const char* pPathID = "GAME";
+			char buf[MAX_PATH];
+			V_snprintf( buf, MAX_PATH, "materials/%s", pTextureName );
+			V_SetExtension( buf, ".vtf", sizeof( buf ) );
+			
+			const char *pbuf = buf;
+			g_pFullFileSystem->AddFilesToFileCache( m_hAsyncLoadFileCache, &pbuf, 1, pPathID );
+			return TextureManager()->ErrorTexture();
+		}
+	}
+
+ 	ITextureInternal *pTexture = TextureManager()->FindOrLoadTexture( pTextureName, pTextureGroupName, nAdditionalCreationFlags );
 	Assert( pTexture );
 	if ( pTexture->IsError() )
 	{
@@ -2343,7 +2928,7 @@ ITexture *CMaterialSystem::FindTexture( char const *pTextureName, const char *pT
 			{
 				if ( !Q_stricmp( pTextureName, TextureAliases[i] ) )
 				{
-					return FindTexture( TextureAliases[i+1], pTextureGroupName, bComplain );
+					return FindTexture( TextureAliases[i+1], pTextureGroupName, bComplain, nAdditionalCreationFlags );
 				}
 			}
 		}
@@ -2400,6 +2985,21 @@ void CMaterialSystem::RecomputeAllStateSnapshots()
 	g_pShaderAPI->ResetRenderState();
 }
 
+//-----------------------------------------------------------------------------
+// Suspend texture streaming operations, for abormal periods such as loading
+//-----------------------------------------------------------------------------
+void CMaterialSystem::SuspendTextureStreaming()
+{
+	TextureManager()->SuspendTextureStreaming();
+}
+
+//-----------------------------------------------------------------------------
+// Inverse of SuspendTextureStreaming
+//-----------------------------------------------------------------------------
+void CMaterialSystem::ResumeTextureStreaming()
+{
+	TextureManager()->ResumeTextureStreaming();
+}
 
 //-----------------------------------------------------------------------------
 // Uncache all materials
@@ -2408,6 +3008,8 @@ void CMaterialSystem::UncacheAllMaterials()
 {
 	MaterialLock_t hLock = Lock();
 	Flush( true );
+
+	m_bReplacementFilesValid = false;
 
 	for ( MaterialHandle_t i = FirstMaterial(); i != InvalidMaterial(); i = NextMaterial( i ) )
 	{
@@ -2424,6 +3026,8 @@ void CMaterialSystem::UncacheAllMaterials()
 //-----------------------------------------------------------------------------
 void CMaterialSystem::UncacheUnusedMaterials( bool bRecomputeStateSnapshots )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	MaterialLock_t hLock = Lock();
 	Flush( true );
 
@@ -2497,15 +3101,27 @@ void CMaterialSystem::ResetTempHWMemory( bool bExitingLevel )
 void CMaterialSystem::CacheUsedMaterials( )
 {
 	g_pShaderAPI->EvictManagedResources();
+	size_t count = 0;
 	for (MaterialHandle_t i = FirstMaterial(); i != InvalidMaterial(); i = NextMaterial(i) )
 	{
-		Assert( GetMaterialInternal(i)->GetReferenceCount() >= 0 );
-		if( GetMaterialInternal(i)->GetReferenceCount() > 0 )
+		// Some (mac) drivers (amd) seem to keep extra resources around on uploads until the next frame swap.  This
+		// injects pointless synthetic swaps (between already-static load frames)
+		if ( mat_texture_reload_frame_swap_workaround.GetBool() )
 		{
-			GetMaterialInternal(i)->Precache();
+			if ( count++ % 20 == 0 )
+			{
+				Flush(true);
+				SwapBuffers(); // Not the right thing to call
+			}
+		}
+		IMaterialInternal* pMat = GetMaterialInternal(i);
+		Assert( pMat->GetReferenceCount() >= 0 );
+		if( pMat->GetReferenceCount() > 0 )
+		{
+			pMat->Precache();
 		}
 	}
-	if( mat_forcemanagedtextureintohardware.GetBool() )
+	if ( mat_forcemanagedtextureintohardware.GetBool() )
 	{
 		TextureManager()->ForceAllTexturesIntoHardware();
 	}
@@ -2516,8 +3132,13 @@ void CMaterialSystem::CacheUsedMaterials( )
 //-----------------------------------------------------------------------------
 void CMaterialSystem::ReloadTextures( void )
 {
+	// Add by jay in changelist 621420.
+	ForceSingleThreaded();
+
 	// 360 should not have gotten here
 	Assert( !IsX360() );
+
+	KeyValuesSystem()->InvalidateCache();
 
 	TextureManager()->RestoreRenderTargets();
 	TextureManager()->RestoreNonRenderTargetTextures();
@@ -2525,6 +3146,19 @@ void CMaterialSystem::ReloadTextures( void )
 
 void CMaterialSystem::ReloadMaterials( const char *pSubString )
 {
+	bool bDeviceReady = g_pShaderAPI->CanDownloadTextures();
+
+	if ( !bDeviceReady )
+	{
+		//$ TODO: Merge m_bDeferredMaterialReload from cs:go?
+		Msg( "%s bDeviceReady false\n", __FUNCTION__ );
+	}
+
+	// Add by jay in changelist 621420.
+	ForceSingleThreaded();
+
+	KeyValuesSystem()->InvalidateCache();
+
 	bool bVertexFormatChanged = false;
 	if( pSubString == NULL )
 	{
@@ -2534,6 +3168,8 @@ void CMaterialSystem::ReloadMaterials( const char *pSubString )
 	}
 	else
 	{
+		Flush( false );
+
 		char const chMultiDelim = '*';
 		CUtlVector< char > arrSearchSubString;
 		CUtlVector< char const * > arrSearchItems;
@@ -2596,7 +3232,7 @@ void CMaterialSystem::ReloadMaterials( const char *pSubString )
 		}
 	}
 
-	if( bVertexFormatChanged )
+	if( bVertexFormatChanged && bDeviceReady )
 	{
 		// Reloading materials could cause a vertex format change, so
 		// we need to release and restore
@@ -2623,9 +3259,12 @@ void CMaterialSystem::AllocateStandardTextures()
 	texel[3] = 255;
 
 	int tcFlags = TEXTURE_CREATE_MANAGED;
+	int tcFlagsSRGB = TEXTURE_CREATE_MANAGED | TEXTURE_CREATE_SRGB;
+	
 	if ( IsX360() )
 	{
 		tcFlags |= TEXTURE_CREATE_CANCONVERTFORMAT;
+		tcFlagsSRGB |= TEXTURE_CREATE_CANCONVERTFORMAT;
 	}
 
 	// allocate a white, single texel texture for the fullbright lightmap
@@ -2641,7 +3280,7 @@ void CMaterialSystem::AllocateStandardTextures()
 
 	// allocate a black single texel texture
 #if !defined( _X360 )
-	m_BlackTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_BGRX8888, 1, 1, tcFlags, "[BLACK_TEXID]", TEXTURE_GROUP_OTHER );
+	m_BlackTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_BGRX8888, 1, 1, tcFlagsSRGB, "[BLACK_TEXID]", TEXTURE_GROUP_OTHER );
 	g_pShaderAPI->ModifyTexture( m_BlackTextureHandle );
 	g_pShaderAPI->TexMinFilter( SHADER_TEXFILTERMODE_LINEAR );
 	g_pShaderAPI->TexMagFilter( SHADER_TEXFILTERMODE_LINEAR );
@@ -2654,7 +3293,7 @@ void CMaterialSystem::AllocateStandardTextures()
 
 	// allocate a fully white single texel texture
 #if !defined( _X360 )
-	m_WhiteTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_BGRX8888, 1, 1, tcFlags, "[WHITE_TEXID]", TEXTURE_GROUP_OTHER );
+	m_WhiteTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_BGRX8888, 1, 1, tcFlagsSRGB, "[WHITE_TEXID]", TEXTURE_GROUP_OTHER );
 	g_pShaderAPI->ModifyTexture( m_WhiteTextureHandle );
 	g_pShaderAPI->TexMinFilter( SHADER_TEXFILTERMODE_LINEAR );
 	g_pShaderAPI->TexMagFilter( SHADER_TEXFILTERMODE_LINEAR );
@@ -2667,7 +3306,7 @@ void CMaterialSystem::AllocateStandardTextures()
 
 	// allocate a grey single texel texture with an alpha of zero (for mat_fullbright 2)
 #if !defined( _X360 )
-	m_GreyTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_BGRX8888, 1, 1, tcFlags, "[GREY_TEXID]", TEXTURE_GROUP_OTHER );
+	m_GreyTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_BGRX8888, 1, 1, tcFlagsSRGB, "[GREY_TEXID]", TEXTURE_GROUP_OTHER );
 	g_pShaderAPI->ModifyTexture( m_GreyTextureHandle );
 	g_pShaderAPI->TexMinFilter( SHADER_TEXFILTERMODE_LINEAR );
 	g_pShaderAPI->TexMagFilter( SHADER_TEXFILTERMODE_LINEAR );
@@ -2681,7 +3320,7 @@ void CMaterialSystem::AllocateStandardTextures()
 
 	// allocate a grey single texel texture with an alpha of zero (for mat_fullbright 2)
 #if !defined( _X360 )
-	m_GreyAlphaZeroTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_RGBA8888, 1, 1, tcFlags, "[GREY_TEXID]", TEXTURE_GROUP_OTHER );
+	m_GreyAlphaZeroTextureHandle = g_pShaderAPI->CreateTexture( 1, 1, 1, IMAGE_FORMAT_RGBA8888, 1, 1, tcFlagsSRGB, "[GREYALPHAZERO_TEXID]", TEXTURE_GROUP_OTHER );
 	g_pShaderAPI->ModifyTexture( m_GreyAlphaZeroTextureHandle );
 	g_pShaderAPI->TexMinFilter( SHADER_TEXFILTERMODE_LINEAR );
 	g_pShaderAPI->TexMagFilter( SHADER_TEXFILTERMODE_LINEAR );
@@ -2699,9 +3338,9 @@ void CMaterialSystem::AllocateStandardTextures()
 	g_pShaderAPI->ModifyTexture( m_FlatNormalTextureHandle );
 	g_pShaderAPI->TexMinFilter( SHADER_TEXFILTERMODE_LINEAR );
 	g_pShaderAPI->TexMagFilter( SHADER_TEXFILTERMODE_LINEAR );
-	texel[0] = 127;
-	texel[1] = 127;
-	texel[2] = 255;
+	texel[0] = 255; // B
+	texel[1] = 127; // G
+	texel[2] = 127; // R
 	g_pShaderAPI->TexImage2D( 0, 0, IMAGE_FORMAT_BGRX8888, 0, 1, 1, IMAGE_FORMAT_BGRX8888, false, texel );
 	g_pShaderAPI->SetStandardTextureHandle( TEXTURE_NORMALMAP_FLAT, m_FlatNormalTextureHandle );
 
@@ -2826,7 +3465,6 @@ void CMaterialSystem::ReleaseStandardTextures()
 	}
 }
 
-
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
@@ -2846,13 +3484,16 @@ void CMaterialSystem::BeginFrame( float frameTime )
 	Assert( m_bGeneratedConfig );
 
 	VPROF_BUDGET( "CMaterialSystem::BeginFrame", VPROF_BUDGETGROUP_SWAP_BUFFERS );
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
 
 	IMatRenderContextInternal *pRenderContext = GetRenderContextInternal();
-	if ( g_config.ForceHWSync() && m_ThreadMode != MATERIAL_QUEUED_THREADED )
+	if ( g_config.ForceHWSync() && (IsPC() || m_ThreadMode != MATERIAL_QUEUED_THREADED) )
 	{
+		tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "ForceHardwareSync" );
 		pRenderContext->ForceHardwareSync();
 	}
 
+	pRenderContext->MarkRenderDataUnused( true );
 	pRenderContext->BeginFrame();
 	pRenderContext->SetFrameTime( frameTime );
 	pRenderContext->SetToneMappingScaleLinear( Vector( 1,1,1) );
@@ -2866,17 +3507,93 @@ bool CMaterialSystem::IsInFrame( ) const
 	return m_bInFrame;
 }
 
+#ifdef RAD_TELEMETRY_ENABLED
+static const char *GetMatString( enum MaterialThreadMode_t ThreadMode )
+{
+	switch( ThreadMode )
+	{
+	case MATERIAL_SINGLE_THREADED:			return "single";
+	case MATERIAL_QUEUED_SINGLE_THREADED:	return "queued_single";
+	case MATERIAL_QUEUED_THREADED:			return "queued_threaded";
+	default:								return "???";
+	}
+}
+#endif
 
-ConVar mat_queue_mode( "mat_queue_mode", "-1", 0, "The queue/thread mode the material system should use: -1=default, 0=synchronous single thread, 1=queued single thread, 2=queued multithreaded" );
+ConVar mat_queue_mode( "mat_queue_mode", "-1", FCVAR_ARCHIVE, "The queue/thread mode the material system should use: -1=default, 0=synchronous single thread"
+#ifdef MAT_QUEUE_MODE_PROFILE
+	", 1=queued single thread"
+#endif
+	", 2=queued multithreaded" );
+
+ConVar mat_queue_report( "mat_queue_report", "0", FCVAR_ARCHIVE, "Report thread stalls.  Positive number will filter by stalls >= time in ms.  -1 reports all locks." );
 
 void CMaterialSystem::ThreadExecuteQueuedContext( CMatQueuedRenderContext *pContext )
 {
+#ifdef RAD_TELEMETRY_ENABLED
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s-%s", __FUNCTION__, GetMatString( m_ThreadMode ) );
+	CTelemetrySpikeDetector Spike( "ThreadExecuteQueuedContext", 1 );
+#endif
+
+	Assert( m_bThreadHasOwnership );
+
 	m_nRenderThreadID = ThreadGetCurrentId(); 
+	IMatRenderContextInternal* pSavedRenderContext = m_pRenderContext.Get();
 	m_pRenderContext.Set( &m_HardwareRenderContext );
 	pContext->EndQueue( true );
-	m_pRenderContext.Set( NULL );
+	m_pRenderContext.Set( pSavedRenderContext );
 	m_nRenderThreadID = 0xFFFFFFFF; 
 }
+
+IThreadPool *CMaterialSystem::CreateMatQueueThreadPool()
+{
+	if( IsX360() )
+	{
+		return g_pThreadPool;
+	}
+	else if( !m_pMatQueueThreadPool )
+	{
+		ThreadPoolStartParams_t startParams;
+
+		startParams.nThreads = 1;
+		startParams.nStackSize = 256*1024;
+		startParams.fDistribute = TRS_TRUE;
+
+		// The rendering thread has the GL context and the main thread is coming in and
+		//  "helping" finish jobs - that breaks OpenGL, which requires TLS. This flag states 
+        //  that only the threadpool threads should execute these jobs.
+		startParams.bExecOnThreadPoolThreadsOnly = true;
+
+		m_pMatQueueThreadPool = CreateThreadPool();
+		m_pMatQueueThreadPool->Start( startParams, "MatQueue" );
+	}
+
+	return m_pMatQueueThreadPool;
+}
+
+void CMaterialSystem::DestroyMatQueueThreadPool()
+{	
+	if( m_pMatQueueThreadPool )
+	{
+		m_pMatQueueThreadPool->Stop();
+		delete m_pMatQueueThreadPool;
+		m_pMatQueueThreadPool = NULL;
+	}
+}
+
+
+//-----------------------------------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------------------------------
+class CThreadAcquire : public CJob
+{
+	virtual JobStatus_t DoExecute()
+	{
+		g_pShaderAPI->AcquireThreadOwnership();
+
+		return JOB_OK;
+	}
+};
 
 void CMaterialSystem::EndFrame( void )
 {
@@ -2888,53 +3605,138 @@ void CMaterialSystem::EndFrame( void )
 	VPROF_BUDGET( "CMaterialSystem::EndFrame", VPROF_BUDGETGROUP_SWAP_BUFFERS );
 
 	GetRenderContextInternal()->EndFrame();
-	    
+	   
+	TextureManager()->Update();
+
+	while ( !m_scheduledComposites.IsEmpty() )
+	{
+		// We hold a ref, so if there's only one count left, it's us. Let it go and move on.
+		if ( m_scheduledComposites[ 0 ]->GetRefCount() == 1 )
+		{
+			m_scheduledComposites[ 0 ]->Release();
+			m_scheduledComposites.Remove( 0 );
+			continue;
+		}
+
+		m_scheduledComposites[ 0 ]->Resolve();
+		m_pendingComposites.AddToTail( m_scheduledComposites[ 0 ] );
+
+		m_scheduledComposites.Remove( 0 );
+
+		// Only do one per frame, because these can actually be fairly expensive.
+		break;
+	}
+
+	FOR_EACH_VEC( m_pendingComposites, i )
+	{
+		CTextureCompositor* comp = m_pendingComposites[ i ];
+
+		// We hold a ref, so if there's only one count left, it's us. Let it go and move on.
+		if ( comp->GetRefCount() == 1 )
+		{
+			comp->Release();
+			m_pendingComposites.Remove( i );
+			// Back up one
+			--i;
+			continue;
+		}
+
+		comp->Update();
+
+		if ( comp->GetResolveStatus() == ECRS_Complete || comp->GetResolveStatus() == ECRS_Error )
+		{
+			comp->Release();
+			m_pendingComposites.Remove( i );
+
+			// Stop after the first one reports that it was completed, these can take awhile and 
+			// we don't want to hammer anyone's framerate.
+			break;
+		}
+	}
+
 	//-------------------------------------------------------------
 
 	int iConVarThreadMode = mat_queue_mode.GetInt();
+
+	// For this testing release, -2 is equivalent to 0 (off). When we release, we'll make -2 equivalent to -1 (on)
+	if ( iConVarThreadMode == -2 )
+	{
+		iConVarThreadMode = MATERIAL_QUEUED_THREADED;
+	}
+
+#ifndef MAT_QUEUE_MODE_PROFILE
+	if ( iConVarThreadMode == MATERIAL_QUEUED_SINGLE_THREADED )
+	{
+		iConVarThreadMode = MATERIAL_SINGLE_THREADED;
+	}
+#endif
+
 	MaterialThreadMode_t nextThreadMode = ( iConVarThreadMode >= 0 ) ? (MaterialThreadMode_t)iConVarThreadMode : m_IdealThreadMode;
+	// note: This is a hack because there is no explicit query for the device being deactivated due to device lost.
+	// however, that is all the current implementation of CanDownloadTextures actually does.
+	bool bDeviceReady = g_pShaderAPI->CanDownloadTextures();
+	if ( !bDeviceReady || !m_bAllowQueuedRendering )
+	{
+		nextThreadMode = MATERIAL_SINGLE_THREADED;
+	}
+
+	if ( m_bForcedSingleThreaded || m_bThreadingNotAvailable )
+	{
+		nextThreadMode = MATERIAL_SINGLE_THREADED;
+		m_bForcedSingleThreaded = false;
+	}
 
 	switch ( m_ThreadMode )
 	{
 	case MATERIAL_SINGLE_THREADED:
+		OnRenderingAsyncComplete();
 		break;
 
 	case MATERIAL_QUEUED_THREADED:
 		{
 			VPROF_BUDGET( "Mat_ThreadedEndframe", "Mat_ThreadedEndframe" );
+			if ( !m_bThreadHasOwnership )
+			{
+				ThreadAcquire( true );
+			}
+
 			if ( m_pActiveAsyncJob && !m_pActiveAsyncJob->IsFinished() )
 			{
 				m_pActiveAsyncJob->WaitForFinish();
-				if ( g_config.ForceHWSync() )
+				if ( !IsPC() && g_config.ForceHWSync() )
 				{
 					g_pShaderAPI->ForceHardwareSync();
 				}
 			}
 			SafeRelease( m_pActiveAsyncJob );
 
+			OnRenderingAsyncComplete();
+
 			CMatQueuedRenderContext *pPrevContext = &m_QueuedRenderContexts[m_iCurQueuedContext];
 
-			m_QueuedRenderContexts[m_iCurQueuedContext].GetCallQueueInternal()->QueueCall( g_pShaderAPI, &IShaderAPI::ReleaseThreadOwnership );
 			m_iCurQueuedContext = ( ( m_iCurQueuedContext + 1 ) % ARRAYSIZE( m_QueuedRenderContexts) );
 			m_QueuedRenderContexts[m_iCurQueuedContext].BeginQueue( pPrevContext );
-			m_QueuedRenderContexts[m_iCurQueuedContext].GetCallQueueInternal()->QueueCall( g_pShaderAPI, &IShaderAPI::AcquireThreadOwnership );
 			m_pRenderContext.Set( &m_QueuedRenderContexts[m_iCurQueuedContext] );
 
-			m_pActiveAsyncJob = new CFunctorJob( CreateFunctor( this, &CMaterialSystem::ThreadExecuteQueuedContext, pPrevContext ) );
+			m_pActiveAsyncJob = new CFunctorJob( CreateFunctor( this, &CMaterialSystem::ThreadExecuteQueuedContext, pPrevContext ), "ThreadExecuteQueuedContext" );
 			if ( IsX360() )
 			{
 				if ( m_nServiceThread >= 0 )
 				{
 					m_pActiveAsyncJob->SetServiceThread( m_nServiceThread );
 				}
-				m_pActiveAsyncJob->SetFlags( m_pActiveAsyncJob->GetFlags() | JF_QUEUE );
 			}
 
-			g_pThreadPool->AddJob( m_pActiveAsyncJob );
+			IThreadPool *pThreadPool = CreateMatQueueThreadPool();
+			pThreadPool->AddJob( m_pActiveAsyncJob );
 			break;
 		}
 
 	case MATERIAL_QUEUED_SINGLE_THREADED:
+		OnRenderingAsyncComplete();
+		break;
+
+#ifdef MAT_QUEUE_MODE_PROFILE
 		{
 			VPROF_BUDGET( "Mat_ThreadedEndframe", "Mat_QueuedEndframe" );
 
@@ -2945,6 +3747,27 @@ void CMaterialSystem::EndFrame( void )
 			g_pShaderAPI->SetDisallowAccess( true );
 			break;
 		}
+#endif
+	}
+
+	bool bRelease = false;
+	if ( !bDeviceReady )
+	{
+		if ( nextThreadMode != MATERIAL_SINGLE_THREADED )
+		{
+			Assert( nextThreadMode == MATERIAL_SINGLE_THREADED );
+			bRelease = true;
+			nextThreadMode = MATERIAL_SINGLE_THREADED;
+			if( mat_debugalttab.GetBool() )
+			{
+				Warning("Handling alt-tab in queued mode!\n");
+			}
+		}
+	}
+
+	if ( m_threadEvents.Count()	)
+	{
+		nextThreadMode = MATERIAL_SINGLE_THREADED;
 	}
 
 	if ( m_ThreadMode != nextThreadMode )
@@ -2962,23 +3785,29 @@ void CMaterialSystem::EndFrame( void )
 					m_pActiveAsyncJob->WaitForFinish();
 					SafeRelease( m_pActiveAsyncJob );
 				}
+				// probably have a queued context set here, need hardware to flush the queue if the job isn't active
+				m_HardwareRenderContext.InitializeFrom(&m_QueuedRenderContexts[m_iCurQueuedContext]);
+				m_pRenderContext.Set( &m_HardwareRenderContext );
+
 				m_QueuedRenderContexts[m_iCurQueuedContext].EndQueue( true );
-				g_pShaderAPI->AcquireThreadOwnership();
+				ThreadRelease();
 			}
 			break;
 
+#ifdef MAT_QUEUE_MODE_PROFILE
 		case MATERIAL_QUEUED_SINGLE_THREADED:
 			{
 				g_pShaderAPI->SetDisallowAccess( false );
+				// We have a queued context set here, need hardware to flush the queue if the job isn't active
+				m_pRenderContext.Set( &m_HardwareRenderContext );
 				m_QueuedRenderContexts[m_iCurQueuedContext].EndQueue( true );
 				break;
 			}
+#endif
 		}
 
 		m_ThreadMode = nextThreadMode;
-#ifndef _LINUX
 		Assert( g_MatSysMutex.GetOwnerId() == 0 );
-#endif
 
 		g_pShaderAPI->EnableShaderShaderMutex( m_ThreadMode != MATERIAL_SINGLE_THREADED ); // use mutex even for queued to allow "disalow access" to function properly
 		g_pShaderAPI->EnableBuffer2FramesAhead( true );
@@ -2990,35 +3819,49 @@ void CMaterialSystem::EndFrame( void )
 			for ( int i = 0; i < ARRAYSIZE( m_QueuedRenderContexts ); i++ )
 			{
 				Assert( m_QueuedRenderContexts[i].IsInitialized() );
-				m_QueuedRenderContexts[i].Term();
+				m_QueuedRenderContexts[i].EndQueue( true );
 			}
 			break;
 
+#ifdef MAT_QUEUE_MODE_PROFILE
 		case MATERIAL_QUEUED_SINGLE_THREADED:
+#endif
 		case MATERIAL_QUEUED_THREADED:
-			for ( int i = 0; i < ARRAYSIZE( m_QueuedRenderContexts ); i++ )
 			{
-				if ( !m_QueuedRenderContexts[i].IsInitialized() )
+				m_iCurQueuedContext = 0;
+				m_QueuedRenderContexts[m_iCurQueuedContext].BeginQueue( &m_HardwareRenderContext );
+				m_pRenderContext.Set( &m_QueuedRenderContexts[m_iCurQueuedContext] );
+#ifdef MAT_QUEUE_MODE_PROFILE
+				if ( m_ThreadMode == MATERIAL_QUEUED_SINGLE_THREADED )
 				{
-					m_QueuedRenderContexts[i].Init( this, &m_HardwareRenderContext );
+					g_pShaderAPI->SetDisallowAccess( true );
 				}
-			}
-			m_iCurQueuedContext = 0;
-			m_QueuedRenderContexts[m_iCurQueuedContext].BeginQueue( &m_HardwareRenderContext );
-			m_pRenderContext.Set( &m_QueuedRenderContexts[m_iCurQueuedContext] );
-			if ( m_ThreadMode == MATERIAL_QUEUED_SINGLE_THREADED )
-			{
-				g_pShaderAPI->SetDisallowAccess( true );
-			}
-			else
-			{
-				g_pShaderAPI->ReleaseThreadOwnership();
-				m_QueuedRenderContexts[m_iCurQueuedContext].GetCallQueueInternal()->QueueCall( g_pShaderAPI, &IShaderAPI::AcquireThreadOwnership );
+				else
+#endif
+				{
+					g_pShaderAPI->ReleaseThreadOwnership();
+
+					CJob		*pActiveAsyncJob = new CThreadAcquire();
+					IThreadPool *pThreadPool = CreateMatQueueThreadPool();
+					pThreadPool->AddJob( pActiveAsyncJob );
+					SafeRelease( pActiveAsyncJob );
+
+					m_bThreadHasOwnership = true;
+					m_ThreadOwnershipID = ThreadGetCurrentId();
+				}
 			}
 			break;
 		}
 	}
 
+	if ( m_ThreadMode == MATERIAL_SINGLE_THREADED )
+	{
+		for ( int i = 0; i < m_threadEvents.Count(); i++ )
+		{
+			g_pShaderDevice->HandleThreadEvent(m_threadEvents[i]);
+		}
+		m_threadEvents.RemoveAll();
+	}
 	Assert( m_bInFrame );
 	m_bInFrame = false;
 }
@@ -3119,10 +3962,9 @@ void CMaterialSystem::DebugPrintUsedMaterials( const char *pSearchSubString, boo
 
 			if( pMaterial->IsPrecached() )
 			{
-				int j;
 				if( pMaterial->GetShader() )
 				{
-					for( j = 0; j < pMaterial->GetShader()->GetNumParams(); j++ )
+					for( int j = 0; j < pMaterial->GetShader()->GetNumParams(); j++ )
 					{
 						IMaterialVar *var;
 						var = pMaterial->GetShaderParams()[j];
@@ -3350,7 +4192,17 @@ void CMaterialSystem::GetShaderFallback( const char *pShaderName, char *pFallbac
 	} while (true);
 }
 
-	
+//-----------------------------------------------------------------------------
+// Triggers OpenGL shader preloading at game startup
+//-----------------------------------------------------------------------------
+#ifdef DX_TO_GL_ABSTRACTION
+void	CMaterialSystem::DoStartupShaderPreloading( void )
+{
+	GetRenderContextInternal()->DoStartupShaderPreloading();
+}
+#endif
+
+
 void CMaterialSystem::SwapBuffers( void )
 {
 	VPROF_BUDGET( "CMaterialSystem::SwapBuffers", VPROF_BUDGETGROUP_SWAP_BUFFERS );
@@ -3432,9 +4284,6 @@ bool CMaterialSystem::SupportsFetch4( void )
 {
 	return g_pShaderAPI->SupportsFetch4();
 }
-
-float CMaterialSystem::GetShadowDepthBias( void ) { return FlashlightState_t().m_flShadowDepthBias; }
-float CMaterialSystem::GetShadowSlopeScaleDepthBias( void ) { return FlashlightState_t().m_flShadowSlopeScaleDepthBias; }
 
 // Vendor-dependent shadow depth texture format
 ImageFormat CMaterialSystem::GetShadowDepthTextureFormat( void )
@@ -3563,7 +4412,27 @@ ITexture* CMaterialSystem::CreateNamedRenderTargetTextureEx(
 {
 	RenderTargetType_t rtType;
 
-	// GR - determine RT type based on depth buffer requirements
+	bool gl_canMixTargetSizes = (HardwareConfig() && HardwareConfig()->SupportsGLMixedSizeTargets());
+	
+	// On GL, the depth buffer for a render target must be the same size (until we pick up mixed-sized attachments in 10.6.3)
+	if ( (!gl_canMixTargetSizes && IsPosix()) || IsEmulatingGL() )
+	{
+		if ( depth != MATERIAL_RT_DEPTH_SEPARATE && depth != MATERIAL_RT_DEPTH_NONE )
+		{
+			int fbWidth, fbHeight;
+			g_pShaderAPI->GetBackBufferDimensions( fbWidth, fbHeight ); 
+
+			if ( sizeMode != RT_SIZE_FULL_FRAME_BUFFER )
+			{
+				if ( w != fbWidth || h != fbHeight )
+				{
+					depth = MATERIAL_RT_DEPTH_SEPARATE;
+				}
+			}
+		}
+	}
+
+	// Determine RT type based on depth buffer requirements
 	switch ( depth )
 	{
 	case MATERIAL_RT_DEPTH_SEPARATE:
@@ -3633,6 +4502,157 @@ ITexture *CMaterialSystem::CreateNamedRenderTargetTextureEx2(
 	return pTexture;
 }
 
+class CTextureBitsRegenerator : public ITextureRegenerator
+{
+public:
+	CTextureBitsRegenerator( int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits )
+		: m_nWidth( w )
+		, m_nHeight( h )
+		, m_nMipmaps( mips )
+		, m_ImageFormat( fmt )
+	{
+		Assert( srcBits );
+		Assert( srcBufferSize > 0 );
+		Assert( m_nMipmaps != 0 );
+
+		// If these fail, we'll crash later, so look to before here for the problem.
+		Assert( ImageLoader::GetMemRequired( w, h, 1, fmt, m_nMipmaps > 1 ? true : false ) <= srcBufferSize );
+		Assert( m_nMipmaps == 1 || m_nMipmaps == ImageLoader::GetNumMipMapLevels( m_nWidth, m_nHeight, 1 ) );
+
+
+		m_ImageData.EnsureCapacity( srcBufferSize );
+		Q_memcpy( m_ImageData.Base(), srcBits, srcBufferSize );
+	}
+
+	virtual void RegenerateTextureBits( ITexture *pTexture, IVTFTexture *pVTFTexture, Rect_t *pRect )
+	{
+		Assert( pVTFTexture->FrameCount() == 1 );
+		Assert( pVTFTexture->FaceCount() == 1 );
+
+		int destWidth, destHeight, destDepth;
+		pVTFTexture->ComputeMipLevelDimensions( 0, &destWidth, &destHeight, &destDepth );
+		Assert( destDepth == 1 );
+		Assert( destWidth <= m_nWidth && destHeight <= m_nHeight );
+
+		unsigned char* pDest = pVTFTexture->ImageData();
+		ImageFormat destFmt = pVTFTexture->Format();
+
+		if ( destFmt == m_ImageFormat && destWidth == m_nWidth && destHeight == m_nHeight )
+		{
+			Q_memcpy( pDest, m_ImageData.Base(), m_ImageData.NumAllocated() );
+		}
+		else
+		{
+			int srcResX = m_nWidth;
+			int srcResY = m_nHeight;
+			int srcOffset = 0;
+			int dstOffset = 0;
+			int mip = 0;
+
+			// Skip the mips we're not including.
+			while ( mip < m_nMipmaps && ( srcResX > destWidth || srcResY > destHeight ) )
+			{
+				srcOffset += ImageLoader::GetMemRequired( srcResX, srcResY, 1, m_ImageFormat, false );
+
+				srcResX = Max( 1, ( srcResX >> 1 ) );
+				srcResY = Max( 1, ( srcResY >> 1 ) );
+
+				mip++;
+			}
+			// Assert we're where we expect to be now.
+			Assert( srcResX == destWidth && srcResY == destHeight );
+
+			for ( ; mip < m_nMipmaps; ++mip )
+			{
+				// Convert this mipmap level.
+				ImageLoader::ConvertImageFormat( m_ImageData.Base() + srcOffset, m_ImageFormat, pDest + dstOffset, destFmt, srcResX, srcResY );
+
+				// Then update offsets for the next mipmap level.
+				srcOffset += ImageLoader::GetMemRequired( srcResX, srcResY, 1, m_ImageFormat, false );
+				dstOffset += ImageLoader::GetMemRequired( srcResX, srcResY, 1, destFmt, false );
+
+				srcResX = Max( 1, ( srcResX >> 1 ) );
+				srcResY = Max( 1, ( srcResY >> 1 ) );
+			}
+		}
+	}
+
+	virtual void Release()
+	{
+		delete this;
+	}
+
+private:
+	int m_nWidth;
+	int m_nHeight;
+	int m_nMipmaps;
+	ImageFormat m_ImageFormat;
+	CUtlMemory<byte> m_ImageData;
+};
+
+ITexture* CMaterialSystem::CreateTextureFromBits(int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits)
+{
+	int flags = TEXTUREFLAGS_SINGLECOPY
+	          | ( mips > 1 
+	              ? TEXTUREFLAGS_ALL_MIPS 
+				  : TEXTUREFLAGS_NOMIP )
+	;
+
+	return CreateNamedTextureFromBitsEx( "frombits", TEXTURE_GROUP_OTHER, w, h, mips, fmt, srcBufferSize, srcBits, flags );
+}
+
+void CMaterialSystem::OverrideRenderTargetAllocation( bool rtAlloc )
+{
+	m_bAllocatingRenderTargets = rtAlloc;
+}
+
+ITextureCompositor*	CMaterialSystem::NewTextureCompositor( int w, int h, const char* pCompositeName, int nTeamNum, uint64 randomSeed, KeyValues* stageDesc, uint32 texCompositeCreateFlags )
+{
+	return CreateTextureCompositor( w, h, pCompositeName, nTeamNum, randomSeed, stageDesc, texCompositeCreateFlags );
+}
+
+void CMaterialSystem::ScheduleTextureComposite( CTextureCompositor* _texCompositor )
+{
+	Assert( _texCompositor != NULL ); 
+	_texCompositor->AddRef();
+	m_scheduledComposites.AddToTail( _texCompositor );
+}
+
+void CMaterialSystem::AsyncFindTexture( const char* pFilename, const char *pTextureGroupName, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs, bool bComplain, int nAdditionalCreationFlags )
+{
+	Assert( pFilename != NULL );
+	Assert( pTextureGroupName != NULL );
+	Assert( pRecipient != NULL );
+
+	// Bump the ref count on the recipient before handing it off. This ensures the receiver won't go away before we have completed our work. 
+	pRecipient->AddRef();
+
+	TextureManager()->AsyncFindOrLoadTexture( pFilename, pTextureGroupName, pRecipient, pExtraArgs, bComplain, nAdditionalCreationFlags );
+}
+
+// creates a texture suitable for use with materials from a raw stream of bits.
+// The bits will be retained by the material system and can be freed upon return.
+ITexture *CMaterialSystem::CreateNamedTextureFromBitsEx( const char* pName, const char *pTextureGroupName, int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits, int nFlags )
+{
+	Assert( srcBits );
+
+	CTextureBitsRegenerator* regen = new CTextureBitsRegenerator( w, h, mips, fmt, srcBufferSize, srcBits );
+	ITextureInternal* tex = TextureManager()->CreateProceduralTexture( pName, pTextureGroupName, w, h, 1, fmt, nFlags, regen );
+	return tex;
+}
+
+bool CMaterialSystem::AddTextureCompositorTemplate( const char* pName, KeyValues* pTmplDesc, int /* nTexCompositeTemplateFlags */ )
+{
+	// Flags are currently unused, but added for futureproofing.
+	return TextureManager()->AddTextureCompositorTemplate( pName, pTmplDesc );
+}
+
+bool CMaterialSystem::VerifyTextureCompositorTemplates()
+{
+	return TextureManager()->VerifyTextureCompositorTemplates();
+}
+
+
 void CMaterialSystem::BeginRenderTargetAllocation( void )
 {
 	g_pShaderAPI->FlushBufferedPrimitives();
@@ -3641,18 +4661,43 @@ void CMaterialSystem::BeginRenderTargetAllocation( void )
 
 void CMaterialSystem::EndRenderTargetAllocation( void )
 {
+	// Any GPU newer than 2005 doesn't need to do this, and it eats up ~40% of our level load time! 
+	const bool cbRequiresRenderTargetAllocationFirst = mat_requires_rt_alloc_first.GetBool();
+
 	g_pShaderAPI->FlushBufferedPrimitives();
 	m_bAllocatingRenderTargets = false;
 
-	if ( IsPC() )
+	if ( IsPC() && cbRequiresRenderTargetAllocationFirst && g_pShaderAPI->CanDownloadTextures() )
 	{
 		// Simulate an Alt-Tab...will cause RTs to be allocated first
+
 		g_pShaderDevice->ReleaseResources();
 		g_pShaderDevice->ReacquireResources();
 	}
 
 	TextureManager()->CacheExternalStandardRenderTargets();
 }
+
+void CMaterialSystem::SetRenderTargetFrameBufferSizeOverrides( int nWidth, int nHeight )
+{
+	m_nRenderTargetFrameBufferWidthOverride = nWidth;
+	m_nRenderTargetFrameBufferHeightOverride = nHeight;
+}
+
+
+void CMaterialSystem::GetRenderTargetFrameBufferDimensions( int & nWidth, int & nHeight )
+{
+	if( m_nRenderTargetFrameBufferHeightOverride && m_nRenderTargetFrameBufferWidthOverride )
+	{
+		nWidth = m_nRenderTargetFrameBufferWidthOverride;
+		nHeight = m_nRenderTargetFrameBufferHeightOverride;
+	}
+	else
+	{
+		GetBackBufferDimensions( nWidth, nHeight );
+	}
+}
+
 
 //-----------------------------------------------------------------------------------------------------
 //
@@ -3804,17 +4849,136 @@ bool CMaterialSystem::OwnGPUResources( bool bEnable )
 //-----------------------------------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------------------------------
-MaterialLock_t CMaterialSystem::Lock()
+class CThreadRelease : public CJob
 {
-	IMatRenderContextInternal *pCurContext = GetRenderContextInternal();
-	if ( pCurContext != &m_HardwareRenderContext && m_pActiveAsyncJob )
+	virtual JobStatus_t DoExecute()
 	{
-		m_pActiveAsyncJob->WaitForFinishAndRelease();
-		m_pActiveAsyncJob = NULL;
+		g_pShaderAPI->ReleaseThreadOwnership();
+
+		return JOB_OK;
+	}
+};
+
+
+void CMaterialSystem::ThreadRelease( )
+{
+	if ( !m_bThreadHasOwnership )
+	{
+		return;
 	}
 
-	g_MatSysMutex.Lock();
-	g_pShaderAPI->ShaderLock();
+	double flStartTime, flEndThreadRelease, flEndTime;
+	int do_report = mat_queue_report.GetInt();
+
+	if ( do_report )
+	{
+		flStartTime = Plat_FloatTime();
+	}
+
+	CJob		*pActiveAsyncJob = new CThreadRelease();
+	IThreadPool *pThreadPool = CreateMatQueueThreadPool();
+	pThreadPool->AddJob( pActiveAsyncJob );
+	pActiveAsyncJob->WaitForFinish();
+
+	SafeRelease( pActiveAsyncJob );
+
+	if ( do_report )
+	{
+		flEndThreadRelease = Plat_FloatTime();
+	}
+
+	g_pShaderAPI->AcquireThreadOwnership();
+
+	m_bThreadHasOwnership = false;
+	m_ThreadOwnershipID = 0;
+
+	if ( do_report )
+	{
+		flEndTime = Plat_FloatTime();
+		double flResult = ( flEndTime - flStartTime ) * 1000.0;
+
+		if ( do_report == -1 || flResult > mat_queue_report.GetFloat() )
+		{
+			Color red(  200,  20,  20, 255 );
+			ConColorMsg( red, "CMaterialSystem::ThreadRelease: %0.2fms = Release:%0.2fms + Acquire:%0.2fms\n", flResult, ( flEndThreadRelease - flStartTime ) * 1000.0, ( flEndTime - flEndThreadRelease ) * 1000.0 );
+		}
+	}
+}
+
+
+void CMaterialSystem::ThreadAcquire( bool bForce )
+{
+	if ( !bForce )
+	{
+		return;
+	}
+
+	double flStartTime, flEndTime;
+	int do_report = mat_queue_report.GetInt();
+
+	if ( do_report )
+	{
+		flStartTime = Plat_FloatTime();
+	}
+
+	g_pShaderAPI->ReleaseThreadOwnership();
+
+	CJob		*pActiveAsyncJob = new CThreadAcquire();
+	IThreadPool *pThreadPool = CreateMatQueueThreadPool();
+	pThreadPool->AddJob( pActiveAsyncJob );
+//	while we could wait for this job to finish, there's no reason too
+//	pActiveAsyncJob->WaitForFinish();	
+
+	SafeRelease( pActiveAsyncJob );
+
+	m_bThreadHasOwnership = true;
+	m_ThreadOwnershipID = ThreadGetCurrentId();
+
+	if ( do_report )
+	{
+		flEndTime = Plat_FloatTime();
+		double flResult = ( flEndTime - flStartTime ) * 1000.0;
+
+		if ( do_report == -1 || flResult > mat_queue_report.GetFloat() )
+		{
+			Color red(  200,  20,  20, 255 );
+			ConColorMsg( red, "CMaterialSystem::ThreadAcquire: %0.2fms\n", flResult );
+		}
+	}
+}
+
+
+//-----------------------------------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------------------------------
+MaterialLock_t CMaterialSystem::Lock()
+{
+	double flStartTime;
+	int do_report = mat_queue_report.GetInt();
+
+	if ( do_report )
+	{
+		flStartTime = Plat_FloatTime();
+	}
+
+	IMatRenderContextInternal *pCurContext = GetRenderContextInternal();
+#if 1 // Rick's optimization: not sure this is needed anymore
+	if ( pCurContext != &m_HardwareRenderContext && m_pActiveAsyncJob )
+	{
+		m_pActiveAsyncJob->WaitForFinish();
+		// threadsafety note: not releasing or nulling pointer.
+	}
+
+	if ( m_ThreadMode != MATERIAL_SINGLE_THREADED )
+	{
+		TelemetrySetLockName( TELEMETRY_LEVEL0, (char const *)&g_MatSysMutex, "MatSysMutex" );
+
+		tmTryLock( TELEMETRY_LEVEL0, (char const *)&g_MatSysMutex, "CMaterialSystem" );
+		g_MatSysMutex.Lock();
+		tmEndTryLock( TELEMETRY_LEVEL0, (char const *)&g_MatSysMutex, TMLR_SUCCESS );
+		tmSetLockState( TELEMETRY_LEVEL0, (char const *)&g_MatSysMutex, TMLS_LOCKED, "CMaterialSystem" );
+	}
+#endif
 
 	MaterialLock_t hMaterialLock = (MaterialLock_t)pCurContext;
 	m_pRenderContext.Set( &m_HardwareRenderContext );
@@ -3824,8 +4988,21 @@ MaterialLock_t CMaterialSystem::Lock()
 		g_pShaderAPI->SetDisallowAccess( false );
 		if ( pCurContext->GetCallQueueInternal() )
 		{
-			g_pShaderAPI->AcquireThreadOwnership();
+			ThreadRelease();
+		}
+	}
 
+	g_pShaderAPI->ShaderLock();
+
+	if ( do_report )
+	{
+		double flEndTime = Plat_FloatTime();
+		double flResult = ( flEndTime - flStartTime ) * 1000.0;
+
+		if ( do_report == -1 || flResult > mat_queue_report.GetFloat() )
+		{
+			Color red(  200,  20,  20, 255 );
+			ConColorMsg( red, "*CMaterialSystem::Lock: %0.2fms\n", flResult );
 		}
 	}
 
@@ -3837,22 +5014,52 @@ MaterialLock_t CMaterialSystem::Lock()
 //-----------------------------------------------------------------------------------------------------
 void CMaterialSystem::Unlock( MaterialLock_t hMaterialLock )
 {
+	double flStartTime;
+	int do_report = mat_queue_report.GetInt();
+
+	if ( do_report )
+	{
+		flStartTime = Plat_FloatTime();
+	}
+
 	IMatRenderContextInternal *pRenderContext = (IMatRenderContextInternal *)hMaterialLock;
 	m_pRenderContext.Set( pRenderContext );
 	g_pShaderAPI->ShaderUnlock();
 
+#ifdef MAT_QUEUE_MODE_PROFILE
 	if ( m_ThreadMode == MATERIAL_QUEUED_SINGLE_THREADED )
 	{
 		g_pShaderAPI->SetDisallowAccess( true );
 	}
-	else if ( m_ThreadMode == MATERIAL_QUEUED_THREADED )
+	else 
+#endif
+		if ( m_ThreadMode == MATERIAL_QUEUED_THREADED )
 	{
 		if ( pRenderContext->GetCallQueueInternal() )
 		{
-			g_pShaderAPI->ReleaseThreadOwnership();
+			ThreadAcquire();
 		}
 	}
-	g_MatSysMutex.Unlock();
+
+#if 1	// Rick's optimization: not sure this is needed anymore
+	if ( m_ThreadMode != MATERIAL_SINGLE_THREADED )
+	{
+		g_MatSysMutex.Unlock();
+		tmSetLockState( TELEMETRY_LEVEL0, (char const *)&g_MatSysMutex, TMLS_RELEASED, "CMaterialSystem" );
+	}
+#endif
+
+	if ( do_report )
+	{
+		double flEndTime = Plat_FloatTime();
+		double flResult = ( flEndTime - flStartTime ) * 1000.0;
+
+		if ( do_report || flResult > mat_queue_report.GetFloat() )
+		{
+			Color red(  200,  20,  20, 255 );
+			ConColorMsg( red, "*CMaterialSystem::Unlock: %0.2fms\n", flResult );
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------------------------------
@@ -3873,6 +5080,357 @@ void CMaterialSystem::UnbindMaterial( IMaterial *pMaterial )
 	}
 }
 
+
+
+class CReplacementProxy : public IMaterialProxy
+{
+public:
+	CReplacementProxy( void );
+	virtual				~CReplacementProxy( void );
+	virtual bool		Init( IMaterial *pMaterial, KeyValues *pKeyValues );
+	virtual void		OnBind( void * );
+	virtual void		Release( );
+	virtual IMaterial *	GetMaterial( );
+
+private:
+	IMaterial	*m_pReplaceMaterial;
+};
+
+
+#define REPLACEMENT_NAME  "_replacement"
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+CReplacementProxy::CReplacementProxy( void ) : m_pReplaceMaterial ( NULL )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+CReplacementProxy::~CReplacementProxy( void )
+{
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Get pointer to the color value
+// Input  : *pMaterial - 
+//-----------------------------------------------------------------------------
+bool CReplacementProxy::Init( IMaterial *pMaterial, KeyValues *pKeyValues )
+{
+	const char *pszFileName = pMaterial->GetName();
+	char szNewName[ MAX_PATH ];
+
+	V_sprintf_safe( szNewName, "%s" REPLACEMENT_NAME, pszFileName );
+	m_pReplaceMaterial = materials->CreateMaterial( szNewName, pKeyValues );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+// Input  :
+//-----------------------------------------------------------------------------
+void CReplacementProxy::OnBind( void * )
+{
+}
+
+
+void CReplacementProxy::Release( )
+{
+	m_pReplaceMaterial->DecrementReferenceCount();
+	// Since we have a material-holding-a-material situation here, we need to nuke these if unreferenced to prevent the
+	// engine needing to double-call UncacheUnusedMaterials to actually get rid of all materials.
+	m_pReplaceMaterial->DeleteIfUnreferenced();
+	m_pReplaceMaterial = NULL;
+}
+
+
+
+IMaterial *CReplacementProxy::GetMaterial()
+{
+	static ConVarRef localplayer_visionflags( "localplayer_visionflags" );
+	bool bVisionOverride = ( localplayer_visionflags.IsValid() && ( localplayer_visionflags.GetInt() & ( 0x01 ) ) ); // Pyro-vision Goggles
+
+	if ( bVisionOverride )
+	{
+		return m_pReplaceMaterial;
+	}
+
+	return NULL;
+}
+
+
+EXPOSE_INTERFACE( CReplacementProxy, IMaterialProxy, "replace_proxy" IMATERIAL_PROXY_INTERFACE_VERSION );
+
+
+static const char *pszReplacementForceCopy[] =
+{
+	"$nocull",
+
+	NULL
+};
+
+void CMaterialSystem::LoadReplacementMaterials()
+{
+	const char* cLocation = "materials";
+	if ( CommandLine()->FindParm( "-matscan") ) {
+		ScanDirForReplacements( cLocation );
+	} else {
+		InitReplacementsFromFile( cLocation );
+	}
+}
+
+void CMaterialSystem::ScanDirForReplacements( const char *pszPathName )
+{
+	char szBaseName[ MAX_PATH ];
+
+	V_sprintf_safe( szBaseName, "%s/replacements.vmt", pszPathName );
+	if ( g_pFullFileSystem->FileExists( szBaseName ) )
+	{
+		KeyValues	*pKV = g_pFullFileSystem->LoadKeyValues( IFileSystem::TYPE_VMT, szBaseName );
+		if ( pKV )
+		{
+			V_sprintf_safe( szBaseName, "%s/", pszPathName );
+			m_Replacements.Insert( szBaseName, pKV );
+		}
+	}
+
+	V_sprintf_safe( szBaseName, "%s/*", pszPathName );
+
+	FileFindHandle_t FindHandle;
+	const char *pFindFileName = g_pFullFileSystem->FindFirst( szBaseName, &FindHandle );
+
+	while ( pFindFileName && pFindFileName[ 0 ] != '\0' )
+	{
+		if ( g_pFullFileSystem->FindIsDirectory( FindHandle ) )
+		{
+			if ( strcmp( pFindFileName, "." ) != 0 &&  strcmp( pFindFileName, ".." ) != 0 )
+			{
+				char szNextBaseName[ MAX_PATH ];
+
+				V_sprintf_safe( szNextBaseName, "%s/%s", pszPathName, pFindFileName );
+				ScanDirForReplacements( szNextBaseName );
+			}
+		}
+
+		pFindFileName = g_pFullFileSystem->FindNext( FindHandle );
+	}
+
+	g_pFullFileSystem->FindClose( FindHandle );
+
+}
+
+void CMaterialSystem::InitReplacementsFromFile( const char *pszPathName )
+{
+	CUtlVector<char*> replacementFiles;
+	char szBaseName[MAX_PATH];
+	V_sprintf_safe( szBaseName, "%s/replacements.txt", pszPathName );
+
+	int replacementCount = ReadListFromFile( &replacementFiles, szBaseName );
+	
+	for ( int i = 0; i < replacementCount; ++i ) 
+	{
+		V_snprintf( szBaseName, sizeof(szBaseName), "%s/%s/replacements.vmt", pszPathName, replacementFiles[i] );
+		if ( g_pFullFileSystem->FileExists(szBaseName) )
+		{
+			KeyValues *pKV = g_pFullFileSystem->LoadKeyValues( IFileSystem::TYPE_VMT, szBaseName );
+			if (pKV)
+			{
+				V_sprintf_safe( szBaseName, "%s/%s/", pszPathName, replacementFiles[i] );
+				m_Replacements.Insert( szBaseName, pKV );
+			}
+		}
+	}
+
+	replacementFiles.PurgeAndDeleteElements();
+}
+
+void CMaterialSystem::PreloadReplacements( )
+{
+	int nIndex = m_Replacements.First();
+	while( m_Replacements.IsValidIndex( nIndex ) )
+	{
+		m_Replacements.Element( nIndex )->deleteThis();
+
+		nIndex = m_Replacements.Next( nIndex );
+	}
+	m_Replacements.Purge();
+
+	COM_TimestampedLog( "LoadReplacementMaterials(): Begin" );
+	LoadReplacementMaterials();
+	COM_TimestampedLog( "LoadReplacementMaterials(): End" );
+
+	m_bReplacementFilesValid = true;
+}
+
+
+IMaterialProxy *CMaterialSystem::DetermineProxyReplacements( IMaterial *pMaterial, KeyValues *pFallbackKeyValues )
+{
+	CReplacementProxy	*pReplacementProxy = NULL;
+
+	if ( !g_pMaterialSystemHardwareConfig->SupportsPixelShaders_2_0() )
+	{
+		return NULL;
+	}
+
+	if ( !m_bReplacementFilesValid )
+	{
+		PreloadReplacements();
+	}
+
+	const char *pszMaterialName = pMaterial->GetName();
+
+	char szCheckPath[ MAX_PATH ], szCheckName[ MAX_PATH ], szLastPath[ MAX_PATH ];
+	const char *pszShadername = pFallbackKeyValues->GetName();
+
+	V_strcpy_safe( szLastPath, pszMaterialName );
+	int	nLength = strlen( szLastPath ) - strlen( REPLACEMENT_NAME );
+	if ( nLength > 0 && strcmpi( &szLastPath[ nLength ], REPLACEMENT_NAME  ) == 0 )
+	{
+		return NULL;
+	}
+
+	while( 1 )
+	{
+		const char *pszRemoveSlashes;
+		V_ExtractFilePath( szLastPath, szCheckPath, sizeof( szCheckPath ) );
+
+		pszRemoveSlashes = szCheckPath;
+		while ( ( *pszRemoveSlashes ) != 0 && ( ( *pszRemoveSlashes ) == '/' || ( *pszRemoveSlashes ) == '\\' ) )
+		{
+			pszRemoveSlashes++;
+		}
+
+		V_sprintf_safe( szCheckName, "materials/%s", pszRemoveSlashes );
+		int nIndex = m_Replacements.Find( szCheckName );
+
+		if ( m_Replacements.IsValidIndex( nIndex ) )
+		{
+			KeyValues	*pKV = m_Replacements.Element( nIndex );
+
+			KeyValues	*pTemplatesKV = pKV->FindKey( "templates" );
+			KeyValues	*pPatternsKV = pKV->FindKey( "patterns" );
+
+			const char *pszFileName = V_GetFileName( pszMaterialName );
+
+			if ( !pTemplatesKV || !pPatternsKV )
+			{
+				Warning( "Replacements: Invalid KV file %s\n", szCheckName );
+			}
+			else
+			{
+				for ( KeyValues *pSubKey = pPatternsKV->GetFirstSubKey(); pSubKey; pSubKey = pSubKey->GetNextKey() )
+				{
+					const char *pszReplacementName = pSubKey->GetName();
+
+//					Msg( "  Sub: %s\n", pSubKey->GetName() );
+					if ( strnicmp( pszFileName, pszReplacementName, strlen( pszReplacementName ) ) == 0 )
+					{	// We found a replacement!
+						const char	*pszTemplateName = pSubKey->GetString( "template", NULL );
+						KeyValues	*pReplacementMaterial = NULL;
+
+						if ( pszTemplateName && pTemplatesKV )
+						{
+							KeyValues *pTemplateKV = pTemplatesKV->FindKey( pszTemplateName );
+							if ( pTemplateKV )
+							{
+								pTemplateKV = pTemplateKV->FindKey( pszShadername );
+
+								if ( pTemplateKV && pTemplateKV->GetFirstSubKey() )
+								{
+									pReplacementMaterial = pTemplateKV->GetFirstSubKey()->MakeCopy();
+								}
+							}
+						}
+						else
+						{
+							if ( pSubKey->GetFirstSubKey() )
+							{
+								pReplacementMaterial = pSubKey->GetFirstSubKey()->MakeCopy();
+							}
+						}
+
+						if ( !pReplacementMaterial )
+						{
+							break;
+						}
+
+						if ( pReplacementMaterial->GetInt( "$copyall" ) == 1 )
+						{
+							for( KeyValues *pCopyKV = pFallbackKeyValues->GetFirstSubKey(); pCopyKV; pCopyKV = pCopyKV->GetNextKey() )
+							{
+								const char *pszCopyValue = pReplacementMaterial->GetString( pCopyKV->GetName(), NULL );
+								if ( !pszCopyValue )
+								{
+									pReplacementMaterial->SetString( pCopyKV->GetName(), pCopyKV->GetString() );
+								}
+							}
+						}
+						else
+						{
+							int nReplaceIndex = 0;
+
+							while( pszReplacementForceCopy[nReplaceIndex] )
+							{
+								const char *pszCopyValue = pFallbackKeyValues->GetString( pszReplacementForceCopy[nReplaceIndex], NULL );
+								if ( pszCopyValue )
+								{
+									pReplacementMaterial->SetString( pszReplacementForceCopy[nReplaceIndex], pszCopyValue );
+								}
+								nReplaceIndex++;
+							}
+						}
+
+						for( KeyValues *pSearchKV = pReplacementMaterial->GetFirstSubKey(); pSearchKV; pSearchKV = pSearchKV->GetNextKey() )
+						{
+							const char *pszValue = pSearchKV->GetString();
+							if ( pszValue[ 0 ] == '$' )
+							{
+								const char *pszCopyValue = pFallbackKeyValues->GetString( pszValue, NULL );
+								if ( pszCopyValue )
+								{
+									pSearchKV->SetStringValue( pszCopyValue );
+								}
+								else
+								{
+									pSearchKV->SetStringValue( "" );
+								}
+							}
+						}
+						pReplacementProxy = new CReplacementProxy();
+						pReplacementProxy->Init( pMaterial, pReplacementMaterial );
+
+						break;
+					}
+				}
+			}
+
+			if ( pReplacementProxy == NULL )
+			{
+//				Msg( "Failed to find: %s\n", GetName() );
+			}
+
+			break;
+		}
+
+		if ( szCheckPath[ 0 ] == 0 )
+		{
+			break;
+		}
+
+		strcpy( szLastPath, szCheckPath );
+	}
+
+	return pReplacementProxy;
+}
+
+
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
@@ -3882,6 +5440,21 @@ void CMaterialSystem::CompactMemory()
 	{
 		m_QueuedRenderContexts[i].CompactMemory();
 	}
+}
+
+void CMaterialSystem::OnRenderingAsyncComplete()
+{
+	Assert( m_pActiveAsyncJob == NULL );
+
+	// Update the texture manager, which may cause some textures to become available for compositing.
+	// Because updating textures may cause textures to swap out their active texture handles, this can only be done
+	// while the async job is not running.
+	bool bThreadHadOwnership = m_bThreadHasOwnership;
+
+	TextureManager()->UpdatePostAsync();
+
+	if ( bThreadHadOwnership && !m_bThreadHasOwnership )
+		ThreadAcquire( true );
 }
 
 //-----------------------------------------------------------------------------
@@ -3954,4 +5527,21 @@ CON_COMMAND( mat_hdr_enabled, "Report if HDR is enabled for debugging" )
 	{
 		Warning( "HDR Disabled\n" );
 	}
+}
+
+
+static int ReadListFromFile(CUtlVector<char*>* outReplacementMaterials, const char *pszPathName)
+{
+	Assert(outReplacementMaterials != NULL);
+	Assert(pszPathName != NULL);
+
+	CUtlBuffer fileContents;
+	if ( !g_pFullFileSystem->ReadFile( pszPathName, NULL, fileContents ) ) 
+		return 0;
+
+	const char* seps[] = { "\r", "\r\n", "\n" };
+	V_SplitString2( (char*)fileContents.Base(), seps, ARRAYSIZE(seps), *outReplacementMaterials );
+
+
+	return outReplacementMaterials->Size();
 }

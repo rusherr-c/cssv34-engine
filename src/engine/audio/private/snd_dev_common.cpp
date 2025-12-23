@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Device Common Base Class.
 //
@@ -51,9 +51,9 @@ static float XfadeSpeakerVolToMono( float scale, float xfade, float ispeaker, fl
 		float scale_targets2ch[] = {0.9, 0.9, 0.0, 0.0};	// RF, LF, RR, LR
 
 		if ( fmix2channels )
-			scale_target = scale_targets2ch[(int)clamp(ispeaker, 0, 3)];
+			scale_target = scale_targets2ch[clamp(FastFloatToSmallInt(ispeaker), 0, 3)];
 		else
-			scale_target = scale_targets[(int)clamp(ispeaker, 0, 3)];
+			scale_target = scale_targets[clamp(FastFloatToSmallInt(ispeaker), 0, 3)];
 
 		goto XfadeExit;
 	}
@@ -62,7 +62,7 @@ static float XfadeSpeakerVolToMono( float scale, float xfade, float ispeaker, fl
 	{
 		// mono sound distribution:
 		float scale_targets[] = {0.9, 0.9, 0.5, 0.5, 0.9};	// RF, LF, RR, LR, FC
-		scale_target = scale_targets[(int)clamp(ispeaker, 0, 4)];
+		scale_target = scale_targets[(int)clamp(FastFloatToSmallInt(ispeaker), 0, 4)];
 		goto XfadeExit;
 	}
 
@@ -121,7 +121,7 @@ static float GetSpeakerVol( float yaw_source, float pitch_source, float mono, fl
 		xfade  = ( pitch_angle - PITCH_ANGLE_THRESHOLD ) / ( 90.0 - PITCH_ANGLE_THRESHOLD );	// 0.0 -> 1.0 as angle 45->90	
 
 		mono += xfade;
-		mono = clamp(mono, 0.0, 1.0);
+		mono = clamp(mono, 0.0f, 1.0f);
 	}
 	
 	if ( cspeaker == 2 )

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -119,8 +119,8 @@ SHADER_DRAW
 		SET_STATIC_VERTEX_SHADER_COMBO( MODEL,  bIsModel );
 		SET_STATIC_VERTEX_SHADER( portalstaticoverlay_vs20 );
 
-		//avoid setting a pixel shader when only doing depth/stencil operations, as recommended by PIX
-		if( bColorWrites || bAlphaMaskTexture )
+		// Avoid setting a pixel shader when only doing depth/stencil operations, as recommended by PIX
+		if( bColorWrites || bAlphaMaskTexture || g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() )
 		{
 			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{
@@ -147,8 +147,8 @@ SHADER_DRAW
 		//x is static, y is inverse static
 		float pc0[4] = { fStaticAmount, 1.0f - fStaticAmount, 0.0f, 0.0f };
 		pShaderAPI->SetPixelShaderConstant( 0, pc0 );
-		
-		if( bStaticBlendTexture )
+
+		if ( bStaticBlendTexture )
 		{
 			BindTexture( SHADER_SAMPLER0, STATICBLENDTEXTURE, STATICBLENDTEXTUREFRAME );
 			if( bAlphaMaskTexture )
@@ -170,8 +170,8 @@ SHADER_DRAW
 		SET_DYNAMIC_VERTEX_SHADER_COMBO( SKINNING, pShaderAPI->GetCurrentNumBones() > 0 );
 		SET_DYNAMIC_VERTEX_SHADER( portalstaticoverlay_vs20 );
 
-		//avoid setting a pixel shader when only doing depth/stencil operations, as recommended by PIX
-		if( bColorWrites || bAlphaMaskTexture )
+		// Avoid setting a pixel shader when only doing depth/stencil operations, as recommended by PIX
+		if( bColorWrites || bAlphaMaskTexture || g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() )
 		{
 			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class for computing things with CDmeMesh data
 //
@@ -32,25 +32,36 @@ class CDmMeshComp
 public:
 	CDmMeshComp( CDmeMesh *pMesh, CDmeVertexData *pPassedBase = NULL );
 
+	~CDmMeshComp();
+
+	class CVert;
+	class CEdge;
+
 	class CVert
 	{
 	public:
-		CVert();
+		CVert( int nPositionIndex, const CUtlVector< int > *pVertexIndices, const Vector *pPosition );
 
-		int Index() const;
+		CVert( const CVert &src );
 
-		const CUtlVector< int > *VertexIndices() const;
+		int PositionIndex() const;
 
 		const Vector *Position() const;
+
+		const CUtlVector< int > *VertexIndices() const;
 
 		bool operator==( const CVert &rhs ) const;
 
 	protected:
 		friend class CDmMeshComp;
 
-		int m_index;								// Index in the position data
+		int m_positionIndex;						// Index in the position data
 		const CUtlVector< int > *m_pVertexIndices;	// Pointer to a list of the vertex indices for this vertex
 		const Vector *m_pPosition;
+		CUtlVector< CEdge * > m_edges;				// An array of pointers to the edges containing this vertex
+
+	private:
+		CVert(); // Not used
 	};
 
 	class CEdge
@@ -58,7 +69,7 @@ public:
 	public:
 		CEdge();
 
-		int GetVertIndex( int edgeRelativeVertexIndex ) const;
+		int GetVertPositionIndex( int edgeRelativeVertexIndex ) const;
 
 		CVert *GetVert( int edgeRelativeVertexIndex ) const;
 
@@ -92,17 +103,11 @@ public:
 
 	CDmeVertexData *BaseState() { return m_pBase; }
 
-	CVert *CreateVert( int nIndex, const CUtlVector< int > &vertexIndices, const Vector &vert );
-
-	CVert *FindVert( int vIndex );
-
 	CEdge *FindOrCreateEdge( int vIndex0, int vIndex1, bool *pReverse = NULL );
 
 	CEdge *FindEdge( int vIndex0, int vIndex1, bool *pReverse = NULL );
 
 	CFace *CreateFace( const CUtlVector< CVert * > &verts, const CUtlVector< CEdge * > &edges, const CUtlVector< bool > &edgeReverseMap );
-
-	int FindEdgesWithVert( int vIndex, CUtlVector< CEdge * > &edges );
 
 	int FindFacesWithVert( int vIndex, CUtlVector< CFace * > &faces );
 
@@ -112,8 +117,8 @@ public:
 
 	CDmeMesh *m_pMesh;
 	CDmeVertexData *m_pBase;
-	CUtlFixedLinkedList< CVert > m_verts;
-	CUtlFixedLinkedList< CEdge > m_edges;
+	CUtlVector< CVert * > m_verts;
+	CUtlVector< CEdge * > m_edges;
 	CUtlFixedLinkedList< CFace > m_faces;
 };
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Physics cannon
 //
@@ -9,12 +9,12 @@
 #ifdef CLIENT_DLL
 	#include "c_hl2mp_player.h"
 	#include "vcollide_parse.h"
-	#include "engine/IVDebugOverlay.h"
+	#include "engine/ivdebugoverlay.h"
 	#include "iviewrender_beams.h"
 	#include "beamdraw.h"
 	#include "c_te_effect_dispatch.h"
 	#include "model_types.h"
-	#include "ClientEffectPrecacheSystem.h"
+	#include "clienteffectprecachesystem.h"
 	#include "fx_interpvalue.h"
 #else
 	#include "hl2mp_player.h"
@@ -1703,7 +1703,7 @@ void CWeaponPhysCannon::PuntVPhysics( CBaseEntity *pEntity, const Vector &vecFor
 			{
 				maxMass *= 2.5;	// 625 for vehicles
 			}
-			float mass = min(totalMass, maxMass); // max 250kg of additional force
+			float mass = MIN(totalMass, maxMass); // max 250kg of additional force
 
 			// Put some spin on the object
 			for ( i = 0; i < listCount; i++ )
@@ -1715,7 +1715,7 @@ void CWeaponPhysCannon::PuntVPhysics( CBaseEntity *pEntity, const Vector &vecFor
 				if ( pList[i] == pEntity->VPhysicsGetObject() )
 				{
 					ratio += hitObjectFactor;
-					ratio = min(ratio,1.0f);
+					ratio = MIN(ratio,1.0f);
 				}
 				else
 				{
@@ -1770,7 +1770,7 @@ void CWeaponPhysCannon::ApplyVelocityBasedForce( CBaseEntity *pEntity, const Vec
 	float mass = pPhysicsObject->GetMass();
 	if (mass > 100)
 	{
-		mass = min(mass, 1000);
+		mass = MIN(mass, 1000);
 		float flForceMin = physcannon_minforce.GetFloat();
 		flForce = SimpleSplineRemapVal(mass, 100, 600, flForceMax, flForceMin);
 	}
@@ -2484,7 +2484,7 @@ void CWeaponPhysCannon::UpdateElementPosition( void )
 
 	float flElementPosition = m_ElementParameter.Interp( gpGlobals->curtime );
 
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		if ( pOwner != NULL )	
 		{
@@ -2601,7 +2601,7 @@ void CWeaponPhysCannon::DoEffectIdle( void )
 
 	StartEffects();
 
-	//if ( IsCarriedByLocalPlayer() )
+	//if ( ShouldDrawUsingViewModel() )
 	{
 		// Turn on the glow sprites
 		for ( int i = PHYSCANNON_GLOW1; i < (PHYSCANNON_GLOW1+NUM_GLOW_SPRITES); i++ )
@@ -3033,7 +3033,7 @@ void CWeaponPhysCannon::StartEffects( void )
 		m_Parameters[i].GetAlpha().SetAbsolute( 64.0f );
 		
 		// Different for different views
-		if ( IsCarriedByLocalPlayer() )
+		if ( ShouldDrawUsingViewModel() )
 		{
 			m_Parameters[i].SetAttachment( LookupAttachment( attachNamesGlow[i-PHYSCANNON_GLOW1] ) );
 		}
@@ -3110,7 +3110,7 @@ void CWeaponPhysCannon::DoEffectReady( void )
 #ifdef CLIENT_DLL
 
 	// Special POV case
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		//Turn on the center sprite
 		m_Parameters[PHYSCANNON_CORE].GetScale().InitFromCurrent( 14.0f, 0.2f );
@@ -3152,7 +3152,7 @@ void CWeaponPhysCannon::DoEffectHolding( void )
 
 #ifdef CLIENT_DLL
 
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		// Scale up the center sprite
 		m_Parameters[PHYSCANNON_CORE].GetScale().InitFromCurrent( 16.0f, 0.2f );
@@ -3414,7 +3414,7 @@ void CWeaponPhysCannon::GetEffectParameters( EffectType_t effectID, color32 &col
 	QAngle	angles;
 
 	// Format for first-person
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 		

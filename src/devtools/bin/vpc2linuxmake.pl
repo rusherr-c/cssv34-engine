@@ -46,8 +46,13 @@ foreach $target ( @MAINTARGETS )
 	print MAKEOUT "$target:\n";
 	foreach $dir ( keys %dir_written )
 	{
-		print MAKEOUT "\tmake -j $nprocs -C $dir $target\n";
+		print MAKEOUT "\tmake -j $nprocs -C $dir $target   #$dir_conf_type{$dir}\n" if ($dir_conf_type{$dir} eq "lib");
 	}
+	foreach $dir ( keys %dir_written )
+	{
+		print MAKEOUT "\tmake -j $nprocs -C $dir $target   #$dir_conf_type{$dir}\n" if ($dir_conf_type{$dir} ne "lib");
+	}
+
 }
 print MAKEOUT "\n\nmakefiles:\n\tperl $srcdir/devtools/bin/vpc2linuxmake.pl\n";
 print MAKEOUT "\ntags:\n\trm -f $srcdir/TAGS\n";
@@ -74,12 +79,21 @@ sub handle_vpc_file
 		}
 	}
 
+    if ( /_include\.vpc$/i )
+        {
+                unless ( /hk_base\.vpc$/i )
+                {
+                        return;
+                }
+        }
+
     if (/\.vpc$/)
     {
 		(%ignore_file,@DEFINES, @CPPFILES, @CXXFILES,@CFILES, @LITERAL_LIBFILES,@LIBFILES, %define_seen,%macros,%include_seen,@INCLUDEDIRS)=undef;
 		undef $buildforlinux;
 		undef $conf_type;
-		$OptimizeLevel=3;
+		$OptimizerLevel='$(SAFE_OPTFLAGS_GCC_422)';
+		$SymbolVisibility='hidden';
 
 
 		# some defines to ignore in vpc files when generating linux include files
@@ -94,7 +108,7 @@ sub handle_vpc_file
 		$define_seen{'_CRT_SECURE_NO_DEPRECATE'}=1;
 		$define_seen{'_CRT_NONSTDC_NO_DEPRECATE'}=1;
 		$define_seen{'fopen'}=1;
-
+		#print "$_\n";
 		&ParseVPC($_);
 
 		$pname=lc($pname);
@@ -107,6 +121,7 @@ sub handle_vpc_file
 			$projdir=getcwd;
 			$projdir=~s@/$@@;
 			$dir_written{$projdir}.=",$pname.mak";
+			$dir_conf_type{$projdir}=$conf_type;
 			&WriteMakefile("$projdir/$pname.mak");
 			&WriteCodeBlocksProj("$projdir/$pname.cbp");
 		}
@@ -208,20 +223,20 @@ FOOTER
 sub WriteMakefile
 {
 	local($_)=@_;
-	    
+	my $objdir ="obj";
 	open(MAKEFILE,">$_") || die "can't write $_";
 	print MAKEFILE "NAME=$pname\n\n";
+	if ( $pname =~ /(server|client)_(\S+)/i )
+	{
+		print MAKEFILE "OBJSUFFIX=_$2\n";
+		$objdir .= "_$2";
+	}
 	print MAKEFILE "SRCROOT=$srcdir\n";
 	print MAKEFILE "PROJDIR=$projdir\n";
 	print MAKEFILE "CONFTYPE=$conf_type\n";
-	if ( int($OptimizeLevel) )
-	{
-		print MAKEFILE "OLEVEL=-O$OptimizeLevel\n";
-	}
-	else
-	{
-		print MAKEFILE "OLEVEL=\n";
-	}
+	print MAKEFILE "OptimizerLevel=$OptimizerLevel\n";
+	print MAKEFILE "SymbolVisibility=$SymbolVisibility\n";
+
 
 	if (@DEFINES)
 	{
@@ -268,7 +283,7 @@ sub WriteMakefile
 		}
 		foreach $lib (@LIBFILES)
 		{
-			my @DLLNAMES=("tier0", "vstdlib");
+			my @DLLNAMES=("tier0", "vstdlib", "steam_api");
 			unless ( $ignore_file{$lib} > 0 )
 			{
 				$lib=lc($lib);
@@ -281,7 +296,6 @@ sub WriteMakefile
 				if ( $dll )
 				{
 					$lib=~s@^.*/([^/]+)\.lib@$1_i486.so@i;
-					$lib="fred";
 					$lib=~s@^.*/lib/(\S+)@$1@g;
 				}
 				else
@@ -332,7 +346,7 @@ sub WriteMakefile
 		unless (( $ignore_file{$_} > 0 ) || ( length($_) < 2 ) )
 		{
 			($filename) = fileparse($_,qr/\.[^.]*/);
-			print MAKEFILE getcwd,"/obj/$filename.o : $_\n\t\$(DO_CC)\n";
+			print MAKEFILE getcwd,"/$objdir/$filename.o : $_\n\t\$(DO_CC)\n";
 		}
 	}
 	foreach $_ (@CXXFILES)
@@ -340,7 +354,7 @@ sub WriteMakefile
 		unless (( $ignore_file{$_} > 0 ) || ( length($_) < 2 ) )
 		{
 			($filename) = fileparse($_,qr/\.[^.]*/);
-			print MAKEFILE getcwd,"/obj/$filename.oxx : $_\n\t\$(DO_CC)\n";
+			print MAKEFILE getcwd,"/$objdir/$filename.oxx : $_\n\t\$(DO_CC)\n";
 		}
 	}
 
@@ -370,7 +384,7 @@ sub ParseVPC
     &startreading($fname);
     while(&nextvpcline)
     {
-#		print "$_\n";
+#		print "$fname -  $_\n";
 		if ( (/^\$linux/i) )
 		{
 			&skipblock(0,\&handlelinuxline);
@@ -410,7 +424,8 @@ sub startreading
 {
     # initialize recursive file reader
     my( $fname)=@_;
-    $curfile=IO::File->new($fname) || die "can't open $fname";
+    #print STDERR "opening $fname\n";
+	$curfile=IO::File->new($fname) || die "can't open $fname";
 }
 
 sub nextvpcline
@@ -446,7 +461,19 @@ sub nextvpcline
 			my $incfile=$1;
 			push @filestack, $curfile;
 			$incfile=~s@\\@/@g;
-			$curfile=IO::File->new($incfile) || die "can't open include $incfile";
+			#print STDERR "opening $incfile\n";
+			#$curfile=IO::File->new($incfile) || die "can't open include $incfile ($pname)";
+			if ( -e $incfile )
+			{
+				push @filestack, $curfile;
+				#print STDERR "opening $incfile\n";
+				$curfile=IO::File->new($incfile) || die "can't open include $incfile";
+			}
+			else
+			{
+				print "can't find include $incfile, ignoring\n";
+			}
+			
 			return &nextvpcline;
 		}
     }
@@ -604,10 +631,11 @@ sub handlelinuxline
 {
     local($_)=@_;
     $buildforlinux = 1 if ( /^\s*\$buildforlinux.*1/i);
-    $OptimizeLevel= $1 if (/^\s*\$OptimizerLevel\s+(\d+)/i);
-	$buildforlinux = 1 if ( /^\s*\$buildforlinux.*1/i);
-	&CheckForFileLine($_); # allows linux-specific file includes and excludes
-	&handleconfigline($_);			   # allow linux-specific #defines
+    $OptimizerLevel= $1 if (/^\s*\$OptimizerLevel\s+(.+)/i);
+    $SymbolVisibility = $1 if (/^\s*\$SymbolVisibility\s+(.+)/i);
+    $buildforlinux = 1 if ( /^\s*\$buildforlinux.*1/i);
+    &CheckForFileLine($_); # allows linux-specific file includes and excludes
+    &handleconfigline($_);			   # allow linux-specific #defines
 
 }
 

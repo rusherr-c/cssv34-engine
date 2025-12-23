@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,7 @@
 #include "mathlib/mathlib.h" // for swap
 
 #include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 
 #include "tier1/mempool.h"
 
@@ -326,5 +327,5 @@ CAttributeNode *CDependencyGraph::FindAttrNode( CDmAttribute *pAttr )
 void CDependencyGraph::DBG_PrintOperator( const char *pIndent, IDmeOperator *pOp )
 {
 	CDmElement *pElement = dynamic_cast< CDmElement* >( pOp );
-	Msg( "%s%s <%s> {\n", pIndent, pElement->GetName(), pElement->GetType() );
+	Msg( "%s%s <%s> {\n", pIndent, pElement->GetName(), pElement->GetTypeString() );
 }

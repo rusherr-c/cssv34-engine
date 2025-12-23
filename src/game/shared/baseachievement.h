@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -25,6 +25,7 @@ class CBaseAchievement : public CGameEventListener, public IAchievement
 	DECLARE_CLASS_NOBASE( CBaseAchievement );
 public:
 	CBaseAchievement();	
+	virtual ~CBaseAchievement();
 	virtual void Init() {}
 	virtual void ListenForEvents() {};
 	virtual void Event_EntityKilled( CBaseEntity *pVictim, CBaseEntity *pAttacker, CBaseEntity *pInflictor, IGameEvent *event );
@@ -33,6 +34,7 @@ public:
 	void SetAchievementID( int iAchievementID ) { m_iAchievementID = iAchievementID; }
 	void SetName( const char *pszName ) { m_pszName = pszName; }
 	const char *GetName() { return m_pszName; }
+	const char *GetStat() { return m_pszStat?m_pszStat:GetName(); }
 	void SetFlags( int iFlags );
 	int GetFlags() { return m_iFlags; }
 	void SetGoal( int iGoal ) { m_iGoal = iGoal; }
@@ -43,6 +45,8 @@ public:
 	int	GetPointValue() { return m_iPointValue; }
 	bool ShouldHideUntilAchieved() { return m_bHideUntilAchieved; }
 	void SetHideUntilAchieved( bool bHide ) { m_bHideUntilAchieved = bHide; }
+	void SetStoreProgressInSteam( bool bStoreProgressInSteam ) { m_bStoreProgressInSteam = bStoreProgressInSteam; }
+	bool StoreProgressInSteam() { return m_bStoreProgressInSteam; }
 	virtual bool ShouldShowProgressNotification() { return true; }
 	virtual void OnPlayerStatsUpdate() {}
 
@@ -56,7 +60,25 @@ public:
 	int GetProgressShown() { return m_iProgressShown; }
 	virtual bool IsAchieved() { return m_bAchieved; }
 	virtual bool IsActive();
+	virtual bool LocalPlayerCanEarn( void ) { return true; }
 	void SetAchieved( bool bAchieved ) { m_bAchieved = bAchieved; }
+	virtual bool IsMetaAchievement() { return false; }
+	virtual bool AlwaysListen() { return false; }
+	virtual bool AlwaysEnabled() { return false; }
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [pfreese] Notification method for derived classes
+	//=============================================================================
+	
+	virtual void OnAchieved() {}
+	uint32 GetUnlockTime() const { return m_uUnlockTime; }
+	void SetUnlockTime( uint32 unlockTime ) { m_uUnlockTime = unlockTime; }
+	
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
 	uint64 GetComponentBits() { return m_iComponentBits; }
 	void SetComponentBits( uint64 iComponentBits );
 	void OnComponentEvent( const char *pchComponentName );
@@ -64,6 +86,27 @@ public:
 	void EvaluateIsAlreadyAchieved();
 	virtual void OnMapEvent( const char *pEventName );
 	virtual void PrintAdditionalStatus() {}		// for debugging, achievements may report additional status in achievement_status concmd
+	virtual void OnSteamUserStatsStored() {}
+	virtual void UpdateAchievement( int nData ) {}
+	virtual bool ShouldShowOnHUD() { return m_bShowOnHUD; }
+	virtual void SetShowOnHUD( bool bShow );
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [pfreese] Serialization methods
+	//=============================================================================
+	
+	virtual void GetSettings( KeyValues* pNodeOut );				// serialize
+	virtual void ApplySettings( /* const */ KeyValues* pNodeIn );	// unserialize
+	
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
+	virtual void Think( void ) { return; }
+
+	const char *GetMapNameFilter( void ){ return m_pMapNameFilter; }
+	CAchievementMgr *GetAchievementMgr( void ){ return m_pAchievementMgr; }
 
 protected:
 	virtual void FireGameEvent( IGameEvent *event );
@@ -74,14 +117,18 @@ protected:
 	void SetInflictorEntityNameFilter( const char *pEntityName );
 	void SetMapNameFilter( const char *pMapName );
 	void SetComponentPrefix( const char *pPrefix );
-	void IncrementCount();
+	void IncrementCount( int iOptIncrement = 0 );
 	void EvaluateNewAchievement();
 	void AwardAchievement();
 	void ShowProgressNotification();
 	void HandleProgressUpdate();
 	virtual void CalcProgressMsgIncrement();
+	void SetNextThink( float flThinkTime );
+	void ClearThink( void );
+	void SetStat( const char* pStatName ) { m_pszStat = pStatName; }
 
 	const char *m_pszName;								// name of this achievement
+	const char *m_pszStat;								// stat this achievement uses
 	int m_iAchievementID;								// ID of this achievement
 	int	m_iFlags;										// ACH_* flags for this achievement
 	int	m_iGoal;										// goal # of steps to award this achievement
@@ -89,6 +136,7 @@ protected:
 	int m_iProgressMsgMinimum;							// the minimum progress needed before showing progress notification
 	int m_iPointValue;									// # of points this achievement is worth (currently only used for XBox Live)
 	bool m_bHideUntilAchieved;							// should this achievement be hidden until achieved?
+	bool m_bStoreProgressInSteam;						// should incremental progress be stored in Steam.  A counter with same name as achievement must be set up in Steam.
 	const char *m_pInflictorClassNameFilter;			// if non-NULL, inflictor class name to filter with
 	const char *m_pInflictorEntityNameFilter;			// if non-NULL, inflictor entity name to filter with
 	const char *m_pVictimClassNameFilter;				// if non-NULL, victim class name to filter with
@@ -101,10 +149,12 @@ protected:
 	const char *m_pszComponentPrefix;
 	int			m_iComponentPrefixLen;
 	bool		m_bAchieved;							// is this achievement achieved
+	uint32		m_uUnlockTime;							// time_t that this achievement was unlocked (0 if before Steamworks unlock time support)
 	int			m_iCount;								// # of steps satisfied toward this achievement (only valid if not achieved)
 	int			m_iProgressShown;						// # of progress msgs we've shown
 	uint64		m_iComponentBits;						// bitfield of components achieved
 	CAchievementMgr *m_pAchievementMgr;					// our achievement manager
+	bool		m_bShowOnHUD;							// if set, the player wants this achievement pinned to the HUD
 
 	friend class CAchievementMgr;
 public:
@@ -150,6 +200,28 @@ class CMapAchievement : public CBaseAchievement
 	}
 };
 
+
+//----------------------------------------------------------------------------------------------------------------
+class CAchievement_AchievedCount : public CBaseAchievement
+{
+public:
+	void Init();
+	virtual void OnSteamUserStatsStored( void );
+	virtual bool IsMetaAchievement() { return true; }
+
+	int GetLowRange() { return m_iLowRange; }
+	int GetHighRange() { return m_iHighRange; }
+	int GetNumRequired() { return m_iNumRequired; }
+
+protected:
+	void SetAchievementsRequired( int iNumRequired, int iLowRange, int iHighRange );
+
+private:
+	int m_iNumRequired;
+	int m_iLowRange;
+	int m_iHighRange;
+};
+
 //
 // Helper class for achievement creation
 //
@@ -170,7 +242,7 @@ public:
 };
 
 #define DECLARE_ACHIEVEMENT_( className, achievementID, achievementName, gameDirFilter, iPointValue, bHidden ) \
-static CBaseAchievement *Create_##className##( void )					\
+static CBaseAchievement *Create_##className( void )					\
 {																		\
 	CBaseAchievement *pAchievement = new className( );					\
 	pAchievement->SetAchievementID( achievementID );					\
@@ -180,7 +252,7 @@ static CBaseAchievement *Create_##className##( void )					\
 	if ( gameDirFilter ) pAchievement->SetGameDirFilter( gameDirFilter ); \
 	return pAchievement;												\
 };																		\
-static CBaseAchievementHelper g_##className##_Helper( Create_##className## );
+static CBaseAchievementHelper g_##className##_Helper( Create_##className );
 
 #define DECLARE_ACHIEVEMENT( className, achievementID, achievementName, iPointValue ) \
 	DECLARE_ACHIEVEMENT_( className, achievementID, achievementName, NULL, iPointValue, false )

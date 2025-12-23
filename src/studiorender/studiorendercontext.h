@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,6 +31,7 @@ class CStudioRender;
 extern IStudioDataCache *g_pStudioDataCache;
 extern CStudioRender *g_pStudioRenderImp;
 
+IMaterial* GetModelSpecificDecalMaterial( IMaterial* pDecalMaterial );
 
 //-----------------------------------------------------------------------------
 // Internal config structure
@@ -40,6 +41,7 @@ struct StudioRenderConfigInternal_t : public StudioRenderConfig_t
 	bool m_bSupportsVertexAndPixelShaders : 1;
 	bool m_bSupportsOverbright : 1;
 	bool m_bEnableHWMorph : 1;
+	bool m_bStatsMode : 1;
 };
 
 
@@ -85,6 +87,16 @@ struct StudioRenderContext_t
 		pCallQueue->QueueCall( pObject, &ClassName::FuncName, ##__VA_ARGS__ );	\
 	}
 
+#define QUEUE_STUDIORENDER_CALL_RC( FuncName, ClassName, pObject, pRenderContext, ... )	\
+	ICallQueue *pCallQueue = pRenderContext->GetCallQueue();			\
+	if ( !pCallQueue || studio_queue_mode.GetInt() == 0 )				\
+	{																	\
+		pObject->FuncName( __VA_ARGS__ );								\
+	}																	\
+	else																\
+	{																	\
+		pCallQueue->QueueCall( pObject, &ClassName::FuncName, ##__VA_ARGS__ );	\
+	}
 
 
 //-----------------------------------------------------------------------------
@@ -125,6 +137,7 @@ public:
 	virtual void SetColorModulation( const float* pColor );
 	virtual void SetAlphaModulation( float alpha );
 	virtual void DrawModel( DrawModelResults_t *pResults, const DrawModelInfo_t& info, matrix3x4_t *pCustomBoneToWorld, float *pFlexWeights, float *pFlexDelayedWeights, const Vector& origin, int flags = STUDIORENDER_DRAW_ENTIRE_MODEL );
+	virtual void DrawModelArray( const DrawModelInfo_t &drawInfo, int arrayCount, model_array_instance_t *pInstanceData, int instanceStride, int flags = STUDIORENDER_DRAW_ENTIRE_MODEL );
 	virtual void DrawModelStaticProp( const DrawModelInfo_t& info, const matrix3x4_t &modelToWorld, int flags = STUDIORENDER_DRAW_ENTIRE_MODEL );
 	virtual void DrawStaticPropDecals( const DrawModelInfo_t &drawInfo, const matrix3x4_t &modelToWorld );
 	virtual void DrawStaticPropShadows( const DrawModelInfo_t &drawInfo, const matrix3x4_t &modelToWorld, int flags );
@@ -145,6 +158,7 @@ public:
 	virtual void UnlockBoneMatrices();
 	virtual void LockFlexWeights( int nWeightCount, float **ppFlexWeights, float **ppFlexDelayedWeights = NULL );
 	virtual void UnlockFlexWeights();
+	virtual void GetMaterialOverride( IMaterial** ppOutForcedMaterial, OverrideType_t* pOutOverrideType );
 
 	// Other public methods
 public:
@@ -185,7 +199,7 @@ private:
 
 	// Helper methods used to construct static meshes
 	int GetNumBoneWeights( const OptimizedModel::StripGroupHeader_t *pGroup );
-	VertexFormat_t CStudioRenderContext::CalculateVertexFormat( const studiohdr_t *pStudioHdr, const studioloddata_t *pStudioLodData,
+	VertexFormat_t CalculateVertexFormat( const studiohdr_t *pStudioHdr, const studioloddata_t *pStudioLodData,
 																const mstudiomesh_t* pMesh, OptimizedModel::StripGroupHeader_t *pGroup, bool bIsHwSkinned );
 	bool MeshNeedsTangentSpace( studiohdr_t *pStudioHdr, studioloddata_t *pStudioLodData, mstudiomesh_t* pMesh );
 	void R_StudioBuildMeshGroup( const char *pModelName, bool bNeedsTangentSpace, studiomeshgroup_t* pMeshGroup,
@@ -202,16 +216,6 @@ private:
 	// Computes LOD
 	int ComputeRenderLOD( IMatRenderContext *pRenderContext, const DrawModelInfo_t& info, const Vector &origin, float *pMetric );
 
-	// Allocates matrices for use in queueing 
-	matrix3x4_t *CreateQueuedMatrices( int nMatrixCount, const matrix3x4_t *pBoneToWorld );
-
-	// Allocates flex weights for use in queueing 
-	float *CreateQueuedFlexWeights( int nWeightCount, float *pWeights );
-
-	// Allocates shadow data for use in queueing 
-	void *CreateQueuedShadowData( int nSizeInBytes, void *pSrc );
-	template<typename T> T* CreateQueuedShadowData( T* pSrc ) { return (T*)CreateQueuedShadowData( sizeof(T), pSrc ); }
-
 	// This invokes proxies of all materials that are queued to be rendered
 	void InvokeBindProxies( const DrawModelInfo_t &info );
 
@@ -227,13 +231,6 @@ private:
 	// Used by the lighting computation methods,
 	// this is only here to prevent constructors in lightpos_t from being repeatedly run
 	lightpos_t m_pLightPos[MAXLIGHTCOMPUTE];
-
-	// Allocates copies of bone-to-world matrices if necessary
-	CMemoryStack m_BoneToWorldMatrices[2];
-	
-	// Allocates flex weight data if necessary
-	CMemoryStack m_FlexWeights[2];
-	int m_nCurrentStack;
 };
 
 

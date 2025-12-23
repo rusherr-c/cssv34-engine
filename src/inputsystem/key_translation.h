@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,8 +10,8 @@
 #pragma once
 #endif
 
-#include "inputsystem/buttoncode.h"
-#include "inputsystem/analogcode.h"
+#include "inputsystem/ButtonCode.h"
+#include "inputsystem/AnalogCode.h"
 
 // Call this to initialize the system
 void ButtonCode_InitKeyTranslationTable();
@@ -33,5 +33,6 @@ const char *ButtonCode_ButtonCodeToString( ButtonCode_t code, bool bXController 
 const char *AnalogCode_AnalogCodeToString( AnalogCode_t code );
 ButtonCode_t ButtonCode_StringToButtonCode( const char *pString, bool bXController );
 AnalogCode_t AnalogCode_StringToAnalogCode( const char *pString );
+ButtonCode_t ButtonCode_SKeyToButtonCode( int nPort, int keyCode );
 
 #endif // KEY_TRANSLATION_H

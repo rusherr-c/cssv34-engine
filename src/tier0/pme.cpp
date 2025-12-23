@@ -1,14 +1,10 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
 
 #include "pch_tier0.h"
-#ifdef _LINUX
-#include "pme_linux.cpp"
-#else
-
 #define WINDOWS_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -154,4 +150,3 @@ void CL2Cache::Validate( CValidator &validator, tchar *pchName )
 }
 #endif // DBGFLAG_VALIDATE
 
-#endif // _LINUX

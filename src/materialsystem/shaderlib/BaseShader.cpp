@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,7 +34,9 @@ IShaderInit *CBaseShader::s_pShaderInit;
 int CBaseShader::s_nModulationFlags;
 CMeshBuilder *CBaseShader::s_pMeshBuilder;
 static ConVar mat_fullbright( "mat_fullbright","0", FCVAR_CHEAT );
-	
+
+bool g_shaderConfigDumpEnable = false; //true;		//DO NOT CHECK IN ENABLED FIXME
+
 //-----------------------------------------------------------------------------
 // constructor
 //-----------------------------------------------------------------------------
@@ -283,7 +285,7 @@ CMeshBuilder* CBaseShader::MeshBuilder()
 //-----------------------------------------------------------------------------
 // Loads a texture
 //-----------------------------------------------------------------------------
-void CBaseShader::LoadTexture( int nTextureVar )
+void CBaseShader::LoadTexture( int nTextureVar, int nAdditionalCreationFlags /* = 0 */ )
 {
 	if ((!s_ppParams) || (nTextureVar == -1))
 		return;
@@ -291,14 +293,10 @@ void CBaseShader::LoadTexture( int nTextureVar )
 	IMaterialVar* pNameVar = s_ppParams[nTextureVar];
 	if( pNameVar && pNameVar->IsDefined() )
 	{
-		s_pShaderInit->LoadTexture( pNameVar, s_pTextureGroupName );
+		s_pShaderInit->LoadTexture( pNameVar, s_pTextureGroupName, nAdditionalCreationFlags );
 	}
 }
 
-void CBaseShader::LoadTexture(int nTextureVar, int flags)
-{
-	LoadTexture(nTextureVar);
-}
 
 //-----------------------------------------------------------------------------
 // Loads a bumpmap
@@ -319,7 +317,7 @@ void CBaseShader::LoadBumpMap( int nTextureVar )
 //-----------------------------------------------------------------------------
 // Loads a cubemap
 //-----------------------------------------------------------------------------
-void CBaseShader::LoadCubeMap( int nTextureVar )
+void CBaseShader::LoadCubeMap( int nTextureVar, int nAdditionalCreationFlags /* = 0 */ )
 {
 	if ((!s_ppParams) || (nTextureVar == -1))
 		return;
@@ -327,18 +325,14 @@ void CBaseShader::LoadCubeMap( int nTextureVar )
 	IMaterialVar* pNameVar = s_ppParams[nTextureVar];
 	if( pNameVar && pNameVar->IsDefined() )
 	{
-		s_pShaderInit->LoadCubeMap( s_ppParams, pNameVar );
+		s_pShaderInit->LoadCubeMap( s_ppParams, pNameVar, nAdditionalCreationFlags );
 	}
 }
 
-void CBaseShader::LoadCubeMap(int nTextureVar, int)
-{
-	LoadCubeMap(nTextureVar);
-}
 
 ShaderAPITextureHandle_t CBaseShader::GetShaderAPITextureBindHandle( int nTextureVar, int nFrameVar, int nTextureChannel )
 {
-	Assert( !IsSnapshotting() );
+//	Assert( !IsSnapshotting() );
 	Assert( nTextureVar != -1 );
 	Assert ( s_ppParams );
 
@@ -372,7 +366,7 @@ void CBaseShader::BindTexture( Sampler_t sampler1, Sampler_t sampler2, int nText
 	{
 		int nFrame = pFrameVar ? pFrameVar->GetIntValue() : 0;
 
-		if ( sampler2 == -1 )
+		if ( sampler2 == Sampler_t(-1) )
 		{
 			GetShaderSystem()->BindTexture( sampler1, pTextureVar->GetTextureValue(), nFrame );
 		}
@@ -393,13 +387,27 @@ void CBaseShader::BindTexture( Sampler_t sampler1, Sampler_t sampler2, ITexture 
 {
 	Assert( !IsSnapshotting() );
 
-	if ( sampler2 == -1 )
+	if ( sampler2 == Sampler_t(-1 ) )
 	{
 		GetShaderSystem()->BindTexture( sampler1, pTexture, nFrame );
 	}
 	else
 	{
 		GetShaderSystem()->BindTexture( sampler1, sampler2, pTexture, nFrame );
+	}
+}
+
+void CBaseShader::GetTextureDimensions( float* pOutWidth, float* pOutHeight, int nTextureVar )
+{
+	Assert( pOutWidth && pOutHeight ); // Outputs must be provided.
+	Assert( nTextureVar != -1 );
+
+	IMaterialVar* pTextureVar = s_ppParams[nTextureVar];
+
+	if (pTextureVar && pTextureVar->GetTextureValue())
+	{
+		*pOutWidth = (float) (pTextureVar->GetTextureValue()->GetActualWidth());
+		*pOutHeight = (float) (pTextureVar->GetTextureValue()->GetActualHeight());
 	}
 }
 
@@ -1353,8 +1361,6 @@ void CBaseShader::FixedFunctionBaseTimesDetailPass( int baseTextureVar,
 
 	if (IsSnapshotting())
 	{
-		IMaterialVar** params = s_ppParams;
-
 		s_pShaderShadow->EnableTexGen( SHADER_TEXTURE_STAGE0, false );
 		s_pShaderShadow->EnableTexGen( SHADER_TEXTURE_STAGE1, false );
 
@@ -1643,6 +1649,102 @@ bool CBaseShader::UsingEditor( IMaterialVar **params ) const
 	{
 		return s_pShaderAPI->InEditorMode();
 	}
+}
+
+void CBaseShader::DrawFlashlight_dx70( 
+	IMaterialVar** params, IShaderDynamicAPI *pShaderAPI, IShaderShadow* pShaderShadow, 
+	int flashlightTextureVar, int flashlightTextureFrameVar,
+	bool suppress_lighting )
+{
+	SHADOW_STATE
+	{
+		SET_FLAGS2( MATERIAL_VAR2_NEEDS_FIXED_FUNCTION_FLASHLIGHT );
+		pShaderShadow->EnableDepthWrites( false );
+		pShaderShadow->EnableAlphaWrites( false );
+
+		// Alpha test
+//		pShaderShadow->EnableAlphaTest( IS_FLAG_SET( MATERIAL_VAR_ALPHATEST ) );
+		bool bIsAlphaTested = IS_FLAG_SET( MATERIAL_VAR_ALPHATEST ) != 0;
+		if( bIsAlphaTested )
+		{
+			// disable alpha test and use the zfunc zequals since alpha isn't guaranteed to 
+			// be the same on both the regular pass and the flashlight pass.
+			s_pShaderShadow->EnableAlphaTest( false );
+			s_pShaderShadow->DepthFunc( SHADER_DEPTHFUNC_EQUAL );
+		}
+
+		// Alpha blend
+		SetAdditiveBlendingShadowState( BASETEXTURE, true );
+		
+		int flags = SHADER_DRAW_POSITION | SHADER_DRAW_TEXCOORD1 | SHADER_DRAW_COLOR | SHADER_DRAW_NORMAL;
+		pShaderShadow->DrawFlags( flags );
+		FogToBlack();
+
+		if ( !suppress_lighting )
+			pShaderShadow->EnableLighting( true );
+
+		pShaderShadow->EnableCustomPixelPipe( true );
+		pShaderShadow->CustomTextureStages( 2 );
+
+		// color stage 0
+		// projected texture * vertex color (lighting)
+		pShaderShadow->CustomTextureOperation( SHADER_TEXTURE_STAGE0, 
+			SHADER_TEXCHANNEL_COLOR, 
+			SHADER_TEXOP_MODULATE,
+			SHADER_TEXARG_TEXTURE, 
+			SHADER_TEXARG_VERTEXCOLOR );
+
+		// color stage 1
+		// * base texture
+		pShaderShadow->CustomTextureOperation( SHADER_TEXTURE_STAGE1, 
+			SHADER_TEXCHANNEL_COLOR, 
+			SHADER_TEXOP_MODULATE,
+			SHADER_TEXARG_TEXTURE, SHADER_TEXARG_PREVIOUSSTAGE );
+
+		// alpha stage 0
+		// get alpha from constant alpha
+		pShaderShadow->CustomTextureOperation( SHADER_TEXTURE_STAGE0, 
+			SHADER_TEXCHANNEL_ALPHA, 
+			SHADER_TEXOP_SELECTARG1,
+			SHADER_TEXARG_CONSTANTCOLOR, SHADER_TEXARG_NONE );
+
+		// alpha stage 1
+		// get alpha from $basetexture
+		pShaderShadow->CustomTextureOperation( SHADER_TEXTURE_STAGE1, 
+			SHADER_TEXCHANNEL_ALPHA, 
+			SHADER_TEXOP_MODULATE,
+			SHADER_TEXARG_TEXTURE, SHADER_TEXARG_PREVIOUSSTAGE );
+
+		pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+		pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+
+		// Shove the view position into texcoord 0 before the texture matrix.
+		pShaderShadow->TexGen( SHADER_TEXTURE_STAGE0, SHADER_TEXGENPARAM_EYE_LINEAR );
+		pShaderShadow->EnableTexGen( SHADER_TEXTURE_STAGE0, true );
+	}
+	DYNAMIC_STATE
+	{
+		SetFlashlightFixedFunctionTextureTransform( MATERIAL_TEXTURE0 );
+
+		// NOTE: This has to come after the loadmatrix since the loadmatrix screws with the
+		// transform flags!!!!!!
+		// Specify that we have XYZ texcoords that need to be divided by W before the pixel shader.
+		// NOTE Tried to divide XY by Z, but doesn't work.
+		pShaderAPI->SetTextureTransformDimension( SHADER_TEXTURE_STAGE0, 3, true );
+		
+		BindTexture( SHADER_SAMPLER0, flashlightTextureVar, flashlightTextureFrameVar );
+		if( params[BASETEXTURE]->IsTexture() )
+		{
+			BindTexture( SHADER_SAMPLER1, BASETEXTURE, FRAME );
+		}
+		else
+		{
+			pShaderAPI->BindStandardTexture( SHADER_SAMPLER1, TEXTURE_GREY );
+		}
+		
+		SetModulationDynamicState();
+	}
+	Draw();
 }
 
 void CBaseShader::SetFlashlightFixedFunctionTextureTransform( MaterialMatrixMode_t matrix )

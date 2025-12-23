@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -85,6 +85,14 @@ void CShaderShadowDx10::EnableBlending( bool bEnable )
 }
 
 void CShaderShadowDx10::BlendFunc( ShaderBlendFactor_t srcFactor, ShaderBlendFactor_t dstFactor )
+{
+}
+
+void CShaderShadowDx10::BlendOp( ShaderBlendOp_t blendOp )
+{
+}
+
+void CShaderShadowDx10::BlendOpSeparateAlpha( ShaderBlendOp_t blendOp )
 {
 }
 

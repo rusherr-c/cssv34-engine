@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,15 +29,12 @@ class CDecalVert
 {
 public:
 	Vector		m_vPos;
+	int			m_decalIndex;		// used by the cache code
 
 	// These are the texcoords for the decal itself
 	Vector2D	m_ctCoords;
-	//Vector2d32 m_ctCoords;
-
-
 	// Lightmap texcoords for the decal.
 	Vector2D	m_cLMCoords;
-	//Vector2d32 m_cLMCoords;
 };
 
 
@@ -47,16 +44,14 @@ CDecalVert* R_DoDecalSHClip(
 	CDecalVert *pOutVerts, 
 	decal_t *pDecal, 
 	int nStartVerts,
-	const Vector &vecNormal,
-	int *pVertCount );
+	const Vector &vecNormal );
 
 // Generate clipped vertex list for decal pdecal projected onto polygon psurf
 CDecalVert* R_DecalVertsClip( 
 	CDecalVert *pOutVerts, 
 	decal_t *pDecal, 
 	SurfaceHandle_t surfID, 
-	IMaterial *pMaterial, 
-	int *pVertCount );
+	IMaterial *pMaterial );
 
 // Compute the unscaled basis for the decal.
 void R_DecalComputeBasis( 
@@ -73,5 +68,6 @@ void R_SetupDecalTextureSpaceBasis(
 	Vector textureSpaceBasis[3],
 	float decalWorldScale[2] );
 
+extern ALIGN16 CDecalVert g_DecalClipVerts[MAX_DECALCLIPVERT] ALIGN16_POST;
 
 #endif // DECAL_CLIP_H

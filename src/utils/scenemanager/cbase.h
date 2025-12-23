@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,7 +19,7 @@
 #include "mxtk/mx.h"
 #include "mxtk/mxwindow.h"
 #include "tier0/dbg.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "vstdlib/random.h"
 #include "sharedInterface.h"
 #include "scenemanager_tools.h"

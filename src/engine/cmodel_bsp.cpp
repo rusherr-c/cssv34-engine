@@ -1,10 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //=============================================================================//
 
+#include "tier0/platform.h"
 #include "sysexternal.h"
 #include "cmodel_engine.h"
 #include "dispcoll_common.h"
@@ -27,7 +28,7 @@ extern IMaterialSystem *materials;
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-extern bool g_bServerGameDLLGreaterThanV4;
+extern int g_iServerGameDLLVersion;
 IPhysicsSurfaceProps *physprop = NULL;
 IPhysicsCollision	 *physcollision = NULL;
 
@@ -1005,7 +1006,9 @@ void CollisionBSPData_LoadEntityString( CCollisionBSPData *pBSPData )
 
 	pBSPData->numentitychars = lh.LumpSize();
 	MEM_ALLOC_CREDIT();
-	pBSPData->map_entitystring.Init( lh.GetDiskName(), lh.LumpOffset(), lh.LumpSize(), IsX360() ? lh.LumpBase() : NULL );
+	char szMapName[MAX_PATH] = { 0 };
+	V_strncpy( szMapName, lh.GetMapName(), sizeof( szMapName ) );
+	pBSPData->map_entitystring.Init( szMapName, lh.LumpOffset(), lh.LumpSize(), lh.LumpBase() );
 }
 
 
@@ -1020,7 +1023,7 @@ void CollisionBSPData_LoadPhysics( CCollisionBSPData *pBSPData )
 	// backwards compat support for older game dlls
 	// they crash if they don't have vcollide data for terrain 
 	// even though the new engine ignores it
-	if ( !g_bServerGameDLLGreaterThanV4 )
+	if ( g_iServerGameDLLVersion >= 5 )
 	{
 		// if there's a linux lump present, go ahead and load it
 		// otherwise, the win32 lump will work as long as it doesn't have any

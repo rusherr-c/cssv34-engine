@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// The copyright to the contents herein is the property of Valve, L.L.C.
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // The contents may be used and/or copied only with the written permission of
 // Valve, L.L.C., or in accordance with the terms and conditions stipulated in
 // the agreement/contract under which the contents have been supplied.
@@ -16,8 +16,11 @@
 
 
 // Standard includes
+
 #include <conio.h>
 #include <stdarg.h>
+#include <math.h>
+#include <time.h>
 
 
 // Valve includes
@@ -44,11 +47,14 @@
 #include "movieobjects/dmeselection.h"
 #include "movieobjects/dmecombinationoperator.h"
 #include "movieobjects/dmobjserializer.h"
+#include "movieobjects/dmsmdserializer.h"
 #include "movieobjects/dmmeshcomp.h"
-#include "movieobjects/dmmeshutils.h"
 #include "movieobjects/dmemodel.h"
+#include "movieobjects/dmedccmakefile.h"
+#include "movieobjects/dmmeshutils.h"
 #include "tier1/utlstring.h"
 #include "tier1/utlbuffer.h"
+#include "tier2/p4helpers.h"
 
 
 // Lua includes
@@ -62,19 +68,10 @@
 
 
 //-----------------------------------------------------------------------------
-// Standard spew functions
+// Statics
 //-----------------------------------------------------------------------------
-static SpewRetval_t SpewStdout( SpewType_t spewType, char const *pMsg )
-{
-	if ( !pMsg )
-		return SPEW_CONTINUE;
-
-	printf( pMsg );
-	fflush( stdout );
-
-	return ( spewType == SPEW_ASSERT ) ? SPEW_DEBUGGER : SPEW_CONTINUE; 
-}
-
+LuaFunc_s *LuaFunc_s::s_pFirstFunc = NULL;
+CDmxEdit LuaFunc_s::m_dmxEdit;
 
 //-----------------------------------------------------------------------------
 //
@@ -129,6 +126,15 @@ CDmxEdit::CDmxEdit()
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+void CDmxEdit::SetScriptFilename( const char *pFilename )
+{
+	m_scriptFilename = pFilename;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::Load( const char *pFilename, const CObjType &loadType /* = DIST_ABSOLUTE */ )
 {
 	Unload();
@@ -136,14 +142,12 @@ bool CDmxEdit::Load( const char *pFilename, const CObjType &loadType /* = DIST_A
 	const int sLen = Q_strlen( pFilename );
 	if ( sLen > 4 && !Q_stricmp( pFilename + sLen - 4, ".dmx" ) )
 	{
-		Msg( "// Loading DMX: \"%s\"\n", pFilename );
 		g_pDataModel->RestoreFromFile( pFilename, NULL, NULL, &m_pRoot );
 
 		if ( !m_pRoot )
-		{
-			Error( "// ERROR: DMX Load of \"%s\" Failed\n", pFilename );
-			return false;
-		}
+			return SetErrorString( "DMX Load Failed" );
+
+		g_p4factory->AccessFile( pFilename )->Add();
 
 		// Find the first mesh with any deltas
 		// Look for model
@@ -188,34 +192,32 @@ bool CDmxEdit::Load( const char *pFilename, const CObjType &loadType /* = DIST_A
 				if ( pFirstMesh )
 				{
 					m_pMesh = pFirstMesh;
-					Msg( "// Warning: Couldn't Find Any DmeMesh With Delta States in %s, Using First Mesh %s\n", pFilename, m_pMesh->GetName() );
+					LuaWarning( "Cannot Find A DmeMesh With Any Delta States In File, Using First Found Mesh %s", m_pMesh->GetName() );
 				}
 				else
 				{
-					Msg( "// Error: Couldn't Find Any DmeMeshes %s\n", pFilename );
+					LuaWarning( "Cannot Find A DmeMesh In File" );
 				}
 			}
 		}
 		else
 		{
-			Msg( "// ERROR: Couldn't Find Any DmeModel as an element of Dme Root object: %s in %s\n", m_pRoot->GetName(), pFilename );
+			LuaWarning( "Cannot Find A DmeModel As Element Dme Root Object: %s in %s", m_pRoot->GetName(), pFilename );
 		}
+	}
+	else if ( sLen > 4 && !V_stricmp( pFilename + sLen - 4, ".smd" ) )
+	{
+		m_pRoot = CDmSmdSerializer().ReadSMD( pFilename, &m_pMesh );
 
-		Msg( "// DMX Loaded: \"%s\"\n", pFilename );
+		if ( !m_pRoot )
+			return SetErrorString( "OBJ Load Failed" );
 	}
 	else
 	{
-		Msg( "// Loading OBJ: \"%s\"\n", pFilename );
-
 		m_pRoot = CDmObjSerializer().ReadOBJ( pFilename, &m_pMesh, true, loadType() == CObjType::kAbsolute );
 
 		if ( !m_pRoot )
-		{
-			Error( "// ERROR: OBJ Load of \"%s\" Failed\n", pFilename );
-			return false;
-		}
-
-		Msg( "// OBJ Loaded: \"%s\"\n", pFilename );
+			return SetErrorString( "OBJ Load Failed" );
 	}
 
 	m_filename = pFilename;
@@ -244,6 +246,51 @@ bool CDmxEdit::Load( const char *pFilename, const CObjType &loadType /* = DIST_A
 
 
 //-----------------------------------------------------------------------------
+// Lua Interface to CDmxEdit::Load
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Load,
+	"< $file.dmx | $file.obj >, [ $loadType ]",
+	"Replaces the current scene with the specified scene.  The current mesh will be set to the first mesh with a combination operator found in the new scene.  $loadType is one of \"absolute\" or \"relative\".  If not specified, \"absolute\" is assumed." )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pFilename = luaL_checkstring( pLuaState, 1 );
+
+	const char *pLoadType = NULL;
+
+	if ( lua_isboolean( pLuaState, 2 ) )
+	{
+		if ( lua_toboolean( pLuaState, 2 ) )
+		{
+			pLoadType = "Absolute";
+		}
+		else
+		{
+			pLoadType = "Relative";
+		}
+	}
+	else if ( lua_isstring( pLuaState, 2 ) )
+	{
+		pLoadType = lua_tostring( pLuaState, 2 );
+	}
+
+	if ( pLoadType )
+	{
+		if ( LuaFunc_s::m_dmxEdit.Load( pFilename, pLoadType ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.Load( pFilename ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
 // Imports the Dmx Model file into the current file
 //-----------------------------------------------------------------------------
 bool CDmxEdit::Import( const char *pFilename, const char *pParentName )
@@ -255,22 +302,36 @@ bool CDmxEdit::Import( const char *pFilename, const char *pParentName )
 
 	CDmeModel *pDstModel = m_pRoot->GetValueElement< CDmeModel >( "model" );
 	if ( !pDstModel )
+		return SetErrorString( "Can't Find Existing Model Node" );
+
+	CDisableUndoScopeGuard sgDisableUndo;
+
+	CDmElement *pRoot = NULL;
+	g_pDataModel->RestoreFromFile( pFilename, NULL, NULL, &pRoot, CR_FORCE_COPY );
+
+	if ( !pRoot )
+		return SetErrorString( "Can't Load DMX File" );
+
+	g_p4factory->AccessFile( pFilename )->Add();
+
+	CDmeDag *pSrcModel = pRoot->GetValueElement< CDmeDag >( "model" );
+	if ( !pSrcModel )
 	{
-		Msg( "// ERROR: Import( \"%s\" ); - Failed: Can't find existing model node\n", pFilename );
-		return false;
+		g_pDataModel->UnloadFile( pRoot->GetFileId() );
+		return SetErrorString( "Can't Find \"model\" Element On Root Node In DMX File" );
 	}
 
 	int nSkinningJointIndex = -1;
 
 	if ( pParentName )
 	{
-		CDmeTransform *pTransform = NULL;
+		CDmeTransform *pJoint = NULL;
 
 		const int nJointTransformCount = pDstModel->GetJointTransformCount();
 		for ( int i = 0; i < nJointTransformCount; ++i )
 		{
-			pTransform = pDstModel->GetJointTransform( i );
-			if ( !Q_stricmp( pTransform->GetName(), pParentName ) )
+			pJoint = pDstModel->GetJointTransform( i );
+			if ( !Q_stricmp( pJoint->GetName(), pParentName ) )
 			{
 				nSkinningJointIndex = i;
 				break;
@@ -279,32 +340,13 @@ bool CDmxEdit::Import( const char *pFilename, const char *pParentName )
 
 		if ( nSkinningJointIndex < 0 )
 		{
-			Warning( "// WARNING: Import( \"%s\" ); - Couldn't Find parent bone \"%s\"\n", pFilename, pParentName );
+			LuaWarning( "Couldn't Find Parent Bone \"%s\"", pParentName );
 		}
 	}
 
-	Msg( "// Import( \"%s\" );\n", pFilename );
+	CleanupWork();
 
-	CDisableUndoScopeGuard sgDisableUndo;
-
-	CDmElement *pRoot = NULL;
-	g_pDataModel->RestoreFromFile( pFilename, NULL, NULL, &pRoot, CR_FORCE_COPY );
-
-	if ( !pRoot )
-	{
-		Msg( "// ERROR: Import( \"%s\" ); - Failed: Couldn't Load Dmx File\n", pFilename );
-		return false;
-	}
-
-	CDmeDag *pSrcModel = pRoot->GetValueElement< CDmeDag >( "model" );
-	if ( !pSrcModel )
-	{
-		Msg( "// ERROR: Import( \"%s\" ); - Failed: Couldn't Find \"model\" element on root\n", pFilename );
-		g_pDataModel->UnloadFile( pRoot->GetFileId() );
-		return false;
-	}
-
-//	CDmeCombinationOperator *pCombo = m_pRoot->GetValueElement< CDmeCombinationOperator >( "combinationOperator" );
+	//	CDmeCombinationOperator *pCombo = m_pRoot->GetValueElement< CDmeCombinationOperator >( "combinationOperator" );
 
 	// Initialize traversal stack to just model's children (don't want to touch model)
 	CUtlStack< CDmeDag * > traverseStack;
@@ -334,32 +376,139 @@ bool CDmxEdit::Import( const char *pFilename, const char *pParentName )
 
 	g_pDataModel->UnloadFile( pRoot->GetFileId() );
 
-	return false;
+	CreateWork();
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+// Lua Interface for CDmxEdit::Import
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Import,
+	"< $file.dmx >, [ $parentBone ]",
+	"Imports the specified DMX model into the scene.  The imported model can optionally be parented (which implictly skins it) to a specified bone in the existing scene via $parentBone." )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pFilename = luaL_checkstring( pLuaState, 1 );
+	const char *pParentBone = lua_isstring( pLuaState, 2 ) ? lua_tostring( pLuaState, 2 ) : NULL;
+
+	if ( LuaFunc_s::m_dmxEdit.Import( pFilename, pParentBone ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-void CDmxEdit::ListDeltas()
+bool CDmxEdit::ListDeltas()
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: No base mesh is currently defined\n" );
-		return;
-	}
+		return SetErrorString( "No Mesh" );
 
 	const int nDeltas( m_pMesh->DeltaStateCount() );
 	if ( nDeltas <= 0 )
-	{
-		Error( "// ERROR: No deltas defined for mesh: %s\n", m_pMesh->GetName() );
-		return;
-	}
+		return SetErrorString( "No Deltas Defined On Mesh: %s", m_pMesh->GetName() );
 
 	for ( int i( 0 ); i < nDeltas; ++i )
 	{
 		Msg( "// Delta %d: %s\n", i, m_pMesh->GetDeltaState( i )->GetName() );
 	}
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	ListDeltas,
+	"",
+	"Prints a list of all of the deltas present in the current mesh" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( LuaFunc_s::m_dmxEdit.ListDeltas() )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+int CDmxEdit::DeltaCount()
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	return m_pMesh->DeltaStateCount();
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	DeltaCount,
+	"",
+	"Returns the number of deltas in the current mesh" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	lua_pushnumber( pLuaState, LuaFunc_s::m_dmxEdit.DeltaCount() );
+
+	return 1;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+const char *CDmxEdit::DeltaName( int nDeltaStateIndex )
+{
+	if ( !m_pMesh )
+	{
+		SetErrorString( "No Mesh" );
+		return NULL;
+	}
+
+	if ( nDeltaStateIndex >= m_pMesh->DeltaStateCount() )
+	{
+		SetErrorString( "Delta Index Too High" );
+		return NULL;
+	}
+
+	return m_pMesh->GetDeltaState( nDeltaStateIndex )->GetName();
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	DeltaName,
+	"< #deltaIndex >",
+	"Returns the name of the delta at the specified index.  Use DeltaCount() to get a count of how many deltas are present" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const int nDeltaIndex = luaL_checknumber( pLuaState, 1 );
+
+	const char *pDeltaName = LuaFunc_s::m_dmxEdit.DeltaName( nDeltaIndex );
+	if ( pDeltaName )
+	{
+		lua_pushstring( pLuaState, pDeltaName );
+		return 1;
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -393,17 +542,11 @@ void CDmxEdit::Unload()
 bool CDmxEdit::ImportComboRules( const char *pFilename, bool bOverwrite /* = true */, bool bPurgeDeltas /* = false */ )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: ImportComboRules( \"%s\" ) Failed - No Mesh\n", pFilename );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	CDmeCombinationOperator *pDestCombo( FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" ) );
 	if ( !pDestCombo )
-	{
-		Error( "// ERROR: ImportComboRules( \"%s\" ) Failed - No Combination Operator On Mesh \"%s\"\n", pFilename, m_pMesh->GetName() );
-		return false;
-	}
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
 
 	CDisableUndoScopeGuard sg;
 
@@ -411,10 +554,9 @@ bool CDmxEdit::ImportComboRules( const char *pFilename, bool bOverwrite /* = tru
 	g_pDataModel->RestoreFromFile( pFilename, NULL, NULL, &pRoot, CR_FORCE_COPY );
 
 	if ( !pRoot )
-	{
-		Error( "// ERROR: ImportComboRules( \"%s\" ) Failed - File Cannot Be Read\n", pFilename );
-		return false;
-	}
+		return SetErrorString( "File Cannot Be Read" );
+
+	g_p4factory->AccessFile( pFilename )->Add();
 
 	// Try to find a combination system in the file
 	CDmeCombinationOperator *pCombo = CastElement< CDmeCombinationOperator >( pRoot );
@@ -424,10 +566,7 @@ bool CDmxEdit::ImportComboRules( const char *pFilename, bool bOverwrite /* = tru
 	}
 
 	if ( !pCombo )
-	{
-		Error( "// ERROR: ImportComboRules( \"%s\" ) Failed - No Combination Operator Found In File\n", pFilename );
-		return false;
-	}
+		return SetErrorString( "No DmeCombinationOperator Found In File" );
 
 	ImportCombinationControls( pCombo, pDestCombo, bOverwrite );
 	ImportDominationRules( pDestCombo, pCombo, bOverwrite );
@@ -441,9 +580,42 @@ bool CDmxEdit::ImportComboRules( const char *pFilename, bool bOverwrite /* = tru
 		CDmMeshUtils::PurgeUnusedDeltas( m_pMesh );
 	}
 
-	Msg( "// ImportComboRules( \"%s\" );\n", pFilename );
-
 	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	ImportComboRules,
+	"< $rules.dmx >, [ #bOverwrite ], [ #bPurgeDeltas ]",
+	"Imports the combintion rules from the specified dmx file and replaces the current rules with those from the file is #bOverwrite specified or is true.  If #bOverwrite is false then any existing controls that are not in the imported rules file are preserved.  If #bPurgeDeltas is specified and is true, then any delta states which are no longer referred to by any combination rule or control will be purged. ")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pFilename = luaL_checkstring( pLuaState, 1 );
+
+	if ( lua_isboolean( pLuaState, 2 ) ) 
+	{
+		if ( lua_isboolean( pLuaState, 3 ) )
+		{
+			if ( LuaFunc_s::m_dmxEdit.ImportComboRules( pFilename, lua_toboolean( pLuaState, 2 ) != 0, lua_toboolean( pLuaState, 3 ) != 0 ) )
+				return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+		}
+		else
+		{
+			if ( LuaFunc_s::m_dmxEdit.ImportComboRules( pFilename, lua_toboolean( pLuaState, 2 ) != 0 ) )
+				return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+		}
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.ImportComboRules( pFilename ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -644,18 +816,20 @@ void CDmxEdit::ImportCombinationControls( CDmeCombinationOperator *pSrcComboOp, 
 	// for which a delta state exists, create that control
 	// All conflicts were resolved previously
 
+	CUtlVectorFixedGrowable< bool, 256 > foundMatch;
+
 	for ( int i = 0; i < pSrcComboOp->GetControlCount(); ++i )
 	{
 		const char *pControlName = pSrcComboOp->GetControlName( i );
 
 		int nRawControls = pSrcComboOp->GetRawControlCount( i );
 		int nMatchCount = 0; 
-		bool *pFoundMatch = (bool*)_alloca( nRawControls * sizeof(bool) );
+		foundMatch.EnsureCount( nRawControls );
 		for ( int j = 0; j < nRawControls; ++j )
 		{
 			const char *pRawControl = pSrcComboOp->GetRawControlName( i, j );
-			pFoundMatch[j] = pDstComboOp->DoesTargetContainDeltaState( pRawControl );
-			nMatchCount += pFoundMatch[j];
+			foundMatch[j] = pDstComboOp->DoesTargetContainDeltaState( pRawControl );
+			nMatchCount += foundMatch[j];
 		}
 
 		// No match? Don't import
@@ -673,7 +847,7 @@ void CDmxEdit::ImportCombinationControls( CDmeCombinationOperator *pSrcComboOp, 
 		pDstComboOp->SetEyelidControl( index, pSrcComboOp->IsEyelidControl( i ) );
 		for ( int j = 0; j < nRawControls; ++j )
 		{
-			if ( pFoundMatch[j] )
+			if ( foundMatch[j] )
 			{
 				const char *pRawControl = pSrcComboOp->GetRawControlName( i, j );
 				float flWrinkleScale = pSrcComboOp->GetRawControlWrinkleScale( i, j );
@@ -692,21 +866,32 @@ void CDmxEdit::ImportCombinationControls( CDmeCombinationOperator *pSrcComboOp, 
 bool CDmxEdit::SetState( const char *pDeltaName )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: SetState( \"%s\" ); Failed - No Mesh\n", pDeltaName );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
 	if ( !pDelta )
-	{
-		Error( "// ERROR: SetState( \"%s\" ); Failed - Invalid Delta\n", pDeltaName );
-		return false;
-	}
-
-	Msg( "// SetState( \"%s\" );\n", pDelta->GetName() );
+		return SetErrorString( "Invalid Delta \"%s\"", pDeltaName );
 
 	return m_pMesh->SetBaseStateToDelta( pDelta );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SetState,
+	"< $delta >",
+	"Sets the current mesh to the specified $delta")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pDeltaName = luaL_checkstring( pLuaState, 1 );
+
+	if ( LuaFunc_s::m_dmxEdit.SetState( pDeltaName ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -716,14 +901,26 @@ bool CDmxEdit::SetState( const char *pDeltaName )
 bool CDmxEdit::ResetState()
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: ResetState() Failed - No Mesh\n" );
-		return false;
-	}
-
-	Msg( "// ResetState();\n" );
+		return SetErrorString( "No Mesh" );
 
 	return m_pMesh->SetBaseStateToDelta( NULL );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	ResetState,
+	"",
+	"Resets the current mesh back to the default base state, i.e. no deltas active")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( LuaFunc_s::m_dmxEdit.ResetState() )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -740,11 +937,38 @@ bool CDmxEdit::Select( const char *pSelectTypeString, CDmeSingleIndexedComponent
 		if ( pDelta)
 			return Select( pDelta, pPassedSelection, pPassedMesh );
 
-		Error( "// ERROR: Select( \"%s\" ) Failed - Invalid Delta\n", pSelectTypeString );
-		return false;
+		return SetErrorString( "Invalid Delta \"%s\"", pSelectTypeString );
 	}
 
 	return Select( selectType, pPassedSelection, pPassedMesh );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Select,
+	"< $delta >, [ $type ]",
+	"Changes the selection based on the vertices present in the specified $delta.  $type is one of \"add\", \"subtract\", \"toggle\", \"intersect\", \"replace\".  If $type is not specified, \"add\" is assumed.")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pSelect1 = luaL_checkstring( pLuaState, 1 );
+	const char *pSelect2 = lua_tostring( pLuaState, 2 );
+
+	if ( pSelect2 )
+	{
+		if ( LuaFunc_s::m_dmxEdit.Select( pSelect1, pSelect2 ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.Select( pSelect1 ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -754,28 +978,17 @@ bool CDmxEdit::Select( const char *pSelectTypeString, CDmeSingleIndexedComponent
 bool CDmxEdit::Select( CDmeVertexDeltaData *pDelta, CDmeSingleIndexedComponent *pPassedSelection /* = NULL */, CDmeMesh *pPassedMesh /* = NULL */ )
 {
 	if ( !pDelta )
-	{
-		Error( "// ERROR: Select() Failed - Invalid Delta\n" );
-		return false;
-	}
+		return SetErrorString( "Invalid Delta" );
 
 	CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : m_pMesh;
 
 	if ( !pMesh )
-	{
-		Error( "// ERROR: Select( \"%s\" ) Failed - No Mesh\n", pDelta->GetName() );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
 
 	if ( !pSelection )
-	{
-		Error( "// ERROR: Select( \"%s\" ) Failed - No Selection To Manipulate\n", pDelta->GetName() );
-		return false;
-	}
-
-	Msg( "// Select( \"%s\" );\n", pDelta->GetName() );
+		return SetErrorString( "No Selection To Manipulate" );
 
 	pMesh->SelectVerticesFromDelta( pDelta, pSelection );
 
@@ -789,22 +1002,15 @@ bool CDmxEdit::Select( CDmeVertexDeltaData *pDelta, CDmeSingleIndexedComponent *
 bool CDmxEdit::Select( const CSelectType &selectType, CDmeSingleIndexedComponent *pPassedSelection /* = NULL */, CDmeMesh *pPassedMesh /* = NULL */ )
 {
 	if ( selectType() == CSelectType::kDelta )
-	{
-		Error( "// ERROR: Select( \"%s\" ) called via CSelectType... Wacky!\n", static_cast< char * >( selectType ) );
-		return false;
-	}
+		return SetErrorString( "Called Via CSelectType... Wacky!" );
 
 	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
 
 	if ( !pSelection )
-	{
-		Error( "// ERROR: Select( \"%s\" ) Failed - No Selection To Manipulate\n", static_cast< char * >( selectType ) );
-		return false;
-	}
+		return SetErrorString( "No Selection To Manipulate" );
 
 	if ( selectType() == CSelectType::kNone )
 	{
-		Msg( "// Select( \"%s\" );\n", static_cast< char * >( selectType ) );
 		m_pCurrentSelection->Clear();
 		return true;
 	}
@@ -815,12 +1021,8 @@ bool CDmxEdit::Select( const CSelectType &selectType, CDmeSingleIndexedComponent
 	CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : m_pMesh;
 
 	if ( !pMesh )
-	{
-		Error( "// ERROR: Select( \"%s\" ) Failed - No Mesh\n", static_cast< char * >( selectType ) );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
-	Msg( "// Select( \"%s\" );\n", static_cast< char * >( selectType ) );
 	pMesh->SelectAllVertices( pSelection );
 
 	return true;
@@ -840,8 +1042,7 @@ bool CDmxEdit::Select( const CSelectOp &selectOp, const char *pSelectTypeString,
 		if ( pDelta)
 			return Select( selectOp, pDelta, pPassedSelection, pPassedMesh );
 
-		Error( "// ERROR: Select( \"%s\", \"%s\" ); Failed - Invalid Delta\n", selectOp, pSelectTypeString );
-		return false;
+		return SetErrorString( "Invalid Delta" );
 	}
 
 	return Select( selectOp, selectType, pPassedSelection, pPassedMesh );
@@ -854,18 +1055,12 @@ bool CDmxEdit::Select( const CSelectOp &selectOp, const char *pSelectTypeString,
 bool CDmxEdit::Select( const CSelectOp &selectOp, CDmeVertexDeltaData *pDelta, CDmeSingleIndexedComponent *pPassedSelection /* = NULL */, CDmeMesh *pPassedMesh /* = NULL */ )
 {
 	if ( !pDelta )
-	{
-		Error( "// ERROR: Select( \"%s\" ); Failed - Invalid Delta\n", selectOp );
-		return false;
-	}
+		return SetErrorString( "Invalid Delta" );
 
 	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
 
 	if ( !pSelection )
-	{
-		Error( "// ERROR: Select( \"%s\", \"%s\" ) Failed - No Selection To Manipulate\n", static_cast< char * >( selectOp ), pDelta->GetName() );
-		return false;
-	}
+		return SetErrorString( "No Selection To Manipulate" );
 
 	CDmeSingleIndexedComponent *pTempSelection = CreateElement< CDmeSingleIndexedComponent >( "tempSelection", pSelection->GetFileId() );
 	if ( !pTempSelection )
@@ -892,10 +1087,7 @@ bool CDmxEdit::Select( const CSelectOp &selectOp, const CSelectType &selectType,
 	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
 
 	if ( !pSelection )
-	{
-		Error( "// ERROR: Select( \"%s\", \"%s\" ) Failed - No Selection To Manipulate\n", static_cast< char * >( selectOp ), static_cast< char * >( selectType ) );
-		return false;
-	}
+		return SetErrorString( "No Selection To Manipulate" );
 
 	CDmeSingleIndexedComponent *pTempSelection = CreateElement< CDmeSingleIndexedComponent >( "tempSelection", pSelection->GetFileId() );
 	if ( !pTempSelection )
@@ -973,10 +1165,7 @@ bool CDmxEdit::SelectHalf( const CSelectOp &selectOp, const CHalfType &halfType,
 	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
 
 	if ( !pSelection )
-	{
-		Error( "// ERROR: SelectHalf( \"%s\", \"%s\" ) Failed - No Selection To Manipulate\n", static_cast< char * >( selectOp ), static_cast< char * >( halfType ) );
-		return false;
-	}
+		return SetErrorString( "No Selection To Manipulate" );
 
 	CDmeSingleIndexedComponent *pTempSelection = CreateElement< CDmeSingleIndexedComponent >( "tempSelection", pSelection->GetFileId() );
 	if ( !pTempSelection )
@@ -1000,23 +1189,15 @@ bool CDmxEdit::SelectHalf( const CSelectOp &selectOp, const CHalfType &halfType,
 //-----------------------------------------------------------------------------
 bool CDmxEdit::SelectHalf( const CHalfType &halfType, CDmeSingleIndexedComponent *pPassedSelection /* = NULL */, CDmeMesh *pPassedMesh /* = NULL */ )
 {
-	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
-
-	if ( !pSelection )
-	{
-		Error( "// ERROR: SelectHalf( \"%s\" ) Failed - No Selection To Manipulate\n", static_cast< char * >( halfType ) );
-		return false;
-	}
-
 	CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : m_pMesh;
 
 	if ( !pMesh )
-	{
-		Error( "// ERROR: SelectHalf( \"%s\" ) Failed - No Mesh\n", static_cast< char * >( halfType ) );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
-	Msg( "// SelectHalf( \"%s\" );\n", static_cast< char * >( halfType ) );
+	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
+
+	if ( !pSelection )
+		return SetErrorString( "No Selection To Manipulate" );
 
 	pMesh->SelectHalfVertices( halfType() == CHalfType::kLeft ? CDmeMesh::kLeft : CDmeMesh::kRight, pSelection );
 
@@ -1027,15 +1208,29 @@ bool CDmxEdit::SelectHalf( const CHalfType &halfType, CDmeSingleIndexedComponent
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SelectHalf,
+	"< $halfType >",
+	"Selects all the vertices in half the mesh.  Half is one of left or right.  Left means the X value of the position is >= 0, right means that the X value of the position is <= 0.  So it's the character's left (assuming they're staring down -z)")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pHalfType = luaL_checkstring( pLuaState, 1 );
+
+	if ( pHalfType && LuaFunc_s::m_dmxEdit.SelectHalf( pHalfType ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::GrowSelection( int nSize /* = 1 */ )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: GrowSelection( %d ) Failed - No Mesh\n", nSize );
-		return false;
-	}
-
-	Msg( "// GrowSelection( %d );\n", nSize );
+		return SetErrorString( "No Mesh" );
 
 	m_pMesh->GrowSelection( nSize, m_pCurrentSelection, NULL );
 
@@ -1046,15 +1241,36 @@ bool CDmxEdit::GrowSelection( int nSize /* = 1 */ )
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+LUA_COMMAND(
+	GrowSelection,
+	"< #size >",
+	"Grows the current selection by the specified $size")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( lua_isnumber( pLuaState, 1 ) )
+	{
+		const int nSize = lua_tointeger( pLuaState, 1 );
+		if ( LuaFunc_s::m_dmxEdit.GrowSelection( nSize ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.GrowSelection() )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::ShrinkSelection( int nSize /* = 1 */ )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: ShrinkSelection( %d ) Failed - No Mesh\n", nSize );
-		return false;
-	}
-
-	Msg( "// ShrinkSelection( %d );\n", nSize );
+		return SetErrorString( "No Mesh" );
 
 	m_pMesh->ShrinkSelection( nSize, m_pCurrentSelection, NULL );
 
@@ -1065,17 +1281,46 @@ bool CDmxEdit::ShrinkSelection( int nSize /* = 1 */ )
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-bool CDmxEdit::Add( const CDmxEditProxy &e, float weight /* = 1.0f */, float featherDistance /* = 0.0f */, const CFalloffType &falloffType, const CDistanceType &passedDistanceType )
+LUA_COMMAND(
+	ShrinkSelection,
+	"< #size >",
+	"Shrinks the current selection by the specified $size (integer)")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( lua_isnumber( pLuaState, 1 ) )
+	{
+		const int nSize = lua_tointeger( pLuaState, 1 );
+		if ( LuaFunc_s::m_dmxEdit.ShrinkSelection( nSize ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.ShrinkSelection() )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::Add(
+	AddType addType,
+	const CDmxEditProxy &e,
+	float weight /* = 1.0f */,
+	float featherDistance /* = 0.0f */,
+	const CFalloffType &falloffType,
+	const CDistanceType &passedDistanceType )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: Add( %f ); Failed - No Mesh\n", weight );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	if ( m_pCurrentSelection->Count() == 0 )
 	{
-		Error( "// ERROR: No Vertices selected for Add( %f );  Selecting All Vertices!\n", weight );
+		LuaWarning( "No Vertices Selected, Selected ALL" );
 		Select( ALL );
 	}
 
@@ -1083,8 +1328,10 @@ bool CDmxEdit::Add( const CDmxEditProxy &e, float weight /* = 1.0f */, float fea
 
 	CDmeSingleIndexedComponent *pNewSelection = featherDistance > 0.0f ? m_pMesh->FeatherSelection( featherDistance, falloffType(), distanceType(), m_pCurrentSelection, NULL ) : NULL;
 
-	Msg( "// Add( \"base\", %f, %f );\n", weight, featherDistance );
-	const bool retVal = m_pMesh->AddMaskedDelta( NULL, NULL, weight, pNewSelection ? pNewSelection : m_pCurrentSelection );
+	const bool retVal =
+		addType == kRaw ?
+		m_pMesh->AddMaskedDelta( NULL, NULL, weight, pNewSelection ? pNewSelection : m_pCurrentSelection ) :
+		m_pMesh->AddCorrectedMaskedDelta( NULL, NULL, weight, pNewSelection ? pNewSelection : m_pCurrentSelection ) ;
 
 	if ( pNewSelection )
 	{
@@ -1098,20 +1345,23 @@ bool CDmxEdit::Add( const CDmxEditProxy &e, float weight /* = 1.0f */, float fea
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-bool CDmxEdit::Add( const char *pDeltaName, float weight /* = 1.0f */, float featherDistance /* = 0.0f */, const CFalloffType &falloffType, const CDistanceType &passedDistanceType )
+bool CDmxEdit::Add(
+	AddType addType,
+	const char *pDeltaName,
+	float weight /* = 1.0f */,
+	float featherDistance /* = 0.0f */,
+	const CFalloffType &falloffType,
+	const CDistanceType &passedDistanceType )
 {
 	if ( !Q_stricmp( "BASE", pDeltaName ) )
-		return Add( CDmxEditProxy( *this ), weight, featherDistance, falloffType );
+		return Add( addType, CDmxEditProxy( *this ), weight, featherDistance, falloffType );
 
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: Add( %f ); Failed - No Mesh\n", weight );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	if ( m_pCurrentSelection->Count() == 0 )
 	{
-		Error( "// ERROR: No Vertices selected for Add( %f );  Selecting All Vertices!\n", weight );
+		LuaWarning( "No Vertices Selected, Selecting ALL" );
 		Select( ALL );
 	}
 
@@ -1121,13 +1371,12 @@ bool CDmxEdit::Add( const char *pDeltaName, float weight /* = 1.0f */, float fea
 
 	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
 	if ( !pDelta )
-	{
-		Error( "// ERROR: Add( \"%s\", %f, %f ); Failed - Invalid Delta\n", pDeltaName, weight, featherDistance );
-		return false;
-	}
+		return SetErrorString( "Invalid Delta \"%s\"", pDeltaName );
 
-	Msg( "// Add( \"%s\", %f, %f );\n", pDelta->GetName(), weight, featherDistance );
-	const bool retVal = m_pMesh->AddMaskedDelta( pDelta, NULL, weight, pNewSelection );
+	const bool retVal =
+		addType == kRaw ?
+		m_pMesh->AddMaskedDelta( pDelta, NULL, weight, pNewSelection ) :
+		m_pMesh->AddCorrectedMaskedDelta( pDelta, NULL, weight, pNewSelection );
 
 	if ( pNewSelection )
 	{
@@ -1141,17 +1390,62 @@ bool CDmxEdit::Add( const char *pDeltaName, float weight /* = 1.0f */, float fea
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Add,
+	"< $delta >, [ #weight ], [ #featherDistance ], < $falloffType >",
+	"Adds specified state to the current state of the mesh weighted and feathered by the specified #weight, #featherDistance & $falloffType.  "
+	"$falloffType is one of \"straight\", \"spike\", \"dome\", \"bell\".  Note that only the specified delta is added.  "
+	"i.e. If Add( \"A_B\" ); is called then just A_B is added, A & B are not.  See AddCorrected();" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	float weight = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
+	float featherDistance = lua_isnumber( pLuaState, 3 ) ? lua_tonumber( pLuaState, 3 ) : 0.0f;
+	const char *pFalloffType = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : "straight";
+
+	if ( LuaFunc_s::m_dmxEdit.Add( CDmxEdit::kRaw, pString1, weight, featherDistance, pFalloffType ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	AddCorrected,
+	"< $delta >, [ #weight ], [ #featherDistance ], < $falloffType >",
+	"Same as Add() except that the corrected delta is added. i.e. If AddCorrected( \"A_B\" ); is called "
+	"then A, B & A_B are all added.  This works similarly to SetState() whereas Add() just adds "
+	"the named delta." )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	float weight = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
+	float featherDistance = lua_isnumber( pLuaState, 3 ) ? lua_tonumber( pLuaState, 3 ) : 0.0f;
+	const char *pFalloffType = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : "straight";
+
+	if ( LuaFunc_s::m_dmxEdit.Add( CDmxEdit::kCorrected, pString1, weight, featherDistance, pFalloffType ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::Interp( const CDmxEditProxy &e, float weight /* = 1.0f */, float featherDistance /* = 0.0f */, const CFalloffType &falloffType, const CDistanceType &passedDistanceType )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: Interp( %f ); Failed - No Mesh\n", weight );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	if ( m_pCurrentSelection->Count() == 0 )
 	{
-		Error( "// ERROR: No Vertices selected for Interp( %f );  Selecting All Vertices!\n", weight );
+		LuaWarning( "No Vertices Selected, Selecting ALL" );
 		Select( ALL );
 	}
 
@@ -1159,7 +1453,6 @@ bool CDmxEdit::Interp( const CDmxEditProxy &e, float weight /* = 1.0f */, float 
 
 	CDmeSingleIndexedComponent *pNewSelection = featherDistance > 0.0f ? m_pMesh->FeatherSelection( featherDistance, falloffType(), distanceType(), m_pCurrentSelection, NULL ) : NULL;
 
-	Msg( "// Interp( \"base\", %f, %f );\n", weight, featherDistance );
 	const bool retVal = m_pMesh->InterpMaskedDelta( NULL, NULL, weight, pNewSelection ? pNewSelection : m_pCurrentSelection );
 
 	if ( pNewSelection )
@@ -1180,14 +1473,11 @@ bool CDmxEdit::Interp( const char *pDeltaName, float weight /* = 1.0f */, float 
 		return Interp( CDmxEditProxy( *this ), weight, featherDistance, falloffType );
 
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: Interp( %f ); Failed - No Mesh\n", weight );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	if ( m_pCurrentSelection->Count() == 0 )
 	{
-		Error( "// ERROR: No Vertices selected for Interp( %f );  Selecting All Vertices!\n", weight );
+		LuaWarning( "No Vertices Selected, Selecting ALL" );
 		Select( ALL );
 	}
 
@@ -1197,12 +1487,8 @@ bool CDmxEdit::Interp( const char *pDeltaName, float weight /* = 1.0f */, float 
 
 	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
 	if ( !pDelta )
-	{
-		Error( "// ERROR: Interp( \"%s\", %f, %f ); Failed - Invalid Delta\n", pDeltaName, weight, featherDistance );
-		return false;
-	}
+		return SetErrorString( "Invalid Delta \"%s\"", pDeltaName );
 
-	Msg( "// Interp( \"%s\", %f, %f );\n", pDelta->GetName(), weight, featherDistance );
 	const bool retVal = m_pMesh->InterpMaskedDelta( pDelta, NULL, weight, pNewSelection ? pNewSelection : m_pCurrentSelection );
 
 	if ( pNewSelection )
@@ -1217,56 +1503,57 @@ bool CDmxEdit::Interp( const char *pDeltaName, float weight /* = 1.0f */, float 
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Interp,
+	"< $delta >, [ #weight ], [ #featherDistance ], < $falloffType >",
+	"Interpolates the current state of the mesh towards the specified state, $weight, #featherDistance and $falloffType.  $falloffType is one of \"straight\", \"spike\", \"dome\", \"bell\"")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	float weight = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
+	float featherDistance = lua_isnumber( pLuaState, 3 ) ? lua_tonumber( pLuaState, 3 ) : 0.0f;
+	const char *pFalloffType = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : "straight";
+
+	if ( LuaFunc_s::m_dmxEdit.Interp( pString1, weight, featherDistance, pFalloffType ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::Save( const char *pFilename, const CObjType &saveType /* = ABSOLUTE */, const char *pDeltaName /* = NULL */ )
 {
 	if ( !pFilename )
-	{
-		Error( "// ERROR: Save() Failed - No filename\n" );
-		return false;
-	}
+		return SetErrorString( "No Filename Specified" );
 
 	if ( !m_pRoot )
-	{
-		Error( "// ERROR: Save() Failed - No dmx root object\n" );
-		return false;
-	}
+		return SetErrorString( "No Dmx Root Object To Save" );
 
-	if ( m_pMesh )
-	{
-		// Cleanup
-		m_pMesh->RemoveAttribute( "selection" );
-		if ( m_pCurrentSelection )
-		{
-			g_pDataModel->DestroyElement( m_pCurrentSelection->GetHandle() );
-			m_pCurrentSelection = NULL;
-		}
+	RemoveExportTags( m_pRoot, "vsDmxIO_exportTags" );
+	AddExportTags( m_pRoot, pFilename );
+	UpdateMakefile( m_pRoot );
 
-		CDmeVertexData *pBind( m_pMesh->FindBaseState( "bind" ) );
-
-		if ( pBind )
-		{
-			m_pMesh->SetCurrentBaseState( "bind" );
-		}
-
-		CDmeVertexData *pWork( m_pMesh->FindBaseState( "__dmxEdit_work" ) );
-
-		if ( pWork )
-		{
-			m_pMesh->DeleteBaseState( "__dmxEdit_work" );
-		}
-	}
+	CleanupWork();
 
 	bool retVal = false;
 
 	const int sLen = Q_strlen( pFilename );
 	if ( sLen > 4 && !Q_stricmp( pFilename + sLen - 4, ".dmx" ) )
 	{
-		Msg( "// DMX Save( \"%s\" );\n", pFilename );
+		retVal = g_p4factory->AccessFile( pFilename )->Edit();
+		if ( !retVal )
+		{
+			retVal = g_p4factory->AccessFile( pFilename )->Add();
+		}
 
 		retVal = g_pDataModel->SaveToFile( pFilename, NULL, "keyvalues2", "model", m_pRoot );
 		if ( !retVal )
 		{
-			Error( "// DMX Save( \"%s\" ); - Failed, Cannot Write File\n", pFilename );
+			SetErrorString( "Cannot Write File" );
 		}
 	}
 	else
@@ -1276,11 +1563,6 @@ bool CDmxEdit::Save( const char *pFilename, const CObjType &saveType /* = ABSOLU
 		{
 			// Relative
 			absolute = false;
-			Msg( "// OBJ Save( \"%s\", \"relative\" );\n", pFilename );
-		}
-		else
-		{
-			Msg( "// OBJ Save( \"%s\", \"absolute\" );\n", pFilename );
 		}
 
 		if ( pDeltaName )
@@ -1300,28 +1582,147 @@ bool CDmxEdit::Save( const char *pFilename, const CObjType &saveType /* = ABSOLU
 		}
 	}
 
-	if ( m_pMesh )
-	{
-		// Undo the cleanup work performed above
-		CDmeVertexData *pBind = m_pMesh->FindBaseState( "bind" );
-
-		if ( pBind )
-		{
-			// Ensure "work" isn't saved!
-			CDmeVertexData *pWork = m_pMesh->FindOrCreateBaseState( "__dmxEdit_work" );
-
-			if ( pWork )
-			{
-				pBind->CopyTo( pWork );
-				m_pMesh->SetCurrentBaseState( "__dmxEdit_work" );
-			}
-		}
-
-		m_pCurrentSelection = CreateElement< CDmeSingleIndexedComponent >( "selection", m_pRoot->GetFileId() );
-		m_pMesh->SetValue( "selection", m_pCurrentSelection );
-	}
+	CreateWork();
 
 	return retVal;
+}
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmxEdit::UpdateMakefile( CDmElement *pRoot )
+{
+	if ( !pRoot )
+		return;
+
+	CDmeDCCMakefile *pMakefile = CreateElement< CDmeDCCMakefile >( "dmxedit", pRoot->GetFileId() );
+	if ( !pMakefile )
+		return;
+
+	pRoot->SetValue( "makefile", pMakefile );
+
+	CDmrElementArray< CDmeSourceDCCFile > sources( pMakefile->GetAttribute( "sources" ) );
+	sources.AddToTail( CreateElement< CDmeSourceDCCFile >( m_filename, pRoot->GetFileId() ) );
+}
+
+
+//-----------------------------------------------------------------------------
+// In winstuff.cpp
+//-----------------------------------------------------------------------------
+void MyGetUserName( char *pszBuf, unsigned long *pBufSiz );
+void MyGetComputerName( char *pszBuf, unsigned long *pBufSiz );
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmxEdit::AddExportTags( CDmElement *pRoot, const char *pFilename )
+{
+	if ( !pRoot )
+		return;
+
+	CDmElement *pExportTags = CreateElement< CDmElement >( "dmxedit_exportTags", pRoot->GetFileId() );
+
+	char szTmpBuf[ BUFSIZ ];
+
+	_strdate( szTmpBuf );
+	pExportTags->SetValue( "date", szTmpBuf );
+
+	_strtime( szTmpBuf );
+	pExportTags->SetValue( "time", szTmpBuf );
+
+	unsigned long dwSize( sizeof( szTmpBuf ) );
+
+	*szTmpBuf ='\0';
+	MyGetUserName( szTmpBuf, &dwSize);
+	pExportTags->SetValue( "user", szTmpBuf );
+
+	*szTmpBuf ='\0';
+	dwSize = sizeof( szTmpBuf );
+	MyGetComputerName( szTmpBuf, &dwSize);
+	pExportTags->SetValue( "machine", szTmpBuf );
+
+	pExportTags->SetValue( "app", "dmxedit" );
+
+	static const char *pChangeList = "$Change: 633871 $";
+	pExportTags->SetValue( "appVersion", pChangeList );
+
+CUtlString cmdLine( "dmxedit " );
+	cmdLine += m_scriptFilename;
+	cmdLine += "";
+	pExportTags->SetValue( "cmdLine", cmdLine );
+
+	pExportTags->SetValue( "Load", m_filename );
+	pExportTags->SetValue( "Save", pFilename );
+
+	pRoot->SetValue( "dmxedit_exportTags", pExportTags );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmxEdit::RemoveExportTags( CDmElement *pRoot, const char *pExportTagsName )
+{
+	if ( !pRoot )
+		return;
+
+	pRoot->RemoveAttribute( pExportTagsName );
+}
+
+
+//-----------------------------------------------------------------------------
+// Lua Wrapper For CDmeEdit::Save
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Save,
+	"[ $file.dmx | $file.obj ], [ $saveType ], [ $delta ]",
+	"Saves the current scene to either a single dmx file or a sequence of obj files.  If $file is not specified, the filename used in the last Load() command will be used to save the file.  $saveType is one of \"absolute\" or \"relative\".  If not specified, \"absolute\" is assumed.  If $delta is passed and the save type is OBJ, then only a single OBJ of that delta is saved.  \"base\" is the base state." )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pSave1 = lua_tostring( pLuaState, 1 );
+
+	const char *pSaveType = NULL;
+
+	if ( lua_isboolean( pLuaState, 2 ) )
+	{
+		if ( lua_toboolean( pLuaState, 2 ) )
+		{
+			pSaveType = "Absolute";
+		}
+		else
+		{
+			pSaveType = "Relative";
+		}
+	}
+	else if ( lua_isstring( pLuaState, 2 ) )
+	{
+		pSaveType = lua_tostring( pLuaState, 2 );
+	}
+
+	if ( pSave1 )
+	{
+		if ( pSaveType )
+		{
+			const char *pDeltaName = lua_isstring( pLuaState, 3 ) ? lua_tostring( pLuaState, 3 ) : NULL;
+
+			if ( LuaFunc_s::m_dmxEdit.Save( pSave1, pSaveType, pDeltaName ) )
+				return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+		}
+		else
+		{
+			if ( LuaFunc_s::m_dmxEdit.Save( pSave1 ) )
+				return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+		}
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.Save() )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1337,25 +1738,30 @@ bool CDmxEdit::Merge( const char *pInFilename, const char *pOutFilename )
 	guard0.Release();
 
 	if ( !pRoot )
-	{
-		Error( "// ERROR: Merge( \"%s\", \"%s\" ); Failed - \"%s\" Unchanged.  Couldn't Load \"%s\".\n", pInFilename, pOutFilename, pOutFilename, pInFilename );
-		return false;
-	}
+		return SetErrorString( "Can't Load File \"%s\"", pInFilename );
 
-	const bool retVal = CDmMeshUtils::Merge( m_pMesh, pRoot );
+	g_p4factory->AccessFile( pInFilename )->Add();
+
+	bool retVal = CDmMeshUtils::Merge( m_pMesh, pRoot );
 
 	CDisableUndoScopeGuard guard1;
 	if ( retVal )
 	{
-		Msg( "// Merge( \"%s\", \"%s\" );\n", pInFilename, pOutFilename );
+		bool bPerforce = g_p4factory->AccessFile( pOutFilename )->Edit();
+		if ( !bPerforce )
+		{
+			bPerforce = g_p4factory->AccessFile( pOutFilename )->Add();
+		}
+
 		if ( !g_pDataModel->SaveToFile( pOutFilename, NULL, "keyvalues2", "model", pRoot ) )
 		{
-			Error( "// ERROR: Merge( \"%s\", \"%s\" ); Failed - \"%s\" Unchanged.  Cannot write file.\n", pInFilename, pOutFilename, pOutFilename );
+			retVal = false;
+			SetErrorString( "Can't Write File \"%s\"", pOutFilename );
 		}
 	}
 	else
 	{
-		Error( "// ERROR: Merge( \"%s\", \"%s\" ); Failed - \"%s\" Unchanged.\n", pInFilename, pOutFilename, pOutFilename );
+		SetErrorString( "Failed! \"%s\" Unchanged", pOutFilename );
 	}
 
 	g_pDataModel->UnloadFile( pRoot->GetFileId() );
@@ -1368,22 +1774,71 @@ bool CDmxEdit::Merge( const char *pInFilename, const char *pOutFilename )
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-CUtlString CDmxEdit::SaveDelta( const char *pDeltaName )
+LUA_COMMAND(
+	Merge,
+	"< $src.dmx >, < $dst.dmx >",
+	"Merges the current mesh onto the specified dmx file and saves to the second specified dmx file")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	const char *pString2 = luaL_checkstring( pLuaState, 2 );
+	if ( LuaFunc_s::m_dmxEdit.Merge( pString1, pString2 ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::SaveDelta( const char *pDeltaName )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: SaveDelta( \"%s\" ) Failed - No Mesh\n", pDeltaName );
-		return "";
-	}
+		return SetErrorString( "No Mesh" );
 
-	Msg( "// SaveDelta( \"%s\" );\n", pDeltaName );
+	if ( !Q_stricmp( pDeltaName, "base" ) )
+	{
+		CDmeVertexData *pCurr = m_pMesh->GetCurrentBaseState();
+		if ( !pCurr )
+			return SetErrorString( "Couldn't Get Current Base State" );
+
+		CDmeVertexData *pBind = m_pMesh->GetBindBaseState();
+		if ( !pBind )
+			return SetErrorString( "Couldn't Get Bind Base State" );
+
+		if ( pCurr == pBind )
+			return SetErrorString( "Current Is Same As Bind State" );
+
+		pCurr->CopyTo( pBind );
+
+		return true;
+	}
 
 	CDmeVertexDeltaData *pDelta = m_pMesh->ModifyOrCreateDeltaStateFromBaseState( pDeltaName );
 	if ( pDelta )
-		return pDelta->GetName();
+		return true;
 
-	Error( "// SaveDelta( \"%s\" )\n - Couldn't Create New Delta State From Base State \"bind\"\n", pDeltaName );
-	return "";
+	return SetErrorString( "Couldn't Create New Delta State From Base State" );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SaveDelta,
+	"< $delta >",
+	"Saves the current state of the mesh to the named delta state")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	if ( LuaFunc_s::m_dmxEdit.SaveDelta( pString1 ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1393,20 +1848,34 @@ CUtlString CDmxEdit::SaveDelta( const char *pDeltaName )
 bool CDmxEdit::DeleteDelta( const delta &d )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: DeleteDelta( \"%s\" ); Failed - No Mesh\n", static_cast< const char * >( d ) );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	if ( !d )
-	{
-		Error( "// ERROR: DeleteDelta( \"%s\" ); Failed - Invalid Delta\n", static_cast< const char * >( d ) );
-		return false;
-	}
+		return SetErrorString( "Invalid Delta" );
 
-	Msg( "// DeleteDelta( \"%s\" );\n", static_cast< const char * >( d ) );
+	// Only reason it can fail is if Delta doesn't exist...
+	// So be silent about it
+	m_pMesh->DeleteDeltaState( static_cast< const char * >( d ) );
 
-	return m_pMesh->DeleteDeltaState( static_cast< const char * >( d ) );
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	DeleteDelta,
+	"< $delta >",
+	"Deletes the named delta state from the current mesh")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	if ( LuaFunc_s::m_dmxEdit.DeleteDelta( pString1 ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1415,8 +1884,6 @@ bool CDmxEdit::DeleteDelta( const delta &d )
 //-----------------------------------------------------------------------------
 bool CDmxEdit::RemapMaterial( int nMaterialIndex, const char *pNewMaterialName )
 {
-	Msg( "// RemapMaterial( %d, \"%s\" );\n", nMaterialIndex, pNewMaterialName );
-
 	return CDmMeshUtils::RemapMaterial( m_pMesh, nMaterialIndex, pNewMaterialName );
 }
 
@@ -1426,8 +1893,41 @@ bool CDmxEdit::RemapMaterial( int nMaterialIndex, const char *pNewMaterialName )
 //-----------------------------------------------------------------------------
 bool CDmxEdit::RemapMaterial( const char *pOldMaterialName, const char *pNewMaterialName )
 {
-	Msg( "// RemapMaterial( \"%s\", \"%s\" );\n", pOldMaterialName, pNewMaterialName );
 	return CDmMeshUtils::RemapMaterial( m_pMesh, pOldMaterialName, pNewMaterialName );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	RemapMaterial,
+	"< #index | $srcMaterial >, < $dstMaterial >",
+	"Remaps the specified material to the new material, material can be specified by index or name")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString2 = luaL_checkstring( pLuaState, 2 );
+
+	// TODO: Bad error checking... but failure to remap isn't really an error
+	if ( lua_isnumber( pLuaState, 1 ) )
+	{
+		const int nMaterialIndex = luaL_checkinteger( pLuaState, 1 );
+		if ( !LuaFunc_s::m_dmxEdit.RemapMaterial( nMaterialIndex, pString2 ) )
+		{
+			LuaFunc_s::m_dmxEdit.LuaWarning( "Invalid Material Index To Remap, Couldn't Find Material %d\n", nMaterialIndex );
+		}
+	}
+	else
+	{
+		const char *pString1 = luaL_checkstring( pLuaState, 1 );
+		if ( !LuaFunc_s::m_dmxEdit.RemapMaterial( pString1, pString2 ) )
+		{
+			LuaFunc_s::m_dmxEdit.LuaWarning( "Invalid Material To Remap, Couldn't Find Material \"%s\"\n", pString1 );
+		}
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
 }
 
 
@@ -1436,8 +1936,25 @@ bool CDmxEdit::RemapMaterial( const char *pOldMaterialName, const char *pNewMate
 //-----------------------------------------------------------------------------
 bool CDmxEdit::RemoveFacesWithMaterial( const char *pMaterialName )
 {
-	Msg( "// RemoveFacesWithMaterial( \"%s\", );\n", pMaterialName );
 	return CDmMeshUtils::RemoveFacesWithMaterial( m_pMesh, pMaterialName );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	RemoveFacesWithMaterial,
+	"< $material >",
+	"Removes faces from the current mesh which have the specified material")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pString1 = luaL_checkstring( pLuaState, 1 );
+	if ( LuaFunc_s::m_dmxEdit.RemoveFacesWithMaterial( pString1 ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1446,8 +1963,27 @@ bool CDmxEdit::RemoveFacesWithMaterial( const char *pMaterialName )
 //-----------------------------------------------------------------------------
 bool CDmxEdit::RemoveFacesWithMoreThanNVerts( int nVertexCount )
 {
-	Msg( "// RemoveFacesWithMoreThanNVerts( %d );\n", nVertexCount );
-	return CDmMeshUtils::RemoveFacesWithMoreThanNVerts( m_pMesh, nVertexCount );
+	CDmMeshUtils::RemoveFacesWithMoreThanNVerts( m_pMesh, nVertexCount );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	RemoveFacesWithMoreThanNVerts,
+	"< #vertexCount >",
+	"Removes faces from the current mesh which have more than the specified number of faces")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const int nVertsCount = luaL_checkinteger( pLuaState, 1 );
+	if ( LuaFunc_s::m_dmxEdit.RemoveFacesWithMoreThanNVerts( nVertsCount ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1456,8 +1992,33 @@ bool CDmxEdit::RemoveFacesWithMoreThanNVerts( int nVertexCount )
 //-----------------------------------------------------------------------------
 bool CDmxEdit::Mirror( CAxisType axisType /* = XAXIS */ )
 {
-	Msg( "// Mirror( \"%s\" );\n", static_cast< const char * >( axisType ) );
 	return CDmMeshUtils::Mirror( m_pMesh, axisType() );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Mirror,
+	"[ $axis ]",
+	"Mirrors the mesh in the specified axis.  $axis is one of \"x\", \"y\", \"z\". If $axis is not specified, \"x\" is assumed (i.e. \"x\" == mirror across YZ plane)")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( lua_isstring( pLuaState, 1 ) )
+	{
+		const char *pString1 = luaL_checkstring( pLuaState, 1 );
+		if ( LuaFunc_s::m_dmxEdit.Mirror( pString1 ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		if ( LuaFunc_s::m_dmxEdit.Mirror() )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1466,7 +2027,6 @@ bool CDmxEdit::Mirror( CAxisType axisType /* = XAXIS */ )
 //-----------------------------------------------------------------------------
 bool CDmxEdit::ComputeNormals()
 {
-	Msg( "// ComputeNormals();\n" );
 	m_pMesh->ComputeDeltaStateNormals();
 
 	return true;
@@ -1476,23 +2036,33 @@ bool CDmxEdit::ComputeNormals()
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-bool CDmxEdit::ComputeWrinkles()
+LUA_COMMAND(
+	ComputeNormals,
+	"",
+	"Computes new smooth normals for the current mesh and all of its delta states.")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( LuaFunc_s::m_dmxEdit.ComputeNormals() )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::ComputeWrinkles( bool bOverwrite )
 {
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: ComputeWrinkles(); Failed - No Mesh\n" );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	CDmeCombinationOperator *pCombo( FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" ) );
 	if ( !pCombo )
-	{
-		Error( "// ERROR: ComputeWrinkles(); Failed - No Combination Operator On Mesh\n" );
-		return false;
-	}
+		return SetErrorString( "No Combination Operator On Mesh \"%s\"", m_pMesh->GetName() );
 
-	Msg( "// ComputeWrinkles();\n" );
-	pCombo->GenerateWrinkleDeltas();
+	pCombo->GenerateWrinkleDeltas( bOverwrite );
 
 	return true;
 }
@@ -1501,28 +2071,86 @@ bool CDmxEdit::ComputeWrinkles()
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-bool CDmxEdit::ComputeWrinkle( const char *pDeltaName, float flScale )
+LUA_COMMAND(
+	ComputeWrinkles,
+	"[ #bOverwrite = false ]",
+	"Uses the current combo rules ( i.e. The wrinkleScales, via SetWrinkleScale()) to compute wrinkle delta values.  "
+	"If #bOverwrite is false, only wrinkle data that doesn't currently exist on the mesh will be computed.  "
+	"If #bOverwrite is true then all wrinkle data will be computed from the combo rules wiping out any existing data computed using ComputeWrinkle().  "
+	)
 {
-	if ( !m_pMesh )
-	{
-		Error( "// ERROR: ComputeWrinkle( \"%s\", %f ); Failed - No Mesh\n", pDeltaName, flScale );
-		return false;
-	}
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
 
-	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
-	if ( !pDelta )
-	{
-		Error( "// ERROR: ComputeWrinkle( \"%s\", %f ); Failed - Cannot Find Delta State\n", pDeltaName, flScale );
-		return false;
-	}
+	const bool bOverwrite = lua_isboolean( pLuaState, 1 ) ? ( lua_toboolean( pLuaState, 1 ) ? true : false ) : false;
 
-	Msg( "// ComputeWrinkle( \"%s\", %f );\n", pDeltaName, flScale );
-	return CDmMeshUtils::CreateWrinkleDeltaFromBaseState( pDelta, flScale, m_pMesh );
+	if ( LuaFunc_s::m_dmxEdit.ComputeWrinkles( bOverwrite ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
 
-	return true;
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::ComputeWrinkle( const char *pDeltaName, float flScale, const char *pOperation )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
+	if ( !pDelta )
+		return SetErrorString( "Cannot Find Delta State \"%s\"", pDeltaName );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	CDmMeshUtils::WrinkleOp wrinkleOp = StringHasPrefix( pOperation, "r" ) ? CDmMeshUtils::kReplace : CDmMeshUtils::kAdd;
+
+	const int nControlCount = pDmeCombo->GetControlCount();
+	for ( int nControlIndex = 0; nControlIndex < nControlCount; ++nControlIndex )
+	{
+		const int nRawControlCount = pDmeCombo->GetRawControlCount( nControlIndex );
+		for ( int nRawControlIndex = 0; nRawControlIndex < nRawControlCount; ++nRawControlIndex )
+		{
+			if ( Q_strcmp( pDeltaName, pDmeCombo->GetRawControlName( nControlIndex, nRawControlIndex ) ) )
+				continue;
+
+			pDmeCombo->SetWrinkleScale( nControlIndex, pDeltaName, 1.0f );
+
+			break;
+		}
+	}
+
+	return CDmMeshUtils::CreateWrinkleDeltaFromBaseState( pDelta, flScale, wrinkleOp, m_pMesh );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	ComputeWrinkle,
+	"< $delta > [ , #scale = 1 [ , $operation ] ] ",
+	"Updates the wrinkle stretch/compress data for the specified delta based on the position deltas "
+	"for the current state scaled by the scale value.  If $operation isn't specified then \"REPLACE\" "
+	"is assumed. $operation is one of: \"REPLACE\", \"ADD\".  "
+	"Note that Negative (-) values enable the compress map and Positive (+) values enable the stretch map. "
+	"This also sets the wrinkle scale to 1"
+	)
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pDeltaName = luaL_checkstring( pLuaState, 1 );
+	const float flScale = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
+	const char *pOperation = lua_isstring( pLuaState, 3 ) ? lua_tostring( pLuaState, 3 ) : "REPLACE";
+
+	if ( LuaFunc_s::m_dmxEdit.ComputeWrinkle( pDeltaName, flScale, pOperation ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
 
 
 //-----------------------------------------------------------------------------
@@ -1537,12 +2165,50 @@ bool CDmxEdit::CreateDeltasFromPresets(
 	ClearPresetCache();
 	CachePreset( pPresetFilename, pExpressionFilename );
 
-	Msg( "// CreateDeltasFromPresets( \"%s\", %s );\n", pPresetFilename, bPurge ? "true" : "false" );
 	const bool bRetVal = CDmMeshUtils::CreateDeltasFromPresets( m_pMesh, NULL, m_presetCache, bPurge, pPurgeAllButThese );
 
 	ClearPresetCache();
 
 	return bRetVal;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	CreateDeltasFromPresets,
+	"< $preset.pre >, [ #bPurgeExisting = true ], [ { \"NoPurge1\", ... } ], [ $expression.txt ]",
+	"Creates a new delta state for every present defined in the specified preset file.  #bPurgeExisting specifies whether existing controls should be purged.  If #bPurgeExisting is true, then an optional array of deltas to not purge can be specified.")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
+	const bool bPurge = lua_isboolean( pLuaState, 2 ) ? lua_toboolean( pLuaState, 2 ) ? true : false : true;
+	const char *pExpressionFilename = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : NULL;
+
+	CUtlVector< CUtlString > purgeAllBut;
+	const CUtlVector< CUtlString > *pPurgeAllBut = NULL;
+
+	if ( lua_istable( pLuaState, 3 ) )
+	{
+		pPurgeAllBut = &purgeAllBut;
+
+		// table is in the stack at index '3'
+		lua_pushnil( pLuaState );  //
+		while (lua_next( pLuaState, 3 ) != 0) {
+			// uses 'key' (at index -2) and 'value' (at index -1)
+			purgeAllBut.AddToTail( lua_tostring( pLuaState, -1 ) );
+
+			// removes 'value'; keeps 'key' for next iteration */
+			lua_pop( pLuaState, 1 );
+		}
+	}
+
+	if ( LuaFunc_s::m_dmxEdit.CreateDeltasFromPresets( pPresetFilename, bPurge, pPurgeAllBut, pExpressionFilename ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1559,6 +2225,26 @@ bool CDmxEdit::CachePreset( const char *pPresetFilename, const char *pExpression
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+LUA_COMMAND(
+	CachePreset,
+	"< $preset.pre >, [ $expression.txt ]",
+	"Caches the specified $preset file for later processing by a call to CreateDeltasFromCachedPresets().  If an $expression.txt file pathname is specified, an expression file will be written out for this preset file" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
+	const char *pExpressionFilename = lua_isstring( pLuaState, 2 ) ? lua_tostring( pLuaState, 2 ) : NULL;
+
+	if ( LuaFunc_s::m_dmxEdit.CachePreset( pPresetFilename, pExpressionFilename ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::ClearPresetCache()
 {
 	m_presetCache.Clear();
@@ -1569,12 +2255,68 @@ bool CDmxEdit::ClearPresetCache()
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+LUA_COMMAND(
+	ClearPresetCache,
+	"",
+	"Removes all preset filenames that have been specified via CachePreset() calls")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	if ( LuaFunc_s::m_dmxEdit.ClearPresetCache() )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 bool CDmxEdit::CreateDeltasFromCachedPresets(
 	bool bPurge /* = true */,
 	const CUtlVector< CUtlString > *pPurgeAllButThese /* = NULL */ ) const
 {
-	Msg( "// CreateCachedDeltasFromPresets( %s );\n", bPurge ? "true" : "false" );
 	return CDmMeshUtils::CreateDeltasFromPresets( m_pMesh, NULL, m_presetCache, bPurge, pPurgeAllButThese );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	CreateDeltasFromCachedPresets,
+	"[ #bPurgeExisting = true ], [ { \"NoPurge1\", ... } ]",
+	"Creates a new delta state for every preset defined in the preset files specified by previous CachePreset() calls.  Calling this calls ClearPresetCache().  #bPurgeExisting specifies whether existing controls should be purged.  If #bPurgeExisting is true, then an optional array of deltas to not purge can be specified.")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const bool bPurge = lua_isboolean( pLuaState, 1 ) ? lua_toboolean( pLuaState, 1 ) ? true : false : true;
+
+	CUtlVector< CUtlString > purgeAllBut;
+	const CUtlVector< CUtlString > *pPurgeAllBut = NULL;
+
+	if ( lua_istable( pLuaState, 2 ) )
+	{
+		pPurgeAllBut = &purgeAllBut;
+
+		// table is in the stack at index '2'
+		lua_pushnil( pLuaState );  //
+		while (lua_next( pLuaState, 2 ) != 0) {
+			// uses 'key' (at index -2) and 'value' (at index -1)
+			purgeAllBut.AddToTail( lua_tostring( pLuaState, -1 ) );
+
+			// removes 'value'; keeps 'key' for next iteration */
+			lua_pop( pLuaState, 1 );
+		}
+	}
+
+	bool bRetVal = LuaFunc_s::m_dmxEdit.CreateDeltasFromCachedPresets( bPurge, pPurgeAllBut );
+	LuaFunc_s::m_dmxEdit.ClearPresetCache();
+
+	if ( bRetVal )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1589,6 +2331,26 @@ bool CDmxEdit::CreateExpressionFileFromPresets( const char *pPresetFilename, con
 	ClearPresetCache();
 
 	return bRetVal;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	CreateExpressionFileFromPresets,
+	"< $preset.pre >, < $expression.txt >",
+	"Creates a faceposer expression.txt and expression.vfe file for the specified preset file")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
+	const char *pExpressionFilename = luaL_checkstring( pLuaState, 2 );
+
+	if ( LuaFunc_s::m_dmxEdit.CreateExpressionFileFromPresets( pPresetFilename, pExpressionFilename ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1616,6 +2378,7 @@ bool CDmxEdit::CreateExpressionFilesFromCachedPresets() const
 		const char *pPresetFilename = m_presetCache.String( i );
 
 		CDmElement *pRoot = NULL;
+		g_p4factory->AccessFile( pPresetFilename )->Add();
 		g_pDataModel->RestoreFromFile( pPresetFilename, NULL, NULL, &pRoot );
 
 		if ( !pRoot )
@@ -1642,12 +2405,22 @@ bool CDmxEdit::CreateExpressionFilesFromCachedPresets() const
 			Q_FixSlashes( buf1 );
 			g_pFullFileSystem->CreateDirHierarchy( buf1 );
 
+			if ( !g_p4factory->AccessFile( buf )->Edit() )
+			{
+				g_p4factory->AccessFile( buf )->Add();
+			}
+
 			pPresetGroup->ExportToTXT( buf, NULL, pComboOp );
 
 			Q_SetExtension( buf, ".vfe", sizeof( buf ) );
 			Q_ExtractFilePath( buf, buf1, sizeof( buf1 ) );
 			Q_FixSlashes( buf1 );
 			g_pFullFileSystem->CreateDirHierarchy( buf1 );
+
+			if ( !g_p4factory->AccessFile( buf )->Edit() )
+			{
+				g_p4factory->AccessFile( buf )->Add();
+			}
 
 			pPresetGroup->ExportToVFE( buf, NULL, pComboOp );
 		}
@@ -1658,141 +2431,27 @@ bool CDmxEdit::CreateExpressionFilesFromCachedPresets() const
 	return bRetVal;
 }
 
+
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-bool CDmxEdit::FixPresetFile(
-	const char *pPresetFilename )
+LUA_COMMAND(
+	CreateExpressionFilesFromCachedPresets,
+	"",
+	"Creates a faceposer expression.txt and expression.vfe file for each of the preset/expression file pairs specified by previous CachePreset calls")
 {
-	CDisableUndoScopeGuard sgDisableUndo;
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
 
-	Msg( "// FixPresetFile( \"%s\" );\n", pPresetFilename );
+	if ( LuaFunc_s::m_dmxEdit.CreateExpressionFilesFromCachedPresets() )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
 
-	CDmElement *pRoot = NULL;
-	g_pDataModel->RestoreFromFile( pPresetFilename, NULL, NULL, &pRoot );
-
-	if ( !pRoot )
-	{
-		Error( "// FixPresetFile( \"%s\" ); - Failed, Can't Load Preset File\n", pPresetFilename );
-		return false;
-	}
-
-	CDmePresetGroup *pPresetGroup = CastElement< CDmePresetGroup >( pRoot );
-	if ( !pPresetGroup )
-	{
-		Error( "// FixPresetFile( \"%s\" ); - Failed, Root Element Is Not A CDmePresetGroup\n", pPresetFilename );
-		return false;
-	}
-
-	const CDmaElementArray< CDmePreset > &presets = pPresetGroup->GetPresets();
-	const int nPresetsCount = presets.Count();
-
-	if ( nPresetsCount <= 0 )
-		return true;	// Nothing to do
-
-	for ( int i = 0; i < nPresetsCount; ++i )
-	{
-		CDmePreset *pPreset = presets[ i ];
-
-		CDmElement *pCloseLid = NULL;
-		CDmElement *pCloseLidV = NULL;
-		CDmElement *pCloseLidLo = NULL;
-		CDmElement *pCloseLidUp = NULL;
-
-		CDmaElementArray< CDmElement > &controlValues = pPreset->GetControlValues();
-		const int nControlValues = controlValues.Count();
-		for ( int j = 0; j < nControlValues; ++j )
-		{
-			CDmElement *pControlPreset = controlValues[ j ];
-			if ( !Q_strcmp( "CloseLid", pControlPreset->GetName() ) )
-			{
-				pCloseLid = pControlPreset;
-			}
-			else if ( !Q_strcmp( "CloseLidV", pControlPreset->GetName() ) )
-			{
-				pCloseLidV = pControlPreset;
-			}
-			else if ( !Q_strcmp( "CloseLidLo", pControlPreset->GetName() ) )
-			{
-				pCloseLidLo = pControlPreset;
-			}
-			else if ( !Q_strcmp( "CloseLidUp", pControlPreset->GetName() ) )
-			{
-				pCloseLidUp = pControlPreset;
-			}
-		}
-
-		if ( pCloseLid )
-		{
-			if ( !pCloseLid->GetAttribute( "multilevel" ) )
-			{
-				if ( pCloseLidV )
-				{
-					pCloseLid->SetValue( "multilevel", pCloseLidV->GetValue( "value", 0.0f ) );
-				}
-				else
-				{
-					pCloseLid->SetValue( "multilevel", 0.5f );
-				}
-			}
-		}
-		else if ( pCloseLidLo && pCloseLidUp )
-		{
-			const float flCloseLidLo = pCloseLidLo->GetValue( "value", 0.0f );
-			const float flCloseLidUp = pCloseLidUp->GetValue( "value", 0.0f );
-			if ( flCloseLidLo != 0.0f || flCloseLidUp != 0.0f )
-			{
-				const float flBalance = ( pCloseLidLo->GetValue( "balance", 0.5f ) + pCloseLidUp->GetValue( "balance", 0.5f ) ) / 2.0f;
-
-				int nControlIndex = controlValues.AddToTail( CreateElement< CDmElement >( "CloseLid", pRoot->GetFileId() ) );
-				pCloseLid = controlValues[ nControlIndex ];
-				if ( pCloseLid )
-				{
-					pCloseLid->SetValue( "value", flCloseLidLo / ( flCloseLidLo + flCloseLidUp ) );
-					pCloseLid->SetValue( "multilevel", flCloseLidLo + flCloseLidUp );
-					pCloseLid->SetValue( "balance", flBalance );
-				}
-				else
-				{
-					Error( "Couldn't Add A New Preset?!?!\n" );
-				}
-			}
-		}
-		else if ( pCloseLidV )
-		{
-			Msg( " * CloseLidV but no CloseLid?!?!? On %s\n", pPreset->GetName() );
-		}
-
-		// Purge the old junk
-		bool bPurge = true;
-		while ( bPurge )
-		{
-			bPurge = false;
-
-			for ( int j = 0; j < controlValues.Count(); ++j )
-			{
-				CDmElement *pControlPreset = controlValues[ j ];
-				if ( !Q_strcmp( "CloseLidV", pControlPreset->GetName() ) || !Q_strcmp( "CloseLidLo", pControlPreset->GetName() ) || !Q_strcmp( "CloseLidUp", pControlPreset->GetName() ) )
-				{
-					controlValues.Remove( j );
-					bPurge = true;
-					break;
-				}
-			}
-		}
-	}
-
-	bool bStatus = g_pDataModel->SaveToFile( pPresetFilename, NULL, "keyvalues2", "preset", pRoot );
-	if ( !bStatus )
-	{
-		Error( "// FixPresetFile( \"%s\" ); - Couldn't Save File via DataModel\n", pPresetFilename );
-	}
-
-	g_pDataModel->UnloadFile( pRoot->GetFileId() );
-
-	return bStatus;
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 void ScaleDeltaPositions( const CDmrArrayConst< Vector > &bindPosData, CDmeVertexDeltaData *pDelta, float sx, float sy, float sz )
 {
 	const int nPosIndex = pDelta->FindFieldIndex( CDmeVertexData::FIELD_POSITION );
@@ -1805,8 +2464,6 @@ void ScaleDeltaPositions( const CDmrArrayConst< Vector > &bindPosData, CDmeVerte
 		return;
 
 	Vector *pPosArray = reinterpret_cast< Vector * >( alloca( nPosDataCount * sizeof( Vector ) ) );
-
-	Vector v;
 
 	for ( int j = 0; j < nPosDataCount; ++j )
 	{
@@ -1885,9 +2542,34 @@ bool CDmxEdit::Scale( float sx, float sy, float sz )
 		}
 	}
 
-	Msg( "// Scale( %f %f %f );\n", sx, sy, sz );
-
 	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Scale,
+	"< #xScale >, [ #yScale, #zScale ]",
+	"Scales the position values by the specified amount.  If only 1 scale value is supplied a uniform scale in all three dimensions is applied")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const float sx = luaL_checknumber( pLuaState, 1 );
+	float sy = sx;
+	float sz = sx;
+
+	if ( lua_isnumber( pLuaState, 2 ) && lua_isnumber( pLuaState, 3 ) )
+	{
+		sy = lua_tonumber( pLuaState, 2 );
+		sz = lua_tonumber( pLuaState, 3 );
+	}
+
+	if ( LuaFunc_s::m_dmxEdit.Scale( sx, sy, sz ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1898,6 +2580,25 @@ bool CDmxEdit::SetDistanceType( const CDistanceType &distanceType )
 {
 	m_distanceType = distanceType;
 	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SetDistanceType,
+	"< $distanceType >",
+	"Sets the way distances will be interpreted after the command.  $distanceType is one of \"absolute\" or \"relative\".  By default distances are \"absolute\".  All functions that work with distances (Add, Interp and Translate) work on the currently selected vertices.  \"absolute\" means use the distance as that number of units, \"relative\" means use the distance as a scale of the radius of the bounding sphere of the selected vertices.")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pDistanceType = luaL_checkstring( pLuaState, 1 );
+
+	if ( LuaFunc_s::m_dmxEdit.SetDistanceType( pDistanceType ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -1917,10 +2618,7 @@ bool CDmxEdit::Translate(
 
 	CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : m_pMesh;
 	if ( !m_pMesh )
-	{
-		Error( "// ERROR: Translate( %f %f %f, %f, %s, %s );\n", t.x, t.y, t.z, featherDistance, static_cast< char * >( falloffType ), static_cast< char * >( distanceType ) );
-		return false;
-	}
+		return SetErrorString( "No Mesh" );
 
 	CDmeVertexData *pBase = pPassedBase ? pPassedBase : pMesh->GetCurrentBaseState();
 
@@ -1929,7 +2627,7 @@ bool CDmxEdit::Translate(
 
 	if ( !pSelection || pSelection->Count() == 0 )
 	{
-		pTmpSelection = CreateElement< CDmeSingleIndexedComponent >( "__selectAll" );
+		pTmpSelection = CreateElement< CDmeSingleIndexedComponent >( "__selectAll", DMFILEID_INVALID );
 		pSelection = pTmpSelection;
 		pMesh->SelectAllVertices( pSelection );
 	}
@@ -1998,9 +2696,1019 @@ bool CDmxEdit::Translate(
 
 	posData.SetMultiple( 0, nPosDataCount, pPosArray );
 
-	Msg( "// Translate( %f %f %f, %f, %s, %s );\n", t.x, t.y, t.z, featherDistance, static_cast< char * >( falloffType ), static_cast< char * >( distanceType ) );
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Translate,
+	"< #xTranslate, #yTranslate, #zTranslate >, [ #falloffDistance, $falloffType ]",
+	"Translates the selected vertices of the mesh by the specified amount")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const float tx = luaL_checknumber( pLuaState, 1 );
+	const float ty = luaL_checknumber( pLuaState, 2 );
+	const float tz = luaL_checknumber( pLuaState, 3 );
+
+	if ( lua_gettop( pLuaState ) < 4 )
+	{
+		if ( LuaFunc_s::m_dmxEdit.Translate( Vector( tx, ty, tz ) ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		float flFeatherDistance = 0.0f;
+		const char *pFalloffType = "STRAIGHT";
+		const char *pDistanceType = "DEFAULT";
+
+		if ( lua_gettop( pLuaState ) == 4 && lua_isstring( pLuaState, 4 ) )
+		{
+			pDistanceType = lua_tostring( pLuaState, 4 );
+		}
+		else
+		{
+			flFeatherDistance = lua_isnumber( pLuaState, 4 ) ? lua_tonumber( pLuaState, 4 ) : flFeatherDistance;
+			pFalloffType = lua_isstring( pLuaState, 5 ) ? lua_tostring( pLuaState, 5 ) : pFalloffType;
+			pDistanceType = lua_isstring( pLuaState, 6 ) ? lua_tostring( pLuaState, 6 ) : pDistanceType;
+		}
+
+		if ( LuaFunc_s::m_dmxEdit.Translate( Vector( tx, ty, tz ), flFeatherDistance, pFalloffType, pDistanceType ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::Rotate(
+	Vector r,	// X, Y, Z Euler angles in degrees specified by user
+	Vector o,	// Offset
+	float featherDistance /* = 0.0f */,
+	const CFalloffType &falloffType /* = STRAIGHT */,
+	const CDistanceType &passedDistanceType /* = DIST_DEFAULT */,
+	CDmeMesh *pPassedMesh /* = NULL */,
+	CDmeVertexData *pPassedBase /* = NULL */,
+	CDmeSingleIndexedComponent *pPassedSelection /* = NULL */ )
+{
+	const CDistanceType &distanceType = passedDistanceType() == CDmeMesh::DIST_DEFAULT ? m_distanceType : passedDistanceType;
+
+	CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : m_pMesh;
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeVertexData *pBase = pPassedBase ? pPassedBase : pMesh->GetCurrentBaseState();
+
+	CDmeSingleIndexedComponent *pSelection = pPassedSelection ? pPassedSelection : m_pCurrentSelection;
+	CDmeSingleIndexedComponent *pTmpSelection = NULL;
+
+	if ( !pSelection || pSelection->Count() == 0 )
+	{
+		pTmpSelection = CreateElement< CDmeSingleIndexedComponent >( "__selectAll", DMFILEID_INVALID );
+		pSelection = pTmpSelection;
+		pMesh->SelectAllVertices( pSelection );
+	}
+
+	CDmeSingleIndexedComponent *pNewSelection = ( pSelection && featherDistance > 0.0f ) ? m_pMesh->FeatherSelection( featherDistance, falloffType(), distanceType(), pSelection, NULL ) : pSelection;
+
+	int nArraySize = 0;
+	Vector *pPosArray = NULL;
+
+	const int nPosIndex = pBase->FindFieldIndex( CDmeVertexData::FIELD_POSITION );
+	if ( nPosIndex < 0 )
+		return false;
+
+	CDmrArray< Vector > posData = pBase->GetVertexData( nPosIndex );
+	const int nPosDataCount = posData.Count();
+	if ( nPosDataCount <= 0 )
+		return false;
+
+	if ( nArraySize < nPosDataCount || pPosArray == NULL )
+	{
+		pPosArray = reinterpret_cast< Vector * >( alloca( nPosDataCount * sizeof( Vector ) ) );
+		if ( pPosArray )
+		{
+			nArraySize = nPosDataCount;
+		}
+	}
+
+	if ( nArraySize < nPosDataCount )
+		return false;
+
+	Vector vCenter;
+	float fRadius;
+
+	pMesh->GetBoundingSphere( vCenter, fRadius, pBase, pSelection );
+
+	if ( distanceType() == CDmeMesh::DIST_RELATIVE )
+	{
+		r *= fRadius;
+	}
+
+	VectorAdd( vCenter, o, vCenter );
+
+	matrix3x4_t rpMat;
+	SetIdentityMatrix( rpMat );
+	PositionMatrix( vCenter, rpMat );
+
+	matrix3x4_t rpiMat;
+	SetIdentityMatrix( rpiMat );
+	PositionMatrix( -vCenter, rpiMat );
+
+	matrix3x4_t rMat;
+	SetIdentityMatrix( rMat );
+
+	if ( pNewSelection )
+	{
+		memcpy( pPosArray, posData.Base(), nPosDataCount * sizeof( Vector ) );
+
+		const int nSelectionCount = pNewSelection->Count();
+		int nIndex;
+		float fWeight;
+		for ( int j = 0; j < nSelectionCount; ++j )
+		{
+			pNewSelection->GetComponent( j, nIndex, fWeight );
+			const Vector &s = posData.Get( nIndex );
+			Vector &d = pPosArray[ nIndex ];
+			AngleMatrix( RadianEuler( DEG2RAD( r.x * fWeight ), DEG2RAD( r.y * fWeight ), DEG2RAD( r.z * fWeight ) ), rMat );
+
+			ConcatTransforms( rpMat, rMat, rMat );
+			ConcatTransforms( rMat, rpiMat, rMat );
+
+			VectorTransform( s, rMat, d );
+		}
+	}
+	else
+	{
+		AngleMatrix( RadianEuler( DEG2RAD( r.x ), DEG2RAD( r.y ), DEG2RAD( r.z ) ), rMat );
+
+		ConcatTransforms( rpMat, rMat, rMat );
+		ConcatTransforms( rMat, rpiMat, rMat );
+
+		for ( int j = 0; j < nPosDataCount; ++j )
+		{
+			const Vector &s = posData.Get( j );
+			Vector &d = pPosArray[ j ];
+			VectorTransform( s, rMat, d );
+		}
+	}
+
+	posData.SetMultiple( 0, nPosDataCount, pPosArray );
 
 	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	Rotate,
+	"< #xRotate, #yRotate, #zRotate >, [ #xOffset, #yOffset, #zOffset ], [ #falloffDistance, $falloffType ]",
+	"Rotates the current selection around the center of the selection by the specified Euler angles (in degrees).  The optional offset is added to the computed pivot point.")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const float rx = luaL_checknumber( pLuaState, 1 );
+	const float ry = luaL_checknumber( pLuaState, 2 );
+	const float rz = luaL_checknumber( pLuaState, 3 );
+
+	if ( lua_gettop( pLuaState ) < 4 )
+	{
+		if ( LuaFunc_s::m_dmxEdit.Rotate( Vector( rx, ry, rz ), Vector( 0.0f, 0.0f, 0.0f ) ) )
+			return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+	}
+	else
+	{
+		const float ox = luaL_checknumber( pLuaState, 4 );
+		const float oy = luaL_checknumber( pLuaState, 5 );
+		const float oz = luaL_checknumber( pLuaState, 6 );
+
+		if ( lua_gettop( pLuaState ) < 7 )
+		{
+			if ( LuaFunc_s::m_dmxEdit.Rotate( Vector( rx, ry, rz ), Vector( ox, oy, oz ) ) )
+				return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+		}
+		else
+		{
+			float flFeatherDistance = 0.0f;
+			const char *pFalloffType = "STRAIGHT";
+			const char *pDistanceType = "DEFAULT";
+
+			flFeatherDistance = lua_isnumber( pLuaState, 7 ) ? lua_tonumber( pLuaState, 7 ) : flFeatherDistance;
+			pFalloffType = lua_isstring( pLuaState, 8 ) ? lua_tostring( pLuaState, 8 ) : pFalloffType;
+			pDistanceType = lua_isstring( pLuaState, 9 ) ? lua_tostring( pLuaState, 9 ) : pDistanceType;
+
+			if ( LuaFunc_s::m_dmxEdit.Rotate( Vector( rx, ry, rz ), Vector( ox, oy, oz ), flFeatherDistance, pFalloffType, pDistanceType ) )
+				return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+		}
+	}
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	FileExists,
+	"< $filename >",
+	"Returns true if the given filename exists on disk, false otherwise")
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pFilename = luaL_checkstring( pLuaState, 1 );
+
+	if ( g_pFullFileSystem->FileExists( pFilename ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState, "File \"%s\" Doesn't Exist", pFilename );
+}
+
+
+//-----------------------------------------------------------------------------
+// If it finds a duplicate control name, reports an error message and returns it found one
+//-----------------------------------------------------------------------------
+bool HasDuplicateControlName(
+	CDmeCombinationOperator *pDmeCombo,
+	const char *pControlName,
+	CUtlVector< const char * > &retiredControlNames )
+{
+	int i;
+	int nRetiredControlNameCount = retiredControlNames.Count();
+	for ( i = 0; i < nRetiredControlNameCount; ++i )
+	{
+		if ( !Q_stricmp( retiredControlNames[i], pControlName ) )
+			break;
+	}
+
+	if ( i == nRetiredControlNameCount )
+	{
+		if ( pDmeCombo->FindControlIndex( pControlName ) >= 0 )
+			return true;
+	}
+
+	return false;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::GroupControls( const char *pGroupName, CUtlVector< const char * > &rawControlNames )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	// Loop through controls to see if any are already group controls, warn and remove
+
+	CUtlVector< const char * > validControlNames;
+	bool bStereo = false;
+	bool bEyelid = false;
+
+	for ( int i = 0; i < rawControlNames.Count(); ++i )
+	{
+		ControlIndex_t nControlIndex = pDmeCombo->FindControlIndex( rawControlNames[ i ] );
+		if ( nControlIndex < 0 )
+		{
+			LuaWarning( "Control \"%s\" Doesn't Exist, Ignoring", pGroupName );
+			continue;
+		}
+
+		if ( pDmeCombo->GetRawControlCount( nControlIndex ) > 1 )
+		{
+			LuaWarning( "Control \"%s\" Isn't A Raw Control, Ignoring", pGroupName );
+			continue;
+		}
+
+		validControlNames.AddToTail( rawControlNames[ i ] );
+
+		if ( pDmeCombo->IsStereoControl( nControlIndex ) )
+		{
+			bStereo = true;
+		}
+
+		if ( pDmeCombo->IsEyelidControl( nControlIndex ) )
+		{
+			bEyelid = true;
+		}
+	}
+
+	if ( HasDuplicateControlName( pDmeCombo, pGroupName, validControlNames ) )
+		return SetErrorString( "Duplicate Control \"%s\" Found", pGroupName );
+
+	if ( validControlNames.Count() <= 0 )
+		return SetErrorString( "No Valid Controls Specified" );
+
+	// Remove the old controls
+	for ( int i = 0; i < validControlNames.Count(); ++i )
+	{
+		pDmeCombo->RemoveControl( validControlNames[i] );
+	}
+
+	// Create new control
+	ControlIndex_t nNewControl = pDmeCombo->FindOrCreateControl( pGroupName, bStereo );
+	pDmeCombo->SetEyelidControl( nNewControl, bEyelid );
+	for ( int i = 0; i < validControlNames.Count(); ++i )
+	{
+		pDmeCombo->AddRawControl( nNewControl, validControlNames[i] );
+	}
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	GroupControls,
+	"< $groupName > [ , $rawControlName ... ]",
+	"Groups the specified raw controls under a common group control.  If the group control already exists, the raw controls are added to it" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pGroupName = luaL_checkstring( pLuaState, 1 );
+
+	CUtlVector< const char * > rawControlNames;
+
+	for ( int i = 2; i <= lua_gettop( pLuaState ); ++i )
+	{
+		if ( !lua_isstring( pLuaState, i ) )
+			break;
+
+		rawControlNames.AddToTail( lua_tostring( pLuaState, i ) );
+	}
+
+	if ( rawControlNames.Count() <= 0 )
+		return LuaFunc_s::m_dmxEdit.LuaError( pLuaState, "No Raw Controls Specified" );
+
+	if ( LuaFunc_s::m_dmxEdit.GroupControls( pGroupName, rawControlNames ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::ReorderControls( CUtlVector< CUtlString > &controlNames )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	// Loop through controls to see if any are already group controls, warn and remove
+
+	CUtlVector< const char * > validControlNames;
+
+	for ( int i = 0; i < controlNames.Count(); ++i )
+	{
+		ControlIndex_t nControlIndex = pDmeCombo->FindControlIndex( controlNames[ i ] );
+		if ( nControlIndex < 0 )
+		{
+			LuaWarning( "Control \"%s\" doesn't exist, ignoring", controlNames[ i ].Get() );
+			continue;
+		}
+
+		validControlNames.AddToTail( controlNames[ i ] );
+	}
+
+	if ( validControlNames.Count() <= 0 )
+		return SetErrorString( "No Valid Controls Specified" );
+
+	for ( int i = 0; i < validControlNames.Count(); ++i )
+	{
+		pDmeCombo->MoveControlBefore( validControlNames[ i ], pDmeCombo->GetControlName( i ) );
+	}
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	ReorderControls,
+	"< $controlName [ , ... ] >",
+	"Reorders the controls in the specified order.  "
+	"The specified controls will be moved to the front of the list of controls.  "
+	"Not all of the controls need to be specified.  "
+	"Unspecified controls will be left in the order they already are after the specified controls " )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	CUtlVector< CUtlString > controlNames;
+
+	for ( int i = 1; i <= lua_gettop( pLuaState ); ++i )
+	{
+		if ( lua_istable( pLuaState, i ) )
+		{
+			const int nCount = luaL_getn( pLuaState, i );
+			for ( int j = 1; j <= nCount; ++j )
+			{
+				lua_rawgeti( pLuaState, i, j );
+				if ( lua_isstring( pLuaState, -1 ) )
+				{
+					controlNames.AddToTail( lua_tostring( pLuaState, -1 ) );
+				}
+				lua_pop( pLuaState, 1 );
+			}
+
+			continue;
+		}
+
+		if ( !lua_isstring( pLuaState, i ) )
+			continue;
+
+		controlNames.AddToTail( lua_tostring( pLuaState, i ) );
+	}
+
+	if ( controlNames.Count() <= 0 )
+		return LuaFunc_s::m_dmxEdit.LuaError( pLuaState, "No Controls Specified" );
+
+	if ( LuaFunc_s::m_dmxEdit.ReorderControls( controlNames ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::AddDominationRule( CUtlVector< CUtlString > &dominators, CUtlVector< CUtlString > &supressed )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	CUtlVector< const char * > tmpDominators;
+	for ( int i = 0; i < dominators.Count(); ++i )
+	{
+		tmpDominators.AddToTail( dominators[ i ].Get() );
+	}
+
+	CUtlVector< const char * > tmpSupressed;
+	for ( int i = 0; i < supressed.Count(); ++i )
+	{
+		tmpSupressed.AddToTail( supressed[ i ].Get() );
+	}
+
+	pDmeCombo->AddDominationRule(
+		tmpDominators.Count(), ( const char ** )tmpDominators.Base(),
+		tmpSupressed.Count(), ( const char ** )tmpSupressed.Base() );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	AddDominationRule,
+	"{ < $dominator > [ , ... ] }, { < $supressed > [ , ... ] }",
+	"Create a domination rule.  A lua array of strings is passed as the 1st argument which are "
+	"the controls which are the dominators and a lua array of strings is passed as the 2nd "
+	"argument which are the controls to be supressed by the dominators."
+	"e.g. AddDominationRule( { \"foo\" }, { \"bar\", \"bob\" } );" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	CUtlVector< CUtlString > dominators;
+
+	if ( lua_istable( pLuaState, 1 ) )
+	{
+		const int nCount = luaL_getn( pLuaState, 1 );
+		for ( int i = 1; i <= nCount; ++i )
+		{
+			lua_rawgeti( pLuaState, 1, i );
+			if ( lua_isstring( pLuaState, -1 ) )
+			{
+				dominators.AddToTail( lua_tostring( pLuaState, -1 ) );
+			}
+			lua_pop( pLuaState, 1 );
+		}
+	}
+
+	if ( dominators.Count() <= 0 )
+		return LuaFunc_s::m_dmxEdit.LuaError( pLuaState, "No Dominator Controls Specified" );
+
+	CUtlVector< CUtlString > supressed;
+
+	if ( lua_istable( pLuaState, 2 ) )
+	{
+		const int nCount = luaL_getn( pLuaState, 2 );
+		for ( int i = 1; i <= nCount; ++i )
+		{
+			lua_rawgeti( pLuaState, 2, i );
+			if ( lua_isstring( pLuaState, -1 ) )
+			{
+				supressed.AddToTail( lua_tostring( pLuaState, -1 ) );
+			}
+			lua_pop( pLuaState, 1 );
+		}
+	}
+
+	if ( supressed.Count() <= 0 )
+		return LuaFunc_s::m_dmxEdit.LuaError( pLuaState, "No Supressed Controls Specified" );
+
+	if ( LuaFunc_s::m_dmxEdit.AddDominationRule( dominators, supressed ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::SetStereoControl( const char *pControlName, bool bStereo )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	const ControlIndex_t nControlIndex = pDmeCombo->FindControlIndex( pControlName );
+	if ( nControlIndex < 0 )
+		return SetErrorString( "No Control Named \"%s\" On DmeCombinationOperator \"%s\" On Mesh \"%s\"", pControlName, pDmeCombo->GetName(), m_pMesh->GetName() );
+
+	pDmeCombo->SetStereoControl( nControlIndex, bStereo );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SetStereoControl,
+	" < $controlName > [ , < true | false > ]",
+	"Sets the specified morph control to be stereo if the 2nd argument is true."
+	"If the 2nd argument is omitted, true is assumed" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pControlName = luaL_checkstring( pLuaState, 1 );
+	const bool bStereo = lua_isboolean( pLuaState, 2 ) ? lua_toboolean( pLuaState, 2 ) != 0 : true;
+
+	if ( LuaFunc_s::m_dmxEdit.SetStereoControl( pControlName, bStereo ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::SetEyelidControl( const char *pControlName, bool bEyelid )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	const ControlIndex_t nControlIndex = pDmeCombo->FindControlIndex( pControlName );
+	if ( nControlIndex < 0 )
+		return SetErrorString( "No Control Named \"%s\" On DmeCombinationOperator \"%s\" On Mesh \"%s\"", pControlName, pDmeCombo->GetName(), m_pMesh->GetName() );
+
+	pDmeCombo->SetEyelidControl( nControlIndex, bEyelid );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SetEyelidControl,
+	" < $controlName > [ , < true | false > ]",
+	"Sets the specified morph control to be an eyelid control if the 2nd argument is true."
+	"If the 2nd argument is omitted, true is assumed" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pControlName = luaL_checkstring( pLuaState, 1 );
+	const bool bStereo = lua_isboolean( pLuaState, 2 ) ? lua_toboolean( pLuaState, 2 ) != 0 : true;
+
+	if ( LuaFunc_s::m_dmxEdit.SetEyelidControl( pControlName, bStereo ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+float CDmxEdit::MaxDeltaDistance( const char *pDeltaName )
+{
+	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
+
+	if ( !pDelta)
+		return 0.0f;
+
+	float fSqMaxDelta = 0.0f;
+	float fTmpSqLength;
+
+	const CUtlVector< Vector > &positions = pDelta->GetPositionData();
+
+	for ( int i = 0; i < positions.Count(); ++i )
+	{
+		fTmpSqLength = positions[ i ].LengthSqr();
+		if ( fTmpSqLength < fSqMaxDelta )
+			continue;
+
+		fSqMaxDelta = fTmpSqLength;
+	}
+
+	return sqrt( fSqMaxDelta );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	MaxDeltaDistance,
+	" < $delta >",
+	"Returns the maximum distance any vertex moves in the specified delta.  Returns 0 if the delta specified doesn't exist" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pDeltaName = luaL_checkstring( pLuaState, 1 );
+
+	lua_pushnumber( pLuaState, LuaFunc_s::m_dmxEdit.MaxDeltaDistance( pDeltaName ) );
+
+	return 1;
+}
+
+
+struct DVec
+{
+	double x;
+	double y;
+	double z;
+
+	DVec()
+		: x( 0.0 )
+		, y( 0.0 )
+		, z( 0.0 )
+	{
+	}
+
+	DVec &operator=( const Vector &rhs )
+	{
+		x = rhs.x;
+		y = rhs.y;
+		z = rhs.z;
+
+		return *this;
+	}
+};
+
+//-----------------------------------------------------------------------------
+//
+// An Efficient Bounding Sphere
+// by Jack Ritter
+// from "Graphics Gems", Academic Press, 1990
+//
+// Routine to calculate tight bounding sphere over
+// a set of points in 3D
+// This contains the routine find_bounding_sphere(),
+// the struct definition, and the globals used for parameters.
+// The abs() of all coordinates must be < BIGNUMBER
+// Code written by Jack Ritter and Lyle Rains.
+//-----------------------------------------------------------------------------
+void FindBoundingSphere( CUtlVector< Vector > &points, Vector &cen, float &fRad )
+{
+	if ( points.Count() <= 0 )
+	{
+		cen.Zero();
+		fRad = 0.0f;
+
+		return;
+	}
+
+	double dx,dy,dz;
+	double rad_sq,xspan,yspan,zspan,maxspan;
+	double old_to_p,old_to_p_sq,old_to_new;
+	Vector xmin,xmax,ymin,ymax,zmin,zmax,dia1,dia2;
+
+//	DVec cen;
+	double rad;
+
+	cen = points[ 0 ];
+	fRad = 0.0f;
+
+	xmin.x=ymin.y=zmin.z= FLT_MAX; /* initialize for min/max compare */
+	xmax.x=ymax.y=zmax.z= -FLT_MAX;
+
+	for ( int i = 0; i < points.Count(); ++i )
+	{
+		const Vector &caller_p = points[ i ];
+
+		if (caller_p.x<xmin.x)
+			xmin = caller_p; /* New xminimum point */
+		if (caller_p.x>xmax.x)
+			xmax = caller_p;
+		if (caller_p.y<ymin.y)
+			ymin = caller_p;
+		if (caller_p.y>ymax.y)
+			ymax = caller_p;
+		if (caller_p.z<zmin.z)
+			zmin = caller_p;
+		if (caller_p.z>zmax.z)
+			zmax = caller_p;
+	}
+
+	/* Set xspan = distance between the 2 points xmin & xmax (squared) */
+	dx = xmax.x - xmin.x;
+	dy = xmax.y - xmin.y;
+	dz = xmax.z - xmin.z;
+	xspan = dx*dx + dy*dy + dz*dz;
+
+	/* Same for y & z spans */
+	dx = ymax.x - ymin.x;
+	dy = ymax.y - ymin.y;
+	dz = ymax.z - ymin.z;
+	yspan = dx*dx + dy*dy + dz*dz;
+
+	dx = zmax.x - zmin.x;
+	dy = zmax.y - zmin.y;
+	dz = zmax.z - zmin.z;
+	zspan = dx*dx + dy*dy + dz*dz;
+
+	/* Set points dia1 & dia2 to the maximally separated pair */
+	dia1 = xmin; dia2 = xmax; /* assume xspan biggest */
+	maxspan = xspan;
+	if (yspan>maxspan)
+	{
+		maxspan = yspan;
+		dia1 = ymin; dia2 = ymax;
+	}
+	if (zspan>maxspan)
+	{
+		dia1 = zmin; dia2 = zmax;
+	}
+
+	/* dia1,dia2 is a diameter of initial sphere */
+	/* calc initial center */
+	cen.x = (dia1.x+dia2.x)/2.0;
+	cen.y = (dia1.y+dia2.y)/2.0;
+	cen.z = (dia1.z+dia2.z)/2.0;
+	/* calculate initial radius**2 and radius */
+	dx = dia2.x-cen.x; /* x component of radius vector */
+	dy = dia2.y-cen.y; /* y component of radius vector */
+	dz = dia2.z-cen.z; /* z component of radius vector */
+	rad_sq = dx*dx + dy*dy + dz*dz;
+	rad = sqrt(rad_sq);
+
+	/* SECOND PASS: increment current sphere */
+
+	for ( int i = 0; i < points.Count(); ++i )
+	{
+		const Vector &caller_p = points[ i ];
+
+		dx = caller_p.x-cen.x;
+		dy = caller_p.y-cen.y;
+		dz = caller_p.z-cen.z;
+		old_to_p_sq = dx*dx + dy*dy + dz*dz;
+		if (old_to_p_sq > rad_sq) 	/* do r**2 test first */
+		{ 	/* this point is outside of current sphere */
+			old_to_p = sqrt(old_to_p_sq);
+			/* calc radius of new sphere */
+			rad = (rad + old_to_p) / 2.0;
+			rad_sq = rad*rad; 	/* for next r**2 compare */
+			old_to_new = old_to_p - rad;
+			/* calc center of new sphere */
+			cen.x = (rad*cen.x + old_to_new*caller_p.x) / old_to_p;
+			cen.y = (rad*cen.y + old_to_new*caller_p.y) / old_to_p;
+			cen.z = (rad*cen.z + old_to_new*caller_p.z) / old_to_p;
+		}
+	}
+
+	/*
+	fCen.x = cen.x;
+	fCen.y = cen.y;
+	fCen.z = cen.z;
+	*/
+	fRad = rad;
+}
+
+
+//-----------------------------------------------------------------------------
+// Take each delta value, add it to the base state, find the bounding sphere
+// of all of the resulting vertices, return the distance from the center to
+// the 
+//-----------------------------------------------------------------------------
+float CDmxEdit::DeltaRadius( const char *pDeltaName )
+{
+	CDmeVertexData *pBind = GetBindState();
+	if ( !pBind )
+		return 0.0f;
+
+	CDmeVertexDeltaData *pDelta = FindDeltaState( pDeltaName );
+
+	if ( !pDelta )
+		return 0.0f;
+
+	const CUtlVector< Vector > &bindPos = pBind->GetPositionData();
+	const CUtlVector< int > &deltaPosIndices = pDelta->GetVertexIndexData( CDmeVertexData::FIELD_POSITION );
+	const CUtlVector< Vector > &deltaPos = pDelta->GetPositionData(); 
+
+	Assert( deltaPosIndices.Count() == deltaPos.Count() );
+
+	CUtlVector< Vector > newPos;
+	newPos.SetSize( deltaPos.Count() );
+
+	for ( int i = 0; i < newPos.Count(); ++i )
+	{
+		newPos[ i ] = bindPos[ deltaPosIndices[ i ] ] + deltaPos[ i ];
+	}
+
+	Vector center;
+	float radius = 0.0;
+
+	FindBoundingSphere( newPos, center, radius );
+
+	return radius;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	DeltaRadius,
+	" < $delta >",
+	"Returns the radius of the specified delta, if it exists.  Radius of a delta is defined as the radius of the tight bounding sphere containing all of the deltas added to their base state values" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pDeltaName = luaL_checkstring( pLuaState, 1 );
+
+	lua_pushnumber( pLuaState, LuaFunc_s::m_dmxEdit.DeltaRadius( pDeltaName ) );
+
+	return 1;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+float CDmxEdit::SelectionRadius()
+{
+	if ( !m_pCurrentSelection || m_pCurrentSelection->Count() == 0 )
+		return 0.0f;
+
+	if ( !m_pMesh )
+		return 0.0f;
+
+	CDmeVertexData *pBase = m_pMesh->GetCurrentBaseState();
+	if ( !pBase )
+		return 0.0f;
+
+	CUtlVector< int > selection;
+	m_pCurrentSelection->GetComponents( selection );
+	const CUtlVector< Vector > &pos = pBase->GetPositionData();
+
+	CUtlVector< Vector > newPos;
+	newPos.SetSize( selection.Count() );
+
+	for ( int i = 0; i < newPos.Count(); ++i )
+	{
+		newPos[ i ] = pos[ selection[ i ] ];
+	}
+
+	Vector center;
+	float radius = 0.0;
+
+	FindBoundingSphere( newPos, center, radius );
+
+	return radius;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SelectionRadius,
+	"",
+	"Returns the radius of the currently selected vertices, if nothing is selected, returns 0.  Radius of a the vertices defined as the radius of the tight bounding sphere containing all of the vertices" )
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	lua_pushnumber( pLuaState, LuaFunc_s::m_dmxEdit.SelectionRadius() );
+
+	return 1;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+bool CDmxEdit::SetWrinkleScale( const char *pControlName, const char *pRawControlName, float flScale )
+{
+	if ( !m_pMesh )
+		return SetErrorString( "No Mesh" );
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( m_pMesh, "targets" );
+	if ( !pDmeCombo )
+		return SetErrorString( "No DmeCombinationOperator On Mesh \"%s\"", m_pMesh->GetName() );
+
+	const ControlIndex_t nControlIndex = pDmeCombo->FindControlIndex( pControlName );
+
+	if ( nControlIndex < 0 )
+		return SetErrorString( "Cannot Find Control \"%s\"", pControlName );
+
+	// Check to see if the raw control exists
+
+	bool bFoundRawControl = false;
+	for ( int nRawControlIndex = 0; nRawControlIndex < pDmeCombo->GetRawControlCount( nControlIndex ); ++nRawControlIndex )
+	{
+		if ( !Q_strcmp( pRawControlName, pDmeCombo->GetRawControlName( nControlIndex, nRawControlIndex ) ) )
+		{
+			bFoundRawControl = true;
+			break;
+		}
+	}
+
+	if ( !bFoundRawControl )
+	{
+		CUtlString rawControls;
+		for ( int nRawControlIndex = 0; nRawControlIndex < pDmeCombo->GetRawControlCount( nControlIndex ); ++nRawControlIndex )
+		{
+			if ( rawControls.Length() > 0 )
+			{
+				rawControls += ", ";
+			}
+			rawControls += pDmeCombo->GetRawControlName( nControlIndex, nRawControlIndex );
+		}
+
+		return SetErrorString( "Control \"%s\" Does Not Have Raw Control \"%s\", Raw Controls: %s ", pControlName, pRawControlName, rawControls.Get() );
+	}
+
+	pDmeCombo->SetWrinkleScale( nControlIndex, pRawControlName, flScale );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+LUA_COMMAND(
+	SetWrinkleScale,
+	"< $controlName >, < $rawControlName >, < #scale >",
+	"Sets the wrinkle scale of the raw control of the specified control. "
+	"NOTE: SetWrinkleScale merely sets the wrinkle scale value of the specified delta on the combination operator.  "
+	"This value is only used if ComputeWrinkles() is called after all SetWrinkleScale() calls are made.  "
+	"A wrinkle scale of 0 means there will be no wrinkle deltas.  "
+	"The function to compute a single delta's wrinkle values, ComputeWrinkle() does not use the wrinkle scale value at all.  "
+	"Negative (-) is compress, Positive (+) is stretch."
+	)
+{
+	LuaFunc_s::m_dmxEdit.SetFuncString( pLuaState );
+
+	const char *pControlName = luaL_checkstring( pLuaState, 1 );
+	const char *pRawControlName = luaL_checkstring( pLuaState, 2 );
+	const double flScale = luaL_checknumber( pLuaState, 3 );
+	const float fScale = flScale;
+
+	if ( LuaFunc_s::m_dmxEdit.SetWrinkleScale( pControlName, pRawControlName, fScale ) )
+		return LuaFunc_s::m_dmxEdit.LuaOk( pLuaState );
+
+	return LuaFunc_s::m_dmxEdit.LuaError( pLuaState );
 }
 
 
@@ -2016,8 +3724,13 @@ void CDmxEdit::Error( const tchar *pMsgFormat, ... )
 	tchar pTempBuffer[5020];
 	assert( _tcslen( pMsgFormat ) < sizeof( pTempBuffer) ); // check that we won't artificially truncate the string
 	_vsntprintf( pTempBuffer, sizeof( pTempBuffer ) - 1, pMsgFormat, args );
-	SpewStdout( SPEW_ERROR, pTempBuffer );
+	pTempBuffer[ ARRAYSIZE(pTempBuffer) - 1 ] = 0;
+	printf( "%s", pTempBuffer );
+	fflush( stdout );
 	va_end(args);
+
+	if ( CommandLine()->FindParm( "-coe" ) || CommandLine()->FindParm( "-continueOnError" ) )
+		return;
 
 	if ( Plat_IsInDebugSession() )
 	{
@@ -2084,184 +3797,188 @@ void CDmxEdit::DoIt()
 
 	CDisableUndoScopeGuard guard;
 
-	#include "doit.h"
-
 	return;
+}
 
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmxEdit::CleanupWork()
+{
+	if ( m_pMesh )
 	{
-		base = "d:/dev/main/content/tf_movies/models/test/dmxedit/parts/obj/plane_zero.obj";
+		// Cleanup
+		m_pMesh->RemoveAttribute( "selection" );
+		if ( m_pCurrentSelection )
+		{
+			g_pDataModel->DestroyElement( m_pCurrentSelection->GetHandle() );
+			m_pCurrentSelection = NULL;
+		}
 
-		ListDeltas();
+		CDmeVertexData *pBind( m_pMesh->FindBaseState( "bind" ) );
 
-		delta A = "A";
-		delta B = "B";
-		delta C = "C";
-		delta D = "D";
-		delta E = "E";
+		if ( pBind )
+		{
+			m_pMesh->SetCurrentBaseState( "bind" );
+		}
 
-		Select( A );
+		CDmeVertexData *pWork( m_pMesh->FindBaseState( "__dmxEdit_work" ) );
 
-		Add( C, 1.0 );
-		SaveDelta( "A-to-C" );
-
-		// Remember to ResetState or SetState!
-		ResetState();
-		Add( C, 1.0, 10.0 );
-		SaveDelta( "A-to-C-Feather10" );
-
-		ResetState();
-		GrowSelection( 3 );
-		Add( C, 1.0, 10.0 );
-		SaveDelta( "A-to-C-Grow3-Feather10" );
-
-		SetState( C );
-		Select( B );
-		Interp( base, 1.0, 24.0, STRAIGHT );
-		delta straight = SaveDelta( "straight" );
-
-		SetState( C );
-		Select( B );
-		Interp( base, 1.0, 24.0, BELL );
-		delta bell = SaveDelta( "bell" );
-
-		SetState( C );
-		Select( B );
-		Interp( base, 1.0, 24.0, DOME );
-		delta dome = SaveDelta( "dome" );
-
-		SetState( C );
-		Select( B );
-		Interp( base, 1.0, 24.0, SPIKE );
-		delta spike = SaveDelta( "spike" );
-
-		ResetState();
-		Select( E );
-		Interp( C, 1.0, 12.0, STRAIGHT );
-		delta midStraight = SaveDelta( "midStraight" );
-
-		ResetState();
-		Select( E );
-		Interp( C, 1.0, 12.0, BELL );
-		delta midBell = SaveDelta( "midBell" );
-
-		ResetState();
-		Select( E );
-		Interp( C, 1.0, 12.0, "DOME" );
-		delta midDome = SaveDelta( "midDome" );
-
-		ResetState();
-		Select( E );
-		Interp( C, 1.0, 12.0, SPIKE );
-		delta midSpike = SaveDelta( "midSpike" );
-
-		SetState( C );
-		Select( C );
-		Interp( D, 0.5 );
-		SaveDelta( "C-to-50-D" );
-
-		ResetState();
-		Select( "F" );
-		Select( "ADD", "G" );
-		Interp( "C", 1.0 );
-		SaveDelta( "F-ADD-G" );
-
-		ResetState();
-		Select( "F" );
-		Select( "SUBTRACT", "G" );
-		Interp( "C", 1.0 );
-		SaveDelta( "F-SUB-G" );
-
-		ResetState();
-		Select( "F" );
-		Select( TOGGLE, "G" );
-		Interp( "C", 1.0 );
-		SaveDelta( "F-TOG-G" );
-
-		ResetState();
-		Select( "F" );
-		GrowSelection( 3 );
-		Select( "INTERSECT", "G" );
-		Interp( "C", 1.0 );
-		SaveDelta( "F-INT-G" );
-
-		ResetState();
-		Select( "F" );
-		Select( "REPLACE", "G" );
-		Interp( "C", 1.0 );
-		SaveDelta( "F-REP-G" );
-
-//		ImportComboRules( "d:/dev/main/content/tf_movies/models/player/heavy/parts/dmx/heavy_head_rules.dmx" );
-
-		// Can save to DMX as well
-		Save( "c:/plane.dmx" );
-
-		// Write out series of objs
-//		Save( "c:/newplane_zero.obj", "ABSOLUTE" );
-//		Save( "c:/blueplane_zero.obj", "RELATIVE" );
+		if ( pWork )
+		{
+			m_pMesh->DeleteBaseState( "__dmxEdit_work" );
+		}
 	}
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmxEdit::CreateWork()
+{
+	if ( m_pMesh )
+	{
+		// Undo the cleanup work performed above
+		CDmeVertexData *pBind = m_pMesh->FindBaseState( "bind" );
+
+		if ( pBind )
+		{
+			// Ensure "work" isn't saved!
+			CDmeVertexData *pWork = m_pMesh->FindOrCreateBaseState( "__dmxEdit_work" );
+
+			if ( pWork )
+			{
+				pBind->CopyTo( pWork );
+				m_pMesh->SetCurrentBaseState( "__dmxEdit_work" );
+			}
+		}
+
+		m_pCurrentSelection = CreateElement< CDmeSingleIndexedComponent >( "selection", m_pRoot->GetFileId() );
+		m_pMesh->SetValue( "selection", m_pCurrentSelection );
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmxEdit::GetFuncArg( lua_State *pLuaState, int nIndex, CUtlString &funcString )
+{
+	switch ( lua_type( pLuaState, nIndex ) )
+	{
+		case LUA_TNUMBER:
+			funcString += lua_tonumber( pLuaState, nIndex );
+			break;
+		case LUA_TBOOLEAN:
+			funcString += ( lua_toboolean( pLuaState, nIndex ) ? "true" : "false" );
+			break;
+		case LUA_TSTRING:
+			funcString += "\"";
+			funcString += lua_tostring( pLuaState, nIndex );
+			funcString += "\"";
+			break;
+		case LUA_TTABLE:
+			{
+				funcString += "{ ";
+				const int nCount = luaL_getn( pLuaState, nIndex );
+				for ( int i = 1; i <= nCount; ++i )
+				{
+					lua_rawgeti( pLuaState, nIndex, i );
+					if ( i > 1 )
+					{
+						funcString += ", ";
+					}
+					GetFuncArg( pLuaState, lua_gettop( pLuaState ), funcString );
+					lua_pop( pLuaState, 1 );
+				}
+				funcString += " }";
+			}
+			break;
+		case LUA_TNIL:
+		case LUA_TFUNCTION:
+		case LUA_TUSERDATA:
+		case LUA_TTHREAD:
+		case LUA_TLIGHTUSERDATA:
+			funcString += "<";
+			funcString += lua_typename( pLuaState, nIndex );
+			funcString += ">";
+			break;
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Sets the current function string and line number
+//-----------------------------------------------------------------------------
+const CUtlString &CDmxEdit::SetFuncString( lua_State *pLuaState )
+{
+	m_funcString.SetLength( 0 );
+
+	lua_Debug ar;
+
+	lua_getstack( pLuaState, 0, &ar );
+	lua_getinfo( pLuaState, "Sln", &ar );
+
+	const char *pFuncName = ar.name;
+	if ( pFuncName )
+	{
+		m_funcString = pFuncName;
+	}
+	else
+	{
+		m_funcString = "Unknown";
+	}
+
+	m_funcString += "(";
+	if ( lua_gettop( pLuaState ) >= 1 )
+		m_funcString += " ";
+
+	for ( int i = 1; i <= lua_gettop( pLuaState ); ++i )
+	{
+		if ( i > 1 )
+		{
+			m_funcString += ", ";
+		}
+
+		GetFuncArg( pLuaState, i, m_funcString );
+	}
+
+	if ( lua_gettop( pLuaState ) >= 1 )
+		m_funcString += " ";
+	m_funcString += ");";
+
+	lua_getstack( pLuaState, 1, &ar );
+	lua_getinfo( pLuaState, "Sln", &ar );
+
+	m_lineNo = ar.currentline;
+
+	m_sourceFile.SetLength( 0 );
+	if ( ar.source )
+	{
+		if ( *( ar.source ) == '@' )
+		{
+			m_sourceFile = ar.source + 1;
+		}
+		else
+		{
+			m_sourceFile = ar.source;
+		}
+	}
+
+	return m_funcString;
 }
 
 
 //=============================================================================
 // Lua Interface
 //=============================================================================
-CDmxEdit CDmxEditLua::m_dmxEdit;
-
-CDmxEditLua::LuaFunc_s CDmxEditLua::s_luaFuncs[] =
-{
-	{	"Load",								Load,							"< $file.dmx | $file.obj >, [ $loadType ]",							"Replaces the current scene with the specified scene.  The current mesh will be set to the first mesh with a combination operator found in the new scene.  $loadType is one of \"absolute\" or \"relative\".  If not specified, \"absolute\" is assumed." },
-	{	"Import",							Import,							"< $file.dmx >, [ $parentBone ]",									"Imports the specified DMX model into the scene.  The imported model can optionally be parented (which implictly skins it) to a specified bone in the existing scene via $parentBone." },
-	{	"Save",								Save,							"[ $file.dmx | $file.obj ], [ $saveType ], [ $delta ]",				"Saves the current scene to either a single dmx file or a sequence of obj files.  If $file is not specified, the filename used in the last Load() command will be used to save the file.  $saveType is one of \"absolute\" or \"relative\".  If not specified, \"absolute\" is assumed.  If $delta is passed and the save type is OBJ, then only a single OBJ of that delta is saved.  \"base\" is the base state." },
-	{	"ListDeltas",						ListDeltas,						"",																	"Prints a list of all of the deltas present in the current mesh" },
-	{	"ImportComboRules",					ImportComboRules,				"< $rules.dmx >, [ #bOverwrite ], [ #bPurgeDeltas ]",				"Imports the combintion rules from the specified dmx file and replaces the current rules with those from the file is #bOverwrite specified or is true.  If #bOverwrite is false then any existing controls that are not in the imported rules file are preserved.  If #bPurgeDeltas is specified and is true, then any delta states which are no longer referred to by any combination rule or control will be purged. " },
-	{	"ResetState",						ResetState,						"",																	"Resets the current mesh back to the default base state, i.e. no deltas active" },
-	{	"SetState",							SetState,						"< $delta >",														"Sets the current mesh to the specified $delta" },
-	{	"Select",							Select,							"< $delta >, [ $type ]",											"Changes the selection based on the vertices present in the specified $delta.  $type is one of \"add\", \"subtract\", \"toggle\", \"intersect\", \"replace\".  If $type is not specified, \"add\" is assumed." },
-	{	"SelectHalf",						SelectHalf,						"< $halfType >",													"Selects all the vertices in half the mesh.  Half is one of left or right.  Left means the X value of the position is >= 0, right means that the X value of the position is <= 0.  So it's the character's left (assuming they're staring down -z)" },
-	{	"GrowSelection",					GrowSelection,					"< #size >",														"Grows the current selection by the specified $size" },
-	{	"ShrinkSelection",					ShrinkSelection,				"< #size >",														"Shrinks the current selection by the specified $size (integer)" },
-	{	"Add",								Add,							"< $delta >, [ #weight ], [ #featherDistance ], < $falloffType >",	"Adds specified state to the current state of the mesh weighted and feathered by the specified #weight, #featherDistance & $falloffType.  $falloffType is one of \"straight\", \"spike\", \"dome\", \"bell\"" },
-	{	"Interp",							Interp,							"< $delta >, [ #weight ], [ #featherDistance ], < $falloffType >",	"Interpolates the current state of the mesh towards the specified state, $weight, #featherDistance and $falloffType.  $falloffType is one of \"straight\", \"spike\", \"dome\", \"bell\"" },
-	{	"SaveDelta",						SaveDelta,						"< $delta >",														"Saves the current state of the mesh to the named delta state" },
-	{	"DeleteDelta",						DeleteDelta,					"< $delta >",														"Deletes the named delta state from the current mesh" },
-	{	"Merge",							Merge,							"< $src.dmx >, < $dst.dmx >",										"Merges the current mesh onto the specified dmx file and saves to the second specified dmx file" },
-	{	"RemapMaterial",					RemapMaterial,					"< #index | $srcMaterial >, < $dstMaterial >",						"Remaps the specified material to the new material, material can be specified by index or name" },
-	{	"RemoveFacesWithMaterial",			RemoveFacesWithMaterial,		"< $material >",													"Removes faces from the current mesh which have the specified material" },
-	{	"RemoveFacesWithMoreThanNVerts",	RemoveFacesWithMoreThanNVerts,	"< #vertexCount >",													"Removes faces from the current mesh which have more than the specified number of faces" },
-	{	"Mirror",							Mirror,							"[ $axis ]",														"Mirrors the mesh in the specified axis.  $axis is one of \"x\", \"y\", \"z\". If $axis is not specified, \"x\" is assumed (i.e. \"x\" == mirror across YZ plane)" },
-	{	"ComputeNormals",					ComputeNormals,					"",																	"Computes new smooth normals for the current mesh and all of its delta states." },
-	{	"CreateDeltasFromPresets",			CreateDeltasFromPresets,		"< $preset.pre >, [ #bPurgeExisting = true ], [ { \"NoPurge1\", ... } ], [ $expression.txt ]",  "Creates a new delta state for every present defined in the specified preset file.  #bPurgeExisting specifies whether existing controls should be purged.  If #bPurgeExisting is true, then an optional array of deltas to not purge can be specified." },
-	{	"CachePreset",						CachePreset,					"< $preset.pre >, [ $expression.txt ]",								"Caches the specified $preset file for later processing by a call to CreateDeltasFromCachedPresets().  If an $expression.txt file pathname is specified, an expression file will be written out for this preset file" },
-	{	"ClearPresetCache",					ClearPresetCache,				"",																	"Removes all preset filenames that have been specified via CachePreset() calls" },
-	{	"CreateDeltasFromCachedPresets",	CreateDeltasFromCachedPresets,	"[ #bPurgeExisting = true ], [ { \"NoPurge1\", ... } ]",			"Creates a new delta state for every preset defined in the preset files specified by previous CachePreset() calls.  Calling this calls ClearPresetCache().  #bPurgeExisting specifies whether existing controls should be purged.  If #bPurgeExisting is true, then an optional array of deltas to not purge can be specified." },
-	{	"CreateExpressionFileFromPresets",	CreateExpressionFileFromPresets,	"< $preset.pre >, < $expression.txt >",							"Creates a faceposer expression.txt and expression.vfe file for the specified preset file" },
-	{	"CreateExpressionFilesFromCachedPresets",	CreateExpressionFilesFromCachedPresets,	"",													"Creates a faceposer expression.txt and expression.vfe file for each of the preset/expression file pairs specified by previous CachePreset calls" },
-	{	"ComputeWrinkles",					ComputeWrinkles,				"",																	"Computes new wrinkle/compress data based on the position deltas." },
-	{	"ComputeWrinkle",					ComputeWrinkle,					"< $delta >, [ #scale = 1 ]",										"Computes new wrinkle/compress data for the specified delta based on the position deltas for the current state of the mesh scaled by the specified #scale.  If #scale it defaults to 1." },
-	{	"Scale",							Scale,							"< #xScale >, [ #yScale, #zScale ]",								"Scales the position values by the specified amount.  If only 1 scale value is supplied a uniform scale in all three dimensions is applied" },
-	{	"SetDistanceType",					SetDistanceType,				"< $distanceType >",												"Sets the way distances will be interpreted after the command.  $distanceType is one of \"absolute\" or \"relative\".  By default distances are \"absolute\".  All functions that work with distances (Add, Interp and Translate) work on the currently selected vertices.  \"absolute\" means use the distance as that number of units, \"relative\" means use the distance as a scale of the radius of the bounding sphere of the selected vertices." },
-	{	"Translate",						Translate,						"< #xTranslate, #yTranslate, #zTranslate >, [ #falloffDistance, $falloffType ]",	"Translates the selected vertices of the mesh by the specified amount" },
-	{	"FixPresetFile",					FixPresetFile,					"< $preset.pre >",													"Fixes the presets for CloseLid based on CloseLidLo, CloseLidUp or CloseLid, CloseLidV to new CloseLid multi-control" },
-	{	"FileExists",						FileExists,						"< $filename >",													"Returns true if the given filename exists on disk, false otherwise" },
-};
 
 
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::FunctionCount()
-{
-	return sizeof( s_luaFuncs ) / sizeof( s_luaFuncs[ 0 ] );
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-const CDmxEditLua::LuaFunc_s *CDmxEditLua::GetFunctionList()
-{
-	return &s_luaFuncs[ 0 ];
-}
+//=============================================================================
+// CDmxEditLua
+//=============================================================================
 
 
 //-----------------------------------------------------------------------------
@@ -2272,10 +3989,10 @@ CDmxEditLua::CDmxEditLua()
 {
 	luaL_openlibs( m_pLuaState );
 
-	for ( int i = 0; i < sizeof( s_luaFuncs ) / sizeof( s_luaFuncs[ 0 ] ); ++i )
+	for ( LuaFunc_s *pFunc = LuaFunc_s::s_pFirstFunc; pFunc; pFunc = pFunc->m_pNextFunc )
 	{
-		lua_pushcfunction( m_pLuaState, s_luaFuncs[ i ].m_pFunc );
-		lua_setglobal( m_pLuaState, s_luaFuncs[ i ].m_pFuncName );
+		lua_pushcfunction( m_pLuaState, pFunc->m_pFunc );
+		lua_setglobal( m_pLuaState, pFunc->m_pFuncName );
 	}
 
 	const char *pLuaInit =
@@ -2303,7 +4020,9 @@ bool CDmxEditLua::DoIt( const char *pFilename )
 
 	bool retVal = true;
 
-	if ( luaL_loadfile( m_pLuaState, pFilename ) || lua_pcall( m_pLuaState, 0, LUA_MULTRET, 0 ) )
+	LuaFunc_s::m_dmxEdit.SetScriptFilename( pFilename );
+
+	if ( luaL_dofile( m_pLuaState, pFilename ) )
 	{
 		Error( "Error: %s\n", lua_tostring( m_pLuaState, -1 ) );
 		retVal = false;
@@ -2311,749 +4030,9 @@ bool CDmxEditLua::DoIt( const char *pFilename )
 
 	lua_close( m_pLuaState );
 
-	m_dmxEdit.Unload();
+	LuaFunc_s::m_dmxEdit.Unload();
 
 	return retVal;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Load( lua_State *pLuaState )
-{
-	const char *pFilename = luaL_checkstring( pLuaState, 1 );
-
-	const char *pLoadType = NULL;
-
-	if ( lua_isboolean( pLuaState, 2 ) )
-	{
-		if ( lua_toboolean( pLuaState, 2 ) )
-		{
-			pLoadType = "Absolute";
-		}
-		else
-		{
-			pLoadType = "Relative";
-		}
-	}
-	else if ( lua_isstring( pLuaState, 2 ) )
-	{
-		pLoadType = lua_tostring( pLuaState, 2 );
-	}
-
-	if ( pLoadType )
-	{
-		if ( m_dmxEdit.Load( pFilename, pLoadType ) )
-			return 0;
-	}
-	else
-	{
-		if ( m_dmxEdit.Load( pFilename ) )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't load file" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Import( lua_State *pLuaState )
-{
-	const char *pFilename = luaL_checkstring( pLuaState, 1 );
-	const char *pParentBone = lua_isstring( pLuaState, 2 ) ? lua_tostring( pLuaState, 2 ) : NULL;
-
-	if ( m_dmxEdit.Import( pFilename, pParentBone ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't import file" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ListDeltas( lua_State *pLuaState )
-{
-	m_dmxEdit.ListDeltas();
-	return 0;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ImportComboRules( lua_State *pLuaState )
-{
-	const char *pFilename = luaL_checkstring( pLuaState, 1 );
-
-	if ( lua_isboolean( pLuaState, 2 ) ) 
-	{
-		if ( lua_isboolean( pLuaState, 3 ) )
-		{
-			if ( m_dmxEdit.ImportComboRules( pFilename, lua_toboolean( pLuaState, 2 ) != 0, lua_toboolean( pLuaState, 3 ) != 0 ) )
-				return 0;
-		}
-		else
-		{
-			if ( m_dmxEdit.ImportComboRules( pFilename, lua_toboolean( pLuaState, 2 ) != 0 ) )
-				return 0;
-		}
-	}
-	else
-	{
-		if ( m_dmxEdit.ImportComboRules( pFilename ) )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't import combo rules" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ResetState( lua_State *pLuaState )
-{
-	m_dmxEdit.ResetState();
-	return 0;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::SetState( lua_State *pLuaState )
-{
-	const char *pDeltaName = luaL_checkstring( pLuaState, 1 );
-
-	if ( m_dmxEdit.SetState( pDeltaName ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't set state" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-// 1 or 2 string arguments
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Select( lua_State *pLuaState )
-{
-	const char *pSelect1 = luaL_checkstring( pLuaState, 1 );
-	const char *pSelect2 = lua_tostring( pLuaState, 2 );
-
-	if ( pSelect2 )
-	{
-		if ( m_dmxEdit.Select( pSelect1, pSelect2 ) )
-			return 0;
-	}
-	else
-	{
-		if ( m_dmxEdit.Select( pSelect1 ) )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Select" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-// 1 string argument
-//-----------------------------------------------------------------------------
-int CDmxEditLua::SelectHalf( lua_State *pLuaState )
-{
-	const char *pHalfType = luaL_checkstring( pLuaState, 1 );
-
-	if ( pHalfType )
-	{
-		if ( m_dmxEdit.SelectHalf( pHalfType ) )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Select" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-// 1 or 2 string arguments
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Save( lua_State *pLuaState )
-{
-	const char *pSave1 = lua_tostring( pLuaState, 1 );
-
-	const char *pSaveType = NULL;
-
-	if ( lua_isboolean( pLuaState, 2 ) )
-	{
-		if ( lua_toboolean( pLuaState, 2 ) )
-		{
-			pSaveType = "Absolute";
-		}
-		else
-		{
-			pSaveType = "Relative";
-		}
-	}
-	else if ( lua_isstring( pLuaState, 2 ) )
-	{
-		pSaveType = lua_tostring( pLuaState, 2 );
-	}
-
-	if ( pSave1 )
-	{
-		if ( pSaveType )
-		{
-			const char *pDeltaName = lua_isstring( pLuaState, 3 ) ? lua_tostring( pLuaState, 3 ) : NULL;
-
-			if ( m_dmxEdit.Save( pSave1, pSaveType, pDeltaName ) )
-				return 0;
-		}
-		else
-		{
-			if ( m_dmxEdit.Save( pSave1 ) )
-				return 0;
-		}
-	}
-	else
-	{
-		if ( m_dmxEdit.Save() )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Save" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::GrowSelection( lua_State *pLuaState )
-{
-	if ( lua_isnumber( pLuaState, 1 ) )
-	{
-		const int nSize = lua_tointeger( pLuaState, 1 );
-		if ( m_dmxEdit.GrowSelection( nSize ) )
-			return 0;
-	}
-	else
-	{
-		if ( m_dmxEdit.GrowSelection() )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Grow Selection" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ShrinkSelection( lua_State *pLuaState )
-{
-	if ( lua_isnumber( pLuaState, 1 ) )
-	{
-		const int nSize = lua_tointeger( pLuaState, 1 );
-		if ( m_dmxEdit.ShrinkSelection( nSize ) )
-			return 0;
-	}
-	else
-	{
-		if ( m_dmxEdit.ShrinkSelection() )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Shrink Selection" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Add( lua_State *pLuaState )
-{
-	const char *pString1 = luaL_checkstring( pLuaState, 1 );
-	float weight = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
-	float featherDistance = lua_isnumber( pLuaState, 3 ) ? lua_tonumber( pLuaState, 3 ) : 0.0f;
-	const char *pFalloffType = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : "straight";
-
-	if ( m_dmxEdit.Add( pString1, weight, featherDistance, pFalloffType ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Add" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Interp( lua_State *pLuaState )
-{
-	const char *pString1 = luaL_checkstring( pLuaState, 1 );
-	float weight = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
-	float featherDistance = lua_isnumber( pLuaState, 3 ) ? lua_tonumber( pLuaState, 3 ) : 0.0f;
-	const char *pFalloffType = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : "straight";
-
-	if ( m_dmxEdit.Interp( pString1, weight, featherDistance, pFalloffType ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Add" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::SaveDelta( lua_State *pLuaState )
-{
-	const char *pString1 = luaL_checkstring( pLuaState, 1 );
-	if ( m_dmxEdit.SaveDelta( pString1 ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't SaveDelta" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::DeleteDelta( lua_State *pLuaState )
-{
-	const char *pString1 = luaL_checkstring( pLuaState, 1 );
-	if ( m_dmxEdit.DeleteDelta( pString1 ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Delete Delta" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Merge( lua_State *pLuaState )
-{
-	const char *pString1 = luaL_checkstring( pLuaState, 1 );
-	const char *pString2 = luaL_checkstring( pLuaState, 2 );
-	if ( m_dmxEdit.Merge( pString1, pString2 ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Merge" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::RemapMaterial( lua_State *pLuaState )
-{
-	const char *pString2 = luaL_checkstring( pLuaState, 2 );
-
-	if ( lua_isnumber( pLuaState, 1 ) )
-	{
-		const int nMaterialIndex = luaL_checkinteger( pLuaState, 1 );
-		if ( m_dmxEdit.RemapMaterial( nMaterialIndex, pString2 ) )
-			return 0;
-	}
-	else
-	{
-		const char *pString1 = luaL_checkstring( pLuaState, 1 );
-		if ( m_dmxEdit.RemapMaterial( pString1, pString2 ) )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Merge" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::RemoveFacesWithMaterial( lua_State *pLuaState )
-{
-	const char *pString1 = luaL_checkstring( pLuaState, 1 );
-	if ( m_dmxEdit.RemoveFacesWithMaterial( pString1 ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Merge" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::RemoveFacesWithMoreThanNVerts( lua_State *pLuaState )
-{
-	const int nVertsCount = luaL_checkinteger( pLuaState, 1 );
-	if ( m_dmxEdit.RemoveFacesWithMoreThanNVerts( nVertsCount ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Remove Faces With More Than N Verts" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Mirror( lua_State *pLuaState )
-{
-	if ( lua_isstring( pLuaState, 1 ) )
-	{
-		const char *pString1 = luaL_checkstring( pLuaState, 1 );
-		if ( m_dmxEdit.Mirror( pString1 ) )
-			return 0;
-	}
-	else
-	{
-		if ( m_dmxEdit.Mirror() )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Mirror" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ComputeNormals( lua_State *pLuaState )
-{
-	if ( m_dmxEdit.ComputeNormals() )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Compute Normals" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::CreateDeltasFromPresets( lua_State *pLuaState )
-{
-	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
-	const bool bPurge = lua_isboolean( pLuaState, 2 ) ? lua_toboolean( pLuaState, 2 ) ? true : false : true;
-	const char *pExpressionFilename = lua_isstring( pLuaState, 4 ) ? lua_tostring( pLuaState, 4 ) : NULL;
-
-	CUtlVector< CUtlString > purgeAllBut;
-	const CUtlVector< CUtlString > *pPurgeAllBut = NULL;
-
-	if ( lua_istable( pLuaState, 3 ) )
-	{
-		pPurgeAllBut = &purgeAllBut;
-
-		// table is in the stack at index '3'
-		lua_pushnil( pLuaState );  //
-		while (lua_next( pLuaState, 3 ) != 0) {
-			// uses 'key' (at index -2) and 'value' (at index -1)
-			/*
-			Msg("%s - %s\n",
-				lua_typename( pLuaState, lua_type( pLuaState, -2 ) ),
-				lua_typename( pLuaState, lua_type( pLuaState, -1 ) ) );
-			*/
-
-			purgeAllBut.AddToTail( lua_tostring( pLuaState, -1 ) );
-
-			// removes 'value'; keeps 'key' for next iteration */
-			lua_pop( pLuaState, 1 );
-		}
-	}
-
-	if ( m_dmxEdit.CreateDeltasFromPresets( pPresetFilename, bPurge, pPurgeAllBut, pExpressionFilename ) )
-			return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Create Deltas From Presets" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::CreateDeltasFromCachedPresets( lua_State *pLuaState )
-{
-	const bool bPurge = lua_isboolean( pLuaState, 1 ) ? lua_toboolean( pLuaState, 1 ) ? true : false : true;
-
-	CUtlVector< CUtlString > purgeAllBut;
-	const CUtlVector< CUtlString > *pPurgeAllBut = NULL;
-
-	if ( lua_istable( pLuaState, 2 ) )
-	{
-		pPurgeAllBut = &purgeAllBut;
-
-		// table is in the stack at index '2'
-		lua_pushnil( pLuaState );  //
-		while (lua_next( pLuaState, 2 ) != 0) {
-			// uses 'key' (at index -2) and 'value' (at index -1)
-			/*
-			Msg("%s - %s\n",
-				lua_typename( pLuaState, lua_type( pLuaState, -2 ) ),
-				lua_typename( pLuaState, lua_type( pLuaState, -1 ) ) );
-			*/
-
-			purgeAllBut.AddToTail( lua_tostring( pLuaState, -1 ) );
-
-			// removes 'value'; keeps 'key' for next iteration */
-			lua_pop( pLuaState, 1 );
-		}
-	}
-
-	bool bRetVal = m_dmxEdit.CreateDeltasFromCachedPresets( bPurge, pPurgeAllBut );
-	m_dmxEdit.ClearPresetCache();
-
-	if ( bRetVal )
-			return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Create Deltas From Cached Presets" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::CachePreset( lua_State *pLuaState )
-{
-	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
-	const char *pExpressionFilename = lua_isstring( pLuaState, 2 ) ? lua_tostring( pLuaState, 2 ) : NULL;
-
-	if ( m_dmxEdit.CachePreset( pPresetFilename, pExpressionFilename ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Create Deltas From Cached Presets" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ClearPresetCache( lua_State *pLuaState )
-{
-	if ( m_dmxEdit.ClearPresetCache() )
-			return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Create Deltas From Cached Presets" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::CreateExpressionFileFromPresets( lua_State *pLuaState )
-{
-	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
-	const char *pExpressionFilename = luaL_checkstring( pLuaState, 2 );
-
-	if ( m_dmxEdit.CreateExpressionFileFromPresets( pPresetFilename, pExpressionFilename ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Create Expression File From Presets" );
-	return 2;
-}
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::CreateExpressionFilesFromCachedPresets( lua_State *pLuaState )
-{
-	if ( m_dmxEdit.CreateExpressionFilesFromCachedPresets() )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Create Expression Files From Cached Presets" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::FixPresetFile( lua_State *pLuaState )
-{
-	const char *pPresetFilename = luaL_checkstring( pLuaState, 1 );
-
-	if ( m_dmxEdit.FixPresetFile( pPresetFilename ) )
-			return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Fix Preset File" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::FileExists( lua_State *pLuaState )
-{
-	const char *pFilename = luaL_checkstring( pLuaState, 1 );
-
-	if ( g_pFullFileSystem->FileExists( pFilename ) )
-	{
-		lua_pushboolean( pLuaState, true );
-	}
-	else
-	{
-		lua_pushboolean( pLuaState, false );
-	}
-
-	return 1;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ComputeWrinkles( lua_State *pLuaState )
-{
-	if ( m_dmxEdit.ComputeWrinkles() )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Compute Wrinkles" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::ComputeWrinkle( lua_State *pLuaState )
-{
-	const char *pDeltaName = luaL_checkstring( pLuaState, 1 );
-	const float flScale = lua_isnumber( pLuaState, 2 ) ? lua_tonumber( pLuaState, 2 ) : 1.0f;
-
-	if ( m_dmxEdit.ComputeWrinkle( pDeltaName, flScale ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Compute Wrinkle" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Scale( lua_State *pLuaState )
-{
-	const float sx = luaL_checknumber( pLuaState, 1 );
-	float sy = sx;
-	float sz = sx;
-
-	if ( lua_isnumber( pLuaState, 2 ) && lua_isnumber( pLuaState, 3 ) )
-	{
-		sy = lua_tonumber( pLuaState, 2 );
-		sz = lua_tonumber( pLuaState, 3 );
-	}
-
-	if ( m_dmxEdit.Scale( sx, sy, sz ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Scale" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::Translate( lua_State *pLuaState )
-{
-	const float tx = luaL_checknumber( pLuaState, 1 );
-	const float ty = luaL_checknumber( pLuaState, 2 );
-	const float tz = luaL_checknumber( pLuaState, 3 );
-
-	if ( lua_gettop( pLuaState ) < 4 )
-	{
-		if ( m_dmxEdit.Translate( Vector( tx, ty, tz ) ) )
-			return 0;
-	}
-	else
-	{
-		float flFeatherDistance = 0.0f;
-		const char *pFalloffType = "STRAIGHT";
-		const char *pDistanceType = "DEFAULT";
-
-		if ( lua_gettop( pLuaState ) == 4 && lua_isstring( pLuaState, 4 ) )
-		{
-			pDistanceType = lua_tostring( pLuaState, 4 );
-		}
-		else
-		{
-			flFeatherDistance = lua_isnumber( pLuaState, 4 ) ? lua_tonumber( pLuaState, 4 ) : flFeatherDistance;
-			pFalloffType = lua_isstring( pLuaState, 5 ) ? lua_tostring( pLuaState, 5 ) : pFalloffType;
-			pDistanceType = lua_isstring( pLuaState, 6 ) ? lua_tostring( pLuaState, 6 ) : pDistanceType;
-		}
-
-		if ( m_dmxEdit.Translate( Vector( tx, ty, tz ), flFeatherDistance, pFalloffType, pDistanceType ) )
-			return 0;
-	}
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't Translate" );
-	return 2;
-}
-
-
-//-----------------------------------------------------------------------------
-//
-//-----------------------------------------------------------------------------
-int CDmxEditLua::SetDistanceType( lua_State *pLuaState )
-{
-	const char *pDistanceType = luaL_checkstring( pLuaState, 1 );
-
-	if ( m_dmxEdit.SetDistanceType( pDistanceType ) )
-		return 0;
-
-	lua_pushnil( pLuaState );  /* return nil and ... */
-	lua_pushstring( pLuaState, "Can't SetDistanceType" );
-	return 2;
 }
 
 

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #ifndef SOURCE_APP_INFO_H
 #define SOURCE_APP_INFO_H
 #ifdef _WIN32

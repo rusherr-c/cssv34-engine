@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -148,7 +148,7 @@ public:
 		Init();
 
 		// This list will have any newly available props written into it. Write a sentinel at the end.
-		m_NewProxyProps[m_nNewProxyProps] = PROP_SENTINEL;
+		m_NewProxyProps[m_nNewProxyProps] = -1; // invalid marker
 		int *pCurNewProxyProp = m_NewProxyProps;
 
 		for ( int i=0; i < nStartProps; i++ )
@@ -156,7 +156,7 @@ public:
 			int iProp = pStartProps[i];
 
 			// Fill in the gaps with any properties that are newly enabled by the proxies.
-			while ( *pCurNewProxyProp < iProp )
+			while ( (unsigned int) *pCurNewProxyProp < (unsigned int) iProp )
 			{
 				AddProp( *pCurNewProxyProp );
 				++pCurNewProxyProp;
@@ -174,7 +174,7 @@ public:
 		}
 
 		// add any remaining new proxy props
-		while ( *pCurNewProxyProp < PROP_SENTINEL )
+		while ( (unsigned int) *pCurNewProxyProp < MAX_DATATABLE_PROPS )
 		{
 			AddProp( *pCurNewProxyProp );
 			++pCurNewProxyProp;
@@ -208,220 +208,20 @@ private:
 
 
 // ----------------------------------------------------------------------------- //
-// CDeltaCalculator encapsulates part of the functionality for calculating deltas between entity states.
-//
-// To use it, initialize it with the from and to states, then walk through the 'to' properties using
-// SeekToNextToProp(). 
-//
-// At each 'to' prop, either call SkipToProp or CalcDelta
-// ----------------------------------------------------------------------------- //
-class CDeltaCalculator
-{
-public:
-
-						CDeltaCalculator(
-							CSendTablePrecalc *pPrecalc,
-							const void *pFromState,
-							const int nFromBits,
-							const void *pToState,
-							const int nToBits,
-							int *pDeltaProps,
-							int nMaxDeltaProps,
-							const int objectID );
-						
-						~CDeltaCalculator();
-
-	// Returns the next prop index in the 'to' buffer. Returns PROP_SENTINEL if there are no more.
-	// If a valid property index is returned, you MUST call PropSkip() or PropCalcDelta() after calling this.
-	int					SeekToNextProp();	
-
-	// Ignore the current 'to' prop.
-	void				PropSkip();
-
-	// Seek the 'from' buffer up to the current property, determine if there is a delta, and
-	// write the delta (and the property data) into the buffer if there is a delta.
-	void				PropCalcDelta();
-
-	// check if current propert is non zero, if so put it into delta indices list
-	void				PropCalcNonZero();
-
-	// Returns the number of deltas detected throughout the 
-	int					GetNumDeltasDetected();
-		
-
-private:
-	CSendTablePrecalc	*m_pPrecalc;
-
-	bf_read				m_bfFromState;
-	bf_read				m_bfToState;
-	
-	CDeltaBitsReader	m_FromBitsReader;
-	CDeltaBitsReader	m_ToBitsReader;
-
-	int					m_ObjectID;
-	
-	// Current property indices.
-	int					m_iFromProp;
-	int					m_iToProp;
-
-	// Bit position into m_bfToState where the current prop (m_iToProp) starts.
-	int					m_iToStateStart;
-
-	// Output..
-	int					*m_pDeltaProps;
-	int					m_nMaxDeltaProps;
-	int					m_nDeltaProps;
-};
-
-
-CDeltaCalculator::CDeltaCalculator(
-	CSendTablePrecalc *pPrecalc,
-	const void *pFromState,
-	const int nFromBits,
-	const void *pToState,
-	const int nToBits,
-	int *pDeltaProps,
-	int nMaxDeltaProps,
-	const int objectID ) 
-	
-	: m_bfFromState( "CDeltaCalculator->m_bfFromState", pFromState, Bits2Bytes( nFromBits ), nFromBits ),
-	m_FromBitsReader( &m_bfFromState ),
-	m_bfToState( "CDeltaCalculator->m_bfToState", pToState, Bits2Bytes( nToBits ), nToBits ),
-	m_ToBitsReader( &m_bfToState )
-{
-	m_pPrecalc = pPrecalc;
-	m_ObjectID = objectID;
-
-	m_pDeltaProps = pDeltaProps;
-	m_nMaxDeltaProps = nMaxDeltaProps;
-	m_nDeltaProps = 0;
-	
-	// Walk through each property in the to state, looking for ones in the from 
-	// state that are missing or that are different.
-	if ( pFromState)
-	{
-		m_iFromProp = NextProp( &m_FromBitsReader );
-	}
-	else
-	{
-		m_iFromProp = PROP_SENTINEL;
-	}
-	
-	m_iToProp = -1;
-}
-
-
-CDeltaCalculator::~CDeltaCalculator()
-{
-	// Make sure we didn't overflow.
-	ErrorIfNot( 
-		m_nDeltaProps <= m_nMaxDeltaProps && !m_bfFromState.IsOverflowed() && !m_bfToState.IsOverflowed(), 
-		( "SendTable_CalcDelta: overflowed on datatable '%s'.", m_pPrecalc->GetSendTable()->GetName() ) 
-		);
-
-	// We may not have read to the end of our input bits, but we don't care.
-	m_FromBitsReader.ForceFinished();
-	m_ToBitsReader.ForceFinished();
-}
-
-
-inline int CDeltaCalculator::SeekToNextProp()
-{
-	m_iToProp = NextProp( &m_ToBitsReader );
-	return m_iToProp;
-}
-		
-
-inline void CDeltaCalculator::PropSkip()
-{
-	Assert( m_iToProp != -1 );
-	SkipPropData( &m_bfToState, m_pPrecalc->GetProp( m_iToProp ) );
-}
-
-void CDeltaCalculator::PropCalcNonZero()
-{
-	const SendProp *pProp = m_pPrecalc->GetProp( m_iToProp );
-
-	if ( !g_PropTypeFns[pProp->m_Type].IsEncodedZero( pProp, &m_bfToState ) )
-	{
-		// add non-zero property to index list
-		if ( m_nDeltaProps < m_nMaxDeltaProps )
-		{
-			m_pDeltaProps[m_nDeltaProps] = m_iToProp;
-		}
-		++m_nDeltaProps;
-	}
-}
-
-void CDeltaCalculator::PropCalcDelta()
-{
-	// Skip any properties in the from state that aren't in the to state.
-	while ( m_iFromProp < m_iToProp )
-	{
-		SkipPropData( &m_bfFromState, m_pPrecalc->GetProp( m_iFromProp ) );
-		m_iFromProp = NextProp( &m_FromBitsReader );
-	}
-
-	const SendProp *pProp = m_pPrecalc->GetProp( m_iToProp );
-
-	int bChange = true;
-
-	if ( m_iFromProp == m_iToProp )
-	{
-		// The property is in both states, so compare them and write the index 
-		// if the states are different.
-		bChange = g_PropTypeFns[pProp->m_Type].CompareDeltas( pProp, &m_bfFromState, &m_bfToState );
-		
-		// Seek to the next properties.
-		m_iFromProp = NextProp( &m_FromBitsReader );
-	}
-	else
-	{
-		// Only the 'to' state has this property, so just skip its data and register a change.
-		SkipPropData( &m_bfToState, pProp );
-	}
-
-	if ( bChange )
-	{
-		// Write the property index.
-		if ( m_nDeltaProps < m_nMaxDeltaProps )
-		{
-			m_pDeltaProps[m_nDeltaProps] = m_iToProp;
-			m_nDeltaProps++;
-		}
-	}
-}
-
-
-inline int CDeltaCalculator::GetNumDeltasDetected()
-{
-	return m_nDeltaProps;
-}
-
-
-// ----------------------------------------------------------------------------- //
 // CEncodeInfo
 // Used by SendTable_Encode.
 // ----------------------------------------------------------------------------- //
 class CEncodeInfo : public CServerDatatableStack
 {
 public:
-					CEncodeInfo( CSendTablePrecalc *pPrecalc, unsigned char *pStructBase, int objectID ) :
-						CServerDatatableStack( pPrecalc, pStructBase, objectID )
-					{
-					}
+	CEncodeInfo( CSendTablePrecalc *pPrecalc, unsigned char *pStructBase, int objectID, bf_write *pOut ) :
+		CServerDatatableStack( pPrecalc, pStructBase, objectID ),
+		m_DeltaBitsWriter( pOut )
+	{
+	}
 
 public:
-
-	bf_write	*m_pOut;
-	bool		m_bEncodeAll;
-	int			m_ObjectID;
-	
-	// Track sizes of what we write..
-	int			m_nOverheadBits;
-	int			m_nDataBits;
-
-	CDeltaBitsWriter	*m_pDeltaBitsWriter;
+	CDeltaBitsWriter m_DeltaBitsWriter;
 };
 
 
@@ -471,7 +271,6 @@ static inline void ShowEncodeDeltaWatchInfo(
 	info.m_pRecvProp = NULL;
 	info.m_pProp = pProp;
 	info.m_pIn = &copy;
-	info.m_ObjectID = objectID;
 	info.m_Value.m_Type = (SendPropType)pProp->m_Type;
 	
 	int startBit = copy.GetNumBitsRead();
@@ -487,37 +286,33 @@ static inline void ShowEncodeDeltaWatchInfo(
 }
 
 
-static void SendTable_EncodeProp( CEncodeInfo *pInfo, unsigned long iProp )
+static FORCEINLINE void SendTable_EncodeProp( CEncodeInfo * pInfo, unsigned long iProp )
 {
-	// Write the index.
-	pInfo->m_pDeltaBitsWriter->WritePropIndex( iProp );
-
-	const SendProp *pProp = pInfo->GetCurProp();
-
 	// Call their proxy to get the property's value.
 	DVariant var;
 	
+	const SendProp *pProp = pInfo->GetCurProp();
+	unsigned char *pStructBase = pInfo->GetCurStructBase();
+
 	pProp->GetProxyFn()( 
 		pProp,
-		pInfo->GetCurStructBase(), 
-		pInfo->GetCurStructBase() + pProp->GetOffset(), 
+		pStructBase, 
+		pStructBase + pProp->GetOffset(), 
 		&var, 
 		0, // iElement
-		pInfo->m_ObjectID
+		pInfo->GetObjectID()
 		);
 
-	// Encode it.
-	int iStartPos = pInfo->m_pOut->GetNumBitsWritten();
+	// Write the index.
+	pInfo->m_DeltaBitsWriter.WritePropIndex( iProp );
 
 	g_PropTypeFns[pProp->m_Type].Encode( 
-		pInfo->GetCurStructBase(), 
+		pStructBase, 
 		&var, 
 		pProp, 
-		pInfo->m_pOut, 
-		pInfo->m_ObjectID
+		pInfo->m_DeltaBitsWriter.GetBitBuf(), 
+		pInfo->GetObjectID()
 		); 
-
-	pInfo->m_nDataBits += ( pInfo->m_pOut->GetNumBitsWritten() - iStartPos ); // record # bits written.
 }
 
 
@@ -527,17 +322,18 @@ static bool SendTable_IsPropZero( CEncodeInfo *pInfo, unsigned long iProp )
 
 	// Call their proxy to get the property's value.
 	DVariant var;
+	unsigned char *pBase = pInfo->GetCurStructBase();
 	
 	pProp->GetProxyFn()( 
 		pProp,
-		pInfo->GetCurStructBase(), 
-		pInfo->GetCurStructBase() + pProp->GetOffset(), 
+		pBase, 
+		pBase + pProp->GetOffset(), 
 		&var, 
 		0, // iElement
-		pInfo->m_ObjectID
+		pInfo->GetObjectID()
 		);
 
-	return g_PropTypeFns[pProp->m_Type].IsZero( pInfo->GetCurStructBase(), &var, pProp );
+	return g_PropTypeFns[pProp->m_Type].IsZero( pBase, &var, pProp );
 }
 
 
@@ -600,7 +396,8 @@ int SendTable_WriteAllDeltaProps(
 		pBufOut,				// output buffer
 		nObjectID,
 		deltaProps,
-		nDeltaProps );
+		nDeltaProps
+	);
 
 	return nDeltaProps;
 }
@@ -626,17 +423,8 @@ bool SendTable_Encode(
 
 	CServerDTITimer timer( pTable, SERVERDTI_ENCODE );
 
-	// This writes and delta-compresses the delta bits.
-	CDeltaBitsWriter deltaBitsWriter( pOut );
-
 	// Setup all the info we'll be walking the tree with.
-	CEncodeInfo info( pPrecalc, (unsigned char*)pStruct, objectID );
-	
-	info.m_pOut = pOut;
-	info.m_ObjectID = objectID;
-	info.m_nDataBits = 0;
-	info.m_nOverheadBits = 0; // unused
-	info.m_pDeltaBitsWriter = &deltaBitsWriter;
+	CEncodeInfo info( pPrecalc, (unsigned char*)pStruct, objectID, pOut );
 	info.m_pRecipients = pRecipients;	// optional buffer to store the bits for which clients get what data.
 
 	info.Init();
@@ -669,7 +457,8 @@ void SendTable_WritePropList(
 	bf_write *pOut,
 	const int objectID,
 	const int *pCheckProps,
-	const int nCheckProps )
+	const int nCheckProps
+	)
 {
 	if ( nCheckProps == 0 )
 	{
@@ -685,27 +474,28 @@ void SendTable_WritePropList(
 	
 	CSendTablePrecalc *pPrecalc = pTable->m_pPrecalc;
 	CDeltaBitsWriter deltaBitsWriter( pOut );
-	
+
 	bf_read inputBuffer( "SendTable_WritePropList->inputBuffer", pState, BitByte( nBits ), nBits );
 	CDeltaBitsReader inputBitsReader( &inputBuffer );
 
 	// Ok, they want to specify a small list of properties to check.
-	int iToProp = NextProp( &inputBitsReader );
+	unsigned int iToProp = inputBitsReader.ReadNextPropIndex();
 	int i = 0;
 	while ( i < nCheckProps )
 	{
 		// Seek the 'to' state to the current property we want to check.
-		while ( iToProp < pCheckProps[i] )
+		while ( iToProp < (unsigned int) pCheckProps[i] )
 		{
-			SkipPropData( &inputBuffer, pPrecalc->GetProp( iToProp ) );
-			iToProp = NextProp( &inputBitsReader );
+			inputBitsReader.SkipPropData( pPrecalc->GetProp( iToProp ) );
+			iToProp = inputBitsReader.ReadNextPropIndex();
 		}
 
-		if ( iToProp == PROP_SENTINEL )
+		if ( iToProp >= MAX_DATATABLE_PROPS )
 		{
 			break;
 		}
-		else if ( iToProp == pCheckProps[i] )
+		
+		if ( iToProp == (unsigned int) pCheckProps[i] )
 		{
 			const SendProp *pProp = pPrecalc->GetProp( iToProp );
 
@@ -716,19 +506,18 @@ void SendTable_WritePropList(
 			}
 
 			// See how many bits the data for this property takes up.
-			int iStartBit = inputBuffer.GetNumBitsRead();
-			SkipPropData( &inputBuffer, pProp );
-			int nToStateBits = inputBuffer.GetNumBitsRead() - iStartBit;
+			int nToStateBits;
+			int iStartBit = pOut->GetNumBitsWritten();
+
+			deltaBitsWriter.WritePropIndex( iToProp );
+			inputBitsReader.CopyPropData( deltaBitsWriter.GetBitBuf(), pProp ); 
+
+			nToStateBits = pOut->GetNumBitsWritten() - iStartBit;
 
 			TRACE_PACKET( ( "    Send Field (%s) = %d (%d bytes)\n", pProp->GetName(), nToStateBits, ( nToStateBits + 7 ) / 8 ) );
 
-			// Write the data into the output.
-			deltaBitsWriter.WritePropIndex( iToProp );
-			inputBuffer.Seek( iStartBit );
-			pOut->WriteBitsFromBuffer( &inputBuffer, nToStateBits );
-
 			// Seek to the next prop.
-			iToProp = NextProp( &inputBitsReader );
+			iToProp = inputBitsReader.ReadNextPropIndex();
 		}
 
 		++i;
@@ -755,46 +544,98 @@ int SendTable_CalcDelta(
 	
 	int *pDeltaProps,
 	int nMaxDeltaProps,
-	
+
 	const int objectID
 	)
 {
 	CServerDTITimer timer( pTable, SERVERDTI_CALCDELTA );
 
+	int *pDeltaPropsBase = pDeltaProps;
+	int *pDeltaPropsEnd = pDeltaProps + nMaxDeltaProps;
+
 	VPROF( "SendTable_CalcDelta" );
 	
 	// Trivial reject.
-	if ( CompareBitArrays( pFromState, pToState, nFromBits, nToBits ) )
+	//if ( CompareBitArrays( pFromState, pToState, nFromBits, nToBits ) )
+	//{
+	//	return 0;
+	//}
+
+	CSendTablePrecalc* pPrecalc = pTable->m_pPrecalc;
+
+	bf_read toBits( "SendTable_CalcDelta/toBits", pToState, BitByte(nToBits), nToBits );
+	CDeltaBitsReader toBitsReader( &toBits );
+	unsigned int iToProp = toBitsReader.ReadNextPropIndex();
+
+	if ( pFromState )
 	{
-		return 0;
+		bf_read fromBits( "SendTable_CalcDelta/fromBits", pFromState, BitByte(nFromBits), nFromBits );
+		CDeltaBitsReader fromBitsReader( &fromBits );
+		unsigned int iFromProp = fromBitsReader.ReadNextPropIndex();
+
+		for ( ; iToProp < MAX_DATATABLE_PROPS; iToProp = toBitsReader.ReadNextPropIndex() )
+		{
+			Assert( (int)iToProp >= 0 );
+
+			// Skip any properties in the from state that aren't in the to state.
+			while ( iFromProp < iToProp )
+			{
+				fromBitsReader.SkipPropData( pPrecalc->GetProp( iFromProp ) );
+				iFromProp = fromBitsReader.ReadNextPropIndex();
+			}
+
+			if ( iFromProp == iToProp )
+			{
+				// The property is in both states, so compare them and write the index 
+				// if the states are different.
+				if ( fromBitsReader.ComparePropData( &toBitsReader, pPrecalc->GetProp( iToProp ) ) )
+				{
+					*pDeltaProps++ = iToProp;
+					if ( pDeltaProps >= pDeltaPropsEnd )
+					{
+						break;
+					}
+				}
+
+				// Seek to the next property.
+				iFromProp = fromBitsReader.ReadNextPropIndex();
+			}
+			else
+			{
+				// Only the 'to' state has this property, so just skip its data and register a change.
+				toBitsReader.SkipPropData( pPrecalc->GetProp( iToProp ) );
+				*pDeltaProps++ = iToProp;
+				if ( pDeltaProps >= pDeltaPropsEnd )
+				{
+					break;
+				}
+			}
+		}
+
+		Assert( iToProp == ~0u );
+
+		fromBitsReader.ForceFinished();
+	}
+	else
+	{
+		for ( ; iToProp != (uint)-1; iToProp = toBitsReader.ReadNextPropIndex() )
+		{
+			Assert( (int)iToProp >= 0 && iToProp < MAX_DATATABLE_PROPS );
+
+			const SendProp *pProp = pPrecalc->GetProp( iToProp );
+			if ( !g_PropTypeFns[pProp->m_Type].IsEncodedZero( pProp, &toBits ) )
+			{
+				*pDeltaProps++ = iToProp;
+				if ( pDeltaProps >= pDeltaPropsEnd )
+				{
+					break;
+				}
+			}
+		}
 	}
 
-	// Now just walk through each property in the 'to' buffer and write it in if it's a new property
-	// or if it's different from the previous state.
-	CDeltaCalculator deltaCalc( 
-		pTable->m_pPrecalc, 
-		pFromState, nFromBits, 
-		pToState, nToBits, 
-		pDeltaProps, nMaxDeltaProps, 
-		objectID );
-
-	// Just calculate a delta for each prop in the 'to' state.
-	while ( deltaCalc.SeekToNextProp() != PROP_SENTINEL )
-	{
-		if ( pFromState )
-		{
-			// check against from state
-			deltaCalc.PropCalcDelta();
-		}
-		else
-		{
-			// check against zero elements
-			deltaCalc.PropCalcNonZero();
-		}
-	}
-	
 	// Return the # of properties that changed between 'from' and 'to'.
-	return deltaCalc.GetNumDeltasDetected();
+	return pDeltaProps - pDeltaPropsBase;
 }
 
 bool SendTable_WriteInfos( SendTable *pTable, bf_write *pBuf )
@@ -1007,6 +848,7 @@ void SendTable_PrintStats( void )
 	int numArrays = 0;
 	int numInts = 0;
 	int numVecs = 0;
+	int numVecXYs = 0;
 	int numSubTables = 0;
 	int numSendProps = 0;
 	int numFlatProps = 0;
@@ -1038,6 +880,7 @@ void SendTable_PrintStats( void )
 				case DPT_Int	: numInts++; break;
 				case DPT_Float	: numFloats++; break;
 				case DPT_Vector : numVecs++; break;
+				case DPT_VectorXY : numVecXYs++; break;
 				case DPT_String : numStrings++; break;
 				case DPT_Array	: numArrays++; break;
 				case DPT_DataTable : numSubTables++; break;
@@ -1046,16 +889,17 @@ void SendTable_PrintStats( void )
 	}
 
 	Msg("Total Send Table stats\n");
-	Msg("Send Tables : %i\n", numTables );
-	Msg("Send Props  : %i\n", numSendProps );
-	Msg("Flat Props  : %i\n", numFlatProps );
-	Msg("Int Props   : %i\n", numInts );
-	Msg("Float Props : %i\n", numFloats );
-	Msg("Vector Props: %i\n", numVecs );
-	Msg("String Props: %i\n", numStrings );
-	Msg("Array Props : %i\n", numArrays );
-	Msg("Table Props : %i\n", numSubTables );
-	Msg("Exclu Props : %i\n", numExcludeProps );
+	Msg("Send Tables   : %i\n", numTables );
+	Msg("Send Props    : %i\n", numSendProps );
+	Msg("Flat Props    : %i\n", numFlatProps );
+	Msg("Int Props     : %i\n", numInts );
+	Msg("Float Props   : %i\n", numFloats );
+	Msg("Vector Props  : %i\n", numVecs );
+	Msg("VectorXY Props: %i\n", numVecXYs );
+	Msg("String Props  : %i\n", numStrings );
+	Msg("Array Props   : %i\n", numArrays );
+	Msg("Table Props   : %i\n", numSubTables );
+	Msg("Exclu Props   : %i\n", numExcludeProps );
 }
 
 
@@ -1151,7 +995,7 @@ bool SendTable_CheckIntegrity( SendTable *pTable, const void *pData, const int n
 	bf_read bfRead(	"SendTable_CheckIntegrity", pData, Bits2Bytes(nDataBits), nDataBits );
 	CDeltaBitsReader bitsReader( &bfRead );
 
-	int iProp = PROP_SENTINEL;
+	int iProp = -1;
 	int iLastProp = -1;
 	int nMaxProps = pTable->m_pPrecalc->GetNumProps();
 	int nPropCount = 0;

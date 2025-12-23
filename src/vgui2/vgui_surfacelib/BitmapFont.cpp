@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: XBox Compiled Bitmap Fonts
 //
@@ -18,7 +18,7 @@
 #include <tier0/mem.h>
 #include <utlbuffer.h>
 #include "filesystem.h"
-#include "materialsystem/ITexture.h"
+#include "materialsystem/itexture.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -134,7 +134,7 @@ bool CBitmapFont::Create( const char *pFontFilename, float scalex, float scaley,
 		Q_snprintf( textureName, MAX_PATH, "vgui/fonts/%s", fontName );
 		pFontTable->m_pTexture = FontManager().MaterialSystem()->FindTexture( textureName, TEXTURE_GROUP_VGUI );
 
-#ifdef _DEBUG
+#if defined( _DEBUG ) && !defined( DX_TO_GL_ABSTRACTION )
 		if ( pFontTable->m_pBitmapFont->m_PageWidth != pFontTable->m_pTexture->GetActualWidth() ||
 			pFontTable->m_pBitmapFont->m_PageHeight != pFontTable->m_pTexture->GetActualHeight() )
 		{
@@ -199,7 +199,7 @@ bool CBitmapFont::Create( const char *pFontFilename, float scalex, float scaley,
 	m_iAscent       = (float)pFontTable->m_pBitmapFont->m_Ascent * m_scaley;
 
 	// mark as valid
-	m_szName = symbol;
+	m_szName = fontName;
 
 	return true;
 }
@@ -249,6 +249,29 @@ void CBitmapFont::GetCharABCWidths( int ch, int &a, int &b, int &c )
 	a = (float)pFont->m_pBitmapGlyphs[ch].a * m_scalex;
 	b = (float)pFont->m_pBitmapGlyphs[ch].b * m_scalex;
 	c = (float)pFont->m_pBitmapGlyphs[ch].c * m_scalex;
+}
+
+void CBitmapFont::GetCharRGBA( wchar_t ch, int rgbaWide, int rgbaTall, unsigned char *prgba )
+{
+	// CBitmapFont derives off CLinuxFont, etc. But you should never call GetCharRGBA on a bitmap font.
+	// If we let this fall into the CLinuxFont code, we'd have a difficult to track down bug - so crash
+	//	hard here...
+	Error( "GetCharRGBA called on CBitmapFont." );
+}
+
+void CBitmapFont::GetKernedCharWidth( wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &abcA, float &abcC )
+{
+	Assert( IsValid() && ch >= 0 && ch <= 255 );
+
+	float abcB;
+	BitmapFontTable_t *pFont = &g_BitmapFontTable[m_bitmapFontHandle];
+
+	ch = pFont->m_pBitmapFont->m_TranslateTable[ch];
+	abcA = (float)pFont->m_pBitmapGlyphs[ch].a * m_scalex;
+	abcB = (float)pFont->m_pBitmapGlyphs[ch].b * m_scalex;
+	abcC = (float)pFont->m_pBitmapGlyphs[ch].c * m_scalex;
+
+	wide = ( abcA + abcB + abcC );
 }
 
 //-----------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -23,7 +23,7 @@
 //			*from - 
 // Output : static
 //-----------------------------------------------------------------------------
-void WriteUsercmd( bf_write *buf, CUserCmd *to, CUserCmd *from )
+void WriteUsercmd( bf_write *buf, const CUserCmd *to, const CUserCmd *from )
 {
 	if ( to->command_number != ( from->command_number + 1 ) )
 	{
@@ -236,6 +236,8 @@ void ReadUsercmd( bf_read *buf, CUserCmd *move, CUserCmd *from )
 	{
 		move->viewangles[2] = buf->ReadFloat();
 	}
+
+	// Moved value validation and clamping to CBasePlayer::ProcessUsercmds()
 
 	// Read movement
 	if ( buf->ReadOneBit() )

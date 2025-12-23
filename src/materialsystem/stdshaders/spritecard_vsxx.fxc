@@ -1,14 +1,21 @@
+//  STATIC: "ZOOM_ANIMATE_SEQ2"		"0..1" [vs20]
 //  STATIC: "DUALSEQUENCE"			"0..1" [vs20]
-//  STATIC: "DUALSEQUENCE"			"0..0" [vs11]
+//	STATIC: "EXTRACTGREENALPHA"		"0..1" [vs20]
 
+//  STATIC: "ZOOM_ANIMATE_SEQ2"		"0..0" [vs11]
+//  STATIC: "DUALSEQUENCE"			"0..0" [vs11]
+//	STATIC: "EXTRACTGREENALPHA"		"0..0" [vs11]
+
+//	STATIC: "USE_INSTANCING"		"0..1" [vs20]
 //	DYNAMIC: "ORIENTATION"			"0..2"
+
 
 #include "common_vs_fxc.h"
 
 const float4x3 cModelView			: register(SHADER_SPECIFIC_CONST_0);
 const float4x4 cProj				: register(SHADER_SPECIFIC_CONST_3);
 
-#if !defined( SHADER_MODEL_VS_1_1 ) 
+#if ZOOM_ANIMATE_SEQ2
 const float4 ScaleParms             : register(SHADER_SPECIFIC_CONST_7);
 #define OLDFRM_SCALE_START (ScaleParms.x)
 #define OLDFRM_SCALE_END (ScaleParms.y)
@@ -16,12 +23,7 @@ const float4 ScaleParms             : register(SHADER_SPECIFIC_CONST_7);
 
 const float4 SizeParms              : register(SHADER_SPECIFIC_CONST_8);
 const float4 SizeParms2             : register(SHADER_SPECIFIC_CONST_9);
-
-#if !defined( SHADER_MODEL_VS_1_1 ) 
-const bool g_bZoomAnimateSeq2		: register( SHADER_SPECIFIC_BOOL_CONST_0 );
-const bool g_bExtractGreenAlpha		: register( SHADER_SPECIFIC_BOOL_CONST_1 );
-const bool g_bUseInstancing			: register( SHADER_SPECIFIC_BOOL_CONST_2 );
-#endif
+const float4 ViewportTransformScaled : register(SHADER_SPECIFIC_CONST_10);
 
 #define MINIMUM_SIZE_FACTOR (SizeParms.x)
 #define MAXIMUM_SIZE_FACTOR (SizeParms.y)
@@ -33,8 +35,15 @@ const bool g_bUseInstancing			: register( SHADER_SPECIFIC_BOOL_CONST_2 );
 #define START_FAR_FADE  ( SizeParms2.x )
 #define FAR_FADE_FACTOR ( SizeParms2.y )	   // alpha = 1-min(1,max(0, (dist-start_fade)*factor))
 
+// Define stuff for instancing on 360
+#if ( defined( _X360 ) && defined( SHADER_MODEL_VS_2_0 ) )
+#define CONST_PC 
+#define VERTEX_INDEX_PARAM_360 ,int Index:INDEX
+#define DO_INSTANCING 1
+#else
 #define CONST_PC const
 #define VERTEX_INDEX_PARAM_360
+#endif
 
 
 struct VS_INPUT
@@ -72,7 +81,11 @@ struct VS_OUTPUT
 	float2 vSeq2TexCoord1   : TEXCOORD6;
 #endif
 
+#if defined( _X360 )
+	float4 vScreenPos_ReverseZ		: TEXCOORD7;
+#else
 	float4 vScreenPos		: TEXCOORD7;
+#endif
 };
 
 #define BLENDFACTOR v.vParms.x
@@ -80,7 +93,7 @@ struct VS_OUTPUT
 #define RADIUS v.vParms.z
 #define YAW (v.vParms.w)
 
-#if !defined( SHADER_MODEL_VS_1_1 ) 
+#if ( ZOOM_ANIMATE_SEQ2 ) 
 float getlerpscaled( float l_in, float s0, float s1, float ts )
 {
 	l_in = 2.0*(l_in-.5);
@@ -97,7 +110,7 @@ float getlerpscale_for_new_frame( float l_in, float ts )
 {
 	return getlerpscaled( l_in, 1.0, OLDFRM_SCALE_START, ts );
 }
-#endif
+#endif // ZOOM_ANIMATE_SEQ2
 
 #ifdef DO_INSTANCING
 void InstancedVertexRead( inout VS_INPUT v, int index )
@@ -157,7 +170,7 @@ VS_OUTPUT main( CONST_PC VS_INPUT v
 	VS_OUTPUT o;
 
 #ifdef DO_INSTANCING
-	if ( g_bUseInstancing )
+	if ( USE_INSTANCING )
 	{
 		InstancedVertexRead( v, Index );
 	}
@@ -269,17 +282,16 @@ VS_OUTPUT main( CONST_PC VS_INPUT v
 	o.texCoord2.x	= lerp( v.vTexCoord2.z, v.vTexCoord2.x, v.vCornerID.x );
 	o.texCoord2.y	= lerp( v.vTexCoord2.w, v.vTexCoord2.y, v.vCornerID.y );
 
-#if DUALSEQUENCE
+#if ( DUALSEQUENCE )
 	float2 lerpold = v.vCornerID.xy;
 	float2 lerpnew = v.vCornerID.xy;
 
-	if ( g_bZoomAnimateSeq2 )
-	{
+#if ( ZOOM_ANIMATE_SEQ2 )
 		lerpold.x = getlerpscale_for_old_frame( v.vCornerID.x, v.vParms1.x );
 		lerpold.y = getlerpscale_for_old_frame( v.vCornerID.y, v.vParms1.x );
 		lerpnew.x = getlerpscale_for_new_frame( v.vCornerID.x, v.vParms1.x );
 		lerpnew.y = getlerpscale_for_new_frame( v.vCornerID.y, v.vParms1.x );
-	}
+#endif
 
 	o.vSeq2TexCoord0.xy	= lerp( v.vSeq2TexCoord0.zw, v.vSeq2TexCoord0.xy, lerpold.xy );
 	o.vSeq2TexCoord1.xy	= lerp( v.vSeq2TexCoord1.zw, v.vSeq2TexCoord1.xy, lerpnew.xy );
@@ -292,8 +304,7 @@ VS_OUTPUT main( CONST_PC VS_INPUT v
 
 	o.blendfactor1 = float4( 0.0f, 0.0f, 0.0f, 0.0f );
 
-	if ( g_bExtractGreenAlpha )
-	{
+#if ( EXTRACTGREENALPHA )
 														// Input range	  Output range
 		if ( v.vParms.x < 0.25f )						// 0.0 .. 0.25
 		{
@@ -310,7 +321,8 @@ VS_OUTPUT main( CONST_PC VS_INPUT v
 			o.blendfactor1.a = v.vParms.x * 2 - 1.5f;					// 0.0 .. 0.5
 			o.blendfactor1.g = 1 - o.blendfactor1.a;					// 1.0 .. 0.5
 		}
-	}
+#endif
+
 #endif
 
 	// Map projected position to the refraction texture
@@ -318,7 +330,15 @@ VS_OUTPUT main( CONST_PC VS_INPUT v
 	vScreenPos.x = projPos.x;
 	vScreenPos.y = -projPos.y; // invert Y
 	vScreenPos = (vScreenPos + projPos.w) * 0.5f;
+
+	// Need to also account for the viewport transform, which matters when rendering with mat_viewportscale != 1.0
+	vScreenPos = (vScreenPos * ViewportTransformScaled.xy) + (projPos.w * ViewportTransformScaled.zw);
+	
+#if defined( _X360 )
+	o.vScreenPos_ReverseZ = float4(vScreenPos.x, vScreenPos.y, projPos.w - projPos.z, projPos.w );
+#else
 	o.vScreenPos = float4(vScreenPos.x, vScreenPos.y, projPos.z, projPos.w );
+#endif
 
 	o.argbcolor = tint;
 	return o;

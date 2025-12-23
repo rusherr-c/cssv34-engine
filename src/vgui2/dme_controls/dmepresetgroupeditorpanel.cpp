@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,7 +21,7 @@
 #include "vgui/MouseCode.h"
 #include "vgui/IInput.h"
 #include "vgui/ISurface.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utldict.h"
 #include "dme_controls/presetpicker.h"
 #include "vgui_controls/FileOpenDialog.h"
@@ -35,8 +35,6 @@
 
 // Forward declaration
 class CDmePresetGroupEditorPanel;
-
-#define ALIGN4( a ) a = (byte *)((int)((byte *)a + 3) & ~ 3)
 
 
 //-----------------------------------------------------------------------------
@@ -909,9 +907,9 @@ void CDmePresetGroupEditorPanel::OnFileStateMachineFinished( KeyValues *pParams 
 	{
 		CPresetPickerFrame *pPresetPicker = new CPresetPickerFrame( this, "Select Preset(s) to Import" );
 		pPresetPicker->AddActionSignalTarget( this );
-		KeyValues *pContextKeyValues = new KeyValues( "ImportPicked" );
-		SetElementKeyValue( pContextKeyValues, "presets", pRoot );
-		pPresetPicker->DoModal( pRoot, true, pContextKeyValues );
+		KeyValues *pContextKeyValuesImport = new KeyValues( "ImportPicked" );
+		SetElementKeyValue( pContextKeyValuesImport, "presets", pRoot );
+		pPresetPicker->DoModal( pRoot, true, pContextKeyValuesImport );
 	}
 	else
 	{
@@ -953,9 +951,9 @@ static int BuildExportedControlList( CDmeAnimationSet *pAnimationSet, CDmePreset
 	int nGlobalIndex = 0;
 	const CDmrElementArray< CDmePreset > &presets = pPresetGroup->GetPresets();
 	int nPresetCount = presets.Count();
-	for ( int i = 0; i < nPresetCount; ++i )
+	for ( int iPreset = 0; iPreset < nPresetCount; ++iPreset )
 	{
-		CDmePreset *pPreset = presets[i];
+		CDmePreset *pPreset = presets[iPreset];
 		const CDmrElementArray< CDmElement > &controls = pPreset->GetControlValues();
 
 		int nControlCount = controls.Count();
@@ -1027,9 +1025,9 @@ void CDmePresetGroupEditorPanel::SetupFileOpenDialog( vgui::FileOpenDialog *pDia
 bool CDmePresetGroupEditorPanel::OnReadFileFromDisk( const char *pFileName, const char *pFileFormat, KeyValues *pContextKeyValues )
 {
 	CDmElement *pRoot;
-	CDisableUndoScopeGuard sg;
+	CDisableUndoScopeGuard sgRestore;
 	DmFileId_t fileId = g_pDataModel->RestoreFromFile( pFileName, NULL, pFileFormat, &pRoot, CR_FORCE_COPY );
-	sg.Release();
+	sgRestore.Release();
 
 	if ( fileId == DMFILEID_INVALID )
 		return false;
@@ -1217,7 +1215,7 @@ void CDmePresetGroupEditorPanel::OnPresetPicked( KeyValues *pParams )
 			SetElementKeyValue( pContextKeyValues, pBuf, presets[i] );
 		}
 
-		m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, PRESET_FILE_FORMAT, 0 );
+		m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, PRESET_FILE_FORMAT, vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 		return;
 	}
 
@@ -1273,7 +1271,7 @@ void CDmePresetGroupEditorPanel::OnExportPresetGroupToVFE()
 
 	KeyValues *pContextKeyValues = new KeyValues( "ExportPresetGroupToVFE" );
 	SetElementKeyValue( pContextKeyValues, "presetGroup", pPresetGroup );
-	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, "vfe", 0 );
+	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, "vfe", vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 
@@ -1288,7 +1286,7 @@ void CDmePresetGroupEditorPanel::OnExportPresetGroupToTXT()
 
 	KeyValues *pContextKeyValues = new KeyValues( "ExportPresetGroupToTXT" );
 	SetElementKeyValue( pContextKeyValues, "presetGroup", pPresetGroup );
-	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, "txt", 0 );
+	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, "txt", vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 
@@ -1303,7 +1301,7 @@ void CDmePresetGroupEditorPanel::OnExportPresetGroups()
 
 	KeyValues *pContextKeyValues = new KeyValues( "ExportPresetGroup" );
 	SetElementKeyValue( pContextKeyValues, "presetGroup", pPresetGroup );
-	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, PRESET_FILE_FORMAT, 0 );
+	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, PRESET_FILE_FORMAT, vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 

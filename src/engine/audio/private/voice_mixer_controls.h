@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,10 +12,9 @@
 
 abstract_class IMixerControls
 {
-protected:
-	virtual			~IMixerControls() {}
 
 public:
+	virtual			~IMixerControls() {}
 	enum Control
 	{
 		// Microphone boost is a boolean switch that sound cards support which boosts the input signal by about +20dB.
@@ -31,8 +30,6 @@ public:
 		NumControls
 	};
 
-	virtual void	Release() = 0;
-	
 	virtual bool	GetValue_Float(Control iControl, float &value) = 0;
 	virtual bool	SetValue_Float(Control iControl, float value) = 0;
 	
@@ -41,8 +38,10 @@ public:
 	virtual bool	SelectMicrophoneForWaveInput() = 0;
 };
 
+extern IMixerControls *g_pMixerControls;
 // Allocates a set of mixer controls.
-IMixerControls* GetMixerControls();
+void InitMixerControls();
+void ShutdownMixerControls();
 
 
 #endif // MIXER_CONTROLS_H

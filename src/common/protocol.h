@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -75,6 +75,7 @@ enum
 #define PACKET_FLAG_ENCRYPTED			(1<<2)  // packet is encrypted
 #define PACKET_FLAG_SPLIT				(1<<3)  // packet is split
 #define PACKET_FLAG_CHOKED				(1<<4)  // packet was choked by sender
+#define PACKET_FLAG_CHALLENGE			(1<<5)  // packet contains challenge number, use to prevent packet injection
 
 // NOTE:  Bits 5, 6, and 7 are used to specify the # of padding bits at the end of the packet!!!
 #define ENCODE_PAD_BITS( x ) ( ( x << 5 ) & 0xff )
@@ -135,9 +136,12 @@ enum
 
 #define svc_GameEventList	30	// list of known games events and fields
 
-#define svc_GetCvarValue	31	// Server wants to know the value of a cvar on the client.
+#define svc_GetCvarValue	31	// Server wants to know the value of a cvar on the client
 
-#define SVC_LASTMSG			31	// last known server messages
+#define svc_CmdKeyValues	32	// Server submits KeyValues command for the client
+#define svc_SetPauseTimed	33	// Timed pause - to avoid breaking demos
+
+#define SVC_LASTMSG			33	// last known server messages
 
 //
 // client to server
@@ -148,10 +152,13 @@ enum
 #define clc_VoiceData			10      // Voicestream data from a client
 #define clc_BaselineAck			11		// client acknowledges a new baseline seqnr
 #define clc_ListenEvents		12		// client acknowledges a new baseline seqnr
-#define clc_RespondCvarValue	25		// client is responding to a svc_GetCvarValue message.
+#define clc_RespondCvarValue	13		// client is responding to a svc_GetCvarValue message.
 #define clc_FileCRCCheck		14		// client is sending a file's CRC to the server to be verified.
+#define clc_SaveReplay			15		// client is sending a save replay request to the server.
+#define clc_CmdKeyValues		16
+#define clc_FileMD5Check		17		// client is sending a file's MD5 to the server to be verified.
 
-#define CLC_LASTMSG			14		//	last known client message
+#define CLC_LASTMSG			17		//	last known client message
 
 #define RES_FATALIFMISSING	(1<<0)   // Disconnect if we can't get this file.
 #define RES_PRELOAD			(1<<1)  // Load on client rather than just reserving name

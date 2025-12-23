@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 //=============================================================================//
 
 #include "vcdblockdoc.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "toolutils/enginetools_int.h"
 #include "filesystem.h"
@@ -462,7 +462,7 @@ void CVcdBlockDoc::InitializeFromServer( CDmrElementArray<> &entityList )
 	entityList.RemoveAll();
 
 	// initialize list with entities on the server
-	void *pServerEnt = servertools->FirstEntity();
+	CBaseEntity *pServerEnt = servertools->FirstEntity();
 	while (pServerEnt)
 	{
 		char classname[256];
@@ -503,7 +503,7 @@ void CVcdBlockDoc::VerifyAllEdits( const CDmrElementArray<> &entityList )
 	{
 		CDmeVMFEntity *pEntity = CastElement<CDmeVMFEntity>( entityList[i] );
 
-		void *pServerEntity = servertools->FindEntityByHammerID( pEntity->GetEntityId() );
+		CBaseEntity *pServerEntity = servertools->FindEntityByHammerID( pEntity->GetEntityId() );
 
 		if (pServerEntity != NULL)
 		{

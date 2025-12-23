@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,15 +6,15 @@
 //=============================================================================//
 
 #include "cbase.h"
-#include "BuySubMenu.h"
+#include "buysubmenu.h"
 
 #include <KeyValues.h>
 #include <vgui_controls/WizardPanel.h>
-#include <FileSystem.h>
+#include <filesystem.h>
 #include <game/client/iviewport.h>
 #include <cdll_client_int.h>
 
-#include "MouseOverPanelButton.h"
+#include "mouseoverpanelbutton.h"
 // #include "cs_gamerules.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -123,9 +123,7 @@ void CBuySubMenu::OnCommand( const char *command)
 			memset( &newEntry, 0x0, sizeof( newEntry ) );
 
 			CBuySubMenu *newMenu = CreateNewSubMenu();
-			if (command != nullptr)
-				newMenu->LoadControlSettings( command );
-
+			newMenu->LoadControlSettings( command );
 			m_NextPanel = newMenu;
 			Q_strncpy( newEntry.filename, command, sizeof( newEntry.filename ) );
 			newEntry.panel = newMenu;

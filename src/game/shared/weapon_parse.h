@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Weapon data file parsing, shared by game & client dlls.
 //
@@ -37,11 +37,15 @@ typedef enum {
 	SPECIAL1,
 	SPECIAL2,
 	SPECIAL3,
+	TAUNT,
+	DEPLOY,
 
 	// Add new shoot sound types here
 
 	NUM_SHOOT_SOUND_TYPES,
 } WeaponSound_t;
+
+int GetWeaponSoundFromString( const char *pszString );
 
 #define MAX_SHOOT_SOUNDS	16			// Maximum number of shoot sounds per shoot type
 
@@ -147,7 +151,7 @@ void PrecacheFileWeaponInfoDatabase( IFileSystem *filesystem, const unsigned cha
 //
 // (This should be moved into a more appropriate place).
 //
-KeyValues* ReadEncryptedKVFile( IFileSystem *filesystem, const char *szFilenameWithoutExtension, const unsigned char *pICEKey );
+KeyValues* ReadEncryptedKVFile( IFileSystem *filesystem, const char *szFilenameWithoutExtension, const unsigned char *pICEKey, bool bForceReadEncryptedFile = false );
 
 
 // Each game implements this. It can return a derived class and override Parse() if it wants.

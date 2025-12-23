@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -38,21 +38,19 @@ public:
 	virtual void SetSize(int x, int y);
 	virtual void SetColor(Color col);
 
+	virtual bool Evict() { return false; }
+	virtual int GetNumFrames() { return 0; }
+	virtual void SetFrame( int nFrame ) {}
+	virtual HTexture GetID();		// returns the texture id
+	virtual void SetRotation( int iRotation ) { return; };
+
 	// methods
 	void ForceUpload(unsigned char *texture,int wide, int tall);	// ensures the bitmap has been uploaded
-	HTexture GetID();		// returns the texture id
 	const char *GetName();
 	bool IsValid()
 	{
 		return _valid;
 	}
-
-	virtual bool Evict() { return false; }
-
-	virtual int GetNumFrames() { return 0; }
-	virtual void SetFrame( int nFrame ) {}
-
-	virtual void SetRotation( int iRotation ) {}
 
 private:
 	HTexture    _id;

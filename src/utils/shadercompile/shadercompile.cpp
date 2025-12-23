@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,11 +17,11 @@
 #include "vmpi_distribute_work.h"
 #include "vmpi_tools_shared.h"
 #include "cmdlib.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "Utlhash.h"
 #include "UtlBuffer.h"
 #include "utlstring.h"
-#include "tier1/utlbinaryblock.h"
+#include "utlbinaryblock.h"
 #include "tier2/utlstreambuffer.h"
 #include "UtlLinkedList.h"
 #include "UtlStringMap.h"
@@ -49,7 +49,6 @@
 
 #include "cmdsink.h"
 #include "d3dxfxc.h"
-#include "d3dx9shader.h"
 #include "subprocess.h"
 #include "cfgprocessor.h"
 
@@ -248,9 +247,10 @@ struct CStaticCombo									// all the data for one static combo
 
 typedef CUtlNodeHash<CStaticCombo, 7097, uint64> StaticComboNodeHash_t;
 
-inline void Construct( StaticComboNodeHash_t ** pMemory )
+template <> 
+inline StaticComboNodeHash_t **Construct( StaticComboNodeHash_t ** pMemory )
 {
-	::new( pMemory ) StaticComboNodeHash_t *( NULL ); // Explicitly new with NULL
+	return ::new( pMemory ) StaticComboNodeHash_t *( NULL ); // Explicitly new with NULL
 }
 
 struct CShaderMap : public CUtlStringMap<StaticComboNodeHash_t *> {
@@ -449,7 +449,7 @@ char * FindLast( char *szString, char *szSearchSet )
 void ErrMsgDispatchMsgLine( char const *szCommand, char *szMsgLine, char const *szShaderName = NULL )
 {
 	// When the filename is specified in front of the message, make sure it is truncated to the bare name only
-	if ( isalpha( *szMsgLine ) && szMsgLine[1] == ':' )
+	if ( V_isalpha( *szMsgLine ) && szMsgLine[1] == ':' )
 	{
 		// Preceded by drive letter
 		szMsgLine += 2;
@@ -690,10 +690,10 @@ static void FlushCombos( size_t *pnTotalFlushedSize, CUtlBuffer *pDynamicComboBu
 		return;
 
 	size_t nCompressedSize;
-	uint8 *pCompressedShader = LZMA_Compress( reinterpret_cast<uint8 *> ( pDynamicComboBuffer->Base() ),
-											  pDynamicComboBuffer->TellPut(),
-											  &nCompressedSize );
-	// high 2 bits of length = 
+	uint8 *pCompressedShader = LZMA_OpportunisticCompress( reinterpret_cast<uint8 *> ( pDynamicComboBuffer->Base() ),
+	                                                       pDynamicComboBuffer->TellPut(),
+	                                                       &nCompressedSize );
+	// high 2 bits of length =
 	// 00 = bzip2 compressed
 	// 10 = uncompressed
 	// 01 = lzma compressed
@@ -1262,7 +1262,7 @@ size_t AssembleWorkerReplyPackage( CfgProcessor::CfgEntryInfo const *pEntry, uin
 		pByteCodeArray->DeleteByKey( nComboOfEntry );
 	if( fabs( fCurTime - s_fLastInfoTime ) > 1.f )
 	{
-		Msg( "\rCompiling  %s  [ %2d remaining ] ...         \r",
+		Msg( "\rCompiling  %s  [ %2llu remaining ] ...         \r",
 			 pEntry->m_szName, nComboOfEntry );
 		s_fLastInfoTime = fCurTime;
 	}
@@ -1481,7 +1481,7 @@ void CWorkerAccumState < TMutexType > ::PrepareSubProcess( SubProcess **ppSp, Su
 		pSp->dwSvcThreadId = ThreadGetCurrentId();
 
 		char chBaseNameBuffer[0x30];
-		sprintf( chBaseNameBuffer, "SHCMPL_SUB_%08X_%08llX_%08X", pSp->dwSvcThreadId, time( NULL ), GetCurrentProcessId() );
+		sprintf( chBaseNameBuffer, "SHCMPL_SUB_%08X_%08llX_%08X", pSp->dwSvcThreadId, (long long)time( NULL ), GetCurrentProcessId() );
 		pCommObjs = pSp->pCommObjs = new SubProcessKernelObjects_Create( chBaseNameBuffer );
 
 		ZeroMemory( &pSp->pi, sizeof( pSp->pi ) );
@@ -1938,12 +1938,12 @@ void Worker_ProcessWorkUnitFn( int iThread, uint64 iWorkUnit, MessageBuffer *pBu
 			nSkipsSoFar = 0;
 		else
 			-- nSkipsSoFar;
-		nComboOfTheEntry--;
-		if ( nComboOfTheEntry < 0 )
+		if ( nComboOfTheEntry == 0 )
 		{
 			++pEntry;
-			nComboOfTheEntry = pEntry->m_numStaticCombos - 1;
+			nComboOfTheEntry = pEntry->m_numStaticCombos;
 		}
+		nComboOfTheEntry--;
 	}
 	if ( nSkipsSoFar )
 	{
@@ -2028,7 +2028,7 @@ void Shader_ParseShaderInfoFromCompileCommands( CfgProcessor::CfgEntryInfo const
 			{
 				char &rchLastChar = (*pszSm = *pShaderModel ++);
 				if ( !rchLastChar ||
-					isspace( rchLastChar ) ||
+					V_isspace( rchLastChar ) ||
 					'=' == rchLastChar )
 				{
 					rchLastChar = 0;
@@ -2069,7 +2069,7 @@ void Worker_GetLocalCopyOfShaders( void )
 
 	while( char *pszLineToCopy = bffr.InplaceGetLinePtr() )
 	{
-		sprintf( filename, "%s\\%s", g_pShaderPath, pszLineToCopy );
+		V_MakeAbsolutePath( filename, sizeof( filename ), pszLineToCopy, g_pShaderPath );
 		
 		if ( g_bVerbose )
 			printf( "getting local copy of shader: \"%s\" (\"%s\")\n", pszLineToCopy, filename );
@@ -2168,7 +2168,7 @@ void Worker_GetLocalCopyOfBinaries( void )
 
 void Shared_ParseListOfCompileCommands( void )
 {
-	double tt_start = Plat_FloatTime();
+//	double tt_start = Plat_FloatTime();
 
 	char fileListFileName[1024];
 	sprintf( fileListFileName, "%s\\filelist.txt", g_pShaderPath );
@@ -2192,9 +2192,9 @@ void Shared_ParseListOfCompileCommands( void )
 		g_numCompileCommands = pInfo->m_iCommandEnd;
 	}
 
-	double tt_end = Plat_FloatTime();
+//	double tt_end = Plat_FloatTime();
 	
-	Msg( "\rCompiling %s commands.         \r", PrettyPrintNumber( g_numCompileCommands ), (tt_end - tt_start) );
+	Msg( "\rCompiling %s commands.         \r", PrettyPrintNumber( g_numCompileCommands ) );
 }
 
 void SetupExeDir( int argc, char **argv )
@@ -2384,65 +2384,6 @@ int ShaderCompile_Main( int argc, char* argv[] )
 	numthreads = 1; // managed specifically in Worker_ProcessCommandRange_Singleton::Startup
 
 	/*
-	Find custom flags
-	*/
-	{
-		if (CommandLine()->FindParm("--partial-precision") || CommandLine()->FindParm("/Gpp"))
-			gFlags |= D3DXSHADER_PARTIALPRECISION;
-		if (CommandLine()->FindParm("/Vd") || CommandLine()->FindParm("--no-validation"))
-			gFlags |= D3DXSHADER_SKIPVALIDATION;
-		if (CommandLine()->FindParm("/Zi") || CommandLine()->FindParm("--include-debug-info"))
-			gFlags |= D3DXSHADER_DEBUG;
-		if (CommandLine()->FindParm("/Gec") || CommandLine()->FindParm("--enable-backwards-compat"))
-			gFlags |= D3DXSHADER_ENABLE_BACKWARDS_COMPATIBILITY;
-		if (CommandLine()->FindParm("/Gis") || CommandLine()->FindParm("--enable-ieee-strict"))
-			gFlags |= D3DXSHADER_IEEE_STRICTNESS;
-		if (CommandLine()->FindParm("/Op") || CommandLine()->FindParm("--disable-preshader"))
-			gFlags |= D3DXSHADER_NO_PRESHADER;
-
-		// Flow control
-		if (CommandLine()->FindParm("/Gfa") || CommandLine()->FindParm("--no-flow-control"))
-			gFlags |= D3DXSHADER_AVOID_FLOW_CONTROL;
-		else if (CommandLine()->FindParm("/Gfp") || CommandLine()->FindParm("--prefer-flow-control"))
-			gFlags |= D3DXSHADER_PREFER_FLOW_CONTROL;
-
-		// Optimization
-		if (CommandLine()->FindParm("/Od") || CommandLine()->FindParm("--disable-optimization"))
-			gFlags |= D3DXSHADER_SKIPOPTIMIZATION;
-		else if (CommandLine()->FindParm("/O0"))
-			gFlags |= D3DXSHADER_OPTIMIZATION_LEVEL0;
-		else if (CommandLine()->FindParm("/O1"))
-			gFlags |= D3DXSHADER_OPTIMIZATION_LEVEL1;
-		else if (CommandLine()->FindParm("/O2"))
-			gFlags |= D3DXSHADER_OPTIMIZATION_LEVEL2;
-		else if (CommandLine()->FindParm("/O3"))
-			gFlags |= D3DXSHADER_OPTIMIZATION_LEVEL3;
-
-		if (CommandLine()->FindParm("--help") || CommandLine()->FindParm("-h"))
-		{
-			printf("-------- SHADERCOMPILE.EXE HELP --------\n");
-			printf("\n--------    GENERAL OPTIONS     --------\n");
-			printf("-h    --help                              - Show this help\n");
-			printf("/Gpp  --partial-precision                 - Enable partial precision (faster runtimes)\n");
-			printf("/Vd   --no-validation                     - Disable validation (faster compile times)\n");
-			printf("/Zi   --include-debug-info                - Include debug info in output (no change in compile times)\n");
-			printf("/Gec  --enable-backwards-compat           - Enable backwards compatibility with earlier shader models (no change in compile times)\n");
-			printf("/Gis  --enable-ieee-strict                - Enable IEEE strictness (no change in compile times)\n");
-			printf("/Op   --disable-preshader                 - Disables preshaders (no change in compile times)\n");
-			printf("\n-------- OPTIMIZATION OPTIONS  --------\n");
-			printf("/Gfa  --no-flow-control                   - Avoids flow control in shaders (faster runtimes, no change in compile times)\n");
-			printf("/Gfp  --prefer-flow-control               - Prefers flow control in shaders (slower runtimes, no change in compile times)\n");
-			printf("/Od   --disable-optimization              - Disables all optimization passes (slower runtimes, fast compile times)\n");
-			printf("/O0                                       - Optimization level 0 (faster runtimes)\n");
-			printf("/O1                                       - Optimization level 1 (faster runtimes, slower compile times)\n");
-			printf("/O2                                       - Optimization level 2 (faster runtimes, slower compile times)\n");
-			printf("/O4                                       - Optimization level 4 (fastest runtimes, much slower compile times)\n");
-			exit(0);
-		}
-	}
-
-
-	/*
 	Special section of code implementing "-subprocess" flag
 	*/
 	if ( int iSubprocess = CommandLine()->FindParm( "-subprocess" ) )
@@ -2454,10 +2395,10 @@ int ShaderCompile_Main( int argc, char* argv[] )
 	// This needs to get called before VMPI is setup because in SDK mode, VMPI will change the args around.
 	SetupExeDir( argc, argv );
 
-	g_bIsX360 = false; //CommandLine()->FindParm( "-x360" ) != 0;
+	g_bIsX360 = CommandLine()->FindParm( "-x360" ) != 0;
 	// g_bSuppressWarnings = g_bIsX360;
 
-	bool bShouldUseVMPI = !( CommandLine()->FindParm( "-mpi" ) == 0 );
+	bool bShouldUseVMPI = ( CommandLine()->FindParm( "-nompi" ) == 0 );
 	if ( bShouldUseVMPI )
 	{	
 		// Master, start accepting connections.
@@ -2674,9 +2615,9 @@ int ShaderCompile_Main( int argc, char* argv[] )
 
 				if ( !pEnd )
 					pEnd = str + strlen( str );
-				while ( pBegin && *pBegin && !isspace( *pBegin ) )
+				while ( pBegin && *pBegin && !V_isspace( *pBegin ) )
 					++ pBegin;
-				while ( pBegin && *pBegin && isspace( *pBegin ) )
+				while ( pBegin && *pBegin && V_isspace( *pBegin ) )
 					++ pBegin;
 
 				// Now parse all combo defines in [pBegin, pEnd]

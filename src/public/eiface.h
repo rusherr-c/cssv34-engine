@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -55,6 +55,11 @@ class	ISpatialPartition;
 class IScratchPad3D;
 class CStandardSendProxies;
 class IAchievementMgr;
+class CGamestatsData;
+class CSteamID;
+class IReplayFactory;
+class IReplaySystem;
+class IServer;
 
 typedef struct player_info_s player_info_t;
 
@@ -68,7 +73,16 @@ typedef struct player_info_s player_info_t;
 #define DLLEXPORT /* */
 #endif
 
-#define INTERFACEVERSION_VENGINESERVER	"VEngineServer021"
+#define INTERFACEVERSION_VENGINESERVER_VERSION_21	"VEngineServer021"
+#define INTERFACEVERSION_VENGINESERVER_VERSION_22	"VEngineServer022"
+#define INTERFACEVERSION_VENGINESERVER				"VEngineServer023"
+#define INTERFACEVERSION_VENGINESERVER_INT			23
+
+struct bbox_t
+{
+	Vector mins;
+	Vector maxs;
+};
 
 //-----------------------------------------------------------------------------
 // Purpose: Interface the engine exposes to the game DLL
@@ -78,16 +92,16 @@ abstract_class IVEngineServer
 public:
 	// Tell engine to change level ( "changelevel s1\n" or "changelevel2 s1 s2\n" )
 	virtual void		ChangeLevel( const char *s1, const char *s2 ) = 0;
-	
+
 	// Ask engine whether the specified map is a valid map file (exists and has valid version number).
 	virtual int			IsMapValid( const char *filename ) = 0;
-	
+
 	// Is this a dedicated server?
 	virtual bool		IsDedicatedServer( void ) = 0;
-	
+
 	// Is in Hammer editing mode?
 	virtual int			IsInEditMode( void ) = 0;
-	
+
 	// Add to the server/client lookup/precache table, the specified string is given a unique index
 	// NOTE: The indices for PrecacheModel are 1 based
 	//  a 0 returned from those methods indicates the model or sound was not correctly precached
@@ -166,7 +180,7 @@ public:
 	// Execute any commands currently in the command parser immediately (instead of once per frame)
 	virtual void		ServerExecute( void ) = 0;
 	// Issue the specified command to the specified client (mimics that client typing the command at the console).
-	virtual void		ClientCommand( edict_t *pEdict, const char *szFmt, ... ) = 0;
+	virtual void		ClientCommand( edict_t *pEdict, PRINTF_FORMAT_STRING const char *szFmt, ... ) = 0;
 
 	// Set the lightstyle to the specified value and network the change to any connected clients.  Note that val must not 
 	//  change place in memory (use MAKE_STRING) for anything that's not compiled into your mod.
@@ -191,10 +205,10 @@ public:
 	// SINGLE PLAYER/LISTEN SERVER ONLY (just matching the client .dll api for this)
 	// Prints the formatted string to the notification area of the screen ( down the right hand edge
 	//  numbered lines starting at position 0
-	virtual void		Con_NPrintf( int pos, const char *fmt, ... ) = 0;
+	virtual void		Con_NPrintf( int pos, PRINTF_FORMAT_STRING const char *fmt, ... ) = 0;
 	// SINGLE PLAYER/LISTEN SERVER ONLY(just matching the client .dll api for this)
 	// Similar to Con_NPrintf, but allows specifying custom text color and duration information
-	virtual void		Con_NXPrintf( const struct con_nprint_s *info, const char *fmt, ... ) = 0;
+	virtual void		Con_NXPrintf( const struct con_nprint_s *info, PRINTF_FORMAT_STRING const char *fmt, ... ) = 0;
 
 	// Change a specified player's "view entity" (i.e., use the view entity position/orientation for rendering the client view)
 	virtual void		SetView( const edict_t *pClient, const edict_t *pViewent ) = 0;
@@ -216,7 +230,7 @@ public:
 	virtual bool		LockNetworkStringTables( bool lock ) = 0;
 
 	// Create a bot with the given name.  Returns NULL if fake client can't be created
-	virtual edict_t		*CreateFakeClient( const char *netname ) = 0;	
+	virtual edict_t		*CreateFakeClient( const char *netname ) = 0;
 
 	// Get a convar keyvalue for s specified client
 	virtual const char	*GetClientConVarValue( int clientIndex, const char *name ) = 0;
@@ -367,10 +381,83 @@ public:
 
 	// Returns true if this client has been fully authenticated by Steam
 	virtual bool IsClientFullyAuthenticated( edict_t *pEdict ) = 0;
+
+	// This makes the host run 1 tick per frame instead of checking the system timer to see how many ticks to run in a certain frame.
+	// i.e. it does the same thing timedemo does.
+	virtual void SetDedicatedServerBenchmarkMode( bool bBenchmarkMode ) = 0;
+
+	// Methods to set/get a gamestats data container so client & server running in same process can send combined data
+	virtual void SetGamestatsData( CGamestatsData *pGamestatsData ) = 0;
+	virtual CGamestatsData *GetGamestatsData() = 0;
+
+	// Returns the SteamID of the specified player. It'll be NULL if the player hasn't authenticated yet.
+	virtual const CSteamID	*GetClientSteamID( edict_t *pPlayerEdict ) = 0;
+
+	// Returns the SteamID of the game server
+	virtual const CSteamID	*GetGameServerSteamID() = 0;
+
+	// Send a client command keyvalues
+	// keyvalues are deleted inside the function
+	virtual void ClientCommandKeyValues( edict_t *pEdict, KeyValues *pCommand ) = 0;
+
+	// Returns the SteamID of the specified player. It'll be NULL if the player hasn't authenticated yet.
+	virtual const CSteamID	*GetClientSteamIDByPlayerIndex( int entnum ) = 0;
+	// Gets a list of all clusters' bounds.  Returns total number of clusters.
+	virtual int GetClusterCount() = 0;
+	virtual int GetAllClusterBounds( bbox_t *pBBoxList, int maxBBox ) = 0;
+
+	// Create a bot with the given name.  Returns NULL if fake client can't be created
+	virtual edict_t		*CreateFakeClientEx( const char *netname, bool bReportFakeClient = true ) = 0;
+
+	// Server version from the steam.inf, this will be compared to the GC version
+	virtual int GetServerVersion() const = 0;
+
+	// Get sv.GetTime()
+	virtual float GetServerTime() const = 0;
+
+	// Exposed for server plugin authors
+	virtual IServer *GetIServer() = 0;
+
+	virtual bool IsPlayerNameLocked( const edict_t *pEdict ) = 0;
+	virtual bool CanPlayerChangeName( const edict_t *pEdict ) = 0;
+
+	// Find the canonical name of a map, given a partial or non-canonical map name.
+	// Except in the case of an exact match, pMapName is updated to the canonical name of the match.
+	// NOTE That this is subject to the same limitation as ServerGameDLL::CanProvideLevel -- This is non-blocking, so it
+	//      is possible that blocking ServerGameDLL::PrepareLevelResources call may be able to pull a better match than
+	//      is immediately available to this call (e.g. blocking lookups of cloud maps)
+	enum eFindMapResult {
+		// A direct match for this name was found
+		eFindMap_Found,
+		// No match for this map name could be found.
+		eFindMap_NotFound,
+		// A fuzzy match for this mapname was found and pMapName was updated to the full name.
+		// Ex: cp_dust -> cp_dustbowl
+		eFindMap_FuzzyMatch,
+		// A match for this map name was found, and the map name was updated to the canonical version of the
+		// name.
+		// Ex: workshop/1234 -> workshop/cp_qualified_name.ugc1234
+		eFindMap_NonCanonical,
+		// No currently available match for this map name could be found, but it may be possible to load ( see caveat
+		// about PrepareLevelResources above )
+		eFindMap_PossiblyAvailable
+	};
+	virtual eFindMapResult FindMap( /* in/out */ char *pMapName, int nMapNameMax ) = 0;
+	
+	virtual void SetPausedForced( bool bPaused, float flDuration = -1.f ) = 0;
 };
 
-#define INTERFACEVERSION_SERVERGAMEDLL_VERSION_4	"ServerGameDLL004"
-#define INTERFACEVERSION_SERVERGAMEDLL				"ServerGameDLL005"
+// These only differ in new items added to the end
+typedef IVEngineServer IVEngineServer021;
+typedef IVEngineServer IVEngineServer022;
+
+
+#define INTERFACEVERSION_SERVERGAMEDLL_VERSION_8	"ServerGameDLL008"
+#define INTERFACEVERSION_SERVERGAMEDLL_VERSION_9	"ServerGameDLL009"
+#define INTERFACEVERSION_SERVERGAMEDLL				"ServerGameDLL010"
+#define INTERFACEVERSION_SERVERGAMEDLL_INT			10
+
+class IServerGCLobby;
 
 //-----------------------------------------------------------------------------
 // Purpose: These are the interfaces that the game .dll exposes to the engine
@@ -384,6 +471,9 @@ public:
 										CreateInterfaceFn physicsFactory, 
 										CreateInterfaceFn fileSystemFactory, 
 										CGlobalVars *pGlobals) = 0;
+
+	// Setup replay interfaces on the server
+	virtual bool			ReplayInit( CreateInterfaceFn fnReplayFactory ) = 0;
 
 	// This is called when a new game is started. (restart, map)
 	virtual bool			GameInit( void ) = 0;
@@ -474,7 +564,76 @@ public:
 	// iCookie is the value returned by IServerPluginHelpers::StartQueryCvarValue.
 	// Added with version 2 of the interface.
 	virtual void			OnQueryCvarValueFinished( QueryCvarCookie_t iCookie, edict_t *pPlayerEntity, EQueryCvarValueStatus eStatus, const char *pCvarName, const char *pCvarValue ) = 0;
+
+	// Called after the steam API has been activated post-level startup
+	virtual void			GameServerSteamAPIActivated( void ) = 0;
+
+	// Called after the steam API has been shutdown post-level startup
+	virtual void			GameServerSteamAPIShutdown( void ) = 0;
+
+	virtual void			SetServerHibernation( bool bHibernating ) = 0;
+
+	// interface to the new GC based lobby system
+	virtual IServerGCLobby *GetServerGCLobby() = 0;
+
+	// Return override string to show in the server browser
+	// "map" column, or NULL to just use the default value
+	// (the map name)
+	virtual const char *GetServerBrowserMapOverride() = 0;
+
+	// Get gamedata string to send to the master serer updater.
+	virtual const char *GetServerBrowserGameData() = 0;
+
+	// Called to add output to the status command
+	virtual void 			Status( void (*print) (const char *fmt, ...) ) = 0;
+
+	// Informs the game we would like to load this level, giving it a chance to prepare dynamic resources.
+	//
+	// - pszMapName is the name of the map we're looking for, and may be overridden to e.g. the canonical name of the
+	//   map.
+	//
+	// - pszMapFile is the file we intend to use for this map ( e.g. maps/<mapname>.bsp ), and may be overridden to the
+	//   file representing this map name. ( e.g. /path/to/steamapps/workshop/cp_mymap.ugc12345.bsp )
+	//
+	// This call is blocking, and may block for extended periods. See AsyncPrepareLevelResources below.
+	virtual void PrepareLevelResources( /* in/out */ char *pszMapName, size_t nMapNameSize,
+	                                    /* in/out */ char *pszMapFile, size_t nMapFileSize ) = 0;
+
+	// Asynchronous version of PrepareLevelResources. Returns preparation status of map when called.
+	// If passed, flProgress is filled with the current progress percentage [ 0.f to 1.f ] for the InProgress
+	// result
+	enum ePrepareLevelResourcesResult
+	{
+		// Good to go
+		ePrepareLevelResources_Prepared,
+		// Game DLL is async preparing (e.g. streaming resources). flProgress will be filled if passed.
+		ePrepareLevelResources_InProgress
+	};
+	virtual ePrepareLevelResourcesResult AsyncPrepareLevelResources( /* in/out */ char *pszMapName, size_t nMapNameSize,
+	                                                                 /* in/out */ char *pszMapFile, size_t nMapFileSize,
+	                                                                 float *flProgress = NULL ) = 0;
+
+	// Ask the game DLL to evaluate what it would do with this map name were it passed to PrepareLevelResources.
+	// NOTE That this is this is syncronous and non-blocking, so it is possible that async PrepareLevelResources call
+	//      may be able to pull a better match than is immediately available to this call (e.g. blocking lookups of
+	//      cloud maps)
+	enum eCanProvideLevelResult {
+		// Have no knowledge of this level name, it will be up to the engine to provide. (e.g. as maps/levelname.bsp)
+		eCanProvideLevel_CannotProvide,
+		// Can provide resources for this level, and pMapName has been updated to the canonical name we would provide it
+		// under (as with PrepareLevelResources)
+		eCanProvideLevel_CanProvide,
+		// We recognize this level name as something we might be able to prepare, but without a blocking/async call to
+		// PrepareLevelResources, it is not possible to say whether it is available.
+		eCanProvideLevel_Possibly
+	};
+	virtual eCanProvideLevelResult CanProvideLevel( /* in/out */ char *pMapName, int nMapNameMax ) = 0;
+
+	// Called to see if the game server is okay with a manual changelevel or map command
+	virtual bool			IsManualMapChangeOkay( const char **pszReason ) = 0;
 };
+
+typedef IServerGameDLL IServerGameDLL008;
 
 //-----------------------------------------------------------------------------
 // Just an interface version name for the random number interface
@@ -513,7 +672,8 @@ public:
 	virtual void			CheckTransmit( CCheckTransmitInfo *pInfo, const unsigned short *pEdictIndices, int nEdicts ) = 0;
 };
 
-#define INTERFACEVERSION_SERVERGAMECLIENTS		"ServerGameClients003"
+#define INTERFACEVERSION_SERVERGAMECLIENTS_VERSION_3	"ServerGameClients003"
+#define INTERFACEVERSION_SERVERGAMECLIENTS				"ServerGameClients004"
 
 //-----------------------------------------------------------------------------
 // Purpose: Player / Client related functions
@@ -555,7 +715,7 @@ public:
 								int dropped_packets, bool ignore, bool paused ) = 0;
 	
 	// Let the game .dll do stuff after messages have been sent to all of the clients once the server frame is complete
-	virtual void			PostClientMessagesSent( void ) = 0;
+	virtual void			PostClientMessagesSent_DEPRECIATED( void ) = 0;
 
 	// For players, looks up the CPlayerState structure corresponding to the player
 	virtual CPlayerState	*GetPlayerState( edict_t *player ) = 0;
@@ -572,7 +732,16 @@ public:
 
 	// A user has had their network id setup and validated 
 	virtual void			NetworkIDValidated( const char *pszUserName, const char *pszNetworkID ) = 0;
+
+	// The client has submitted a keyvalues command
+	virtual void			ClientCommandKeyValues( edict_t *pEntity, KeyValues *pKeyValues ) = 0;
+
+	// Hook for player spawning
+	virtual void			ClientSpawned( edict_t *pPlayer ) = 0;
 };
+
+typedef IServerGameClients IServerGameClients003;
+
 
 #define INTERFACEVERSION_UPLOADGAMESTATS		"ServerUploadGameStats001"
 
@@ -630,5 +799,29 @@ public:
 };
 
 #define SERVER_DLL_SHARED_APPSYSTEMS		"VServerDllSharedAppSystems001"
+
+#define INTERFACEVERSION_SERVERGAMETAGS		"ServerGameTags001"
+
+//-----------------------------------------------------------------------------
+// Purpose: querying the game dll for Server cvar tags
+//-----------------------------------------------------------------------------
+abstract_class IServerGameTags
+{
+public:
+	// Get the list of cvars that require tags to show differently in the server browser
+	virtual void			GetTaggedConVarList( KeyValues *pCvarTagList ) = 0;
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Provide hooks for the GC based lobby system
+//-----------------------------------------------------------------------------
+abstract_class IServerGCLobby
+{
+public:
+	virtual bool HasLobby() const = 0;
+	virtual bool SteamIDAllowedToConnect( const CSteamID &steamId ) const = 0;
+	virtual void UpdateServerDetails(void) = 0;
+	virtual bool ShouldHibernate() = 0;
+};
 
 #endif // EIFACE_H

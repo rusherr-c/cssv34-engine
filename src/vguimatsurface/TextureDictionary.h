@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Contains all texture state for the material system surface to use
 //
@@ -10,6 +10,7 @@
 #define TEXTUREDICTIONARY_H
 
 class IMaterial;
+class ITexture;
 
 enum
 {
@@ -25,6 +26,7 @@ class ITextureDictionary
 public:
 	// Create, destroy textures
 	virtual int	CreateTexture( bool procedural = false ) = 0;
+	virtual int CreateTextureByTexture( ITexture *pTexture, bool procedural = true ) = 0;
 	virtual void DestroyTexture( int id ) = 0;
 	virtual void DestroyAllTextures() = 0;
 
@@ -49,8 +51,11 @@ public:
 
 	virtual int	FindTextureIdForTextureFile( char const *pFileName ) = 0;
 	virtual void SetSubTextureRGBA( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall ) = 0;
+	virtual void SetSubTextureRGBAEx( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat format ) = 0;
 
-	virtual void SetTextureRGBAEx( int id, const char* rgba, int wide, int tall, ImageFormat format ) = 0;
+	virtual void SetTextureRGBAEx( int id, const char* rgba, int wide, int tall, ImageFormat format, bool bFixupTextCoordsForDimensions ) = 0;
+
+	virtual void UpdateSubTextureRGBA( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat ) = 0;
 };
 
 ITextureDictionary *TextureDictionary();

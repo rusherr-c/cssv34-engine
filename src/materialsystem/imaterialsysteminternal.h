@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,7 +30,11 @@ public:
 	CMatCallQueue()
 	{
 		MEM_ALLOC_CREDIT_( "CMatCallQueue.m_Allocator" );
-		m_Allocator.Init( 2*1024*1024, 0, 0, 4 );
+#ifdef SWDS
+		m_Allocator.Init( 2*1024, 0, 0, 4 );
+#else
+		m_Allocator.Init( IsX360() ? 2*1024*1024 : 8*1024*1024, 64*1024, 256*1024, 4 );
+#endif
 		m_FunctorFactory.SetAllocator( &m_Allocator );
 		m_pHead = m_pTail = NULL;
 	}
@@ -173,6 +177,10 @@ private:
 	unsigned m_nBreakSerialNumber;
 };
 
+
+class IMaterialProxy;
+
+
 //-----------------------------------------------------------------------------
 // Additional interfaces used internally to the library
 //-----------------------------------------------------------------------------
@@ -208,6 +216,8 @@ public:
 
 	virtual void UnbindMaterial( IMaterial *pMaterial ) = 0;
 	virtual uint GetRenderThreadId() const = 0 ;
+
+	virtual IMaterialProxy	*DetermineProxyReplacements( IMaterial *pMaterial, KeyValues *pFallbackKeyValues ) = 0;
 };
 
 

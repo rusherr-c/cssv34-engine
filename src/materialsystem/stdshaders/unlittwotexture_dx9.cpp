@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -100,9 +100,9 @@ BEGIN_VS_SHADER( UnlitTwoTexture_DX9, "Help for UnlitTwoTexture_DX9" )
 	SHADER_INIT
 	{
 		if (params[BASETEXTURE]->IsDefined())
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		if (params[TEXTURE2]->IsDefined())
-			LoadTexture( TEXTURE2 );
+			LoadTexture( TEXTURE2, TEXTUREFLAGS_SRGB );
 
 		// Cloak Pass
 		if ( params[CLOAKPASSENABLED]->GetIntValue() )

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Simple, small, free-standing tools for building AIs
 //
@@ -23,6 +23,11 @@
 
 inline CBasePlayer *AI_GetSinglePlayer()
 {
+	if ( gpGlobals->maxClients > 1 )
+	{
+		return NULL;
+	}
+	
 	return UTIL_GetLocalPlayer();
 }
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,9 @@
 #include "dme_controls/AttributeWidgetFactory.h"
 #include "vgui_controls/TreeView.h"
 #include "vgui_controls/TreeViewListControl.h"
+#include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "datamodel/dmehandle.h"
 #include "tier1/utlntree.h"
 #include "tier1/utlstring.h"

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,6 +18,8 @@
 #ifdef CLIENT_DLL
 	class C_BaseAnimatingOverlay;
 	class C_WeaponCSBase;
+	// Avoid redef warnings
+	#undef CBaseAnimatingOverlay
 	#define CBaseAnimatingOverlay C_BaseAnimatingOverlay
 	#define CWeaponCSBase C_WeaponCSBase
 	#define CCSPlayer C_CSPlayer
@@ -42,6 +44,7 @@ enum PlayerAnimEvent_t
 	PLAYERANIMEVENT_RELOAD_START,	///< w_model partial reload for shotguns
 	PLAYERANIMEVENT_RELOAD_LOOP,	///< w_model partial reload for shotguns
 	PLAYERANIMEVENT_RELOAD_END,		///< w_model partial reload for shotguns
+	PLAYERANIMEVENT_CLEAR_FIRING,	///< clear animations on the firing layer
 	
 	PLAYERANIMEVENT_COUNT
 };

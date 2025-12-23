@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing vertex data
 //
@@ -12,6 +12,8 @@
 #endif
 
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "mathlib/vector.h"
 #include "Color.h"
 
@@ -322,7 +324,6 @@ public:
 	// The maximum distance any vertex is moved is returned
 	float GenerateWeightDelta( CDmeVertexData *pBindState );
 
-protected:
 	CDmaVar< bool > m_bCorrected;
 
 private:

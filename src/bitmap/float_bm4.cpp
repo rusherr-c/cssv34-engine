@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -287,7 +287,7 @@ FloatBitMap_t *FloatBitMap_t::ComputeSelfShadowedBumpmapFromHeightInAlphaChannel
 	ctxs[0].min_y = 0;
 	ctxs[0].max_y = Height - 1;
 	ctxs[0].m_nOptionFlags = nOptionFlags;
-	int nthreads = min( 32, GetCPUInformation()->m_nPhysicalProcessors );
+	int nthreads = min( 32, (int)GetCPUInformation()->m_nPhysicalProcessors );
 
 	ThreadHandle_t waithandles[32];
 	int starty = 0;

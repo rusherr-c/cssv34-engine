@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,8 +12,8 @@
 #endif
 
 #include <vgui_controls/Frame.h>
-#include "UtlVector.h"
-#include "UtlSymbol.h"
+#include "utlvector.h"
+#include "utlsymbol.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: Dialog for editing the game server map cycle list

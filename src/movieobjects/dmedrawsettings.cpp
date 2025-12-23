@@ -1,4 +1,4 @@
-//======= Copyright © 1996-2006, Valve Corporation, All rights reserved. ======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -31,8 +31,10 @@ bool CDmeDrawSettings::s_bWireframeOnShadedMaterialInitialized( false );
 CMaterialReference CDmeDrawSettings::s_WireframeOnShadedMaterial;
 bool CDmeDrawSettings::s_bFlatGrayMaterial( false );
 CMaterialReference CDmeDrawSettings::s_FlatGrayMaterial;
+bool CDmeDrawSettings::s_bUnlitGrayMaterial( false );
+CMaterialReference CDmeDrawSettings::s_UnlitGrayMaterial;
 
-CUtlRBTree< UtlSymId_t > CDmeDrawSettings::s_KnownDrawableTypes;
+CUtlRBTree< CUtlSymbol > CDmeDrawSettings::s_KnownDrawableTypes;
 
 
 //-----------------------------------------------------------------------------
@@ -45,7 +47,7 @@ void CDmeDrawSettings::OnConstruction()
 		BuildKnownDrawableTypes();
 	}
 
-	SetDefLessFunc< CUtlRBTree< UtlSymId_t > >( m_NotDrawable );
+	SetDefLessFunc< CUtlRBTree< CUtlSymbol > >( m_NotDrawable );
 	m_NotDrawable.RemoveAll();
 
 	m_DrawType.InitAndSet( this, "drawType", static_cast< int >( DRAW_SMOOTH ) );
@@ -56,6 +58,9 @@ void CDmeDrawSettings::OnConstruction()
 	m_bNormals.InitAndSet( this, "normals", false );
 	m_NormalLength.InitAndSet( this, "normalLength", 1.0 );
 	m_Color.InitAndSet( this, "color", Color( 0, 0, 0, 1 ) );
+	m_bDeltaHighlight.InitAndSet( this, "highlightDeltas", false );
+	m_flHighlightSize.InitAndSet( this, "highlightSize", 1.5f );
+	m_cHighlightColor.InitAndSet( this, "highlightColor", Color( 0xff, 0x14, 0x93, 0xff ) );	// Deep Pink
 
 	m_IsAMaterialBound = false;
 }
@@ -87,6 +92,8 @@ void CDmeDrawSettings::BindWireframe()
 		s_bWireframeMaterialInitialized = true;
 
 		KeyValues *pKeyValues = new KeyValues( "wireframe" );
+		pKeyValues->SetInt( "$decal", 0 );
+		pKeyValues->SetInt( "$vertexcolor", 1 );
 		pKeyValues->SetInt( "$ignorez", 1 );
 		s_WireframeMaterial.Init( "__DmeWireframe", pKeyValues );
 	}
@@ -107,7 +114,8 @@ void CDmeDrawSettings::BindWireframeOnShaded()
 		s_bWireframeOnShadedMaterialInitialized = true;
 
 		KeyValues *pKeyValues = new KeyValues( "wireframe" );
-		pKeyValues->SetInt( "$decal", 1 );
+		pKeyValues->SetInt( "$decal", 0 );
+		pKeyValues->SetInt( "$vertexcolor", 1 );
 		pKeyValues->SetInt( "$ignorez", 0 );
 		s_WireframeOnShadedMaterial.Init( "__DmeWireframeOnShaded", pKeyValues );
 	}
@@ -119,7 +127,7 @@ void CDmeDrawSettings::BindWireframeOnShaded()
 
 
 //-----------------------------------------------------------------------------
-// Flat Grey Shaded
+// Flat Gray Shaded
 //-----------------------------------------------------------------------------
 void CDmeDrawSettings::BindGray()
 {
@@ -128,13 +136,33 @@ void CDmeDrawSettings::BindGray()
 		s_bFlatGrayMaterial = true;
 
 		KeyValues *pKeyValues = new KeyValues( "VertexLitGeneric" );
-		pKeyValues->SetInt( "$flat", 1 );
-		pKeyValues->SetColor( "$color", Color( 1, 1, 1 ) );
-		s_FlatGrayMaterial.Init( "__DmeFlatGrey", pKeyValues );
+		pKeyValues->SetInt( "$model", 1 );
+		s_FlatGrayMaterial.Init( "__DmeFlatGray", pKeyValues );
 	}
 
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 	pRenderContext->Bind( s_FlatGrayMaterial );
+	m_IsAMaterialBound = true;
+}
+
+
+//-----------------------------------------------------------------------------
+// Flat Gray Shaded
+//-----------------------------------------------------------------------------
+void CDmeDrawSettings::BindUnlitGray()
+{
+	if ( !s_bUnlitGrayMaterial )
+	{
+		s_bUnlitGrayMaterial = true;
+
+		KeyValues *pKeyValues = new KeyValues( "UnlitGeneric" );
+		pKeyValues->SetInt( "$model", 1 );
+		pKeyValues->SetInt( "$vertexcolor", 1 );
+		s_UnlitGrayMaterial.Init( "__DmeUnlitGray", pKeyValues );
+	}
+
+	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
+	pRenderContext->Bind( s_UnlitGrayMaterial );
 	m_IsAMaterialBound = true;
 }
 
@@ -156,7 +184,7 @@ bool CDmeDrawSettings::Drawable( CDmElement *pElement )
 //-----------------------------------------------------------------------------
 void CDmeDrawSettings::BuildKnownDrawableTypes()
 {
-	SetDefLessFunc< CUtlRBTree< UtlSymId_t > >( s_KnownDrawableTypes );
+	SetDefLessFunc< CUtlRBTree< CUtlSymbol > >( s_KnownDrawableTypes );
 
 	s_KnownDrawableTypes.RemoveAll();
 
@@ -177,55 +205,61 @@ void CDmeDrawSettings::DrawDag( CDmeDag *pDag )
 	if ( !pDag )
 		return;
 
+	m_vHighlightPoints.RemoveAll();
+
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 
 	m_IsAMaterialBound = false;
 
-	if ( !Shaded() )
+	if ( GetDeltaHighlight() )
 	{
-		BindWireframe();
+		BindUnlitGray();
 	}
-	else if ( GetGrayShade() )
+	else
 	{
-		BindGray();
+		if ( !Shaded() )
+		{
+			BindWireframe();
+		}
+		else if ( GetGrayShade() )
+		{
+			BindGray();
+		}
 	}
 
 	pDag->Draw( this );
 
 	m_IsAMaterialBound = false;
 
-	if ( GetWireframeOnShaded() )
+	if ( GetDeltaHighlight() || ( GetWireframeOnShaded() && Shaded() ) )
 	{
-		if ( Shaded() )
-		{
-			VMatrix m;
+		VMatrix m;
 
-			pRenderContext->GetMatrix( MATERIAL_PROJECTION, &m );
+		pRenderContext->GetMatrix( MATERIAL_PROJECTION, &m );
 
-			/*	Extract the near and far clipping plane values from projection matrix
-			float c = m[ 2 ][ 2 ];
-			float d = m[ 2 ][ 3 ];
+		/*	Extract the near and far clipping plane values from projection matrix
+		float c = m[ 2 ][ 2 ];
+		float d = m[ 2 ][ 3 ];
 
-			const float near = d / ( c - 1.0f );
-			const float far = d / ( c + 1.0f );
-			*/
+		const float near = d / ( c - 1.0f );
+		const float far = d / ( c + 1.0f );
+		*/
 
-			const float zBias = 0.00025;
-			m[ 2 ][ 2 ] += zBias;
-			m[ 2 ][ 3 ] += zBias;
+		const float zBias = 0.00025;
+		m[ 2 ][ 2 ] += zBias;
+		m[ 2 ][ 3 ] += zBias;
 
-			pRenderContext->MatrixMode( MATERIAL_PROJECTION );
-			pRenderContext->PushMatrix();
-			pRenderContext->LoadMatrix( m );
+		pRenderContext->MatrixMode( MATERIAL_PROJECTION );
+		pRenderContext->PushMatrix();
+		pRenderContext->LoadMatrix( m );
 
-			BindWireframeOnShaded();
-			PushDrawType();
-			SetDrawType( CDmeDrawSettings::DRAW_WIREFRAME );
-			pDag->Draw( this );
-			PopDrawType();
+		BindWireframeOnShaded();
+		PushDrawType();
+		SetDrawType( CDmeDrawSettings::DRAW_WIREFRAME );
+		pDag->Draw( this );
+		PopDrawType();
 
-			pRenderContext->MatrixMode( MATERIAL_PROJECTION );
-			pRenderContext->PopMatrix();
-		}
+		pRenderContext->MatrixMode( MATERIAL_PROJECTION );
+		pRenderContext->PopMatrix();
 	}
 }

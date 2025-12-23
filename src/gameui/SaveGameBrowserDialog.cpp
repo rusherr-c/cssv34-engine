@@ -1,11 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
 
 #include "BasePanel.h"
-#include "SavegameDialog.h"
+#include "SaveGameDialog.h"
 
 #include "winlite.h"		// FILETIME
 #include "vgui/ILocalize.h"
@@ -1120,29 +1120,35 @@ void CSaveGameBrowserDialog::OnKeyCodePressed( vgui::KeyCode code )
 	switch( code )
 	{
 	case KEY_XBUTTON_A:
+	case STEAMCONTROLLER_A:
 		PerformSelectedAction();
 		break;
 
 	case KEY_XBUTTON_B:
+	case STEAMCONTROLLER_B:
 		OnClose();
 		break;
 
 	case KEY_XBUTTON_X:
+	case STEAMCONTROLLER_X:
 		PerformDeletion();
 		break;
 
 	case KEY_XBUTTON_Y:
+	case STEAMCONTROLLER_Y:
 		BasePanel()->OnChangeStorageDevice();
 		break;
 
 		// Move the selection up and down
 	case KEY_XSTICK1_LEFT:
 	case KEY_XBUTTON_LEFT:
+	case STEAMCONTROLLER_DPAD_LEFT:
 		ScrollSelectionPanels( SCROLL_RIGHT );
 		break;
 
 	case KEY_XSTICK1_RIGHT:
 	case KEY_XBUTTON_RIGHT:
+	case STEAMCONTROLLER_DPAD_RIGHT:
 		ScrollSelectionPanels( SCROLL_LEFT );
 		break;
 
@@ -1192,7 +1198,7 @@ bool CSaveGameBrowserDialog::ParseSaveData( char const *pszFileName, char const 
 
 	save->iSize = g_pFullFileSystem->Size( fh );
 
-	int readok = SaveReadNameAndComment( fh, szMapName, szComment );
+	int readok = SaveReadNameAndComment( fh, szMapName, sizeof(szMapName), szComment, sizeof(szComment) );
 	g_pFullFileSystem->Close(fh);
 
 	if ( !readok )
@@ -1221,9 +1227,9 @@ bool CSaveGameBrowserDialog::ParseSaveData( char const *pszFileName, char const 
 		wchar_t wzMins[4];	
 		wchar_t wzSecs[4];
 
-		_snwprintf( wzHours, sizeof(wzHours), L"%d", hours );
-		_snwprintf( wzMins, sizeof(wzMins), L"%d", minutes );
-		_snwprintf( wzSecs, sizeof(wzSecs), L"%d", seconds );
+		_snwprintf( wzHours, ARRAYSIZE(wzHours), L"%d", hours );
+		_snwprintf( wzMins, ARRAYSIZE(wzMins), L"%d", minutes );
+		_snwprintf( wzSecs, ARRAYSIZE(wzSecs), L"%d", seconds );
 
 		wchar_t buf[20];
 

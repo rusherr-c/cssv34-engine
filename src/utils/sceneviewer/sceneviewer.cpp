@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -16,9 +16,9 @@
 
 #include "vstdlib/cvar.h"
 #include "appframework/AppFramework.h"
-#include "FileSystem.h"
-#include "materialsystem/IMaterialSystem.h"
-#include "materialsystem/ITexture.h"
+#include "filesystem.h"
+#include "materialsystem/imaterialsystem.h"
+#include "materialsystem/itexture.h"
 #include "materialsystem/IMaterialSystemHardwareConfig.h"
 #include "vgui/IVGui.h"
 #include "vgui_controls/Panel.h"
@@ -44,12 +44,14 @@
 #include "datacache/imdlcache.h"
 #include "datamodel/idatamodel.h"
 #include "vphysics_interface.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "filesystem_init.h"
 #include "dmserializers/idmserializers.h"
 #include "datamodel/dmelementfactoryhelper.h"
+#include "p4lib/ip4.h"
 #include "vstdlib/iprocessutils.h"
 #include "tier3/tier3.h"
+#include "vgui_controls/perforcefileexplorer.h"
 #include "dme_controls/assetbuilder.h"
 
 
@@ -260,9 +262,6 @@ bool CSceneViewerApp::Create()
 	// FIXME: Enable vs30 shaders while NVidia driver bug exists
 	CommandLine()->AppendParm( "-box", NULL );
 
-	SpewOutputFunc( ModelBrowserSpewFunc );
-	SpewActivate( "console", 1 );
-
 	if ( !BaseClass::Create() )
 		return false;
 
@@ -276,12 +275,25 @@ bool CSceneViewerApp::Create()
 		{ "", "" }	// Required to terminate the list
 	};
 
+	if ( !AddSystems( appSystems ) )
+	{
+		return false;
+	}
+
+	// Add the P4 module separately so that if it is absent (say in the SDK) then the other system will initialize properly
+	AppModule_t p4Module = LoadModule( "p4lib.dll" );
+
+	if ( APP_MODULE_INVALID != p4Module )
+	{
+		AddSystem( p4Module, P4_INTERFACE_VERSION );
+	}
+
 	AddSystem( g_pDataModel, VDATAMODEL_INTERFACE_VERSION );
 	AddSystem( g_pDmElementFramework, VDMELEMENTFRAMEWORK_VERSION );
 	AddSystem( g_pDmSerializers, DMSERIALIZERS_INTERFACE_VERSION );
 	AddSystem( GetDefaultDmeMakefileUtils(), DMEMAKEFILE_UTILS_INTERFACE_VERSION );
 
-	return AddSystems( appSystems );
+	return true; 
 }
 
 void CSceneViewerApp::Destroy()
@@ -297,6 +309,9 @@ bool CSceneViewerApp::PreInit( )
 {
 	if ( !BaseClass::PreInit() )
 		return false;
+
+	SpewOutputFunc( ModelBrowserSpewFunc );
+	SpewActivate( "console", 1 );
 
 	MathLib_Init( 2.2f, 2.2f, 0.0f, 2.0f, false, false, false, false );
 

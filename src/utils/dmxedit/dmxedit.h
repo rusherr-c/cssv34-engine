@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// The copyright to the contents herein is the property of Valve, L.L.C.
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // The contents may be used and/or copied only with the written permission of
 // Valve, L.L.C., or in accordance with the terms and conditions stipulated in
 // the agreement/contract under which the contents have been supplied.
@@ -18,7 +18,6 @@
 
 
 // Valve includes
-#include "stdafx.h"
 #include "movieobjects/dmemesh.h"
 #include "tier1/utlstring.h"
 #include "tier1/utlvector.h"
@@ -36,6 +35,8 @@ class CDmxEditProxy;
 class CDmxEdit
 {
 public:
+	void SetScriptFilename( const char *pFilename );
+
 	class delta : public CUtlString
 	{
 	public:
@@ -479,7 +480,11 @@ public:
 
 	void DoIt();
 
-	void ListDeltas();
+	bool ListDeltas();
+
+	int DeltaCount();
+
+	const char *DeltaName( int nDeltaIndex );
 
 	void Unload();
 
@@ -505,15 +510,49 @@ public:
 
 	bool ShrinkSelection( int nSize = 1 );
 
-	bool Add( const CDmxEditProxy &e, float weight = 1.0f, float featherDistance = 0.0f, const CFalloffType &falloffType = STRAIGHT, const CDistanceType &distanceType = DIST_DEFAULT );
+	enum AddType { kRaw, kCorrected };
 
-	bool Add( const char *pDeltaName, float weight = 1.0f, float featherDistance = 0.0f, const CFalloffType &falloffType = STRAIGHT, const CDistanceType &distanceType = DIST_DEFAULT );
+	bool Add(
+		AddType addType,
+		const CDmxEditProxy &e,
+		float weight = 1.0f,
+		float featherDistance = 0.0f,
+		const CFalloffType &falloffType = STRAIGHT,
+		const CDistanceType &distanceType = DIST_DEFAULT );
+
+	bool Add(
+		const CDmxEditProxy &e,
+		float weight = 1.0f,
+		float featherDistance = 0.0f,
+		const CFalloffType &falloffType = STRAIGHT,
+		const CDistanceType &distanceType = DIST_DEFAULT )
+	{
+		return Add( kRaw, e, weight, featherDistance, falloffType, distanceType );
+	}
+
+	bool Add(
+		AddType addType,
+		const char *pDeltaName,
+		float weight = 1.0f,
+		float featherDistance = 0.0f,
+		const CFalloffType &falloffType = STRAIGHT,
+		const CDistanceType &distanceType = DIST_DEFAULT );
+
+	bool Add(
+		const char *pDeltaName,
+		float weight = 1.0f,
+		float featherDistance = 0.0f,
+		const CFalloffType &falloffType = STRAIGHT,
+		const CDistanceType &distanceType = DIST_DEFAULT )
+	{
+		return Add( kRaw, pDeltaName, weight, featherDistance, falloffType, distanceType );
+	}
 
 	bool Interp( const CDmxEditProxy &e, float weight = 1.0f, float featherDistance = 0.0f, const CFalloffType &falloffType = STRAIGHT, const CDistanceType &distanceType = DIST_DEFAULT );
 
 	bool Interp( const char *pDeltaName, float weight = 1.0f, float featherDistance = 0.0f, const CFalloffType &falloffType = STRAIGHT, const CDistanceType &distanceType = DIST_DEFAULT );
 
-	CUtlString SaveDelta( const char *pDeltaName );
+	bool SaveDelta( const char *pDeltaName );
 
 	bool DeleteDelta( const delta &d );
 
@@ -521,6 +560,9 @@ public:
 
 	bool Save() { return Save( m_filename ); }
 
+	void CleanupWork();
+
+	void CreateWork();
 	bool Merge( const char *pInFilename, const char *pOutFilename );
 
 	bool RemapMaterial( int nMaterialIndex, const char *pNewMaterialName );
@@ -547,9 +589,9 @@ public:
 
 	bool CreateExpressionFilesFromCachedPresets() const;
 
-	bool ComputeWrinkles();
+	bool ComputeWrinkles( bool bOverwrite );
 
-	bool ComputeWrinkle( const char *pDeltaName, float scale );
+	bool ComputeWrinkle( const char *pDeltaName, float scale, const char *pOperation );
 
 	bool Scale( float sx, float sy, float sz );
 
@@ -569,13 +611,189 @@ public:
 		return Translate( t, featherDistance, falloffType, m_distanceType );
 	}
 
+	bool Rotate(
+		Vector r,
+		Vector o,
+		float featherDistance = 0.0f,
+		const CFalloffType &falloffType = STRAIGHT,
+		const CDistanceType &passedDistanceType = DIST_DEFAULT,
+		CDmeMesh *pPassedMesh = NULL,
+		CDmeVertexData *pPassedBase = NULL,
+		CDmeSingleIndexedComponent *pPassedSelection = NULL );
+
 	bool FixPresetFile( const char *pPresetFilename );
+
+	bool GroupControls( const char *pGroupName, CUtlVector< const char * > &rawControlNames );
+
+	bool ReorderControls( CUtlVector< CUtlString > &controlNames );
+
+	bool AddDominationRule( CUtlVector< CUtlString > &dominators, CUtlVector< CUtlString > &supressed );
+
+	bool SetStereoControl( const char *pControlName, bool bStereo );
+
+	bool SetEyelidControl( const char *pControlName, bool bEyelid );
+
+	float MaxDeltaDistance( const char *pDeltaName );
+
+	float DeltaRadius( const char *pDeltaName );
+
+	float SelectionRadius();
+
+	bool SetWrinkleScale( const char *pControlName, const char *pRawControlName, float flScale );
 
 	bool ErrorState() {
 		return m_errorState;
 	}
 
-	void Error( const tchar *pMsgFormat, ... );
+	void Error( PRINTF_FORMAT_STRING const tchar *pMsgFormat, ... );
+
+	const CUtlString &SetFuncString( lua_State *pLuaState );
+
+	const CUtlString &GetFuncString() const { return m_funcString; }
+
+	int GetLineNumber() const { return m_lineNo; }
+
+	const CUtlString &GetSourceFile() const { return m_sourceFile; }
+
+	const CUtlString &GetErrorString() const { return m_errorString; }
+
+	int LuaOk( lua_State *pLuaState )
+	{
+		Msg( "// %s\n", GetFuncString().Get() );
+
+		lua_pushboolean( pLuaState, true );
+		return 1;
+	}
+
+	int LuaError( lua_State *pLuaState )
+	{
+		if ( GetLineNumber() >= 0 )
+		{
+			Error( "// ERROR: %s:%d: %s - %s\n",
+				GetSourceFile().Get(),
+				GetLineNumber(),
+				GetFuncString().Get(),
+				GetErrorString().Get() );
+		}
+		else
+		{
+			Error( "// ERROR: %s - %s\n",
+				GetFuncString().Get(),
+				GetErrorString().Get() );
+		}
+
+		lua_pushboolean( pLuaState, false );
+		return 1;
+	}
+
+	int LuaError( lua_State *pLuaState, PRINTF_FORMAT_STRING const char *pFormat, ... )
+	{
+		char tmpBuf[ 4096 ];
+
+		va_list marker;
+
+		va_start( marker, pFormat );
+#ifdef _WIN32
+		int len = _vsnprintf( tmpBuf, sizeof( tmpBuf ) - 1, pFormat, marker );
+#elif LINUX
+		int len = vsnprintf( tmpBuf, sizeof( tmpBuf ) - 1, pFormat, marker );
+#else
+#error "define vsnprintf type."
+#endif
+		va_end( marker );
+
+		// Len < 0 represents an overflow
+		if( len < 0 )
+		{
+			len = sizeof( tmpBuf ) - 1;
+			tmpBuf[sizeof( tmpBuf ) - 1] = 0;
+		}
+
+		if ( GetLineNumber() >= 0 )
+		{
+			Error( "// ERROR: %s:%d: %s - %s\n",
+				GetSourceFile().Get(),
+				GetLineNumber(),
+				GetFuncString().Get(),
+				tmpBuf );
+		}
+		else
+		{
+			Error( "// ERROR: %s - %s\n",
+				GetFuncString().Get(),
+				tmpBuf );
+		}
+
+		lua_pushboolean( pLuaState, false );
+		return 1;
+	}
+
+	void LuaWarning( PRINTF_FORMAT_STRING const char *pFormat, ... )
+	{
+		char tmpBuf[ 4096 ];
+
+		va_list marker;
+
+		va_start( marker, pFormat );
+#ifdef _WIN32
+		int len = _vsnprintf( tmpBuf, sizeof( tmpBuf ) - 1, pFormat, marker );
+#elif LINUX
+		int len = vsnprintf( tmpBuf, sizeof( tmpBuf ) - 1, pFormat, marker );
+#else
+#error "define vsnprintf type."
+#endif
+		va_end( marker );
+
+		// Len < 0 represents an overflow
+		if( len < 0 )
+		{
+			len = sizeof( tmpBuf ) - 1;
+			tmpBuf[sizeof( tmpBuf ) - 1] = 0;
+		}
+
+		if ( GetLineNumber() >= 0 )
+		{
+			Warning( "// WARNING: %s:%d: %s - %s\n",
+				GetSourceFile().Get(),
+				GetLineNumber(),
+				GetFuncString().Get(),
+				tmpBuf );
+		}
+		else
+		{
+			Warning( "// WARNING: %s - %s\n",
+				GetFuncString().Get(),
+				tmpBuf );
+		}
+	}
+
+	bool SetErrorString( PRINTF_FORMAT_STRING const char *pFormat, ... )
+	{
+		char tmpBuf[ 4096 ];
+
+		va_list marker;
+
+		va_start( marker, pFormat );
+#ifdef _WIN32
+		int len = _vsnprintf( tmpBuf, sizeof( tmpBuf ) - 1, pFormat, marker );
+#elif LINUX
+		int len = vsnprintf( tmpBuf, sizeof( tmpBuf ) - 1, pFormat, marker );
+#else
+#error "define vsnprintf type."
+#endif
+		va_end( marker );
+
+		// Len < 0 represents an overflow
+		if( len < 0 )
+		{
+			len = sizeof( tmpBuf ) - 1;
+			tmpBuf[sizeof( tmpBuf ) - 1] = 0;
+		}
+
+		m_errorString = tmpBuf;
+
+		return false;
+	}
 
 protected:
 	CUtlString m_filename;
@@ -586,6 +804,8 @@ protected:
 	CDistanceType m_distanceType;
 
 	CUtlStringMap< CUtlString > m_presetCache;
+
+	CUtlString m_scriptFilename;
 
 	bool Select( CDmeVertexDeltaData *pDelta, CDmeSingleIndexedComponent *pPassedSelection = NULL, CDmeMesh *pPassedMesh = NULL );
 
@@ -625,7 +845,86 @@ protected:
 
 		return pMesh->FindDeltaState( pDeltaName );
 	}
+
+	CDmeVertexData *GetBindState( const CDmeMesh *pPassedMesh = NULL ) const
+	{
+		const CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : m_pMesh;
+		if ( !pMesh )
+			return NULL;
+
+		return pMesh->FindBaseState( "bind" );
+	}
+
+	void GetFuncArg( lua_State *pLuaState, int nIndex, CUtlString &funcString );
+
+	CUtlString m_funcString;
+
+	int m_lineNo;
+
+	CUtlString m_sourceFile;
+
+	CUtlString m_errorString;
+
+	void UpdateMakefile( CDmElement *pRoot );
+	void AddExportTags( CDmElement *pRoot, const char *pFilename );
+	void RemoveExportTags( CDmElement *pRoot, const char *pExportTagsName );
 };
+
+
+//=============================================================================
+//
+//=============================================================================
+typedef int ( * LuaFunc_t ) ( lua_State * );
+
+
+//=============================================================================
+//
+//=============================================================================
+struct LuaFunc_s
+{
+	LuaFunc_s( const char *pName, LuaFunc_t pFunc, const char *pProto, const char *pDoc )
+	: m_pFuncName( pName )
+	, m_pFunc( pFunc )
+	, m_pFuncPrototype( pProto )
+	, m_pFuncDesc( pDoc )
+	{
+		m_pNextFunc = s_pFirstFunc;
+		s_pFirstFunc = this;
+	}
+
+	const char *m_pFuncName;
+	LuaFunc_t m_pFunc;
+	const char *m_pFuncPrototype;
+	const char *m_pFuncDesc;
+
+	static LuaFunc_s *s_pFirstFunc;
+	LuaFunc_s *m_pNextFunc;
+
+	static CDmxEdit m_dmxEdit;
+};
+
+
+//-----------------------------------------------------------------------------
+// Macro to install a valve lua command
+//
+// Use like this:
+//
+// LUA_COMMAND( blah, "blah prototype", "blah documentation" )
+// {
+//		// ... blah implementation ...
+//		// ... Function is passed single struct of lua_State *pLuaState  ...
+//		// ... Function returns an int ...
+//
+//		// Example usage:
+//
+//		const char *pArg = luaL_checkstring( pLuaState, 1 );
+//		return 0;
+// }
+//-----------------------------------------------------------------------------
+#define LUA_COMMAND( _name, _proto, _doc ) \
+	static int _name##_luaFunc( lua_State *pLuaState ); \
+	static LuaFunc_s _name##_LuaFunc_s( #_name, _name##_luaFunc, _proto, _doc ); \
+	static int _name##_luaFunc( lua_State *pLuaState )
 
 
 //=============================================================================
@@ -642,95 +941,10 @@ public:
 
 	void SetGame( const CUtlString &game );
 
-	typedef int ( * LuaFunc_t ) ( lua_State * );
-
-	struct LuaFunc_s
-	{
-		const char *m_pFuncName;
-		LuaFunc_t m_pFunc;
-		const char *m_pFuncPrototype;
-		const char *m_pFuncDesc;
-	};
-
-	static int FunctionCount();
-
-	static const LuaFunc_s *GetFunctionList();
-
-protected:
-	static LuaFunc_s s_luaFuncs[];
-
-	static int Load( lua_State *pLuaState );
-
-	static int Import( lua_State *pLuaState );
-
-	static int Save( lua_State *pLuaState );
-
-	static int ListDeltas( lua_State *pLuaState );
-
-	static int ImportComboRules( lua_State *pLuaState );
-
-	static int ResetState( lua_State *pLuaState );
-
-	static int SetState( lua_State *pLuaState );
-
-	static int Select( lua_State *pLuaState );
-
-	static int SelectHalf( lua_State *pLuaState );
-
-	static int GrowSelection( lua_State *pLuaState );
-
-	static int ShrinkSelection( lua_State *pLuaState );
-
-	static int Add( lua_State *pLuaState );
-
-	static int Interp( lua_State *pLuaState );
-
-	static int SaveDelta( lua_State *pLuaState );
-
-	static int DeleteDelta( lua_State *pLuaState );
-
-	static int Merge( lua_State *pLuaState );
-
-	static int RemapMaterial( lua_State *pLuaState );
-
-	static int RemoveFacesWithMaterial( lua_State *pLuaState );
-
-	static int RemoveFacesWithMoreThanNVerts( lua_State *pLuaState );
-
-	static int Mirror( lua_State *pLuaState );
-
-	static int ComputeNormals( lua_State *pLuaState );
-
-	static int CreateDeltasFromPresets( lua_State *pLuaState );
-
-	static int CachePreset( lua_State *pLuaState );
-
-	static int ClearPresetCache( lua_State *pLuaState );
-
-	static int CreateDeltasFromCachedPresets( lua_State *pLuaState );
-
-	static int CreateExpressionFileFromPresets( lua_State *pLuaState );
-
-	static int CreateExpressionFilesFromCachedPresets( lua_State *pLuaState );
-
-	static int ComputeWrinkles( lua_State *pLuaState );
-
-	static int ComputeWrinkle( lua_State *pLuaState );
-
-	static int Scale( lua_State *pLuaState );
-
-	static int Translate( lua_State *pLuaState );
-
-	static int SetDistanceType( lua_State *pLusState );
-
-	static int FixPresetFile( lua_State *pLuaState );
-
 	static int FileExists( lua_State *pLuaState );
 
 protected:
 	lua_State *m_pLuaState;
-	// TODO: Store this into the lua state somehow...
-	static CDmxEdit m_dmxEdit;
 };
 
 

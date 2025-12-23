@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Represents an entity in a VMF
 //
@@ -13,7 +13,7 @@
 #include "toolutils/dmemdlrenderable.h"
 #include "datamodel/dmelement.h"
 #include "toolframework/itoolentity.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 
 
 //-----------------------------------------------------------------------------
@@ -63,12 +63,12 @@ public:
 	void MarkDeleted( bool bDeleted = true );
 	bool IsDeleted( void ) { return m_bIsDeleted; };
 
-	bool CopyFromServer( void *pServerEnt );
-	bool CopyFromServer( void *pServerEnt, const char *szField );
-	bool CopyFromServer( void *pServerEnt, const char *szSrcField, const char *szDstField );
+	bool CopyFromServer( CBaseEntity *pServerEnt );
+	bool CopyFromServer( CBaseEntity *pServerEnt, const char *szField );
+	bool CopyFromServer( CBaseEntity *pServerEnt, const char *szSrcField, const char *szDstField );
 	bool CopyToServer( void );
 
-	bool IsSameOnServer( void *pServerEntity );
+	bool IsSameOnServer( CBaseEntity *pServerEntity );
 	bool CreateOnServer( void );
 
 private:

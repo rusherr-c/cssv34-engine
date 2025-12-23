@@ -121,6 +121,32 @@ public:
 		ConstructStringKeyValuesInternal( unicodeOutput, unicodeBufferSizeInBytes, formatString, localizationVariables );
 	}
 
+
+	// Safe version of Construct String that has the compiler infer the buffer size
+	template <size_t maxLenInChars, typename T > 
+	static void ConstructString_safe( OUT_Z_ARRAY T (&pDest)[maxLenInChars], const T *formatString, int numFormatParameters, ... )
+	{
+		va_list argList;
+		va_start( argList, numFormatParameters );
+
+		ConstructStringVArgsInternal( pDest, maxLenInChars * sizeof( *pDest ), formatString, numFormatParameters, argList );
+
+		va_end( argList );
+	}
+
+	template <size_t maxLenInChars, typename T > 
+	static void ConstructString_safe( OUT_Z_ARRAY T (&pDest)[maxLenInChars], const T *formatString, KeyValues *localizationVariables )
+	{
+		ConstructStringKeyValuesInternal( pDest, maxLenInChars * sizeof( *pDest ), formatString, localizationVariables );
+	}
+
+	// Non-static version to be safe version of the virtual functions that utilize KVP
+	template <size_t maxLenInChars, typename T >
+	void ConstructString_safe( OUT_Z_ARRAY T( &pDest )[maxLenInChars], const char *formatString, KeyValues *localizationVariables )
+	{
+		ConstructString( pDest, maxLenInChars * sizeof( *pDest ), formatString, localizationVariables );
+	}
+
 private:
 	// internal "interface"
 	static void ConstructStringVArgsInternal(OUT_Z_BYTECAP(unicodeBufferSizeInBytes) char *unicodeOutput, int unicodeBufferSizeInBytes, const char *formatString, int numFormatParameters, va_list argList);
@@ -371,6 +397,31 @@ public:
 										  CLocalizedStringArg<U>( arg1 ).GetLocArg(),
 										  CLocalizedStringArg<V>( arg2 ).GetLocArg(),
 										  CLocalizedStringArg<W>( arg3 ).GetLocArg() );
+		}
+	}
+
+	template < typename T, typename U, typename V, typename W, typename X >
+	CConstructLocalizedString( const locchar_t *loc_Format, T arg0, U arg1, V arg2, W arg3, X arg4 )
+	{
+		COMPILE_TIME_ASSERT( CLocalizedStringArg<T>::kIsValid );
+		COMPILE_TIME_ASSERT( CLocalizedStringArg<U>::kIsValid );
+		COMPILE_TIME_ASSERT( CLocalizedStringArg<V>::kIsValid );
+		COMPILE_TIME_ASSERT( CLocalizedStringArg<W>::kIsValid );
+		COMPILE_TIME_ASSERT( CLocalizedStringArg<X>::kIsValid );
+
+		m_loc_Buffer[0] = '\0';
+
+		if ( loc_Format )
+		{
+			::ILocalize::ConstructString( m_loc_Buffer,
+				sizeof( m_loc_Buffer ),
+				loc_Format,
+				5,
+				CLocalizedStringArg<T>( arg0 ).GetLocArg(),
+				CLocalizedStringArg<U>( arg1 ).GetLocArg(),
+				CLocalizedStringArg<V>( arg2 ).GetLocArg(),
+				CLocalizedStringArg<W>( arg3 ).GetLocArg(),
+				CLocalizedStringArg<X>( arg4 ).GetLocArg() );
 		}
 	}
 

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "cbase.h"
 #include "vguiwnd.h"
 #include <vgui_controls/EditablePanel.h>
@@ -6,8 +7,8 @@
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "FacePoser_VGui.h"
 // #include "material.h"
-#include "materialsystem/IMaterialVar.h"
-#include "materialsystem/IMaterial.h"
+#include "materialsystem/imaterialvar.h"
+#include "materialsystem/imaterial.h"
 
 #define REPAINT_TIMER_ID	1042 //random value, hopfully no collisions	
 

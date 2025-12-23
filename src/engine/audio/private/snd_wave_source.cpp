@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,19 +14,15 @@
 #include "xwvfile.h"
 #include "filesystem/IQueuedLoader.h"
 #include "tier1/lzmaDecoder.h"
+#include "tier2/fileutils.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 // This determines how much data to pre-cache (will invalidate per-map caches if changed).
 #define SND_ASYNC_LOOKAHEAD_SECONDS		( 0.125f )
-#define SOUND_DIRECTORY_LENGTH			6		// i.e., Q_strlen( "sound/" )
-#define	OTHER_REBUILD_CACHE_NAME		"_other_rebuild"
-// If a sound is in 50% of the maps, put in precacheshared
-#define SOUND_PRECACHESHARED_THRESHOLD	( 0.5f )
 
 extern ConVar snd_async_spew_blocking;
-extern float realtime;
 ConVar snd_async_minsize("snd_async_minsize", "262144");
 
 // #define DEBUG_CHUNKS
@@ -186,9 +182,10 @@ void CAudioSourceWave::GetCacheData( CAudioSourceCachedInfo *info )
 
 	byte tempbuf[ 32768 ];
 	int datalen = 0;
+	// NOTE GetStartupData has side-effects (...) hence the unconditional call
 	if ( GetStartupData( tempbuf, sizeof( tempbuf ), datalen ) &&
-		datalen > 0 && 
-		info->s_bIsPrecacheSound )
+	     info->s_bIsPrecacheSound &&
+	     datalen > 0 )
 	{
 		byte *data = new byte[ datalen ];
 		Q_memcpy( data, tempbuf, datalen );
@@ -269,7 +266,7 @@ void CAudioSourceWave::CheckAudioSourceCache()
 
 	Assert( m_pSfx );
 
-	if ( !m_pSfx->IsPrecachedSound() )
+	if ( !m_pSfx || !m_pSfx->IsPrecachedSound() )
 	{
 		return;
 	}
@@ -621,15 +618,13 @@ bool CAudioSourceWave::GetXboxAudioStartupData()
 				m_bNoSentence = false;
 
 				// vdat is precompiled into minimal binary format and possibly compressed
-				CLZMA lzma;
-				
-				if ( lzma.IsCompressed( pData ) )
+				if ( CLZMA::IsCompressed( pData ) )
 				{
 					// uncompress binary vdat and restore
 					CUtlBuffer targetBuffer;
-					int originalSize = lzma.GetActualSize( pData );
+					int originalSize = CLZMA::GetActualSize( pData );
 					targetBuffer.EnsureCapacity( originalSize );
-					lzma.Uncompress( pData, (unsigned char *)targetBuffer.Base() );
+					CLZMA::Uncompress( pData, (unsigned char *)targetBuffer.Base() );
 					targetBuffer.SeekPut( CUtlBuffer::SEEK_HEAD, originalSize );
 					m_pTempSentence->CacheRestoreFromBuffer( targetBuffer );
 				}
@@ -1042,10 +1037,6 @@ CAudioSourceMemWave::~CAudioSourceMemWave()
 CAudioMixer *CAudioSourceMemWave::CreateMixer( int initialStreamPosition )
 {
 	CAudioMixer *pMixer = CreateWaveMixer( CreateWaveDataMemory(*this), m_format, m_channels, m_bits, initialStreamPosition );
-	if ( pMixer )
-	{
-		ReferenceAdd( pMixer );
-	}
 
 	return pMixer;
 }
@@ -1418,7 +1409,7 @@ void CAudioSourceMemWave::CacheLoad( void )
 			char szFilename[MAX_PATH];
 			if ( m_format == WAVE_FORMAT_XMA || m_format == WAVE_FORMAT_PCM )
 			{
-				strcpy( szFilename, pFilename );
+				V_strcpy_safe( szFilename, pFilename );
 				V_SetExtension( szFilename, ".360.wav", sizeof( szFilename ) );
 				pFilename = szFilename;
 
@@ -1613,7 +1604,7 @@ CAudioMixer *CAudioSourceStreamWave::CreateMixer( int initialStreamPosition )
 	const char *pFileName = m_pSfx->GetFileName();
 	if ( IsX360() && ( m_format == WAVE_FORMAT_XMA || m_format == WAVE_FORMAT_PCM ) )
 	{
-		strcpy( fileName, pFileName );
+		V_strcpy_safe( fileName, pFileName );
 		V_SetExtension( fileName, ".360.wav", sizeof( fileName ) );
 		pFileName = fileName;
 
@@ -1637,7 +1628,6 @@ CAudioMixer *CAudioSourceStreamWave::CreateMixer( int initialStreamPosition )
 		CAudioMixer *pMixer = CreateWaveMixer( pWaveData, m_format, m_channels, m_bits, initialStreamPosition );
 		if ( pMixer )
 		{
-			ReferenceAdd( pMixer );
 			return pMixer;
 		}
 
@@ -2280,36 +2270,50 @@ void CAudioSourceCachedInfo::Rebuild( char const *filename )
 	}
 }
 
-#define AUDIOSOURCE_CACHE_VERSION	 3
+// Versions
+//   3: The before time
+//   4: Changed MP3 caching to ensure we store proper sample rate, removed hack to not cache vo/
+//   5: Fixed bug that could result in incorrect mp3 datasizes in the sound cache
+#define AUDIOSOURCE_CACHE_VERSION	 5
 class CAudioSourceCache : public IAudioSourceCache
 {
 public:
-	typedef CUtlCachedFileData< CAudioSourceCachedInfo > CacheType_t;
+
+	struct SearchPathCache : CUtlCachedFileData< CAudioSourceCachedInfo >
+	{
+		SearchPathCache( const char *pszRepositoryFilename, const char *pszSearchPath, UtlCachedFileDataType_t eOutOfDateMethod )
+		: CUtlCachedFileData( pszRepositoryFilename, AUDIOSOURCE_CACHE_VERSION, AsyncLookaheadMetaChecksum, eOutOfDateMethod )
+		{
+			V_strcpy_safe( m_szSearchPath, pszSearchPath );
+
+			// Delete any existing cache if it's out of date
+			IsUpToDate();
+
+			// Load up existing cache file
+			Init();
+		}
+
+		char m_szSearchPath[ MAX_PATH ];
+
+		virtual ~SearchPathCache()
+		{
+			Shutdown();
+		}
+	};
+
 
 	CAudioSourceCache()
 	{
-		Q_memset( m_szCurrentLanguage, 0, sizeof( m_szCurrentLanguage ) );
-
-		Q_memset( m_szCurrentLevel, 0, sizeof( m_szCurrentLevel ) );
-		Q_memset( m_szMapCache, 0, sizeof( m_szMapCache ) );
-		Q_memset( m_szMapCacheBase, 0, sizeof( m_szMapCacheBase ) );
-		Q_memset( m_szOtherSoundsCache, 0, sizeof( m_szOtherSoundsCache ) );
-		Q_memset( m_szSharedPrecacheCache, 0, sizeof( m_szSharedPrecacheCache ) );
-		m_pCache = NULL;
-		m_pOtherSoundCache = NULL;
-		m_pSharedPrecacheCache = NULL;
-		m_pBuildingCache = NULL;
-		m_bBuildingFullDataCache = false;
-		m_bFirstTime = true;
 		m_nServerCount = -1;
-		m_pLastWorldModel = NULL;
 		m_bSndCacheDebug = false;
 	}
 
 	bool Init( unsigned int memSize );
 	void Shutdown();
 
+	void CheckSaveDirtyCaches();
 	void CheckCacheBuild();
+	void BuildCache( char const *pszSearchPath );
 
 	static unsigned int AsyncLookaheadMetaChecksum( void );
 
@@ -2320,81 +2324,20 @@ public:
 	virtual void RebuildCacheEntry( int audiosourcetype, bool soundisprecached, CSfxTable *sfx );
 	virtual void ForceRecheckDiskInfo();
 
-	bool FastBuildSharedPrecachedSoundsCache( bool fullbuild, bool showprogress, bool bForceBuild );
-	void	WriteManifest();
 private:
-	// Purpose: 
-	CacheType_t *LookUpCacheEntry( const char *fn, int audiosourcetype, bool soundisprecached, CSfxTable *sfx );
+	SearchPathCache *LookUpCacheEntry( const char *szCleanedFilename, int audiosourcetype, bool soundisprecached, CSfxTable *sfx );
 
-	struct AudioSourceUsage_t
-	{
-		AudioSourceUsage_t() :
-			handle( 0 ),
-			count( 0u )
-		{
-		}
-		FileNameHandle_t	handle;
-		unsigned int		count;
-	};
+	SearchPathCache *FindCacheForSearchPath( const char *pszSearchPath );
+	SearchPathCache *CreateCacheForSearchPath( const char *pszSearchPath );
 
-	static bool AudioSourceUsageLessFunc( const AudioSourceUsage_t& lhs, const AudioSourceUsage_t& rhs )
-	{
-		return lhs.handle < rhs.handle;
-	}
+	static void GetSoundFilename( char *szResult, int nResultSize, const char *pszInputFilename );
 
-	CacheType_t *AllocAudioCache( char const *cachename );
-
-	void AnalyzeReslists( CUtlRBTree< FileNameHandle_t, int >& other, CUtlRBTree< FileNameHandle_t, int >& sharedprecache );
-	bool FastBuildAllMissingSoundCaches( CacheType_t *pOther, CacheType_t *pSharedPrecache, bool showprogress = false, bool forcerebuild = false, float flProgressStart = 0.0f, float flProgressEnd = 1.0f );
-	bool FastBuildSoundCache( float progressfrac, char const *currentcache, CacheType_t *fullCache, CacheType_t *precacheCache, CacheType_t *cache, char const *manifest );
-	CacheType_t *BuildCacheFromList( char const *cachename, CUtlRBTree< FileNameHandle_t, int >& list, bool fulldata, bool showprogress = false, float flProgressStart = 0.0f, float flProgressEnd = 1.0f );
-	CacheType_t *BuildNoDataCacheFromFullDataCache( char const *cachename, CacheType_t *fulldata, bool showprogress = false, float flProgressStart = 0.0f, float flProgressEnd = 1.0f );
-	bool IsValidCache( char const *cachename );
 	void RemoveCache( char const *cachename );
-	bool HasMissingCaches();
 
-	void KillCache();
+	// List of all loaded caches
+	CUtlVector<SearchPathCache*>	m_vecCaches;
 
-	char const				*GetAudioCacheLanguageSuffix( char *buf, size_t bufsize );
-
-	enum
-	{
-		MAX_LANGUAGE_NAME = 64,
-		MAX_LEVEL_NAME = 128,
-		MAX_REPOSITORY_NAME = 256,
-		MAX_LIST_SIZE = 1024
-	};
-
-	char				m_szCurrentLevel[ MAX_LEVEL_NAME ];
-	char				m_szMapCache[ MAX_REPOSITORY_NAME ];
-	char				m_szMapCacheBase[ MAX_REPOSITORY_NAME ];
-	char				m_szOtherSoundsCache[ MAX_REPOSITORY_NAME ];
-	char				m_szSharedPrecacheCache[ MAX_REPOSITORY_NAME ];
-	char				m_szCurrentLanguage[ MAX_LANGUAGE_NAME ];
-
-	typedef enum
-	{
-		CACHE_MAP = 0,
-		CACHE_SHARED,
-		CACHE_OTHER,
-		CACHE_BUILDING
-	} SoundCacheType_t;
-
-	void					SetCachePointer( SoundCacheType_t ptrType, CacheType_t *ptr );
-
-	// Current level specific sounds (only in precache list)
-	CacheType_t				*m_pCache;
-	// All sounds (no startup data) referenced anywhere in game
-	CacheType_t				*m_pOtherSoundCache;
-	// Current level specific sounds which are shared across a bunchof levels
-	CacheType_t				*m_pSharedPrecacheCache;
-
-	CacheType_t				*m_pBuildingCache;
-	bool					m_bBuildingFullDataCache;
-
-	bool					m_bFirstTime;
 	int						m_nServerCount;
-	model_t					*m_pLastWorldModel;
 	bool					m_bSndCacheDebug;
 };
 
@@ -2423,13 +2366,6 @@ bool CAudioSourceCache::Init( unsigned int memSize )
 
 	m_bSndCacheDebug = CommandLine()->FindParm( "-sndcachedebug" ) ? true : false;
 
-	GetAudioCacheLanguageSuffix( m_szCurrentLanguage, sizeof( m_szCurrentLanguage ) );
-
-	if ( m_bSndCacheDebug )
-	{
-		DevMsg(	1, "Audio Caches using '%s' as suffix\n", m_szCurrentLanguage );
-	}
-
 	if ( !wavedatacache->Init( memSize ) )
 	{
 		Error( "Unable to init wavedatacache system\n" );
@@ -2442,46 +2378,85 @@ bool CAudioSourceCache::Init( unsigned int memSize )
 		return true;
 	}
 
-	g_pFullFileSystem->CreateDirHierarchy( AUDIOSOURCE_CACHE_ROOTDIR, "MOD" );
+	// Gather up list of search paths
+	CUtlVector< CUtlString > vecSearchPaths;
+	GetSearchPath( vecSearchPaths, "game" );
 
-	Q_snprintf( m_szOtherSoundsCache, sizeof( m_szOtherSoundsCache ), "%s/_other%s.cache", AUDIOSOURCE_CACHE_ROOTDIR, m_szCurrentLanguage );
-	Q_snprintf( m_szSharedPrecacheCache, sizeof( m_szSharedPrecacheCache ), "%s/_sharedprecache%s.cache", AUDIOSOURCE_CACHE_ROOTDIR, m_szCurrentLanguage );
-
-	if ( m_bSndCacheDebug )
+	// Create corresponding caches
+	FOR_EACH_VEC( vecSearchPaths, idxSearchPath )
 	{
-		DevMsg(	1, "Other Cache :  '%s'\n", m_szOtherSoundsCache );
-		DevMsg(	1, "Shared Cache:  '%s'\n", m_szSharedPrecacheCache );
-	}
 
-	CacheType_t *cache = AllocAudioCache( m_szOtherSoundsCache );
+		// Standardize the name
+		char szSearchPath[ MAX_PATH ];
+		V_strcpy_safe( szSearchPath, vecSearchPaths[idxSearchPath] );
+		V_FixSlashes( szSearchPath );
+		V_AppendSlash( szSearchPath, sizeof(szSearchPath ) );
 
-	SetCachePointer( CACHE_OTHER, cache );
+		// See if we already have a cache for this search path.
+		bool bFound = false;
+		FOR_EACH_VEC( m_vecCaches, idxCache )
+		{
+			if ( V_stricmp( szSearchPath, m_vecCaches[idxCache]->m_szSearchPath ) == 0 )
+			{
+				Assert( V_strcmp( szSearchPath, m_vecCaches[idxCache]->m_szSearchPath ) == 0 ); // case *should* match exactly
+				bFound = true;
+				break;
+			}
+		}
+		if ( bFound )
+			continue;
 
-	Assert( m_pOtherSoundCache );
-	if ( !m_pOtherSoundCache->Init() )
-	{
-		Error( "Failed to init 'other' sound cache '%s'\n", m_szOtherSoundsCache );
-		delete m_pOtherSoundCache;
-		m_pOtherSoundCache = NULL;
-	}
-
-	cache = AllocAudioCache( m_szSharedPrecacheCache );
-
-	SetCachePointer( CACHE_SHARED, cache );
-
-	Assert( m_pSharedPrecacheCache );
-	if ( !m_pSharedPrecacheCache->Init() )
-	{
-		Error( "Failed to init 'shared precache' sound cache '%s'\n", m_szSharedPrecacheCache );
-		delete m_pSharedPrecacheCache;
-		m_pSharedPrecacheCache = NULL;
+		// Add a ceche
+		SearchPathCache *pCache = CreateCacheForSearchPath( szSearchPath );
+		m_vecCaches.AddToTail( pCache );
 	}
 
 	return true;
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: 
+CAudioSourceCache::SearchPathCache *CAudioSourceCache::FindCacheForSearchPath( const char *pszSearchPath )
+{
+	FOR_EACH_VEC( m_vecCaches, idx )
+	{
+		SearchPathCache *pCache = m_vecCaches[idx];
+		if ( V_stricmp( pCache->m_szSearchPath, pszSearchPath ) == 0 )
+		{
+			return pCache;
+		}
+	}
+
+	return NULL;
+}
+
+CAudioSourceCache::SearchPathCache *CAudioSourceCache::CreateCacheForSearchPath( const char *pszSearchPath )
+{
+
+	// Make sure search path ends in a slash
+	char szSearchPath[ MAX_PATH ];
+	V_strcpy_safe( szSearchPath, pszSearchPath );
+	V_AppendSlash( szSearchPath, sizeof(szSearchPath) );
+
+	// Set the filename for the cache.
+	UtlCachedFileDataType_t eOutOfDateMethod = UTL_CACHED_FILE_USE_FILESIZE;
+	char szCacheName[ MAX_PATH + 32 ];
+	V_strcpy_safe( szCacheName, szSearchPath );
+	char *dotVpkSlash = V_stristr( szCacheName, ".vpk" CORRECT_PATH_SEPARATOR_S );
+	if ( dotVpkSlash )
+	{
+		Assert( dotVpkSlash[5] == '\0' );
+		char *d = dotVpkSlash+4; // backup to where the slash is
+		Assert( *d == CORRECT_PATH_SEPARATOR );
+		V_strcpy( d, ".sound.cache" );
+	}
+	else
+	{
+		V_strcat_safe( szCacheName, "sound" CORRECT_PATH_SEPARATOR_S "sound.cache" );
+		eOutOfDateMethod = UTL_CACHED_FILE_USE_TIMESTAMP;
+	}
+
+	return new SearchPathCache( szCacheName, szSearchPath, eOutOfDateMethod );
+}
+
 //-----------------------------------------------------------------------------
 void CAudioSourceCache::Shutdown()
 {
@@ -2489,48 +2464,10 @@ void CAudioSourceCache::Shutdown()
 	Msg( "CAudioSourceCache: Shutdown\n" );
 #endif
 
-	if ( !IsX360() || IsPC() )
-	{
-		KillCache();
-
-		if ( m_pSharedPrecacheCache )
-		{
-			m_pSharedPrecacheCache->Shutdown();
-			delete m_pSharedPrecacheCache;
-		}
-
-		SetCachePointer( CACHE_SHARED, NULL );
-
-		if ( m_pOtherSoundCache )
-		{
-			m_pOtherSoundCache->Shutdown();
-			delete m_pOtherSoundCache;
-		}
-
-		SetCachePointer( CACHE_OTHER, NULL );
-
-		m_szCurrentLevel[0] = 0;
-		m_szMapCache[0] = 0;
-		m_szMapCacheBase[0] = 0;
-	}
+	CheckSaveDirtyCaches();
+	m_vecCaches.PurgeAndDeleteElements();
 
 	wavedatacache->Shutdown();
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *cachename - 
-// Output : CacheType_t
-//-----------------------------------------------------------------------------
-CAudioSourceCache::CacheType_t *CAudioSourceCache::AllocAudioCache( char const *cachename )
-{
-	if ( IsX360() )
-	{
-		return NULL;
-	}
-
-	CacheType_t *cache = new CacheType_t( cachename, AUDIOSOURCE_CACHE_VERSION, AsyncLookaheadMetaChecksum, UTL_CACHED_FILE_USE_FILESIZE );
-	return cache;
 }
 
 //-----------------------------------------------------------------------------
@@ -2543,12 +2480,23 @@ void CAudioSourceCache::CheckCacheBuild()
 		return;
 	}
 
-	Assert( g_pFullFileSystem );
-
-	if ( m_bFirstTime )
+	// !FIXME! We'll just do everything lazily for now!
+	FOR_EACH_VEC( m_vecCaches, idx )
 	{
-		FastBuildSharedPrecachedSoundsCache( false, true, false );
-		m_bFirstTime = false;
+	}
+}
+
+//-----------------------------------------------------------------------------
+void CAudioSourceCache::CheckSaveDirtyCaches()
+{
+	FOR_EACH_VEC( m_vecCaches, idx )
+	{
+		SearchPathCache *pCache = m_vecCaches[idx];
+		if ( pCache->IsDirty() && pCache->GetNumElements() > 0 )
+		{
+			Msg( "Saving %s\n", pCache->GetRepositoryFileName() );
+			pCache->Save();
+		}
 	}
 }
 
@@ -2580,66 +2528,7 @@ unsigned int CAudioSourceCache::AsyncLookaheadMetaChecksum( void )
 //-----------------------------------------------------------------------------
 void CAudioSourceCache::LevelInit( char const *mapname )
 {
-	if ( IsX360() )
-	{
-		// 360 not using
-		return;
-	}
-
-	if ( !Q_stricmp( mapname, m_szCurrentLevel ) )
-	{
-		if ( !m_pLastWorldModel )
-		{
-			m_pLastWorldModel = host_state.worldmodel;
-		}
-
-		Assert( !host_state.worldmodel || ( m_pLastWorldModel == host_state.worldmodel ) );
-		return;
-	}
-
-	if ( !g_pFullFileSystem )
-	{
-		return;
-	}
-
-	m_pLastWorldModel = host_state.worldmodel;
-
-	KillCache();
-
-	Assert( !m_pCache );
-
-	g_pFullFileSystem->CreateDirHierarchy( AUDIOSOURCE_CACHE_ROOTDIR, "MOD" );
-
-	Q_snprintf( m_szMapCache, sizeof( m_szMapCache ), "%s/%s%s.cache", AUDIOSOURCE_CACHE_ROOTDIR, mapname, m_szCurrentLanguage );
-	Q_snprintf( m_szMapCacheBase, sizeof( m_szMapCacheBase ), "%s/%s", AUDIOSOURCE_CACHE_ROOTDIR, mapname );
-
-	if ( m_bSndCacheDebug )
-	{
-		DevMsg(	1, "Map Cache     :  '%s'\n", m_szMapCache );
-		DevMsg(	1, "Map Cache Base:  '%s'\n", m_szMapCacheBase );
-	}
-
-#if defined( _DEBUG )
-	ConColorMsg( Color( 0,100,255,255), "CAudioSourceCache: LevelInit:  %s\n", m_szMapCache );
-#endif
-
-	CacheType_t *newCache = AllocAudioCache( m_szMapCache );
-	Assert( newCache );
-	if ( !newCache->Init() )
-	{
-		Warning( "Failed to init sound cache '%s'\n", m_szMapCache );
-		delete newCache;
-		newCache = NULL;
-	}
-
-	if ( !newCache )
-	{
-		return;
-	}
-
-	Q_strncpy( m_szCurrentLevel, mapname, sizeof( m_szCurrentLevel ) );
-
-	SetCachePointer( CACHE_MAP, newCache );
+	CheckSaveDirtyCaches();
 }
 
 //-----------------------------------------------------------------------------
@@ -2647,116 +2536,20 @@ void CAudioSourceCache::LevelInit( char const *mapname )
 //-----------------------------------------------------------------------------
 void CAudioSourceCache::LevelShutdown()
 {
-	if ( IsX360() )
-	{
-		// 360 not using
-		return;
-	}
-
-	if ( !m_pCache )
-	{
-		return;
-	}
-
-	// Get precached sound count and store manifest if running with -makereslists
-	if ( !CommandLine()->FindParm( "-makereslists" ) )
-	{
-		return;
-	}
-
-	int count = g_pSoundServices->GetPrecachedSoundCount();
-
-	if ( !count )
-	{
-		return;
-	}
-
-	// So that we only save this out once per level
-	if ( g_pSoundServices->GetServerCount() == m_nServerCount )
-	{
-		return;
-	}
-
-	m_nServerCount = g_pSoundServices->GetServerCount();
-
-	WriteManifest();
+	CheckSaveDirtyCaches();
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CAudioSourceCache::WriteManifest()
+void CAudioSourceCache::GetSoundFilename( char *szResult, int nResultSize, const char *pszInputFilename )
 {
-	if ( IsX360() )
-	{
-		// 360 not using
-		return;
-	}
-
-	if ( !m_pCache )
-	{
-		DevMsg( "Skipping WriteManifest, must be running map locally\n" );
-		return;
-	}
-
-	int count = g_pSoundServices->GetPrecachedSoundCount();
-
-	if ( !count )
-	{
-		DevMsg( "Skipping WriteManifest, no entries in sound precache string table\n" );
-		return;
-	}
-
-	// Save manifest out to disk...
-	CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
-
-	for ( int i = 0; i < count; ++i )
-	{
-		char const *fn = g_pSoundServices->GetPrecachedSound( i );
-		if ( fn && fn[ 0 ] )
-		{
-			char full[ 512 ];
-			Q_snprintf( full, sizeof( full ), "sound\\%s", PSkipSoundChars( fn ) );
-			Q_strlower( full );
-			Q_FixSlashes( full );
-
-			// Write to file
-			buf.Printf( "\"%s\"\r\n", full );
-		}
-	}
-
-	g_pFullFileSystem->CreateDirHierarchy( AUDIOSOURCE_CACHE_ROOTDIR, "MOD" );
-
-	char manifest_name[ 512 ];
-	Q_snprintf( manifest_name, sizeof( manifest_name ), "%s.manifest", m_szMapCacheBase );
-
-	if ( g_pFullFileSystem->FileExists( manifest_name, "MOD" ) && 
-		!g_pFullFileSystem->IsFileWritable( manifest_name, "MOD" ) )
-	{
-		g_pFullFileSystem->SetFileWritable( manifest_name, true, "MOD" );
-	}
-
-	// Now write to file
-	FileHandle_t fh;
-	fh = g_pFullFileSystem->Open( manifest_name, "wb" );
-	if ( FILESYSTEM_INVALID_HANDLE != fh )
-	{
-		g_pFullFileSystem->Write( buf.Base(), buf.TellPut(), fh );
-		g_pFullFileSystem->Close( fh );
-
-		DevMsg( "WriteManifest:  Persisting cache manifest '%s' (%d entries)\n", manifest_name, count );
-	}
-	else
-	{
-		Warning( "WriteManifest:  Unable to persist cache manifest '%s', check file permissions\n", manifest_name );
-	}
+	V_snprintf( szResult, nResultSize, "sound/%s", pszInputFilename );
+	V_FixSlashes( szResult );
+	V_RemoveDotSlashes( szResult );
+	V_strlower( szResult );
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-CAudioSourceCache::CacheType_t *CAudioSourceCache::LookUpCacheEntry( const char *fn, int audiosourcetype, bool soundisprecached, CSfxTable *sfx )
+CAudioSourceCache::SearchPathCache *CAudioSourceCache::LookUpCacheEntry( const char *fn, int audiosourcetype, bool soundisprecached, CSfxTable *sfx )
 {
 	if ( IsX360() )
 	{
@@ -2766,49 +2559,31 @@ CAudioSourceCache::CacheType_t *CAudioSourceCache::LookUpCacheEntry( const char 
 	// Hack to remember the type of audiosource to create if we need to recreate it
 	CAudioSourceCachedInfo::s_CurrentType = audiosourcetype;
 	CAudioSourceCachedInfo::s_pSfx = sfx;
-	CAudioSourceCachedInfo::s_bIsPrecacheSound = soundisprecached || m_bBuildingFullDataCache;
+	CAudioSourceCachedInfo::s_bIsPrecacheSound = soundisprecached;
 
-	CacheType_t *pCache = NULL;
+	// Get cleaned up filename
+	char szRelFilename[ 256 ];
+	GetSoundFilename( szRelFilename, sizeof( szRelFilename ), sfx->GetFileName() );
 
-	// If building a cache, just shortcut thourgh to target cache
-	if ( m_pBuildingCache )
+	// Get absolute filename.  This thing had better exist in the filesystem somewhere
+	char szAbsFilename[ 1024 ];
+	if ( !g_pFullFileSystem->RelativePathToFullPath( szRelFilename, "game", szAbsFilename, sizeof(szAbsFilename) ) )
 	{
-		pCache = m_pBuildingCache;
+		return NULL;
 	}
-	// Always check shared/common sounds first, since it has startup data included
-	else 
+
+	// now try to figure out which search path this corresponds to
+	FOR_EACH_VEC( m_vecCaches, idx )
 	{
-		if ( m_pSharedPrecacheCache && m_pSharedPrecacheCache->EntryExists( fn ) )
+		SearchPathCache *pCache = m_vecCaches[idx];
+		if ( V_strncmp( pCache->m_szSearchPath, szAbsFilename, V_strlen( pCache->m_szSearchPath ) ) == 0 )
 		{
-			pCache = m_pSharedPrecacheCache;
-		}
-		else
-		{
-			if ( soundisprecached )
-			{
-				if ( !m_pLastWorldModel )
-				{
-					m_pLastWorldModel = host_state.worldmodel;
-				}
-				Assert( m_pLastWorldModel == host_state.worldmodel );
-
-				// No level loaoded, return NULL
-				if ( !m_pCache )
-				{
-					return NULL;
-				}
-
-				// Check the level specific precache list
-				pCache = m_pCache;
-			}
-			else
-			{
-				// Grab from the full game list
-				Assert( m_pOtherSoundCache );
-				pCache = m_pOtherSoundCache;
-			}
+			return pCache;
 		}
 	}
+	Warning( "Cannot figure out which search path %s came from.  Absolute path is %s\n", szRelFilename, szAbsFilename );
+
+	SearchPathCache *pCache = NULL;
 
 	return pCache;
 }
@@ -2830,24 +2605,25 @@ CAudioSourceCachedInfo *CAudioSourceCache::GetInfo( int audiosourcetype, bool so
 	Assert( sfx );
 
 	char fn[ 512 ];
-	Q_snprintf( fn, sizeof( fn ), "sound/%s", sfx->GetFileName() );
+	GetSoundFilename( fn, sizeof( fn ), sfx->GetFileName() );
 
 	CAudioSourceCachedInfo *info = NULL;
-	CacheType_t *pCache = LookUpCacheEntry( fn, audiosourcetype, soundisprecached, sfx );
+	SearchPathCache *pCache = LookUpCacheEntry( fn, audiosourcetype, soundisprecached, sfx );
 	if ( !pCache )
 		return NULL;
 
 	info = pCache->Get( fn );
 
-	if ( info && info->Format() == 0 )
-	{
-		if ( g_pFullFileSystem->FileExists( fn, "BSP" ) )
-		{
-			DevMsg( 1, "Forced rebuild of bsp cache sound '%s'\n", fn );
-			info = pCache->RebuildItem( fn );
-			Assert( info->Format() != 0 );
-		}
-	}
+// Is this applicable anymore now that we have a cache per search path?
+//	if ( info && info->Format() == 0 )
+//	{
+//		if ( g_pFullFileSystem->FileExists( fn, "BSP" ) )
+//		{
+//			DevMsg( 1, "Forced rebuild of bsp cache sound '%s'\n", fn );
+//			info = pCache->RebuildItem( fn );
+//			Assert( info->Format() != 0 );
+//		}
+//	}
 
 	return info;
 }
@@ -2855,7 +2631,7 @@ CAudioSourceCachedInfo *CAudioSourceCache::GetInfo( int audiosourcetype, bool so
 
 void CAudioSourceCache::RebuildCacheEntry( int audiosourcetype, bool soundisprecached, CSfxTable *sfx )
 {
-	VPROF("CAudioSourceCache::GetInfo");
+	VPROF("CAudioSourceCache::RebuildCacheEntry");
 
 	if ( IsX360() )
 	{
@@ -2866,8 +2642,8 @@ void CAudioSourceCache::RebuildCacheEntry( int audiosourcetype, bool soundisprec
 	Assert( sfx );
 
 	char fn[ 512 ];
-	Q_snprintf( fn, sizeof( fn ), "sound/%s", sfx->GetFileName() );
-	CacheType_t *pCache = LookUpCacheEntry( fn, audiosourcetype, soundisprecached, sfx );
+	GetSoundFilename( fn, sizeof( fn ), sfx->GetFileName() );
+	SearchPathCache *pCache = LookUpCacheEntry( fn, audiosourcetype, soundisprecached, sfx );
 	if ( !pCache )
 		return;
 
@@ -2875,156 +2651,15 @@ void CAudioSourceCache::RebuildCacheEntry( int audiosourcetype, bool soundisprec
 }
 
 
+//-----------------------------------------------------------------------------
 void CAudioSourceCache::ForceRecheckDiskInfo()
 {
-	if ( m_pCache )
-		m_pCache->ForceRecheckDiskInfo();
-
-	if ( m_pOtherSoundCache )
-		m_pOtherSoundCache->ForceRecheckDiskInfo();
-	
-	if ( m_pSharedPrecacheCache )
-		m_pSharedPrecacheCache->ForceRecheckDiskInfo();
-
-	if ( m_pBuildingCache )
-		m_pBuildingCache->ForceRecheckDiskInfo();
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: Analyzes all sounds referenced in reslists and determines which ones are "shared", i.e., used in a bunch of maps, and
-// Purpose: 
-// Input  : FileNameHandle_t - 
-//			other - 
-//			FileNameHandle_t - 
-//			sharedprecache - 
-//-----------------------------------------------------------------------------
-void CAudioSourceCache::AnalyzeReslists( CUtlRBTree< FileNameHandle_t, int >& other, CUtlRBTree< FileNameHandle_t, int >& sharedprecache )
-{
-	int i, j;
-
-	if ( IsX360() )
+	FOR_EACH_VEC( m_vecCaches, idx )
 	{
-		return;
-	}
-
-	other.RemoveAll();
-	sharedprecache.RemoveAll();
-
-	CUtlRBTree< FileNameHandle_t, int > manifests( 0, 0, DefLessFunc( FileNameHandle_t ) );
-
-	g_pSoundServices->GetAllManifestFiles( manifests );
-
-	int c = manifests.Count();
-	if ( !c )
-	{
-		return;
-	}
-
-	CUtlRBTree< AudioSourceUsage_t, int >	usage( 0, 0, AudioSourceUsageLessFunc );
-
-	// Now walk through each manifest and try to build sounds
-	for ( i = manifests.FirstInorder(); i != manifests.InvalidIndex(); i = manifests.NextInorder( i ) )
-	{
-		char manifest_file[ 512 ];
-		if ( g_pFullFileSystem->String( manifests[ i ], manifest_file, sizeof( manifest_file ) ) )
-		{
-			CUtlRBTree< FileNameHandle_t, int > filenames( 0, 0, DefLessFunc( FileNameHandle_t ) );
-			g_pSoundServices->GetAllSoundFilesInManifest( filenames, manifest_file );
-	
-			for ( j = filenames.FirstInorder() ; j != filenames.InvalidIndex() ; j = filenames.NextInorder( j ) )
-			{
-				FileNameHandle_t& h = filenames[ j ];
-
-				AudioSourceUsage_t u;
-				u.handle = h;
-
-				// Add it if it's the first one
-				int idx = usage.Find( u );
-				if ( idx == usage.InvalidIndex() )
-				{
-					idx = usage.Insert( u );
-				}
-
-				// Increment count
-				++usage[ idx ].count;
-			}
-		}
-	}
-
-	// Now figure out which .wavs are referenced by multiple .bsps
-	unsigned int threshold = (unsigned int)( SOUND_PRECACHESHARED_THRESHOLD * manifests.Count() );
-
-	for ( i = usage.FirstInorder(); i != usage.InvalidIndex() ; i = usage.NextInorder( i ) )
-	{
-		char soundfile[ 512 ];
-		if ( g_pFullFileSystem->String( usage[ i ].handle, soundfile, sizeof( soundfile ) ) )
-		{
-			//  Msg( "%02i : %s\n", usage[ i ].count, soundfile );
-			unsigned int ucount = usage[ i ].count;
-
-			if ( ucount >= threshold )
-			{
-				sharedprecache.Insert( usage[ i ].handle );
-			}
-			else
-			{
-				other.Insert( usage[ i ].handle );
-			}
-		}
-	}
-	
-	// Now actually get the list of all sounds used by the game during the actual reslists run and make sure those are in "other", too
-	CUtlRBTree< FileNameHandle_t, int > soundfiles( 0, 0, DefLessFunc( FileNameHandle_t ) );
-
-	g_pSoundServices->GetAllSoundFilesReferencedInReslists( soundfiles );
-
-	// Now walk through these and see if they are in either list
-	for ( i = soundfiles.FirstInorder(); i != soundfiles.InvalidIndex() ; i = soundfiles.NextInorder( i ) )
-	{
-		FileNameHandle_t& handle = soundfiles[ i ];
-
-		// It's in this list
-		if ( sharedprecache.Find( handle ) != sharedprecache.InvalidIndex() )
-		{
-			continue;
-		}
-
-		if ( other.Find( handle ) != other.InvalidIndex() )
-		{
-			continue;
-		}
-
-		// Otherwise, it goes in the "other" list
-		other.Insert( handle );
+		m_vecCaches[ idx ]->ForceRecheckDiskInfo();
 	}
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *cachename - 
-// Output : Returns true on success, false on failure.
-//-----------------------------------------------------------------------------
-bool CAudioSourceCache::IsValidCache( char const *cachename )
-{
-	if ( IsX360() )
-	{
-		return false;
-	}
-
-	CacheType_t *cache = AllocAudioCache( cachename );
-
-	// This will delete any outdated .cache files
-	bool valid = cache->IsUpToDate();
-
-	delete cache;
-
-	return valid;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *cachename - 
 //-----------------------------------------------------------------------------
 void CAudioSourceCache::RemoveCache( char const *cachename )
 {
@@ -3043,634 +2678,108 @@ void CAudioSourceCache::RemoveCache( char const *cachename )
 	}
 }
 
-void CAudioSourceCache::SetCachePointer( SoundCacheType_t ptrType, CacheType_t *ptr )
+//-----------------------------------------------------------------------------
+void CAudioSourceCache::BuildCache( char const *pszSearchPath )
 {
-	if ( IsX360() )
+
+	// Get absolute path
+	char szAbsPath[ MAX_PATH ];
+	V_MakeAbsolutePath( szAbsPath, sizeof(szAbsPath), pszSearchPath );
+	V_FixSlashes( szAbsPath );
+
+	// Add a search path to the filesystem.  We'll add one search path as a kludge so we
+	// can use the existing file finder system easily
+	g_pFullFileSystem->AddSearchPath( szAbsPath, "soundcache_kludge", PATH_ADD_TO_HEAD );
+
+	Msg( "Finding .wav files...\n");
+	CUtlVector< CUtlString > vecFilenames;
+	AddFilesToList( vecFilenames, "sound", "soundcache_kludge", "wav" );
+
+	Msg( "Finding .mp3 files...\n");
+	AddFilesToList( vecFilenames, "sound", "soundcache_kludge", "mp3" );
+
+	Msg( "Found %d audio files.\n", vecFilenames.Count() );
+
+	g_pFullFileSystem->RemoveSearchPaths( "soundcache_kludge" );
+
+	if ( vecFilenames.Count() < 1 )
 	{
+		Warning(" No audio files found.  Not building cache\n" );
 		return;
 	}
 
-	bool dirty = false;
+	// FindCacheForSearchPath expects an absolute search path, but if we're working with a VPK we'll have the path to
+	// the file, wherein the proper path to the file is /foo/bar.vpk, but the *search path* should be /foo/bar.vpk/
+	char szAsSearchPath[MAX_PATH] = { 0 };
+	V_strncpy( szAsSearchPath, szAbsPath, sizeof( szAsSearchPath ) );
+	V_AppendSlash( szAsSearchPath, sizeof( szAsSearchPath ) );
 
-	switch ( ptrType )
+	SearchPathCache *pCache = FindCacheForSearchPath( szAsSearchPath );
+	if ( !pCache )
 	{
-	default:
-		Error( "SetCachePointer with bogus type %i\n", (int)ptrType );
-		break;
-	case CACHE_MAP:
-		if ( m_pCache != ptr )
-		{
-			dirty = true;
-			m_pCache = ptr;
-		}
-		break;
-	case CACHE_SHARED:
-		if ( m_pSharedPrecacheCache != ptr )
-		{
-			dirty = true;
-			m_pSharedPrecacheCache = ptr;
-		}
-		break;
-	case CACHE_OTHER:
-		if ( m_pOtherSoundCache != ptr )
-		{
-			dirty = true;
-			m_pOtherSoundCache = ptr;
-		}
-		break;
-	case CACHE_BUILDING:
-		if ( m_pBuildingCache != ptr )
-		{
-			dirty = true;
-			m_pBuildingCache = ptr;
-		}
-		break;
+		// This cache might not have existed on startup
+		pCache = CreateCacheForSearchPath( szAbsPath );
+		m_vecCaches.AddToTail( pCache );
 	}
 
-	if ( dirty )
+	g_pFullFileSystem->AddSearchPath( szAbsPath, "game", PATH_ADD_TO_HEAD );
+	int nLenAbsPath = V_strlen( szAbsPath );
+	int iLastShownPct = -1;
+	FOR_EACH_VEC( vecFilenames, idxFilename )
 	{
-		CAudioSourceCachedInfoHandle_t::InvalidateCache();
-	}
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Output : Returns true on success, false on failure.
-//-----------------------------------------------------------------------------
-bool CAudioSourceCache::HasMissingCaches()
-{
-	if ( IsX360() )
-	{
-		return false;
-	}
-
-	CUtlRBTree< FileNameHandle_t, int > manifests( 0, 0, DefLessFunc( FileNameHandle_t ) );
-
-	g_pSoundServices->GetAllManifestFiles( manifests );
-
-	int c = manifests.Count();
-	if ( !c )
-	{
-		return false;
-	}
-
-	// Now walk through each manifest and try to build sounds
-	for ( int i = manifests.FirstInorder(); i != manifests.InvalidIndex(); i = manifests.NextInorder( i ) )
-	{
-		char manifest_file[ 512 ];
-		if ( g_pFullFileSystem->String( manifests[ i ], manifest_file, sizeof( manifest_file ) ) )
+		const char *pszFilename = vecFilenames[ idxFilename ];
+		if ( V_strnicmp( pszFilename, szAbsPath, nLenAbsPath ) != 0 )
 		{
-			char mapname[ 512 ];
-			Q_StripExtension( manifest_file, mapname, sizeof( mapname ) );
+			Warning( "Sound %s doesn't begin with search path %s\n", pszFilename, szAbsPath );
+			Assert( false );
+			continue;
+		}
+		const char *pszRelName = pszFilename + nLenAbsPath;
+		if ( *pszRelName == '/' || *pszRelName == '\\' )
+			++pszRelName;
+		if ( V_strnicmp( pszRelName, "sound" CORRECT_PATH_SEPARATOR_S, 6 ) != 0 )
+		{
+			Warning( "Relative name %s doesn't begin with leading 'sound' directory?\n", pszRelName );
+			Assert( false );
+			continue;
+		}
+		const char *pszName = pszRelName + 6;
 
-			// See if there is a valid cache file for this manifest
-			char cachename[ 512 ];
-			Q_snprintf( cachename, sizeof( cachename ), "%s%s.cache", mapname, m_szCurrentLanguage ); 
+		// Show progress
+		int iPct = idxFilename * 100 / vecFilenames.Count();
+		if ( iPct != iLastShownPct )
+		{
+			Msg( "  %3d%% %s\n", iPct, pszName );
+			iLastShownPct = iPct;
+		}
 
-			if ( !IsValidCache( cachename ) )
-				return true;
+		CAudioSourceCachedInfo::s_bIsPrecacheSound = true;
+		CAudioSourceCachedInfo::s_CurrentType = CAudioSource::AUDIO_SOURCE_WAV;
+		char szExt[ 10 ] = { 0 };
+		V_ExtractFileExtension( pszFilename, szExt, sizeof( szExt ) );
+		if ( V_stricmp( szExt, "mp3" ) == 0 )
+		{
+			CAudioSourceCachedInfo::s_CurrentType = CAudioSource::AUDIO_SOURCE_MP3;
+		}
+		CAudioSourceCachedInfo::s_pSfx = S_DummySfx( pszName );
+
+		const CAudioSourceCachedInfo *pInfo = pCache->Get( pszRelName );
+		if ( !pInfo )
+		{
+			Warning( "Failed to cache info for %s\n", pszFilename );
 		}
 	}
+	g_pFullFileSystem->RemoveSearchPath( szAbsPath, "game" );
 
-	return false;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : showprogress - 
-// Output : Returns true on success, false on failure.
-//-----------------------------------------------------------------------------
-bool CAudioSourceCache::FastBuildSharedPrecachedSoundsCache( bool rebuild, bool showprogress, bool bForceBuild )
-{
-	if ( IsX360() )
+	if ( pCache->IsDirty() )
 	{
-		// 360 not using
-		return true;
-	}
-
-	if ( !m_bFirstTime && !bForceBuild )
-	{
-		return true;
-	}
-	
-	bool needsRebuildWork = false;
-
-	char fn[ 512 ];
-	Q_snprintf( fn, sizeof( fn ), "%s/%s%s.cache", AUDIOSOURCE_CACHE_ROOTDIR, OTHER_REBUILD_CACHE_NAME, m_szCurrentLanguage );
-
-	if ( m_bSndCacheDebug )
-	{
-		DevMsg(	1, "Fast Build Temp Cache:  '%s'\n", fn );
-	}
-
-	if ( rebuild )
-	{
-		// Blow away the metacaches if rebuilding, which will force a full cache build
-		RemoveCache( fn );
-		RemoveCache( m_szSharedPrecacheCache );
-		RemoveCache( m_szOtherSoundsCache );
-
-		needsRebuildWork = true;
-
+		Msg( "Saving %s\n", pCache->GetRepositoryFileName() );
+		pCache->Save();
 	}
 	else
 	{
-		// This will do a fast check and delete the cache if it's invalid (old format)
-		if ( !IsValidCache( fn ) )
-		{
-			needsRebuildWork = true;
-		}
-		if ( !IsValidCache( m_szSharedPrecacheCache ) )
-		{
-			needsRebuildWork = true;
-		}
-		if ( !IsValidCache( m_szOtherSoundsCache ) )
-		{
-			needsRebuildWork = true;
-		}
+		Msg( "No changes detected; not saving %s\n", pCache->GetRepositoryFileName() );
 	}
-
-	bool needsLevelWork = HasMissingCaches();
-
-	if ( !needsRebuildWork && !needsLevelWork )
-	{
-		return true;
-	}
-
-	if ( showprogress )
-	{
-		g_pSoundServices->CacheBuildingStart();	
-	}
-
-	CacheType_t *pOtherFullData		= NULL;
-	CacheType_t *pSharedFullData	= NULL;
-	CacheType_t *pOtherNoData		= NULL;
-
-	if ( needsRebuildWork )
-	{
-		CUtlRBTree< FileNameHandle_t, int > other( 0, 0, DefLessFunc( FileNameHandle_t ) );
-		CUtlRBTree< FileNameHandle_t, int > sharedprecache( 0, 0, DefLessFunc( FileNameHandle_t ) );
-		
-		AnalyzeReslists( other, sharedprecache );
-
-		pOtherFullData		= BuildCacheFromList( fn, other, true, showprogress, 0.0f, 0.33f );
-		pSharedFullData		= BuildCacheFromList( m_szSharedPrecacheCache, sharedprecache, true, showprogress, 0.33f, 0.75f );
-		pOtherNoData		= BuildNoDataCacheFromFullDataCache( m_szOtherSoundsCache, pOtherFullData, showprogress, 0.75f, 0.90f );
-
-		if ( pSharedFullData )
-		{
-			if ( m_pSharedPrecacheCache )
-			{
-				// Don't shutdown/save, since we have a new one already
-				delete m_pSharedPrecacheCache;
-			}
-
-			// Take over ptr
-			SetCachePointer( CACHE_SHARED, pSharedFullData );
-		}
-
-		if ( pOtherNoData )
-		{
-			if ( m_pOtherSoundCache )
-			{
-				// Don't shutdown/save, since we have a new one already
-				delete m_pOtherSoundCache;
-			}
-
-			// Take over ptr
-			SetCachePointer( CACHE_OTHER, pOtherNoData );
-		}
-	}
-	else
-	{
-		// Load the full data cache from disk
-		pOtherFullData = AllocAudioCache( fn );
-		Assert( pOtherFullData );
-		pOtherFullData->Init();
-
-		pSharedFullData = m_pSharedPrecacheCache;
-	}
-
-	if ( pOtherFullData && pSharedFullData )
-	{
-		FastBuildAllMissingSoundCaches( pOtherFullData, pSharedFullData, showprogress, rebuild, 0.8f, 1.0f );
-	}
-
-	// Always discard this one
-	if ( pOtherFullData )
-	{
-		pOtherFullData->Shutdown();
-		delete pOtherFullData;
-	}
-
-	if ( showprogress )
-	{
-		g_pSoundServices->CacheBuildingFinish();	
-	}
-
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *pOther - 
-//			*pSharedPrecache - 
-//			showprogress - 
-// Output : Returns true on success, false on failure.
-//-----------------------------------------------------------------------------
-bool CAudioSourceCache::FastBuildAllMissingSoundCaches( CacheType_t *pOther, CacheType_t *pSharedPrecache, bool showprogress /*=false*/, bool forcerebuild /*=false*/, float flProgressStart /*= 0.0f*/, float flProgressEnd /*= 1.0f*/ )
-{
-	if ( IsX360() )
-	{
-		// 360 not using
-		return true;
-	}
-
-	if ( !m_bFirstTime )
-	{
-		return true;
-	}
-
-	CUtlRBTree< FileNameHandle_t, int > manifests( 0, 0, DefLessFunc( FileNameHandle_t ) );
-
-	g_pSoundServices->GetAllManifestFiles( manifests );
-
-	int c = manifests.Count();
-	if ( !c )
-	{
-		return false;
-	}
-
-	int i;
-
-	CUtlVector< FileNameHandle_t >	worklist;
-
-	// Now walk through each manifest and try to build sounds
-	for ( i = manifests.FirstInorder(); i != manifests.InvalidIndex(); i = manifests.NextInorder( i ) )
-	{
-		char manifest_file[ 512 ];
-		if ( g_pFullFileSystem->String( manifests[ i ], manifest_file, sizeof( manifest_file ) ) )
-		{
-			char mapname[ 512 ];
-			Q_StripExtension( manifest_file, mapname, sizeof( mapname ) );
-
-			//  Cache is same filename, with .cache extension instead.
-			char cachename[ 512 ];
-			Q_snprintf( cachename, sizeof( cachename ), "%s%s.cache", mapname, m_szCurrentLanguage );
-
-			CacheType_t *cache = AllocAudioCache( cachename );
-			// This will delete any outdated .cache files
-			if ( cache->IsUpToDate() && !forcerebuild )
-			{
-				delete cache;
-				continue;
-			}
-			if ( forcerebuild )
-			{
-				RemoveCache( cachename ); // force it to rebuild the cache
-			}
-
-			worklist.AddToTail( manifests[ i ] );
-		}
-	}
-
-	// Nothing to do
-	if ( worklist.Count() == 0 )
-	{
-		return true;
-	}
-
-	double st = Plat_FloatTime();
-
-	int num = 0;
-
-	// Now walk through each manifest and try to build sounds
-	for ( i = 0; i < worklist.Count(); ++i )
-	{
-		char manifest_file[ 512 ];
-		if ( g_pFullFileSystem->String( worklist[ i ], manifest_file, sizeof( manifest_file ) ) )
-		{
-			char mapname[ 512 ];
-			Q_StripExtension( manifest_file, mapname, sizeof( mapname ) );
-
-			//  Cache is same filename, with .cache extension instead.
-			char cachename[ 512 ];
-			Q_snprintf( cachename, sizeof( cachename ), "%s%s.cache", mapname, m_szCurrentLanguage );
-
-			++num;
-
-			CacheType_t *cache = AllocAudioCache( cachename );
-			if ( !cache )
-			{
-				Error( "Unable to create '%s'!", cachename );
-			}
-
-			if ( !cache->Init() )
-			{
-				Warning( "Failed to init sound cache '%s'\n", cachename );
-				delete cache;
-				cache = NULL;
-				continue;
-			}
-
-			float frac = (float)(num - 1 ) / (float)worklist.Count();
-
-			if ( showprogress )
-			{
-				char base[ 256 ];
-				Q_FileBase( cachename, base, sizeof( base ) );
-				Q_strlower( base );
-				g_pSoundServices->CacheBuildingUpdateProgress( flProgressStart + frac * ( flProgressEnd - flProgressStart ), base );
-			}
-
-			FastBuildSoundCache( frac, cachename, pOther, pSharedPrecache, cache, manifest_file );
-
-			cache->Shutdown();
-			delete cache;
-		}
-	}
-
-	double ed = Plat_FloatTime();
-	DevMsg( "Rebuild took %.3f seconds\n", ( float )( ed - st ) );
-
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Given a manfest and fulldat versions of the other and shared caches, rebuild the level specific data cache
-// Input  : progressfrac - 
-//			*fullCache - 
-//			*cache - 
-//			fullCache - 
-// Output : Returns true on success, false on failure.
-//-----------------------------------------------------------------------------
-bool CAudioSourceCache::FastBuildSoundCache( 
-	float progressfrac, 
-	char const *currentcache, 
-	CacheType_t *fullCache, 
-	CacheType_t *sharedPrecacheCache,
-	CacheType_t *cache, 
-	char const *manifest )
-{
-	if ( IsX360() )
-	{
-		// 360 not using
-		return true;
-	}
-
-	Assert( currentcache );
-	Assert( fullCache );
-	Assert( cache );
-	Assert( manifest );
-
-	CUtlRBTree< FileNameHandle_t, int > list( 0, 0, DefLessFunc( FileNameHandle_t ) );
-	
-	g_pSoundServices->GetAllSoundFilesInManifest( list, manifest );
-	
-	DevMsg( "%.2f %% -> %s\n", 100.0f * progressfrac, currentcache );
-
-	bool needsave = false;
-	for ( int i = list.FirstInorder() ; i != list.InvalidIndex() ; i = list.NextInorder( i ) )
-	{
-		FileNameHandle_t& h = list[ i ];
-		char fn[ 512 ];
-		if ( g_pFullFileSystem->String( h, fn, sizeof( fn ) ) )
-		{
-			// If entry is in the sharedprecache cache, don't add to the per-level cache
-			if ( sharedPrecacheCache->EntryExists( fn ) )
-			{
-				continue;
-			}
-
-			// Otherwise, it should be in the full cache
-			if ( fullCache->EntryExists( fn ) )
-			{
-				needsave = true;
-
-				CAudioSourceCachedInfo* entry = fullCache->Get( fn );
-
-				long info = fullCache->GetFileInfo( fn );
-
-				cache->SetElement( fn, info, entry );
-			}
-		}
-	}
-	
-	if ( needsave )
-	{
-		cache->Save();
-	}
-
-	return true;
-}
-
-CAudioSourceCache::CacheType_t *CAudioSourceCache::BuildNoDataCacheFromFullDataCache( char const *cachename, CacheType_t *fullCache, bool showprogress /*= false*/, float flProgressStart /*= 0.0f*/, float flProgressEnd /*= 1.0f*/ )
-{
-	if ( IsX360() )
-	{
-		// 360 not using
-		return NULL;
-	}
-
-	CacheType_t *newCache = NULL;
-	
-	newCache = AllocAudioCache( cachename );
-	Assert( newCache );
-	if ( newCache->Init() )
-	{
-		int visited = 0;
-		int c = fullCache->Count();
-
-		for ( int i =0; i < c; ++i )
-		{
-			char fn[ 512 ];
-			
-			fullCache->GetElementName( i, fn, sizeof( fn ) );
-
-			CAudioSourceCachedInfo* entry = (*fullCache)[ i ];
-
-			long fileinfo = fullCache->GetFileInfo( fn );
-
-			CAudioSourceCachedInfo *entryCopy = new CAudioSourceCachedInfo( *entry );
-
-			entryCopy->RemoveData();
-
-			newCache->SetElement( fn, fileinfo, entryCopy );
-
-			++visited;
-
-			if ( !( visited % 100 ) )
-			{
-				Msg( "  progress %i/%i (%i %%)\n",
-					visited, c, (int)( 100.0f * ( float) visited / (float) c ) );
-			}
-
-			if ( showprogress )
-			{
-				float frac = ( float )( visited - 1 )/( float )c;
-				
-				frac = flProgressStart + frac * ( flProgressEnd - flProgressStart );
-
-				char base[ 256 ];
-				Q_FileBase( fn, base, sizeof( base ) );
-				Q_strlower( base );
-				g_pSoundServices->CacheBuildingUpdateProgress( frac, base );
-			}
-		}
-
-		Msg( "Touched %i cached files\n", c);
-
-		// Persist data to HD if dirty
-		newCache->Save();
-	}
-	else
-	{
-		delete newCache;
-		newCache = NULL;
-	}
-
-	return newCache;
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *cachename - 
-//			FileNameHandle_t - 
-//			soundlist - 
-//			fulldata - 
-//			showprogress - 
-// Output : CAudioSourceCache::CacheType_t
-//-----------------------------------------------------------------------------
-CAudioSourceCache::CacheType_t *CAudioSourceCache::BuildCacheFromList( char const *cachename, CUtlRBTree< FileNameHandle_t, int >& soundlist, bool fulldata, bool showprogress /*= false*/, float flProgressStart /*= 0.0f*/, float flProgressEnd /*= 1.0f*/ )
-{
-	if ( IsX360() )
-	{
-		// 360 not using
-		return NULL;
-	}
-
-	CacheType_t *newCache = NULL;
-
-	newCache = AllocAudioCache( cachename );
-	Assert( newCache );
-	if ( newCache->Init() )
-	{
-		SetCachePointer( CACHE_BUILDING, newCache );
-
-		m_bBuildingFullDataCache = fulldata;
-
-		int visited = 0;
-
-		for ( int i = soundlist.FirstInorder(); i != soundlist.InvalidIndex(); i = soundlist.NextInorder( i ) )
-		{
-			FileNameHandle_t& handle = soundlist[ i ];
-			char soundname[ 512 ];
-			soundname[ 0 ] = 0;
-			if ( g_pFullFileSystem->String( handle, soundname, sizeof( soundname ) ) )
-			{
-				// Touch the cache
-				// Force it to go into the "other" cache but to also appear as "full data" precache
-				CSfxTable *pTable = S_PrecacheSound( &soundname[ SOUND_DIRECTORY_LENGTH ] );
-				// This will "re-cache" this if it's not in this level's cache already
-				if ( pTable && pTable->pSource )
-				{
-					GetInfo( pTable->pSource->GetType(), fulldata, pTable );
-				}
-			}
-			else
-			{
-				Assert( !"Unable to find FileNameHandle_t in fileystem list." );
-			}
-
-			++visited;
-
-			if ( !( visited % 100 ) )
-			{
-				Msg( "  progress %i/%i (%i %%)\n",
-					visited, soundlist.Count(), (int)( 100.0f * ( float) visited / (float) soundlist.Count() ) );
-			}
-
-			if ( showprogress )
-			{
-				float frac = ( float )( visited - 1 )/( float )soundlist.Count();
-
-				frac = flProgressStart + frac * ( flProgressEnd - flProgressStart );
-
-				char base[ 256 ];
-				Q_FileBase( soundname, base, sizeof( base ) );
-				Q_strlower( base );
-				g_pSoundServices->CacheBuildingUpdateProgress( frac, base );
-			}
-		}
-
-		Msg( "Touched %i cached files\n", soundlist.Count() );
-
-		m_bBuildingFullDataCache = false;
-		SetCachePointer( CACHE_BUILDING, NULL );
-
-		// Persist data to HD if dirty
-		newCache->Save();
-	}
-	else
-	{
-		delete newCache;
-		newCache = NULL;
-	}
-
-	return newCache;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Shutdown the level specific cache
-//-----------------------------------------------------------------------------
-void CAudioSourceCache::KillCache()
-{
-	if ( m_pCache )
-	{
-#if defined( _DEBUG )
-		ConColorMsg( Color( 0,100,255,255), "Audio LevelShutdown:  %s\n", m_szMapCache );
-#endif
-		m_pCache->Shutdown();
-		delete m_pCache;
-	}
-	SetCachePointer( CACHE_MAP, NULL );
-}
-
-char const *CAudioSourceCache::GetAudioCacheLanguageSuffix( char *buf, size_t bufsize )
-{
-	char const *pchLanguage = g_pSoundServices->GetUILanguage();
-
-	if ( !pchLanguage || !*pchLanguage || !Q_stricmp( pchLanguage, "english" ) )
-	{
-		buf[ 0 ] = 0;
-		return buf;
-	}
-	
-	//Check language right here to see if we need the caches for it.
-	char szLanguageList[ MAX_REPOSITORY_NAME ];
-	Q_snprintf( szLanguageList, sizeof( szLanguageList ), "%s/localization_cache_list.txt", AUDIOSOURCE_CACHE_ROOTDIR );	
-	FileHandle_t fh = g_pFullFileSystem->Open( szLanguageList, "r" );
-	char szCacheLanguage[ MAX_LIST_SIZE ];
-	if ( fh )
-	{
-		g_pFullFileSystem->Read( szCacheLanguage, MAX_LIST_SIZE, fh);
-		g_pFullFileSystem->Close( fh );
-
-		if ( Q_stristr( szCacheLanguage, pchLanguage ) )
-		{
-			Q_snprintf( buf, bufsize, "_%s", pchLanguage );
-			return buf;
-		}
-		else
-		{
-			buf[ 0 ] = 0;
-			return buf;
-		}
-	}	
-
-	Q_snprintf( buf, bufsize, "_%s", pchLanguage );
-	return buf;
 }
 
 void CheckCacheBuild()
@@ -3678,17 +2787,30 @@ void CheckCacheBuild()
 	g_ASCache.CheckCacheBuild();
 }
 
-void FastBuildSharedPrecachedSoundsCache( bool bForceBuild )
+CON_COMMAND( snd_buildcache, "<directory or VPK filename>  Rebulds sound cache for a given search path.\n" )
 {
-	g_ASCache.FastBuildSharedPrecachedSoundsCache( true, true, bForceBuild );
+	if ( args.ArgC() < 2 )
+	{
+		ConMsg( "Usage:  snd_buildcache <directory or VPK filename>\n" );
+		return;
+	}
+
+	// Allow them to eitehr specify multiple args, or comma-seperated list.
+	// You cannot easily pas multiple args on the (OS) command line.
+	for ( int idxArg = 1 ; idxArg < args.ArgC() ; ++idxArg )
+	{
+		CUtlStringList vecPaths;
+		V_SplitString( args[idxArg], ",", vecPaths );
+		FOR_EACH_VEC( vecPaths, idxPath )
+		{
+			g_ASCache.BuildCache( vecPaths[idxPath] );
+		}
+	}
+
+	// And now quit the game, because we mucked with search paths and the game is almost certainly not
+	// going to work anymore
+	Msg( "Quitting the game because we probably screwed up the search paths...\n" );
+	extern void HostState_Shutdown();
+	HostState_Shutdown();
 }
 
-CON_COMMAND( snd_rebuildaudiocache, "Rebuilds all audio caches (_other, _other_rebuild, _sharedprecache, level caches) from reslists\n" )
-{
-	FastBuildSharedPrecachedSoundsCache( true );
-}
-
-CON_COMMAND( snd_writemanifest, "If running a game, outputs the precache manifest for the current level\n" )
-{
-	g_ASCache.WriteManifest();
-}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -33,13 +33,26 @@
 #include "GameEventManager.h"
 #include "host.h"
 #include "proto_version.h"
+#include "proto_oob.h"
 #include "dt_common_eng.h"
 #include "baseautocompletefilelist.h"
 #include "sv_steamauth.h"
 #include "tier0/icommandline.h"
+#include "sys_dll.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+#define S2A_EXTRA_DATA_HAS_GAME_PORT				0x80		// Next 2 bytes include the game port.
+#define S2A_EXTRA_DATA_HAS_SPECTATOR_DATA			0x40		// Next 2 bytes include the spectator port, then the spectator server name.
+#define S2A_EXTRA_DATA_HAS_GAMETAG_DATA				0x20		// Next bytes are the game tag string
+#define S2A_EXTRA_DATA_HAS_STEAMID					0x10		// Next 8 bytes are the steamID
+#define S2A_EXTRA_DATA_GAMEID						0x01		// Next 8 bytes are the gameID of the server
+
+#define A2S_KEY_STRING_STEAM		"Source Engine Query" // required postfix to a A2S_INFO query
+
+extern CNetworkStringTableContainer *networkStringTableContainerClient;
+extern ConVar sv_tags;
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -182,7 +195,8 @@ void CDeltaEntityCache::AddDeltaBits( int nEntityIndex, int nDeltaTick, int nBit
 		if ( ((char*)(pNew) + sizeof(DeltaEntityEntry_s) + nBufferSize) > pEnd )
 			return;	// data wouldn't fit into cache anymore, don't add new entries
 
-		pEntry->pNext = pEntry = pNew;
+		pEntry = pNew;
+		pEntry->pNext = pEntry;
 	}
 
 	pEntry->pNext = NULL; // link to next
@@ -502,6 +516,10 @@ void CHLTVServer::StartMaster(CGameClient *client)
 
 	m_MasterClient = client;
 	m_MasterClient->m_bIsHLTV = true;
+#if defined( REPLAY_ENABLED )
+	m_MasterClient->m_bIsReplay = false;
+#endif
+
 	// let game.dll know that we are the HLTV client
 	Assert( serverGameClients );
 
@@ -526,8 +544,7 @@ void CHLTVServer::StartMaster(CGameClient *client)
 	m_nGameServerMaxClients = m_Server->GetMaxClients(); // maxclients is different on proxy (128)
 	serverclasses	= m_Server->serverclasses;
 	serverclassbits	= m_Server->serverclassbits;
-	worldmapCRC		= m_Server->worldmapCRC;
-	clientDllCRC	= m_Server->clientDllCRC;
+	V_memcpy( worldmapMD5.bits, m_Server->worldmapMD5.bits, MD5_DIGEST_LENGTH );
 	m_flTickInterval= m_Server->GetTickInterval();
 
 	// allocate buffers for input frame
@@ -682,19 +699,19 @@ bool CHLTVServer::DispatchToRelay( CHLTVClient *pClient )
 		pszRelayAddr );
 
 	// first tell that client that we are a SourceTV server,
-	// otherwise it's might ignore the "connect" command
-	SVC_ServerInfo serverInfo;	
-	FillServerInfo( serverInfo ); 
+	// otherwise it's might ignore the command
+	SVC_ServerInfo serverInfo;
+	FillServerInfo( serverInfo );
 	pClient->SendNetMsg( serverInfo, true );
-	
+
 	// tell the client to connect to this new address
-	NET_StringCmd cmdMsg( va("connect %s\n", pszRelayAddr ) ) ;
+	NET_StringCmd cmdMsg( va("redirect %s\n", pszRelayAddr ) ) ;
 	pClient->SendNetMsg( cmdMsg, true );
-    		
+
  	// increase this proxies client number in advance so this proxy isn't used again next time
 	int clients = Q_atoi( pBestProxy->GetUserSetting( "hltv_clients" ) );
 	pBestProxy->SetUserCVar( "hltv_clients", va("%d", clients+1 ) );
-	
+
 	return true;
 }
 
@@ -706,13 +723,13 @@ void CHLTVServer::ConnectRelay(const char *address)
 		m_ClientState.m_szRetryAddress[0] = 0;
 
 		// disconnect first
-		m_ClientState.Disconnect();
+		m_ClientState.Disconnect( "HLTV server connecting to relay", true );
 
 		Changelevel(); // inactivate clients
 	}
 
 	// connect to new server
-	m_ClientState.Connect( address );
+	m_ClientState.Connect( address, "tvrelay" );
 }
 
 void CHLTVServer::StartRelay()
@@ -754,7 +771,7 @@ int	CHLTVServer::GetHLTVSlot( void )
 
 float CHLTVServer::GetOnlineTime( void )
 {
-	return max(0, net_time - m_flStartTime);
+	return max(0., net_time - m_flStartTime);
 }
 
 void CHLTVServer::GetLocalStats( int &proxies, int &slots, int &clients )
@@ -1000,6 +1017,7 @@ void CHLTVServer::FireGameEvent(IGameEvent *event)
 
 bool CHLTVServer::ShouldUpdateMasterServer()
 {
+
 	// If the main game server is active, then we let it update Steam with the server info.
 	return !sv.IsActive();
 }
@@ -1088,7 +1106,9 @@ void CHLTVServer::UserInfoChanged( int nClientIndex )
 
 void CHLTVServer::LinkInstanceBaselines( void )
 {	
-	GetInstanceBaselineTable(); // forces to update m_pInstanceBaselineTable
+	// Forces to update m_pInstanceBaselineTable.
+	AUTO_LOCK( g_svInstanceBaselineMutex );
+	GetInstanceBaselineTable(); 
 
 	Assert( m_pInstanceBaselineTable );
 		
@@ -1308,17 +1328,17 @@ CClientFrame *CHLTVServer::AddNewFrame( CClientFrame *clientFrame )
 	{
 		m_nFirstTick = clientFrame->tick_count;
 		m_nTickCount = m_nFirstTick;
-		
+
 		if ( !IsMasterProxy() )
 		{
 			Assert ( m_State == ss_loading );
 			m_State = ss_active; // we are now ready to go
 
 			ReconnectClients();
-			
+
 			ConMsg("SourceTV relay active.\n" );
-			
-			Steam3Server().Activate();
+
+			Steam3Server().Activate( CSteam3Server::eServerTypeTVRelay );
 			Steam3Server().SendUpdatedServerDetails();
 		}
 		else
@@ -1326,7 +1346,7 @@ CClientFrame *CHLTVServer::AddNewFrame( CClientFrame *clientFrame )
 			ConMsg("SourceTV broadcast active.\n" );
 		}
 	}
-	
+
 	CHLTVFrame *hltvFrame = new CHLTVFrame;
 
 	// copy tickcount & entities from client frame
@@ -1334,7 +1354,7 @@ CClientFrame *CHLTVServer::AddNewFrame( CClientFrame *clientFrame )
 
 	//copy rest (messages, tempents) from current HLTV frame
 	hltvFrame->CopyHLTVData( m_HLTVFrame );
-	
+
 	// add frame to HLTV server
 	AddClientFrame( hltvFrame );
 
@@ -1659,6 +1679,39 @@ void CHLTVServer::Clear( void )
 	m_FrameCache.RemoveAll();
 }
 
+bool CHLTVServer::ProcessConnectionlessPacket( netpacket_t * packet )
+{
+	bf_read msg = packet->message; // We're copying the message, so we don't need to seek back when passing packet to the base class.
+//	int bits = msg.GetNumBitsRead();
+
+	char c = msg.ReadChar();
+
+	if ( c == 0 )
+	{
+		return false;
+	}
+
+	switch ( c )
+	{
+#ifndef NO_STEAM
+	case A2S_INFO:
+		char rgchInfoPostfix[64];
+		msg.ReadString( rgchInfoPostfix, sizeof( rgchInfoPostfix ) );
+		if ( !Q_stricmp( rgchInfoPostfix, A2S_KEY_STRING_STEAM ) )
+		{
+			ReplyInfo( packet->from );
+			return true;
+		}
+
+		break;
+	//case A2S_PLAYER:
+	//	return true;
+#endif // #ifndef NO_STEAM
+	}
+
+	return CBaseServer::ProcessConnectionlessPacket( packet );
+}
+
 void CHLTVServer::Init(bool bIsDedicated)
 {
 	CBaseServer::Init( bIsDedicated );
@@ -1711,7 +1764,7 @@ void CHLTVServer::Shutdown( void )
 		// do not try to reconnect to old connection
 		m_ClientState.m_szRetryAddress[0] = 0;
 
-		m_ClientState.Disconnect();
+		m_ClientState.Disconnect( "HLTV server shutting down", true );
 	}
 
 	g_GameEventManager.RemoveListener( this );
@@ -1751,6 +1804,11 @@ void CHLTVServer::SetPlaybackTimeScale(float timescale)
 void CHLTVServer::ResyncDemoClock()
 {
 	m_nStartTick = host_tickcount;
+}
+
+int CHLTVServer::GetPlaybackStartTick( void )
+{
+	return m_nStartTick;
 }
 
 int	CHLTVServer::GetPlaybackTick( void )
@@ -1803,7 +1861,7 @@ bool CHLTVServer::StartPlayback( const char *filename, bool bAsTimeDemo )
 
 	double start = Plat_FloatTime();
 
-	ReadCompeleteDemoFile();
+	ReadCompleteDemoFile();
 
 	double diff = Plat_FloatTime() - start;
 
@@ -1815,7 +1873,7 @@ bool CHLTVServer::StartPlayback( const char *filename, bool bAsTimeDemo )
 	return true;
 }
 
-void CHLTVServer::ReadCompeleteDemoFile()
+void CHLTVServer::ReadCompleteDemoFile()
 {
 	int			tick = 0;
 	byte		cmd = dem_signon;
@@ -1847,10 +1905,11 @@ void CHLTVServer::ReadCompeleteDemoFile()
 			break;
 		case dem_datatables:
 			{
-				char data[64*1024];
+				ALIGN4 char data[64*1024] ALIGN4_POST;
 				bf_read buf( "dem_datatables", data, sizeof(data) );
 				
 				m_DemoFile.ReadNetworkDataTables( &buf );
+				buf.Seek( 0 );
 
 				// support for older engine demos
 				if ( !DataTable_LoadDataTablesFromBuffer( &buf, m_DemoFile.m_DemoHeader.demoprotocol ) )
@@ -1859,11 +1918,42 @@ void CHLTVServer::ReadCompeleteDemoFile()
 				}
 			}
 			break;
+		case dem_stringtables:
+			{
+				void *data = NULL;
+				int dataLen = 512 * 1024;
+				while ( dataLen <= DEMO_FILE_MAX_STRINGTABLE_SIZE )
+				{
+					data = realloc( data, dataLen );
+					bf_read buf( "dem_stringtables", data, dataLen );
+					// did we successfully read
+					if ( m_DemoFile.ReadStringTables( &buf ) > 0 )
+					{
+						buf.Seek( 0 );
+						if ( !networkStringTableContainerClient->ReadStringTables( buf ) )
+						{
+							Host_Error( "Error parsing string tables during demo playback." );
+						}
+						break;
+					}
+
+					// Didn't fit.  Try doubling the size of the buffer
+					dataLen *= 2;
+				}
+
+				if ( dataLen > DEMO_FILE_MAX_STRINGTABLE_SIZE )
+				{
+					Warning( "ReadCompleteDemoFile failed to read string tables. Trying to read string tables that's bigger than max string table size\n" );
+				}
+
+				free( data );
+			}
+			break;
 		case dem_usercmd:
 			{
-				char buffer[256];
-				int  length = sizeof(buffer);
-				m_DemoFile.ReadUserCmd( buffer, length );
+				char bufferIn[256];
+				int  length = sizeof( bufferIn );
+				m_DemoFile.ReadUserCmd( bufferIn, length );
 				// MOTODO HLTV must store user commands too
 			}
 			break;
@@ -1911,11 +2001,11 @@ const char *CHLTVServer::GetPassword() const
 	return password;
 }
 
-IClient *CHLTVServer::ConnectClient ( netadr_t &adr, int protocol, int challenge, int authProtocol, 
+IClient *CHLTVServer::ConnectClient ( netadr_t &adr, int protocol, int challenge, int clientChallenge, int authProtocol, 
 									 const char *name, const char *password, const char *hashedCDkey, int cdKeyLen )
 {
 	IClient	*client = (CHLTVClient*)CBaseServer::ConnectClient( 
-		adr, protocol, challenge,authProtocol, name, password, hashedCDkey, cdKeyLen, CSteamID() );
+		adr, protocol, challenge, clientChallenge, authProtocol, name, password, hashedCDkey, cdKeyLen );
 
 	if ( client )
 	{
@@ -1926,6 +2016,125 @@ IClient *CHLTVServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 
 	return client;
 }
+
+int CHLTVServer::GetProtocolVersion()
+{
+	if ( GetDemoFile() )
+		return GetDemoFile()->GetProtocolVersion();
+	return PROTOCOL_VERSION;
+}
+
+#ifndef NO_STEAM
+void CHLTVServer::ReplyInfo( const netadr_t &adr )
+{
+	static char gamedir[MAX_OSPATH];
+	Q_FileBase( com_gamedir, gamedir, sizeof( gamedir ) );
+
+	CUtlBuffer buf;
+	buf.EnsureCapacity( 2048 );
+
+	buf.PutUnsignedInt( LittleDWord( CONNECTIONLESS_HEADER ) );
+	buf.PutUnsignedChar( S2A_INFO_SRC );
+
+	buf.PutUnsignedChar( GetProtocolVersion() ); // Hardcoded protocol version number
+	buf.PutString( GetName() );
+	buf.PutString( GetMapName() );
+	buf.PutString( gamedir );
+	buf.PutString( serverGameDLL->GetGameDescription() );
+
+	// The next field is a 16-bit version of the AppID.  If our AppID < 65536,
+	// then let's go ahead and put in in there, to maximize compatibility
+	// with old clients who might be only using this field but not the new one.
+	// However, if our AppID won't fit, there's no way we can be compatible,
+	// anyway, so just put in a zero, which is better than a bogus AppID.
+	uint16 usAppIdShort = (uint16)GetSteamAppID();
+	if ( (AppId_t)usAppIdShort != GetSteamAppID() )
+	{
+		usAppIdShort = 0;
+	}
+	buf.PutShort( LittleWord( usAppIdShort ) );
+
+	// player info
+	buf.PutUnsignedChar( GetNumClients() );
+	buf.PutUnsignedChar( GetMaxClients() );
+	buf.PutUnsignedChar( 0 );
+
+	// NOTE: This key's meaning is changed in the new version. Since we send gameport and specport,
+	// it knows whether we're running SourceTV or not. Then it only needs to know if we're a dedicated or listen server.
+	if ( IsDedicated() )
+		buf.PutUnsignedChar( 'd' );	// d = dedicated server
+	else
+		buf.PutUnsignedChar( 'l' );	// l = listen server
+
+#if defined(_WIN32)
+	buf.PutUnsignedChar( 'w' );
+#elif defined(OSX)
+	buf.PutUnsignedChar( 'm' );
+#else // LINUX?
+	buf.PutUnsignedChar( 'l' );
+#endif
+
+	// Password?
+	buf.PutUnsignedChar( GetPassword() != NULL ? 1 : 0 );
+	buf.PutUnsignedChar( Steam3Server().BSecure() ? 1 : 0 );
+	buf.PutString( GetSteamInfIDVersionInfo().szVersionString );
+
+	//
+	// NEW DATA.
+	//
+
+	// Write a byte with some flags that describe what is to follow.
+	const char *pchTags = sv_tags.GetString();
+	byte nNewFlags = 0;
+	//if ( GetGamePort() != 0 )
+	//	nNewFlags |= S2A_EXTRA_DATA_HAS_GAME_PORT;
+
+	if ( Steam3Server().GetGSSteamID().IsValid() )
+		nNewFlags |= S2A_EXTRA_DATA_HAS_STEAMID;
+
+	if ( GetUDPPort() != 0 )
+		nNewFlags |= S2A_EXTRA_DATA_HAS_SPECTATOR_DATA;
+
+	if ( pchTags && pchTags[0] != '\0' )
+		nNewFlags |= S2A_EXTRA_DATA_HAS_GAMETAG_DATA;
+
+	nNewFlags |= S2A_EXTRA_DATA_GAMEID;
+
+	buf.PutUnsignedChar( nNewFlags );
+
+	// Write the rest of the data.
+	//if ( nNewFlags & S2A_EXTRA_DATA_HAS_GAME_PORT )
+	//{
+	//	buf.PutShort( LittleWord( GetGamePort() ) );
+	//}
+
+	if ( nNewFlags & S2A_EXTRA_DATA_HAS_STEAMID )
+	{
+		buf.PutUint64( LittleQWord( Steam3Server().GetGSSteamID().ConvertToUint64() ) );
+	}
+
+	if ( nNewFlags & S2A_EXTRA_DATA_HAS_SPECTATOR_DATA )
+	{
+		buf.PutShort( LittleWord( GetUDPPort() ) );
+		buf.PutString( GetName() );
+	}
+
+	if ( nNewFlags & S2A_EXTRA_DATA_HAS_GAMETAG_DATA )
+	{
+		buf.PutString( pchTags );
+	}
+
+	if ( nNewFlags & S2A_EXTRA_DATA_GAMEID )
+	{
+		// !FIXME! Is there a reason we aren't using the other half
+		// of this field?  Shouldn't we put the game mod ID in there, too?
+		// We have the game dir.
+		buf.PutUint64( LittleQWord( CGameID( GetSteamAppID() ).ToUint64() ) );
+	}
+
+	NET_SendPacket( NULL, m_Socket, adr, (unsigned char *)buf.Base(), buf.TellPut() );
+}
+#endif // #ifndef NO_STEAM
 
 CON_COMMAND( tv_status, "Show SourceTV server status." ) 
 {

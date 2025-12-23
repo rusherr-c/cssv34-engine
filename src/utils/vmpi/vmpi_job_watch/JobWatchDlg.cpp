@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -615,7 +615,7 @@ BOOL CJobWatchDlg::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
 			LPNMLISTVIEW pListView = (LPNMLISTVIEW)lParam;
 
 			// Now sort by this column.
-			g_iSortColumn = max( 0, min( pListView->iSubItem, ARRAYSIZE( g_ColumnInfos ) - 1 ) );
+			g_iSortColumn = max( 0, min( pListView->iSubItem, (int)ARRAYSIZE( g_ColumnInfos ) - 1 ) );
 			ResortItems();
 		}
 	}

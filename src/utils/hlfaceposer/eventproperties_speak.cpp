@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 #include "EventProperties.h"
 #include "mdlviewer.h"
 #include "choreoevent.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "AddSoundEntry.h"
 #include "SoundLookup.h"

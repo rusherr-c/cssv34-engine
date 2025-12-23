@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,17 +14,21 @@
 
 #include "interface.h"
 #include "imysqlwrapper.h"
-#include "tier1/UtlVector.h"
-#include "tier1/UtlBuffer.h"
-#include "tier1/UtlSymbol.h"
-#include "tier1/UtlString.h"
-#include "tier1/UtlDict.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlbuffer.h"
+#include "tier1/utlsymbol.h"
+#include "tier1/utlstring.h"
+#include "tier1/utldict.h"
 #include "KeyValues.h"
 #include "filesystem_helpers.h"
 #include "tier2/tier2.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "interface.h"
 #include "vstdlib/random.h"
+#include "jpeglib/jpeglib.h"
+
+
+static char gamename[ 32 ] = "ep2";
 
 extern IFileSystem *g_pFullFileSystem;
 
@@ -96,9 +100,20 @@ bool ReadBitmapRGB( const byte *raw, size_t rawlen, Image_t *image )
 
 		for ( x = 0; x < image->w; ++x )
 		{
+#define USE_GRAYSCALE
+#if defined( USE_GRAYSCALE )
+			int val = row[ 0 ] + row[ 1 ] + row[ 2 ];
+			val /= 3;
+			*dst++ = val;
+			*dst++ = val;
+			*dst++ = val;
+
+			row += 3;
+#else
 			*dst++ = *row++;
 			*dst++ = *row++;
 			*dst++ = *row++;
+#endif
 		}
 	}
 
@@ -242,6 +257,216 @@ bool WriteBitmap( char const *filename, Image_t *image )
 	return true;
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: Expanded data destination object for CUtlBuffer output
+//-----------------------------------------------------------------------------
+struct JPEGDestinationManager_t
+{
+	struct jpeg_destination_mgr pub; // public fields
+
+	CUtlBuffer	*pBuffer;		// target/final buffer
+	byte		*buffer;		// start of temp buffer
+};
+
+// choose an efficiently bufferaable size
+#define OUTPUT_BUF_SIZE  4096	
+
+//-----------------------------------------------------------------------------
+// Purpose:  Initialize destination --- called by jpeg_start_compress
+//  before any data is actually written.
+//-----------------------------------------------------------------------------
+METHODDEF(void) init_destination (j_compress_ptr cinfo)
+{
+	JPEGDestinationManager_t *dest = ( JPEGDestinationManager_t *) cinfo->dest;
+
+	// Allocate the output buffer --- it will be released when done with image
+	dest->buffer = (byte *)
+		(*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_IMAGE,
+		OUTPUT_BUF_SIZE * sizeof(byte));
+
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = OUTPUT_BUF_SIZE;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Empty the output buffer --- called whenever buffer fills up.
+// Input  : boolean - 
+//-----------------------------------------------------------------------------
+METHODDEF(boolean) empty_output_buffer (j_compress_ptr cinfo)
+{
+	JPEGDestinationManager_t *dest = ( JPEGDestinationManager_t * ) cinfo->dest;
+
+	CUtlBuffer *buf = dest->pBuffer;
+
+	// Add some data
+	buf->Put( dest->buffer, OUTPUT_BUF_SIZE );
+
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = OUTPUT_BUF_SIZE;
+
+	return TRUE;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Terminate destination --- called by jpeg_finish_compress
+// after all data has been written.  Usually needs to flush buffer.
+//
+// NB: *not* called by jpeg_abort or jpeg_destroy; surrounding
+// application must deal with any cleanup that should happen even
+// for error exit.
+//-----------------------------------------------------------------------------
+METHODDEF(void) term_destination (j_compress_ptr cinfo)
+{
+	JPEGDestinationManager_t *dest = (JPEGDestinationManager_t *) cinfo->dest;
+	size_t datacount = OUTPUT_BUF_SIZE - dest->pub.free_in_buffer;
+
+	CUtlBuffer *buf = dest->pBuffer;
+
+	/* Write any data remaining in the buffer */
+	if (datacount > 0) 
+	{
+		buf->Put( dest->buffer, datacount );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Set up functions for writing data to a CUtlBuffer instead of FILE *
+//-----------------------------------------------------------------------------
+GLOBAL(void) jpeg_UtlBuffer_dest (j_compress_ptr cinfo, CUtlBuffer *pBuffer )
+{
+	JPEGDestinationManager_t *dest;
+
+	/* The destination object is made permanent so that multiple JPEG images
+	* can be written to the same file without re-executing jpeg_stdio_dest.
+	* This makes it dangerous to use this manager and a different destination
+	* manager serially with the same JPEG object, because their private object
+	* sizes may be different.  Caveat programmer.
+	*/
+	if (cinfo->dest == NULL) {	/* first time for this JPEG object? */
+		cinfo->dest = (struct jpeg_destination_mgr *)
+			(*cinfo->mem->alloc_small) ((j_common_ptr) cinfo, JPOOL_PERMANENT,
+			sizeof(JPEGDestinationManager_t));
+	}
+
+	dest = ( JPEGDestinationManager_t * ) cinfo->dest;
+
+	dest->pub.init_destination		= init_destination;
+	dest->pub.empty_output_buffer	= empty_output_buffer;
+	dest->pub.term_destination		= term_destination;
+	dest->pBuffer					= pBuffer;
+}
+
+bool ImageToJPEGBuffer( Image_t *image, CUtlBuffer& buf, int quality )
+{
+#if !defined( _X360 )
+
+	// Validate quality level
+	quality = clamp( quality, 1, 100 );
+
+	int imagew = image->w;
+	int imageh = image->h;
+
+	// Allocate space for bits
+	uint8 *pImage = new uint8[ imagew * 3 * imageh];
+	if ( !pImage )
+	{
+		Msg( "Unable to allocate %i bytes for image\n", imagew * 3 * imageh );
+		return false;
+	}
+
+	// Get Bits from the material system
+	// ReadScreenPixels( 0, 0, GetModeWidth(), GetModeHeight(), pImage, IMAGE_FORMAT_RGB888 );
+	// Copy data in
+	for ( int y = 0; y < imageh; ++y )
+	{
+		byte *row = (byte *)&pImage[ y * imagew * 3 ];
+		const byte *pSrc = (const byte *)&image->data[ y * imagew * 3 ];
+		for ( int x = 0; x < imagew; ++x )
+		{
+			// BGR to RGB
+			row[ 0 ] = pSrc[ 2 ];
+			row[ 1 ] = pSrc[ 1 ];
+			row[ 2 ] = pSrc[ 0 ];
+
+			pSrc += 3;
+			row += 3;
+		}
+	}
+
+	JSAMPROW row_pointer[1];     // pointer to JSAMPLE row[s]
+	int row_stride;              // physical row width in image buffer
+
+	// stderr handler
+	struct jpeg_error_mgr jerr;
+
+	// compression data structure
+	struct jpeg_compress_struct cinfo;
+
+	row_stride = imagew * 3; // JSAMPLEs per row in image_buffer
+
+	// point at stderr
+	cinfo.err = jpeg_std_error(&jerr);
+
+	// create compressor
+	jpeg_create_compress(&cinfo);
+
+	// Hook CUtlBuffer to compression
+	jpeg_UtlBuffer_dest(&cinfo, &buf );
+
+	// image width and height, in pixels
+	cinfo.image_width = imagew;
+	cinfo.image_height = imageh;
+	// RGB is 3 componnent
+	cinfo.input_components = 3;
+	// # of color components per pixel
+	cinfo.in_color_space = JCS_RGB;
+
+	// Apply settings
+	jpeg_set_defaults(&cinfo);
+	jpeg_set_quality(&cinfo, quality, TRUE );
+
+	// Start compressor
+	jpeg_start_compress(&cinfo, TRUE);
+
+	// Write scanlines
+	while ( cinfo.next_scanline < cinfo.image_height ) 
+	{
+		row_pointer[ 0 ] = &pImage[ cinfo.next_scanline * row_stride ];
+		jpeg_write_scanlines( &cinfo, row_pointer, 1 );
+	}
+
+	// Finalize image
+	jpeg_finish_compress(&cinfo);
+
+	// Cleanup
+	jpeg_destroy_compress(&cinfo);
+
+	delete[] pImage;
+
+#else
+	// not supporting
+	Assert( 0 );
+#endif
+	return true;
+}
+
+bool WriteJPeg( char const *filename, Image_t *image )
+{
+	FileHandle_t fh = g_pFullFileSystem->Open( filename, "wb" );
+	if ( FILESYSTEM_INVALID_HANDLE == fh )
+		return false;
+
+	CUtlBuffer buf;
+	ImageToJPEGBuffer( image, buf, 90 );
+
+	g_pFullFileSystem->Write( buf.Base(), buf.TellPut(), fh );
+	// clean up
+	g_pFullFileSystem->Close( fh );
+
+	return true;
+}
+
 #include <string>
 //-------------------------------------------------
 void v_escape_string (std::string& s)
@@ -313,9 +538,9 @@ void HSLToRGB( Color &out, float *hsl )
 		sat[ 1 ] = 0;
 		sat[ 2 ] = (360 - hsl[ 0 ]) / 60.0;
 	}
-	sat[ 0 ] = min(sat[ 0 ],1);
-	sat[ 1 ] = min(sat[ 1 ],1);
-	sat[ 2 ] = min(sat[ 2 ],1);
+	sat[ 0 ] = min(sat[ 0 ],1.f);
+	sat[ 1 ] = min(sat[ 1 ],1.f);
+	sat[ 2 ] = min(sat[ 2 ],1.f);
 
 	ctmp[ 0 ] = 2 * hsl[ 1 ] * sat[ 0 ] + (1 - hsl[ 1 ]);
 	ctmp[ 1 ] = 2 * hsl[ 1 ] * sat[ 1 ] + (1 - hsl[ 1 ]);
@@ -374,7 +599,7 @@ void BuildAggregateStats( IMySQL *mysql, char const *pszMapName, char const *whe
 
 	// Now read all the locations from the sql server
 
-	Q_snprintf( q, sizeof( q ), "select Sum(Count), Avg(Count), Avg(Seconds)/60.0, Avg(Deaths) from ep2_maps where MapName = \'%s\' %s and Seconds < 15000;", mapname.c_str(), whereClause );
+	Q_snprintf( q, sizeof( q ), "select Sum(Count), Avg(Count), Avg(Seconds)/60.0, Avg(Deaths) from %s_maps where MapName = \'%s\' %s and Seconds < 15000;", gamename, mapname.c_str(), whereClause );
 
 	int retcode = mysql->Execute( q );
 	if ( retcode != 0 )
@@ -409,7 +634,7 @@ void BuildAggregateStats( IMySQL *mysql, char const *pszMapName, char const *whe
 
 	// Now show entity stats
 
-	Q_snprintf( q, sizeof( q ), "select Entity, Sum(BodyCount), avg(BodyCount), Sum(KilledPlayer), avg(KilledPlayer) from ep2_entities where mapname = \'%s\' %s group by Entity;", mapname.c_str(), whereClause );
+	Q_snprintf( q, sizeof( q ), "select Entity, Sum(BodyCount), avg(BodyCount), Sum(KilledPlayer), avg(KilledPlayer) from %s_entities where mapname = \'%s\' %s group by Entity;", gamename, mapname.c_str(), whereClause );
 
 	retcode = mysql->Execute( q );
 	if ( retcode != 0 )
@@ -436,7 +661,7 @@ void BuildAggregateStats( IMySQL *mysql, char const *pszMapName, char const *whe
 	}
 
 	// Now show weapon stats	
-	Q_snprintf( q, sizeof( q ), "select Weapon, Sum(Shots), avg(Shots), sum(Hits), avg(Hits), Sum(Damage), Avg(Damage) from ep2_weapons where mapname = \'%s\' %s group by Weapon;", mapname.c_str(), whereClause );
+	Q_snprintf( q, sizeof( q ), "select Weapon, Sum(Shots), avg(Shots), sum(Hits), avg(Hits), Sum(Damage), Avg(Damage) from %s_weapons where Damage < 100000 and mapname = \'%s\' %s group by Weapon;", gamename, mapname.c_str(), whereClause );
 
 	retcode = mysql->Execute( q );
 	if ( retcode != 0 )
@@ -465,7 +690,7 @@ void BuildAggregateStats( IMySQL *mysql, char const *pszMapName, char const *whe
 	}
 
 	// Now show weapon stats	
-	Q_snprintf( q, sizeof( q ), "select count(*)/count(distinct(userid) ) from ep2_saves where mapname = \'%s\' %s;", mapname.c_str(), whereClause );
+	Q_snprintf( q, sizeof( q ), "select count(*)/count(distinct(userid) ) from %s_saves where mapname = \'%s\' %s;", gamename, mapname.c_str(), whereClause );
 
 	retcode = mysql->Execute( q );
 	if ( retcode != 0 )
@@ -523,7 +748,7 @@ void BuildAggregateStats( IMySQL *mysql, char const *pszMapName, char const *whe
 								"Sum(GODMODES), Avg(GODMODES),"\
 								"Sum(NOCLIPS), Avg(NOCLIPS),"\
 								"Sum(DAMAGETAKEN), Avg(DAMAGETAKEN) "\
-								"from ep2_counters where mapname = \'%s\' %s;", mapname.c_str(), whereClause );
+								"from %s_counters where mapname = \'%s\' %s;", gamename, mapname.c_str(), whereClause );
 
 	retcode = mysql->Execute( q );
 	if ( retcode != 0 )
@@ -576,7 +801,7 @@ void BuildAggregateStats( IMySQL *mysql, char const *pszMapName, char const *whe
 	Msg( "-----------------------------------------------------------\n" );
 
 	// Now show generic stats	
-	Q_snprintf( q, sizeof( q ), "select StatName, Sum(Count), avg(Count), sum(Value), avg(Value) from ep2_generic where mapname = \'%s\' %s group by StatName;", mapname.c_str(), whereClause );
+	Q_snprintf( q, sizeof( q ), "select StatName, Sum(Count), avg(Count), sum(Value), avg(Value) from %s_generic where mapname = \'%s\' %s group by StatName;", gamename, mapname.c_str(), whereClause );
 
 	retcode = mysql->Execute( q );
 	if ( retcode != 0 )
@@ -611,6 +836,7 @@ void printusage( int argc, char * argv[] )
 		" Version = " EP2_DEATHS_VERSION "\n"\
 		" Date [ " __DATE__ " " __TIME__ " ]\n"\
 		" Copyright Valve 2007.  All rights reserved.\n"\
+		"  -game [ep2 | tf]		{ which game }\n"\
 		"  -bugs bugtestfile     { special bug file culled from PVCSTracker report }\n"\
 		"  -imagedir imagedir    { directory for mapinfo.res and image .bmps }\n"\
 		"  -deaths               { build death images }\n"\
@@ -652,6 +878,12 @@ int main(int argc, char* argv[])
 			Msg( "  parsing bugs from '%s'\n", bugfile );
 			++i;
 		}
+		else if ( !stricmp( argv[ i ], "-game" ))
+		{
+			Q_strncpy( gamename, argv[i+1], sizeof( gamename ) );
+			Msg( "  death maps for game '%s'\n", gamename );
+			++i;
+		}
 		else if (!stricmp(argv[i],"-deaths"))
 		{
 			bBuildImages = true;
@@ -684,7 +916,7 @@ int main(int argc, char* argv[])
 		else if (!stricmp(argv[i],"-p"))
 		{
 			pw = argv[ i + 1 ];
-			Msg( "  mysql pw '%s'\n", pw );
+			// Msg( "  mysql pw '%s'\n", pw );
 			++i;
 		}
 		else if (!stricmp(argv[i],"-db"))
@@ -795,16 +1027,16 @@ int main(int argc, char* argv[])
 	float flGradesMinusOne = (float)( numgrades - 1 );
 	Color *colors = new Color[ numgrades ];
 	float *fastSquareRoot = new float[ numgrades ];
-	for ( int i = 0; i < numgrades; ++i )
+	for ( int iGrades = 0; iGrades < numgrades; ++iGrades )
 	{
-		float flValue = (float)i / flGradesMinusOne;
+		float flValue = (float)iGrades / flGradesMinusOne;
 		float hsl[ 3 ];
 		hsl[ 0 ] = 240.0f - ( 1.0f - flValue ) * 240.0f;
 		hsl[ 1 ] = 1.0f;
 		hsl[ 2 ] = 0.5f;
-		HSLToRGB( colors[ i ], hsl );
+		HSLToRGB( colors[iGrades], hsl );
 
-		fastSquareRoot[ i ] = sqrt( flValue );
+		fastSquareRoot[iGrades] = sqrt( flValue );
 	}
 
 	Color black( 0, 0, 0, 0 );
@@ -821,10 +1053,12 @@ int main(int argc, char* argv[])
 			Q_snprintf( imagefile, sizeof( imagefile ), "%s/%s.bmp", pathname, pszMapName );
 			Q_FixSlashes( imagefile );
 			Q_strlower( imagefile );
+
 			char outfile[ 512 ];
-			Q_snprintf( outfile, sizeof( outfile ), "%s/%s_deaths.bmp", pathname, pszMapName );
+			Q_snprintf( outfile, sizeof( outfile ), "%s/%s_deaths.jpg", pathname, pszMapName );
 			Q_FixSlashes( outfile );
 			Q_strlower( outfile );
+
 
 			// Do the processing
 			FileHandle_t fh = g_pFullFileSystem->Open( imagefile, "rb" );
@@ -861,11 +1095,11 @@ int main(int argc, char* argv[])
 					int idx = raw.Find( pszMapName );
 					if ( idx != raw.InvalidIndex() )
 					{
-						CUtlVector< Vector > *db = raw[ idx ];
-						for ( int i= 0; i < db->Count(); ++i )
+						CUtlVector< Vector > *pvDB = raw[ idx ];
+						for ( int iVec= 0; iVec < pvDB->Count(); ++iVec )
 						{
-							int x = (int)db->Element( i )[ 0 ];
-							int y = (int)db->Element( i )[ 1 ];
+							int x = (int)pvDB->Element( iVec )[ 0 ];
+							int y = (int)pvDB->Element( iVec )[ 1 ];
 							// int z = mysql->GetColumnValue_Int( 2 );
 
 							float pixx = (float)( x - pos_x );
@@ -886,7 +1120,7 @@ int main(int argc, char* argv[])
 				{
 					if ( bStressTest )
 					{
-						for ( int i = 0 ; i < stresstestcount; ++i )
+						for ( int iTest = 0 ; iTest < stresstestcount; ++iTest )
 						{
 							POINT death;
 							do 
@@ -915,7 +1149,7 @@ int main(int argc, char* argv[])
 
 						// Now read all the locations from the sql server
 
-						Q_snprintf( q, sizeof( q ), "select x, y from ep2_deaths where MapName = \'%s\' %s;", mapname.c_str(), whereclause );
+						Q_snprintf( q, sizeof( q ), "select x, y from %s_deaths where MapName = \'%s\' %s;", gamename, mapname.c_str(), whereclause );
 
 						int retcode = mysql->Execute( q );
 						if ( retcode != 0 )
@@ -973,9 +1207,9 @@ int main(int argc, char* argv[])
 				float st = Plat_FloatTime();
 
 				int c = vecDeaths.Count();
-				for ( int i = 0; i < c; ++i )
+				for ( int iDeath = 0; iDeath < c; ++iDeath )
 				{
-					POINT &v = vecDeaths[ i ];
+					POINT &v = vecDeaths[iDeath];
 					int xpos = v.x;
 					int ypos = v.y;
 					for ( int y = max( 0, ypos - nRadius ); y <= min( ypos + nRadius, image.h - 1 ); ++y )
@@ -991,7 +1225,7 @@ int main(int argc, char* argv[])
 							int dy = y - ypos + nRadius;
 
 							// Figure out contrubution
-							float flScale = contribution[ dy * nSide + dx ];
+							flScale = contribution[ dy * nSide + dx ];
 							if ( flScale <= 0.0f )
 								continue;
 
@@ -1017,7 +1251,10 @@ int main(int argc, char* argv[])
 							const Color &col = colors[ colorIndex ];
 
 							DrawColoredRect( &image, x, y, 1, 1, black, flValue * flValue );
-							DrawColoredRect( &image, x, y, 1, 1, col, fastSquareRoot[ colorIndex ] );
+							float sqroot = fastSquareRoot[ colorIndex ];
+							if ( sqroot != 0.0f )
+								sqroot = max( sqroot, 0.33f );
+							DrawColoredRect( &image, x, y, 1, 1, col, sqroot );
 						}
 					}
 				}
@@ -1039,7 +1276,7 @@ int main(int argc, char* argv[])
 				delete[] info;
 
 				// Now write the image back out 
-				WriteBitmap( outfile, &image );
+				WriteJPeg( outfile, &image );
 			}
 			delete[] image.data;
 

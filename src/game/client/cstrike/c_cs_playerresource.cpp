@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: CS's custom C_PlayerResource
 //
@@ -12,7 +12,6 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
-
 
 IMPLEMENT_CLIENTCLASS_DT(C_CS_PlayerResource, DT_CSPlayerResource, CCSPlayerResource)
 	RecvPropInt( RECVINFO( m_iPlayerC4 ) ),
@@ -31,7 +30,14 @@ IMPLEMENT_CLIENTCLASS_DT(C_CS_PlayerResource, DT_CSPlayerResource, CCSPlayerReso
 	RecvPropArray3( RECVINFO_ARRAY(m_hostageRescueZ), RecvPropInt( RECVINFO(m_hostageRescueZ[0]))),
 	RecvPropInt( RECVINFO( m_bBombSpotted ) ),
 	RecvPropArray3( RECVINFO_ARRAY(m_bPlayerSpotted), RecvPropInt( RECVINFO(m_bPlayerSpotted[0]))),
+	RecvPropArray3( RECVINFO_ARRAY(m_iMVPs), RecvPropInt( RECVINFO(m_iMVPs[0]))),
+	RecvPropArray3( RECVINFO_ARRAY(m_bHasDefuser), RecvPropInt( RECVINFO(m_bHasDefuser[0]))),
+	RecvPropArray3( RECVINFO_ARRAY(m_szClan), RecvPropString( RECVINFO(m_szClan[0]))),
 END_RECV_TABLE()
+ 
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -40,6 +46,8 @@ C_CS_PlayerResource::C_CS_PlayerResource()
 {
 	m_Colors[TEAM_TERRORIST] = COLOR_RED;
 	m_Colors[TEAM_CT] = COLOR_BLUE;
+	memset( m_iMVPs, 0, sizeof( m_iMVPs ) );
+	memset( m_bHasDefuser, 0, sizeof( m_bHasDefuser ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -138,6 +146,15 @@ const Vector C_CS_PlayerResource::GetHostageRescuePosition( int iIndex )
 	return ret;
 }
 
+int C_CS_PlayerResource::GetPlayerClass( int iIndex )
+{
+	if ( !IsConnected( iIndex ) )
+	{
+		return CS_CLASS_NONE;
+	}
+
+	return m_iPlayerClasses[ iIndex ];
+}
 
 //--------------------------------------------------------------------------------------------------------
 bool C_CS_PlayerResource::IsBombSpotted( void ) const
@@ -155,5 +172,35 @@ bool C_CS_PlayerResource::IsPlayerSpotted( int iIndex )
 	return m_bPlayerSpotted[iIndex];
 }
 
+//-----------------------------------------------------------------------------
+const char *C_CS_PlayerResource::GetClanTag( int iIndex )
+{
+	if ( iIndex < 1 || iIndex > MAX_PLAYERS )
+	{
+		Assert( false );
+		return "";
+	}
 
-//--------------------------------------------------------------------------------------------------------
+	if ( !IsConnected( iIndex ) )
+		return "";
+
+	return m_szClan[iIndex];
+}
+
+//-----------------------------------------------------------------------------
+int C_CS_PlayerResource::GetNumMVPs( int iIndex )
+{
+	if ( !IsConnected( iIndex ) )
+		return false;
+
+	return m_iMVPs[iIndex];
+} 
+
+//-----------------------------------------------------------------------------
+bool C_CS_PlayerResource::HasDefuser( int iIndex )
+{
+	if ( !IsConnected( iIndex ) )
+		return false;
+
+	return m_bHasDefuser[iIndex];
+} 

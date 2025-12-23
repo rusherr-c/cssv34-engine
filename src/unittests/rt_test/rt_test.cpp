@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "tier0/platform.h"
 #include "tier0/progressbar.h"
 #include "bitmap/float_bm.h"

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@ using namespace vgui;
 #include <vgui_controls/ComboBox.h>
 #include <vgui_controls/RadioButton.h>
 #include <vgui_controls/CheckButton.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "tier1/convar.h"
 #include "EngineInterface.h"
 #include "CvarToggleCheckButton.h"
@@ -64,6 +64,36 @@ CCreateMultiplayerGameServerPage::CCreateMultiplayerGameServerPage(vgui::Panel *
 //-----------------------------------------------------------------------------
 CCreateMultiplayerGameServerPage::~CCreateMultiplayerGameServerPage()
 {
+}
+
+void CCreateMultiplayerGameServerPage::OnKeyCodePressed( vgui::KeyCode code )
+{
+	if ( code == KEY_XBUTTON_LEFT || code == KEY_XSTICK1_LEFT || code == KEY_XSTICK2_LEFT )
+	{
+		int nItem = m_pMapList->GetActiveItem();
+		nItem -= 1;
+		if ( nItem < 0 )
+		{
+			nItem = m_pMapList->GetItemCount() - 1;
+		}
+
+		m_pMapList->SilentActivateItem( nItem );
+	}
+	else if ( code == KEY_XBUTTON_RIGHT || code == KEY_XSTICK1_RIGHT || code == KEY_XSTICK2_RIGHT )
+	{
+		int nItem = m_pMapList->GetActiveItem();
+		nItem += 1;
+		if ( nItem >= m_pMapList->GetItemCount() )
+		{
+			nItem = 0;
+		}
+
+		m_pMapList->SilentActivateItem( nItem );
+	}
+	else
+	{
+		BaseClass::OnKeyCodePressed(code);
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -139,10 +169,11 @@ void CCreateMultiplayerGameServerPage::LoadMaps( const char *pszPathID )
 
 	KeyValues *hiddenMaps = ModInfo().GetHiddenMaps();
 
-	const char *pszFilename = g_pFullFileSystem->FindFirst( "maps/*.bsp", &findHandle );
+	const char *pszFilename = g_pFullFileSystem->FindFirstEx( "maps/*.bsp", pszPathID, &findHandle );
 	while ( pszFilename )
 	{
 		char mapname[256];
+		char *ext, *str;
 
 		// FindFirst ignores the pszPathID, so check it here
 		// TODO: this doesn't find maps in fallback dirs
@@ -154,7 +185,7 @@ void CCreateMultiplayerGameServerPage::LoadMaps( const char *pszPathID )
 
 		// remove the text 'maps/' and '.bsp' from the file name to get the map name
 		
-		const char *str = Q_strstr( pszFilename, "maps" );
+		str = Q_strstr( pszFilename, "maps" );
 		if ( str )
 		{
 			strncpy( mapname, str + 5, sizeof(mapname) - 1 );	// maps + \\ = 5
@@ -163,7 +194,7 @@ void CCreateMultiplayerGameServerPage::LoadMaps( const char *pszPathID )
 		{
 			strncpy( mapname, pszFilename, sizeof(mapname) - 1 );
 		}
-		char *ext = Q_strstr( mapname, ".bsp" );
+		ext = Q_strstr( mapname, ".bsp" );
 		if ( ext )
 		{
 			*ext = 0;
@@ -208,24 +239,8 @@ void CCreateMultiplayerGameServerPage::LoadMapList()
 	// add special "name" to represent loading a randomly selected map
 	m_pMapList->AddItem( RANDOM_MAP, new KeyValues( "data", "mapname", RANDOM_MAP ) );
 
-	// iterate the filesystem getting the list of all the files
-	// UNDONE: steam wants this done in a special way, need to support that
-	const char *pathID = "MOD";
-	if ( !stricmp(ModInfo().GetGameName(), "Half-Life" ) ) 
-	{
-		pathID = NULL; // hl is the base dir
-	}
-
 	// Load the GameDir maps
-	LoadMaps( pathID ); 
-
-	// If we're not the Valve directory and we're using a "fallback_dir" in gameinfo.txt then include those maps...
-	// (pathID is NULL if we're "Half-Life")
-	const char *pszFallback = ModInfo().GetFallbackDir();
-	if ( pathID && pszFallback[0] )
-	{
-		LoadMaps( "GAME_FALLBACK" );
-	}
+	LoadMaps( "GAME" ); 
 
 	// set the first item to be selected
 	m_pMapList->ActivateItem( 0 );

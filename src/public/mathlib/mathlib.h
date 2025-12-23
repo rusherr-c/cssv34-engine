@@ -8,6 +8,7 @@
 #define MATH_LIB_H
 
 #include <math.h>
+#include "minmax.h"
 #include "tier0/basetypes.h"
 #include "tier0/commonmacros.h"
 #include "mathlib/vector.h"
@@ -16,7 +17,7 @@
 
 #include "mathlib/math_pfns.h"
 
-#if defined(__i386__) || defined(_M_IX86) || defined(_X64_)
+#if defined(__i386__) || defined(_M_IX86)
 // For MMX intrinsics
 #include <xmmintrin.h>
 #endif
@@ -431,7 +432,7 @@ qboolean VectorsEqual( const float *v1, const float *v2 );
 
 inline vec_t RoundInt (vec_t in)
 {
-	return floorf(in + 0.5f);
+	return floor(in + 0.5f);
 }
 
 int Q_log2(int val);
@@ -439,9 +440,30 @@ int Q_log2(int val);
 // Math routines done in optimized assembly math package routines
 void inline SinCos( float radians, float *sine, float *cosine )
 {
-	// Stdlib sincosf is faster
-	*sine = sin(radians);
-	*cosine = cos(radians);
+#if defined( _X360 )
+	XMScalarSinCos( sine, cosine, radians );
+#elif defined( PLATFORM_WINDOWS_PC32 )
+	_asm
+	{
+		fld		DWORD PTR [radians]
+		fsincos
+
+		mov edx, DWORD PTR [cosine]
+		mov eax, DWORD PTR [sine]
+
+		fstp DWORD PTR [edx]
+		fstp DWORD PTR [eax]
+	}
+#elif defined( PLATFORM_WINDOWS_PC64 )
+	*sine = sin( radians );
+	*cosine = cos( radians );
+#elif defined( POSIX )
+	double __cosr, __sinr;
+	__asm ("fsincos" : "=t" (__cosr), "=u" (__sinr) : "0" (radians));
+
+  	*sine = __sinr;
+  	*cosine = __cosr;
+#endif
 }
 
 #define SIN_TABLE_SIZE	256
@@ -1265,7 +1287,7 @@ FORCEINLINE unsigned long RoundFloatToUnsignedLong(float f)
 
 FORCEINLINE bool IsIntegralValue( float flValue, float flTolerance = 0.001f )
 {
-	return fabsf( RoundFloatToInt( flValue ) - flValue ) < flTolerance;
+	return fabs( RoundFloatToInt( flValue ) - flValue ) < flTolerance;
 }
 
 // Fast, accurate ftol:
@@ -1289,7 +1311,7 @@ FORCEINLINE int Float2Int( float a )
 inline int Floor2Int( float a )
 {
 	int RetVal;
-#if defined( __i386__ ) || defined(WIN64) || defined(POSIX)
+#if defined( __i386__ )
 	// Convert to int and back, compare, subtract one if too big
 	__m128 a128 = _mm_set_ss(a);
 	RetVal = _mm_cvtss_si32(a128);
@@ -1346,7 +1368,7 @@ inline float ClampToMsec( float in )
 inline int Ceil2Int( float a )
 {
    int RetVal;
-#if defined( __i386__ ) || defined(WIN64) || defined(POSIX)
+#if defined( __i386__ )
    // Convert to int and back, compare, add one if too small
    __m128 a128 = _mm_load_ss(&a);
    RetVal = _mm_cvtss_si32(a128);
@@ -2028,7 +2050,7 @@ FORCEINLINE float * UnpackNormal_UBYTE4( const unsigned int *pPackedNormal, floa
 	y = ( y*ySign - ySignBit ) / 63.0f;
 	z = 1.0f - x - y;
 
-	float oolen	 = 1.0f / sqrtf( x*x + y*y + z*z );	// Normalize and
+	float oolen	 = 1.0f / sqrt( x*x + y*y + z*z );	// Normalize and
 	x			*= oolen * xSign;					// Recover signs
 	y			*= oolen * ySign;
 	z			*= oolen * zSign;
@@ -2134,14 +2156,14 @@ float FastPow10( float i );			// 10^i
 
 inline bool CloseEnough( float a, float b, float epsilon = EQUAL_EPSILON )
 {
-	return fabsf( a - b ) <= epsilon;
+	return fabs( a - b ) <= epsilon;
 }
 
 inline bool CloseEnough( const Vector &a, const Vector &b, float epsilon = EQUAL_EPSILON )
 {
-	return fabsf( a.x - b.x ) <= epsilon &&
-		fabsf( a.y - b.y ) <= epsilon &&
-		fabsf( a.z - b.z ) <= epsilon;
+	return fabs( a.x - b.x ) <= epsilon &&
+		fabs( a.y - b.y ) <= epsilon &&
+		fabs( a.z - b.z ) <= epsilon;
 }
 
 // Fast compare

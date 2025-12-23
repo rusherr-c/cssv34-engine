@@ -1,10 +1,10 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: net_chan.cpp: implementation of the CNetChan_t struct.
 //
 //=============================================================================//
 
-#include "../thirdparty/bzip2/bzlib.h"
+#include "../utils/bzip2/bzlib.h"
 #include "net_chan.h"
 #include "tier1/strtools.h"
 #include "filesystem_engine.h"
@@ -16,7 +16,11 @@
 #include "host.h"
 #include "netmessages.h"
 #include "tier0/vcrmode.h"
+#include "tier0/etwprof.h"
 #include "tier0/vprof.h"
+#include "net_ws_headers.h"
+#include "net_ws_queued_packet_sender.h"
+#include "filesystem_init.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -27,7 +31,7 @@
 
 ConVar net_showudp( "net_showudp", "0", 0, "Dump UDP packets summary to console" );
 ConVar net_showtcp( "net_showtcp", "0", 0, "Dump TCP stream summary to console" );
-ConVar net_blocksize( "net_maxfragments", "1260", 0, "Max fragment bytes per packet", true, FRAGMENT_SIZE, true, MAX_ROUTABLE_PAYLOAD );
+ConVar net_blocksize( "net_maxfragments", NETSTRING( MAX_ROUTABLE_PAYLOAD ), 0, "Max fragment bytes per packet", true, FRAGMENT_SIZE, true, MAX_ROUTABLE_PAYLOAD );
 
 static ConVar net_showmsg( "net_showmsg", "0", 0, "Show incoming message: <0|1|name>" );
 static ConVar net_showfragments( "net_showfragments", "0", 0, "Show netchannel fragments" );
@@ -37,9 +41,10 @@ static ConVar net_showdrop( "net_showdrop", "0", 0, "Show dropped packets in con
 static ConVar net_drawslider( "net_drawslider", "0", 0, "Draw completion slider during signon" );
 static ConVar net_chokeloopback( "net_chokeloop", "0", 0, "Apply bandwidth choke to loopback packets" );
 static ConVar net_maxfilesize( "net_maxfilesize", "16", 0, "Maximum allowed file size for uploading in MB", true, 0, true, 64 );
-static ConVar net_compresspackets( "net_compresspackets", "1", 0, "Use lz compression on game packets." );
-static ConVar net_compresspackets_minsize( "net_compresspackets_minsize", "128", 0, "Don't bother compressing packets below this size." );
+static ConVar net_compresspackets( "net_compresspackets", "1", 0, "Use compression on game packets." );
+static ConVar net_compresspackets_minsize( "net_compresspackets_minsize", "1024", 0, "Don't bother compressing packets below this size." );
 static ConVar net_maxcleartime( "net_maxcleartime", "4.0", 0, "Max # of seconds we can wait for next packets to be sent based on rate setting (0 == no limit)." );
+static ConVar net_maxpacketdrop( "net_maxpacketdrop", "5000", 0, "Ignore any packets with the sequence number more than this ahead (0 == no limit)" );
 
 extern ConVar net_maxroutable;
 
@@ -47,6 +52,7 @@ extern int  NET_ConnectSocket( int nSock, const netadr_t &addr );
 extern void NET_CloseSocket( int hSocket, int sock = -1 );
 extern int  NET_SendStream( int nSock, const char * buf, int len, int flags );
 extern int  NET_ReceiveStream( int nSock, char * buf, int len, int flags );
+
 
 // If the network connection hasn't been active in this many seconds, display some warning text.
 #define CONNECTION_PROBLEM_TIME		4.0f	// assume network problem after this time
@@ -62,39 +68,6 @@ static bool ShouldChecksumPackets()
 		return false;
 
 	return NET_IsMultiplayer();
-}
-
-// Tells if it's ok for us to send this file to someone.
-static bool IsSafeFileToDownload( const char *pFilename )
-{
-	// No absolute paths or weaseling up the tree with ".." allowed.
-	if ( V_strstr( pFilename, ":" )
-		|| V_strstr( pFilename, ".." ) )
-	{
-		return false;
-	}		
-
-	// Only files with 3-letter extensions allowed.
-	const char *pExt = V_strrchr( pFilename, '.' );
-	if ( !pExt || V_strlen( pExt ) != 4 )
-		return false;
-
-	// Don't allow any of these extensions.
-	if ( V_stricmp( pExt, ".cfg" ) == 0
-		|| V_stricmp( pExt, ".lst" ) == 0
-		|| V_stricmp( pExt, ".exe" ) == 0
-		|| V_stricmp( pExt, ".vbs" ) == 0
-		|| V_stricmp( pExt, ".com" ) == 0
-		|| V_stricmp( pExt, ".bat" ) == 0
-		|| V_stricmp( pExt, ".dll" ) == 0
-		|| V_stricmp( pExt, ".ini" ) == 0
-		|| V_stricmp( pExt, ".log" ) == 0 )
-	{
-		return false;
-	}
-
-	// Word.
-	return true;
 }
 
 bool CNetChan::IsLoopback() const
@@ -148,6 +121,12 @@ void CNetChan::Clear()
 		}
 	}
 
+	if ( m_bProcessingMessages )
+	{
+		// ProcessMessages() needs to know we just nuked the receive list from under it or bad things ensue.
+		m_bClearedDuringProcessing = true;
+	}
+
 	Reset();
 }
 
@@ -164,6 +143,8 @@ void CNetChan::CompressFragments()
 	if ( VCRGetMode() != VCR_Disabled )
 		return;
 
+	VPROF_BUDGET( "CNetChan::CompressFragments", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 	// write fragemnts for both streams
 	for ( int i=0; i<MAX_STREAMS; i++ )
 	{
@@ -174,7 +155,7 @@ void CNetChan::CompressFragments()
 		dataFragments_t *data = m_WaitingList[i][0];
 
 		// if data is already compressed or too small, skip it
-		if ( data->isCompressed || data->bytes < 512 )
+		if ( data->isCompressed || (int)data->bytes < net_compresspackets_minsize.GetInt() )
 			continue;
 
 		// if we already started sending this block, we can't compress it anymore
@@ -185,13 +166,19 @@ void CNetChan::CompressFragments()
 
 		if ( data->buffer )	
 		{
-			// fragments data is in memory
-			unsigned int compressedSize = data->bytes;
-			char * compressedData = new char[data->bytes];
+			CFastTimer compressTimer;
+			compressTimer.Start();
 
-			if ( NET_BufferToBufferCompress( compressedData , &compressedSize, data->buffer, data->bytes ) )
+			// fragments data is in memory
+			unsigned int compressedSize = COM_GetIdealDestinationCompressionBufferSize_Snappy( data->bytes );
+			char * compressedData = new char[ compressedSize ];
+
+			if ( COM_BufferToBufferCompress_Snappy( compressedData, &compressedSize, data->buffer, data->bytes ) &&
+				( compressedSize < data->bytes ) )
 			{
-				DevMsg("Compressing fragments (%d -> %d bytes)\n", data->bytes, compressedSize );
+				compressTimer.End(); 
+				DevMsg("Compressing fragments (%d -> %d bytes): %.2fms\n",
+						data->bytes, compressedSize, compressTimer.GetDuration().GetMillisecondsF() );
 
 				// copy compressed data but dont reallocate memory
 				Q_memcpy( data->buffer, compressedData, compressedSize );
@@ -233,16 +220,16 @@ void CNetChan::CompressFragments()
 			else
 			{
 				// create compressed version of source file
-				char *uncompressed = new char[data->bytes];
-				char *compressed = new char[data->bytes];
-				unsigned int compressedSize = data->bytes;
 				unsigned int uncompressedSize = data->bytes;
+				unsigned int compressedSize = COM_GetIdealDestinationCompressionBufferSize_Snappy( uncompressedSize );
+				char *uncompressed = new char[uncompressedSize];
+				char *compressed = new char[compressedSize];
 					
 				// read in source file
 				g_pFileSystem->Read( uncompressed, data->bytes, data->file );
 
 				// compress into buffer
-				if ( NET_BufferToBufferCompress( compressed, &compressedSize, uncompressed, uncompressedSize ) )
+				if ( COM_BufferToBufferCompress_Snappy( compressed, &compressedSize, uncompressed, uncompressedSize ) )
 				{
 					// write out to disk compressed version
 					hZipFile = g_pFileSystem->Open( compressedfilename, "wb", NULL );
@@ -292,7 +279,7 @@ void CNetChan::UncompressFragments( dataFragments_t *data )
 	unsigned int uncompressedSize = data->nUncompressedSize;
 
 	// uncompress data
-	NET_BufferToBufferDecompress( newbuffer, &uncompressedSize, data->buffer, data->bytes );
+	COM_BufferToBufferDecompress( newbuffer, &uncompressedSize, data->buffer, data->bytes );
 
 	Assert( uncompressedSize == data->nUncompressedSize );
 
@@ -303,7 +290,7 @@ void CNetChan::UncompressFragments( dataFragments_t *data )
 	data->isCompressed = false;
 }
 
-unsigned int CNetChan::RequestFile(const char *filename	)
+unsigned int CNetChan::RequestFile(const char *filename)
 {
 	m_FileRequestCounter++;
 
@@ -344,15 +331,28 @@ bool CNetChan::SendFile(const char *filename, unsigned int transferID)
 	if ( remote_address.GetType() == NA_NULL )
 		return true;
 
-	if ( !CreateFragmentsFromFile( filename, FRAG_FILE_STREAM, transferID	) )
+	if ( !filename )
+		return false;
+
+	const char *sendfile = filename;
+	while( sendfile[0] && PATHSEPARATOR( sendfile[0] ) )
 	{
-		DenyFile( filename, transferID ); // send host a deny message
+		sendfile = sendfile + 1;
+	}
+
+	// Don't transfer exe, vbs, com, bat-type files.
+	if ( !IsValidFileForTransfer( sendfile ) )
+		return false;
+
+	if ( !CreateFragmentsFromFile( sendfile, FRAG_FILE_STREAM, transferID	) )
+	{
+		DenyFile( sendfile, transferID ); // send host a deny message
 		return false;
 	}
 
 	if ( net_showfragments.GetInt() == 2 )
 	{
-		DevMsg("SendFile: %s (ID %i)\n", filename, transferID );
+		DevMsg("SendFile: %s (ID %i)\n", sendfile, transferID );
 	}
 
 	return true;
@@ -421,10 +421,13 @@ CNetChan::CNetChan()
 	m_nMaxRoutablePayloadSize = MAX_ROUTABLE_PAYLOAD;
 	m_bProcessingMessages = false;
 	m_bShouldDelete = false;
+	m_bClearedDuringProcessing = false;
+	m_bStreamContainsChallenge = false;
 	m_Socket = -1; // invalid
 	remote_address.Clear();
 	last_received = 0;
 	connect_time = 0;
+	m_nProtocolVersion = -1;	// invalid
 	
 	Q_strncpy( m_Name, "", sizeof(m_Name) ); 
 
@@ -478,7 +481,8 @@ CNetChan::Setup
 called to open a channel to a remote system
 ==============
 */
-void CNetChan::Setup(int sock, netadr_t *adr, const char * name, INetChannelHandler * handler )
+void CNetChan::Setup(int sock, netadr_t *adr, const char * name, INetChannelHandler * handler,
+					 int nProtocolVersion )
 {
 	Assert( name ); 
 	Assert ( handler );
@@ -508,6 +512,7 @@ void CNetChan::Setup(int sock, netadr_t *adr, const char * name, INetChannelHand
 	Q_strncpy( m_Name, name, sizeof(m_Name) ); 
 
 	m_MessageHandler = handler;
+	m_nProtocolVersion = nProtocolVersion;
 
 	m_DemoRecorder = NULL;
 
@@ -716,7 +721,7 @@ void CNetChan::SetCompressionMode( bool bUseCompression )
 
 void CNetChan::SetDataRate(float rate)
 {
-	m_Rate = clamp( rate, MIN_RATE, MAX_RATE );
+	m_Rate = clamp( rate, (float) MIN_RATE, (float) MAX_RATE );
 }
 
 const char * CNetChan::GetName() const
@@ -783,7 +788,15 @@ void CNetChan::FlowNewPacket(int flow, int seqnr, int acknr, int nChoked, int nD
 
 	if ( seqnr > pflow->currentindex )
 	{
-		for ( int i = pflow->currentindex+1; i <= seqnr; i++ )
+		//
+		// The following loop must execute no more than NET_FRAMES_BACKUP times
+		// since that's the amount of storage in frame_headers & frames arrays,
+		// a malformed client packet pushing "seqnr" by 1,000,000 can cause this
+		// loop to watchdog.
+		//
+		for ( int i = pflow->currentindex + 1, numPacketFramesOverflow = 0;
+			( i <= seqnr ) && ( numPacketFramesOverflow < NET_FRAMES_BACKUP );
+			++ i, ++ numPacketFramesOverflow )
 		{
 			int nBackTrack = seqnr - i;
 
@@ -821,7 +834,9 @@ void CNetChan::FlowNewPacket(int flow, int seqnr, int acknr, int nChoked, int nD
 	}
 	else
 	{
+#if !defined( SWDS )
 		Assert( demoplayer->IsPlayingBack() || seqnr > pflow->currentindex );
+#endif
 	}
 
 	pflow->totalpackets++;
@@ -994,6 +1009,8 @@ void CNetChan::RemoveHeadInWaitingList( int nList )
 
 bool CNetChan::CreateFragmentsFromBuffer( bf_write *buffer, int stream )
 {
+	VPROF_BUDGET( "CNetChan::CreateFragmentsFromBuffer", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 	bf_write bfwrite;
 	dataFragments_t *data = NULL;
 
@@ -1080,7 +1097,7 @@ bool CNetChan::CreateFragmentsFromBuffer( bf_write *buffer, int stream )
 bool CNetChan::CreateFragmentsFromFile( const char *filename, int stream, unsigned int transferID )
 {
 	if ( IsFileInWaitingList( filename ) )
-		return true; // alread scheduled for upload
+		return true; // already scheduled for upload
 	
 	const char *pPathID = "GAME";
 
@@ -1121,7 +1138,7 @@ bool CNetChan::CreateFragmentsFromFile( const char *filename, int stream, unsign
 
 	data->transferID = transferID;
 	Q_strncpy( data->filename, filename, sizeof(data->filename) );
-		
+
 	m_WaitingList[stream].AddToTail( data );	// that's it for now
 
 	// check if send as stream or with snapshot
@@ -1154,6 +1171,8 @@ void CNetChan::SendTCPData( void )
 
 bool CNetChan::SendSubChannelData( bf_write &buf )
 {
+	VPROF_BUDGET( "CNetChan::SendSubChannelData", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 	subChannel_s *subChan = NULL;
 	int i;
 
@@ -1225,7 +1244,7 @@ bool CNetChan::SendSubChannelData( bf_write &buf )
 				buf.WriteOneBit( 0 ); 
 			}
 
-			buf.WriteUBitLong( data->bytes, NET_MAX_PALYLOAD_BITS );
+			buf.WriteVarInt32( data->bytes );
 		}
 		else
 		{
@@ -1330,7 +1349,7 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 				data->isCompressed = false;
 			}
 
-			data->bytes = buf.ReadUBitLong( NET_MAX_PALYLOAD_BITS );
+			data->bytes = buf.ReadVarInt32();
 		}
 		else
 		{
@@ -1359,11 +1378,11 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 		{
 			// last transmission was aborted, free data
 			delete [] data->buffer;
-			ConDMsg("Fragment transmission aborted at %i/%i.\n", data->ackedFragments, data->numFragments );
+			data->buffer = NULL;
+			ConDMsg( "Fragment transmission aborted at %i/%i from %s.\n", data->ackedFragments, data->numFragments, GetAddress() );
 		}
 
-		data->bits = data->bytes * 8; 
-		data->buffer = new char[PAD_NUMBER(data->bytes, 4)]; 
+		data->bits = data->bytes * 8;
 		data->asTCP = false;
 		data->numFragments = BYTES2FRAGMENTS(data->bytes);
 		data->ackedFragments = 0;
@@ -1374,6 +1393,16 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 			numFragments = data->numFragments;
 			length = numFragments * FRAGMENT_SIZE;
 		}
+
+		if ( data->bytes > MAX_FILE_SIZE )
+		{
+			// This can happen with the compressed path above, which uses VarInt32 rather than MAX_FILE_SIZE_BITS
+			Warning( "Net message exceeds max size (%u / %u)\n", MAX_FILE_SIZE, data->bytes );
+			// Subsequent packets for this transfer will treated as invalid since we never setup a buffer.
+			return false;
+		}
+
+		data->buffer = new char[PAD_NUMBER(data->bytes, 4)];
 	}
 	else
 	{
@@ -1393,8 +1422,24 @@ bool CNetChan::ReadSubChannelData( bf_read &buf, int stream  )
 		if ( rest < FRAGMENT_SIZE )
 			length -= rest;
 	}
+	else if ( ( startFragment + numFragments ) > data->numFragments )
+	{
+		// a malicious client can send a fragment beyond what was arranged in fragment#0 header
+		// old code will overrun the allocated buffer and likely cause a server crash
+		// it could also cause a client memory overrun because the offset can be anywhere from 0 to 16MB range
+		// drop the packet and wait for client to retry
+		ConDMsg( "Received fragment chunk out of bounds: %i+%i>%i from %s\n", startFragment, numFragments, data->numFragments, GetAddress() );
+		return false;
+	}
 
 	Assert ( (offset + length) <= data->bytes );
+	if ( length == 0 || ( offset + length > data->bytes ) )
+	{
+		delete[] data->buffer;
+		data->buffer = NULL;
+		ConMsg("Malformed fragment ofs %i len %d, buffer size %d from %s\n", offset, length, PAD_NUMBER(data->bytes, 4), remote_address.ToString() );
+		return false;
+	}
 
 	buf.ReadBytes( data->buffer + offset, length ); // read data
 
@@ -1532,7 +1577,7 @@ A 0 length will still generate a packet and deal with the reliable messages.
 */
 int CNetChan::SendDatagram(bf_write *datagram)
 {
-	byte		send_buf[ NET_MAX_MESSAGE ];
+	ALIGN4 byte		send_buf[ NET_MAX_MESSAGE ] ALIGN4_POST;
 
 #ifndef NO_VCR
 	if ( vcr_verbose.GetInt() && datagram && datagram->GetNumBytesWritten() > 0 )
@@ -1607,11 +1652,16 @@ int CNetChan::SendDatagram(bf_write *datagram)
 		send.WriteByte ( m_nChokedPackets & 0xFF );	// send number of choked packets
 	}
 
+	// always append a challenge number
+	flags |= PACKET_FLAG_CHALLENGE ;
+
+	// append the challenge number itself right on the end
+	send.WriteLong( m_ChallengeNr );
+
 	if ( SendSubChannelData( send ) )
 	{
 		flags |= PACKET_FLAG_RELIABLE;
 	}
-
 
 	// Is there room for given datagram data. the datagram data 
 	// is somewhat more important than the normal unreliable data
@@ -1736,13 +1786,15 @@ int CNetChan::SendDatagram(bf_write *datagram)
 			Q_snprintf( comp, sizeof( comp ), " compression=%5u [%5.2f %%]", bytesSent, 100.0f * float( bytesSent ) / float( send.GetNumBytesWritten() ) );
 		}
 	
-		ConMsg ("UDP -> %12.12s: sz=%5i seq=%5i ack=%5i rel=%1i tm=%8.3f%s\n"
+		ConMsg ("UDP -> %12.12s: sz=%5i seq=%5i ack=%5i rel=%1i ch=%1i tm=%f rt=%f%s\n"
 			, GetName()
 			, send.GetNumBytesWritten()
 			, ( m_nOutSequenceNr ) & mask
 			, m_nInSequenceNr & mask
 			, (flags & PACKET_FLAG_RELIABLE) ? 1 : 0
+			, flags & PACKET_FLAG_CHALLENGE ? 1 : 0
 			, (float)net_time
+			, (float)Plat_FloatTime()
 			, comp );
 	}
 
@@ -1801,8 +1853,7 @@ bool CNetChan::ProcessControlMessage( int cmd, bf_read &buf)
 		unsigned int transferID = buf.ReadUBitLong( 32 );
 
 		buf.ReadString( string, sizeof(string) );
-
-		if ( buf.ReadOneBit() != 0 && IsSafeFileToDownload( string ) )
+		if ( buf.ReadOneBit() != 0 && IsValidFileForTransfer( string ) )
 		{
 			m_MessageHandler->FileRequested( string, transferID );
 		}
@@ -1850,7 +1901,7 @@ bool CNetChan::ProcessMessages( bf_read &buf  )
 		{
 			m_MessageHandler->ConnectionCrashed( "Buffer overflow in net message" );
 			return false;
-		}	
+		}
 
 		// Are we at the end?
 		if ( buf.GetNumBitsLeft() < NETMSG_TYPE_BITS )
@@ -1878,7 +1929,7 @@ bool CNetChan::ProcessMessages( bf_read &buf  )
 			// let message parse itself from buffe
 			const char *msgname = netmsg->GetName();
 			
-			int startbit = buf.GetNumBitsRead();
+			int nMsgStartBit = buf.GetNumBitsRead();
 
 			if ( !netmsg->ReadFromBuffer( buf ) )
 			{
@@ -1887,7 +1938,7 @@ bool CNetChan::ProcessMessages( bf_read &buf  )
 				return false;
 			}
 
-			UpdateMessageStats( netmsg->GetGroup(), buf.GetNumBitsRead() - startbit );
+			UpdateMessageStats( netmsg->GetGroup(), buf.GetNumBitsRead() - nMsgStartBit );
 
 			if ( showmsgname )
 			{
@@ -1915,6 +1966,13 @@ bool CNetChan::ProcessMessages( bf_read &buf  )
 			if ( m_bShouldDelete )
 			{
 				delete this;
+				return false;
+			}
+
+			if ( m_bClearedDuringProcessing )
+			{
+				// Clear() was called during processing, our buffer is no longer valid
+				m_bClearedDuringProcessing = false;
 				return false;
 			}
 
@@ -2011,6 +2069,118 @@ void CNetChan::CheckWaitingList(int nList)
 	// else: still pending fragments
 }
 
+#ifdef STAGING_ONLY
+
+CON_COMMAND( netchan_test_upload, "[filename]: Uploads a file to server." )
+{
+	if ( args.ArgC() != 2 )
+	{
+		Msg( "Usage: netchan_test_upload [filename]\n" );
+		return;
+	}
+
+	//$ TODO: the con command system is truncating the filenames we're passing in. Need to workaround this...
+	const char *filename = args.GetCommandString() + V_strlen( "netchan_test_upload " );
+
+	Msg( "Sending '%s'\n", filename );
+	bool bRet = CNetChan::TestUpload( filename );
+	Msg( "%s returned %d\n", __FUNCTION__, bRet );
+}
+
+bool CNetChan::TestUpload( const char *filename )
+{
+	dataFragments_t data;
+	static char s_buf[] = "The quick brown\nfox\n";
+
+	data.file = FILESYSTEM_INVALID_HANDLE;		// open file handle
+	V_strcpy_safe( data.filename, filename );	// filename
+	data.buffer = s_buf;						// if NULL it's a file
+	data.bytes = sizeof( s_buf ) - 1;			// size in bytes
+	data.bits = data.bytes * 8;					// size in bits
+	data.transferID = 123;						// only for files
+	data.isCompressed = false;					// true if data is bzip compressed
+	data.nUncompressedSize = data.bytes; 		// full size in bytes
+	data.asTCP = 0;								// send as TCP stream
+	data.numFragments = 0;						// number of total fragments
+	data.ackedFragments = 0; 					// number of fragments send & acknowledged
+	data.pendingFragments = 0; 					// number of fragments send, but not acknowledged yet
+
+	return HandleUpload( &data, NULL );
+}
+
+#endif // STAGING_ONLY
+
+bool CNetChan::HandleUpload( dataFragments_t *data, INetChannelHandler *MessageHandler )
+{
+	const char *szErrorStr = NULL;
+	static ConVar *s_pAllowUpload = g_pCVar->FindVar( "sv_allowupload" );
+
+	if ( !s_pAllowUpload || !s_pAllowUpload->GetBool() )
+	{
+		szErrorStr = "ignored. File uploads are disabled!";
+	}
+	else
+	{
+		// Make sure that this file is not being written to a location above the current directory, isn't in 
+		// writing to any locations we don't want, isn't an unsupported 
+		if ( !CNetChan::IsValidFileForTransfer( data->filename ) )
+		{
+			szErrorStr = "has invalid path or extension!";
+		}
+		else
+		{
+			// There's a special write path for this stuff
+			const char *pszPathID = "download";
+
+			// we received a file, write it to disk and notify host
+			if ( g_pFileSystem->FileExists( data->filename, pszPathID ) )
+			{
+				szErrorStr = "already exists!";
+			}
+			else
+			{
+				// Make sure path exists
+				char szParentDir[ MAX_PATH ];
+				if ( !V_ExtractFilePath( data->filename, szParentDir, sizeof( szParentDir ) ) )
+					szParentDir[0] = '\0';
+
+				g_pFileSystem->CreateDirHierarchy( szParentDir, pszPathID );
+
+				// Open new file for write binary.
+				data->file = g_pFileSystem->Open( data->filename, "wb", pszPathID );
+
+				if ( FILESYSTEM_INVALID_HANDLE == data->file )
+				{
+					szErrorStr = "failed to write!";
+				}
+				else
+				{
+					g_pFileSystem->Write( data->buffer, data->bytes, data->file );
+					g_pFileSystem->Close( data->file );
+
+					if ( net_showfragments.GetInt() == 2 )
+					{
+						DevMsg( "FileReceived: %s, %i bytes (ID %i)\n", data->filename, data->bytes, data->transferID );
+					}
+
+					if ( MessageHandler )
+					{
+						MessageHandler->FileReceived( data->filename, data->transferID );
+					}
+				}
+			}
+		}
+
+	}
+
+	if ( szErrorStr )
+	{
+		ConMsg( "Download file '%s' %s\n", data->filename, szErrorStr );
+	}
+
+	return true;
+}
+
 bool CNetChan::CheckReceivingList(int nList)
 {
 	dataFragments_t * data = &m_ReceiveList[nList]; // get list
@@ -2023,11 +2193,11 @@ bool CNetChan::CheckReceivingList(int nList)
 
 	if ( data->ackedFragments > data->numFragments )
 	{
-		ConMsg("Receiving failed: too many fragments %i/%i\n", data->ackedFragments, data->numFragments );
+		ConMsg( "Receiving failed: too many fragments %i/%i from %s\n", data->ackedFragments, data->numFragments, GetAddress() );
 		return false;
 	}
 
-	// got all fragments
+	// Got all fragments.
 
 	if ( net_showfragments.GetBool() )
 		ConMsg("Receiving complete: %i fragments, %i bytes\n", data->numFragments, data->bytes );
@@ -2048,37 +2218,7 @@ bool CNetChan::CheckReceivingList(int nList)
 	}
 	else
 	{
-		// we received a file, write it to disc and notify host
-		if ( !g_pFileSystem->FileExists(data->filename) )
-		{
-			// mae sure path exists
-			COM_CreatePath( data->filename );
-
-			// open new file for write binary
-			data->file = g_pFileSystem->Open( data->filename, "wb" );
-			
-			if ( FILESYSTEM_INVALID_HANDLE != data->file )
-			{
-				g_pFileSystem->Write( data->buffer, data->bytes, data->file );
-				g_pFileSystem->Close( data->file );
-
-				if ( net_showfragments.GetInt() == 2 )
-				{
-					DevMsg("FileReceived: %s, %i bytes (ID %i)\n", data->filename, data->bytes, data->transferID );
-				}
-
-				m_MessageHandler->FileReceived( data->filename, data->transferID );
-			}
-			else
-			{
-				ConMsg("Failed to write received file '%s'!\n", data->filename );
-			}
-		}
-		else
-		{
-			// don't overwrite existing files
-			ConMsg("Download file '%s' already exists!\n", data->filename );
-		}
+		HandleUpload( data, m_MessageHandler );
 	}
 
 	// clear receiveList
@@ -2128,6 +2268,17 @@ int CNetChan::ProcessPacketHeader( netpacket_t * packet )
 	if ( flags & PACKET_FLAG_CHOKED )
 		nChoked = packet->message.ReadByte(); 
 
+	if ( flags & PACKET_FLAG_CHALLENGE )
+	{
+		unsigned int nChallenge = packet->message.ReadLong();
+		if ( nChallenge != m_ChallengeNr )
+			return -1;
+		// challenge was good, latch we saw a good one
+		m_bStreamContainsChallenge = true;
+	}
+	else if ( m_bStreamContainsChallenge )
+		return -1; // what, no challenge in this packet but we got them before?
+
 	// discard stale or duplicated packets
 	if (sequence <= m_nInSequenceNr )
 	{
@@ -2165,6 +2316,17 @@ int CNetChan::ProcessPacketHeader( netpacket_t * packet )
 			,remote_address.ToString(), m_PacketDrop, sequence );
 		}
 	}
+
+	if ( net_maxpacketdrop.GetInt() > 0 && m_PacketDrop > net_maxpacketdrop.GetInt() )
+	{
+		if ( net_showdrop.GetInt() )
+		{
+			ConMsg ("%s:Too many dropped packets (%i) at %i\n"
+				,remote_address.ToString(), m_PacketDrop, sequence );
+		}
+		return -1;
+	}
+
 
 	for ( i = 0; i<MAX_SUBCHANNELS; i++ )
 	{
@@ -2237,6 +2399,7 @@ int CNetChan::ProcessPacketHeader( netpacket_t * packet )
 
 	m_nInSequenceNr = sequence;
 	m_nOutSequenceNrAck = sequence_ack;
+	ETWReadPacket( packet->from.ToString(), packet->wiresize, m_nInSequenceNr, m_nOutSequenceNr );
 
 // Update waiting list status
 	
@@ -2286,13 +2449,15 @@ void CNetChan::ProcessPacket( netpacket_t * packet, bool bHasHeader )
 
 	if ( net_showudp.GetInt() && net_showudp.GetInt() != 3 )
 	{
-		ConMsg ("UDP <- %s: sz=%i seq=%i ack=%i rel=%i tm=%f wire=%i\n"
+		ConMsg ("UDP <- %s: sz=%i seq=%i ack=%i rel=%i ch=%d, tm=%f rt=%f wire=%i\n"
 			, GetName()
 			, packet->size
 			, m_nInSequenceNr & 63
 			, m_nOutSequenceNrAck & 63 
 			, flags & PACKET_FLAG_RELIABLE ? 1 : 0
+			, flags & PACKET_FLAG_CHALLENGE ? 1 : 0
 			, net_time
+			, (float)Plat_FloatTime()
 			, packet->wiresize );
 	}
 	
@@ -2314,7 +2479,7 @@ void CNetChan::ProcessPacket( netpacket_t * packet, bool bHasHeader )
 			}
 		}
 
-		// flip subChannel bit to signal successfull receiving
+		// flip subChannel bit to signal successful receiving
 		FLIPBIT(m_nInReliableState, bit);
 		
 		for ( i=0; i<MAX_STREAMS; i++ )
@@ -2455,7 +2620,7 @@ bool CNetChan::SendReliableViaStream( dataFragments_t *data)
 {
 	// Always queue any pending reliable data ahead of the fragmentation buffer
 
-	char		headerBuf[32];
+	ALIGN4 char		headerBuf[32] ALIGN4_POST;
 	bf_write	header( "outDataHeader", headerBuf, sizeof(headerBuf) );
 
 	
@@ -2480,7 +2645,7 @@ bool CNetChan::SendReliableAcknowledge(int seqnr)
 {
 	// Always queue any pending reliable data ahead of the fragmentation buffer
 
-	char		headerBuf[32];
+	ALIGN4 char		headerBuf[32] ALIGN4_POST;
 	bf_write	header( "outAcknHeader", headerBuf, sizeof(headerBuf) );
 
 	header.WriteByte( STREAM_CMD_ACKN );
@@ -2497,7 +2662,7 @@ bool CNetChan::SendReliableAcknowledge(int seqnr)
 bool CNetChan::ProcessStream( void )
 {
 	char		cmd;
-	char		headerBuf[512];
+	ALIGN4 char	headerBuf[512] ALIGN4_POST;
 	
 	if ( !m_StreamSocket )
 		return true;
@@ -2556,7 +2721,8 @@ bool CNetChan::ProcessStream( void )
 		m_StreamLength = header.ReadWord();
 		m_StreamSeqNr = header.ReadLong();
 
-		if ( m_StreamLength	> NET_MAX_PAYLOAD )
+		const int cMaxPayload = GetProtocolVersion() > PROTOCOL_VERSION_23 ? NET_MAX_PAYLOAD : NET_MAX_PAYLOAD_V23;
+		if ( m_StreamLength	> cMaxPayload )
 		{
 			ConMsg( "ERROR! Stream indata too big (%i)", m_StreamLength );
 			return false;
@@ -2592,7 +2758,7 @@ bool CNetChan::ProcessStream( void )
 		{
 			if ( net_showtcp.GetInt() )
 			{
-				ConMsg ("TCP <- %s: ACKN seq=%i\n", remote_address.ToString(), m_StreamSeqNr );
+				ConMsg ("TCP <- %s: ACKN seqnr=%i\n", remote_address.ToString(), m_StreamSeqNr );
 			}
 
 			Assert( data->pendingFragments == data->numFragments );
@@ -2601,7 +2767,7 @@ bool CNetChan::ProcessStream( void )
 		}
 		else
 		{
-			ConMsg ("TCP <- %s: invalid ACKN seqnr %i\n", remote_address.ToString(), m_StreamLength, m_StreamSeqNr );
+			ConMsg ("TCP <- %s: invalid ACKN seqnr=%i\n", remote_address.ToString(), m_StreamSeqNr );
 		}
 
 		ResetStreaming();
@@ -2915,6 +3081,11 @@ void CNetChan::DecrementQueuedPackets()
 
 bool CNetChan::HasQueuedPackets() const
 {
+	if ( g_pQueuedPackedSender->HasQueuedPackets( this ) )
+	{
+		return true;
+	}
+
 	return m_nQueuedPackets > 0;
 }
 
@@ -2945,7 +3116,117 @@ int CNetChan::GetMaxRoutablePayloadSize()
 	return m_nMaxRoutablePayloadSize;
 }
 
+int CNetChan::GetProtocolVersion()
+{
+	AssertMsg(
+		m_nProtocolVersion >= 0 && m_nProtocolVersion <= PROTOCOL_VERSION,
+		"This is probably not being initialized somewhere"
+	);
+	return m_nProtocolVersion;
+}
+
 int CNetChan::IncrementSplitPacketSequence()
 {
 	return ++m_nSplitPacketSequence;
 }
+
+bool CNetChan::IsValidFileForTransfer( const char *pszFilename )
+{
+	if ( !pszFilename || !pszFilename[ 0 ] )
+		return false;
+
+	// No absolute paths or weaseling up the tree with ".." allowed.
+	if ( !COM_IsValidPath( pszFilename ) || V_IsAbsolutePath( pszFilename ) )
+		return false;
+
+	int len = V_strlen( pszFilename );
+	if ( len >= MAX_PATH )
+		return false;
+
+	char szTemp[ MAX_PATH ];
+	V_strcpy_safe( szTemp, pszFilename );
+
+	// Convert so we've got all forward slashes in the path.
+	V_FixSlashes( szTemp, '/' );
+	V_FixDoubleSlashes( szTemp );
+	if ( szTemp[ len - 1 ] == '/' )
+		return false;
+
+	int slash_count = 0;
+	for ( const char *psz = szTemp; *psz; psz++ )
+	{
+		if ( *psz == '/' )
+			slash_count++;
+	}
+	// Really no reason to have deeper directory than this?
+	if ( slash_count >= 32 )
+		return false;
+
+	// Don't allow filenames with unicode whitespace in them.
+	if ( Q_RemoveAllEvilCharacters( szTemp ) )
+		return false;
+
+	if ( V_stristr( szTemp, "lua/" ) ||
+	     V_stristr( szTemp, "gamemodes/" ) ||
+	     V_stristr( szTemp, "addons/" ) ||
+	     V_stristr( szTemp, "~/" ) ||
+	     // V_stristr( szTemp, "//" ) || 		// Don't allow '//'. TODO: Is this check ok?
+	     V_stristr( szTemp, "./././" ) ||	// Don't allow folks to make crazy long paths with ././././ stuff.
+	     V_stristr( szTemp, "   " ) ||		// Don't allow multiple spaces or tab (was being used for an exploit).
+	     V_stristr( szTemp, "\t" ) )
+	{
+		return false;
+	}
+
+	// If .exe or .EXE or these other strings exist _anywhere_ in the filename, reject it.
+	if ( V_stristr( szTemp, ".cfg" ) ||
+	     V_stristr( szTemp, ".lst" ) ||
+	     V_stristr( szTemp, ".exe" ) ||
+	     V_stristr( szTemp, ".vbs" ) ||
+	     V_stristr( szTemp, ".com" ) ||
+	     V_stristr( szTemp, ".bat" ) ||
+	     V_stristr( szTemp, ".cmd" ) ||
+	     V_stristr( szTemp, ".dll" ) ||
+	     V_stristr( szTemp, ".so" ) ||
+	     V_stristr( szTemp, ".dylib" ) ||
+	     V_stristr( szTemp, ".ini" ) ||
+	     V_stristr( szTemp, ".log" ) ||
+	     V_stristr( szTemp, ".lua" ) ||
+	     V_stristr( szTemp, ".vdf" ) ||
+	     V_stristr( szTemp, ".smx" ) ||
+	     V_stristr( szTemp, ".gcf" ) ||
+	     V_stristr( szTemp, ".lmp" ) ||
+	     V_stristr( szTemp, ".sys" ) )
+	{
+		return false;
+	}
+
+	// Search for the first . in the base filename, and bail if not found.
+	// We don't want people passing in things like 'cfg/.wp.so'...
+	const char *basename = strrchr( szTemp, '/' );
+	if ( !basename )
+		basename = szTemp;
+	const char *extension = strchr( basename, '.' );
+	if ( !extension )
+		return false;
+
+	// If the extension is not exactly 3 or 4 characters, bail.
+	int extension_len = V_strlen( extension );
+	if ( ( extension_len != 3 ) &&
+	     ( extension_len != 4 ) &&
+	     V_stricmp( extension, ".bsp.bz2" ) &&
+	     V_stricmp( extension, ".xbox.vtx" ) &&
+	     V_stricmp( extension, ".dx80.vtx" ) &&
+	     V_stricmp( extension, ".dx90.vtx" ) &&
+	     V_stricmp( extension, ".sw.vtx" ) )
+	{
+		return false;
+	}
+
+	// If there are any spaces in the extension, bail. (Windows exploit).
+	if ( strchr( extension, ' ' ) )
+		return false;
+
+	return true;
+}
+

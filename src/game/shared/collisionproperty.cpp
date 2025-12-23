@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,7 @@
 #include "igamesystem.h"
 #include "utlvector.h"
 #include "tier0/threadtools.h"
+#include "tier0/tslist.h"
 
 #ifdef CLIENT_DLL
 
@@ -51,11 +52,29 @@ public:
 	void AddEntity( CBaseEntity *pEntity );
 	
 	~CDirtySpatialPartitionEntityList();
+	void LockPartitionForRead()
+	{
+		if ( m_readLockCount == 0 )
+		{
+			m_partitionMutex.LockForRead();
+		}
+		m_readLockCount++;
+	}
+	void UnlockPartitionForRead()
+	{
+		m_readLockCount--;
+		if ( m_readLockCount == 0 )
+		{
+			m_partitionMutex.UnlockRead();
+		}
+	}
 
 
 private:
-	CUtlVector< CBaseHandle > m_DirtyEntities;
-	CThreadFastMutex m_mutex;
+	CTSListWithFreeList<CBaseHandle> m_DirtyEntities;
+	CThreadSpinRWLock	 m_partitionMutex;
+	uint32			 m_partitionWriteId;
+	CThreadLocalInt<>	 m_readLockCount;
 };
 
 
@@ -87,6 +106,7 @@ void UpdateDirtySpatialPartitionEntities()
 CDirtySpatialPartitionEntityList::CDirtySpatialPartitionEntityList( char const *name ) : CAutoGameSystem( name )
 {
 	m_DirtyEntities.Purge();
+	m_readLockCount = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -102,13 +122,13 @@ CDirtySpatialPartitionEntityList::~CDirtySpatialPartitionEntityList()
 //-----------------------------------------------------------------------------
 bool CDirtySpatialPartitionEntityList::Init()
 {
-	partition->InstallQueryCallback( this );
+	::partition->InstallQueryCallback( this );
 	return true;
 }
 
 void CDirtySpatialPartitionEntityList::Shutdown()
 {
-	partition->RemoveQueryCallback( this );
+	::partition->RemoveQueryCallback( this );
 }
 
 
@@ -117,8 +137,7 @@ void CDirtySpatialPartitionEntityList::Shutdown()
 //-----------------------------------------------------------------------------
 void CDirtySpatialPartitionEntityList::AddEntity( CBaseEntity *pEntity )
 {
-	AUTO_LOCK( m_mutex );
-	m_DirtyEntities.AddToTail( pEntity->GetRefEHandle() );
+	m_DirtyEntities.PushItem( pEntity->GetRefEHandle() );
 }
 
 
@@ -137,61 +156,78 @@ void CDirtySpatialPartitionEntityList::LevelShutdownPostEntity()
 void CDirtySpatialPartitionEntityList::OnPreQuery( SpatialPartitionListMask_t listMask )
 {
 #ifdef CLIENT_DLL
-	if ( !( listMask & PARTITION_CLIENT_GAME_EDICTS ) )
+	const int validMask = PARTITION_CLIENT_GAME_EDICTS;
+#else
+	const int validMask = PARTITION_SERVER_GAME_EDICTS;
+#endif
+
+	if ( !( listMask & validMask ) )
 		return;
 
+	if ( m_partitionWriteId != 0 && m_partitionWriteId == ThreadGetCurrentId() )
+		return;
+
+#ifdef CLIENT_DLL
 	// FIXME: This should really be an assertion... feh!
 	if ( !C_BaseEntity::IsAbsRecomputationsEnabled() )
 	{
-		m_mutex.Lock();
+		LockPartitionForRead();
 		return;
 	}
-
-#else
-	if ( !( listMask & PARTITION_SERVER_GAME_EDICTS ) )
-		return;
 #endif
 
-	m_mutex.Lock();
-
-	CUtlVector< CBaseHandle > vecStillDirty;
-
-	int nDirtyEntityCount = m_DirtyEntities.Count();
-	while ( nDirtyEntityCount > 0 )
+	// if you're holding a read lock, then these are entities that were still dirty after your trace started
+	// or became dirty due to some other thread or callback. Updating them may cause corruption further up the
+	// stack (e.g. partition iterator).  Ignoring the state change should be safe since it happened after the 
+	// trace was requested or was unable to be resolved in a previous attempt (still dirty).
+	if ( m_DirtyEntities.Count() && !m_readLockCount )
 	{
-		CBaseHandle handle;
-		handle = m_DirtyEntities[nDirtyEntityCount-1];
+		CUtlVector< CBaseHandle > vecStillDirty;
+		m_partitionMutex.LockForWrite();
+		m_partitionWriteId = ThreadGetCurrentId();
+		CTSListWithFreeList<CBaseHandle>::Node_t *pCurrent, *pNext;
+		while ( ( pCurrent = m_DirtyEntities.Detach() ) != NULL )
+		{
+			while ( pCurrent )
+			{
+				CBaseHandle handle = pCurrent->elem;
+				pNext = (CTSListWithFreeList<CBaseHandle>::Node_t *)pCurrent->Next;
+				m_DirtyEntities.FreeNode( pCurrent );
+				pCurrent = pNext;
 
 #ifndef CLIENT_DLL
-		CBaseEntity *pEntity = gEntList.GetBaseEntity( handle );
+				CBaseEntity *pEntity = gEntList.GetBaseEntity( handle );
 #else
-		CBaseEntity *pEntity = cl_entitylist->GetBaseEntityFromHandle( handle );
+				CBaseEntity *pEntity = cl_entitylist->GetBaseEntityFromHandle( handle );
 #endif
-		
-		m_DirtyEntities.FastRemove( nDirtyEntityCount-1 );
 
-		if ( pEntity )
-		{
-			// If an entity is in the middle of bone setup, don't call UpdatePartition
-			//  which can cause it to redo bone setup on the same frame causing a recursive
-			//  call to bone setup.
-			if ( !pEntity->IsEFlagSet( EFL_SETTING_UP_BONES ) )
-			{
-				pEntity->CollisionProp()->UpdatePartition();
-			}
-			else
-			{
-				vecStillDirty.AddToTail( handle );
+				if ( pEntity )
+				{
+					// If an entity is in the middle of bone setup, don't call UpdatePartition
+					//  which can cause it to redo bone setup on the same frame causing a recursive
+					//  call to bone setup.
+					if ( !pEntity->IsEFlagSet( EFL_SETTING_UP_BONES ) )
+					{
+						pEntity->CollisionProp()->UpdatePartition();
+					}
+					else
+					{
+						vecStillDirty.AddToTail( handle );
+					}
+				}
 			}
 		}
-
-		nDirtyEntityCount = m_DirtyEntities.Count();
+		if ( vecStillDirty.Count() > 0 )
+		{
+			for ( int i = 0; i < vecStillDirty.Count(); i++ )
+			{
+				m_DirtyEntities.PushItem( vecStillDirty[i] );
+			}
+		}
+		m_partitionWriteId = 0;
+		m_partitionMutex.UnlockWrite();
 	}
-
-	if ( vecStillDirty.Count() > 0 )
-	{
-		m_DirtyEntities = vecStillDirty;
-	}
+	LockPartitionForRead();
 }
 
 //-----------------------------------------------------------------------------
@@ -207,7 +243,10 @@ void CDirtySpatialPartitionEntityList::OnPostQuery( SpatialPartitionListMask_t l
 		return;
 #endif
 
-	m_mutex.Unlock();
+	if ( m_partitionWriteId != 0 )
+		return;
+
+	UnlockPartitionForRead();
 }
 
 
@@ -220,6 +259,8 @@ void CDirtySpatialPartitionEntityList::OnPostQuery( SpatialPartitionListMask_t l
 	BEGIN_DATADESC_NO_BASE( CCollisionProperty )
 
 //		DEFINE_FIELD( m_pOuter, FIELD_CLASSPTR ),
+		DEFINE_GLOBAL_FIELD( m_vecMinsPreScaled, FIELD_VECTOR ),
+		DEFINE_GLOBAL_FIELD( m_vecMaxsPreScaled, FIELD_VECTOR ),
 		DEFINE_GLOBAL_FIELD( m_vecMins, FIELD_VECTOR ),
 		DEFINE_GLOBAL_FIELD( m_vecMaxs, FIELD_VECTOR ),
 		DEFINE_KEYFIELD( m_nSolidType, FIELD_CHARACTER, "solid" ),
@@ -227,6 +268,8 @@ void CDirtySpatialPartitionEntityList::OnPostQuery( SpatialPartitionListMask_t l
 		DEFINE_FIELD( m_nSurroundType, FIELD_CHARACTER ),
 		DEFINE_FIELD( m_flRadius, FIELD_FLOAT ),
 		DEFINE_FIELD( m_triggerBloat, FIELD_CHARACTER ),
+		DEFINE_FIELD( m_vecSpecifiedSurroundingMinsPreScaled, FIELD_VECTOR ),
+		DEFINE_FIELD( m_vecSpecifiedSurroundingMaxsPreScaled, FIELD_VECTOR ),
 		DEFINE_FIELD( m_vecSpecifiedSurroundingMins, FIELD_VECTOR ),
 		DEFINE_FIELD( m_vecSpecifiedSurroundingMaxs, FIELD_VECTOR ),
 		DEFINE_FIELD( m_vecSurroundingMins, FIELD_VECTOR ),
@@ -243,6 +286,8 @@ void CDirtySpatialPartitionEntityList::OnPostQuery( SpatialPartitionListMask_t l
 //-----------------------------------------------------------------------------
 BEGIN_PREDICTION_DATA_NO_BASE( CCollisionProperty )
 
+	DEFINE_PRED_FIELD( m_vecMinsPreScaled, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_vecMaxsPreScaled, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_vecMins, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_vecMaxs, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_nSolidType, FIELD_CHARACTER, FTYPEDESC_INSENDTABLE ),
@@ -268,18 +313,18 @@ static void RecvProxy_SolidFlags( const CRecvProxyData *pData, void *pStruct, vo
 	((CCollisionProperty*)pStruct)->SetSolidFlags( pData->m_Value.m_Int );
 }
 
-static void RecvProxy_OBBMins( const CRecvProxyData *pData, void *pStruct, void *pOut )
+static void RecvProxy_OBBMinsPreScaled( const CRecvProxyData *pData, void *pStruct, void *pOut )
 {
 	CCollisionProperty *pProp = ((CCollisionProperty*)pStruct);
 	Vector &vecMins = *((Vector*)pData->m_Value.m_Vector);
-	pProp->SetCollisionBounds( vecMins, pProp->OBBMaxs() );
+	pProp->SetCollisionBounds( vecMins, pProp->OBBMaxsPreScaled() );
 }
 
-static void RecvProxy_OBBMaxs( const CRecvProxyData *pData, void *pStruct, void *pOut )
+static void RecvProxy_OBBMaxsPreScaled( const CRecvProxyData *pData, void *pStruct, void *pOut )
 {
 	CCollisionProperty *pProp = ((CCollisionProperty*)pStruct);
 	Vector &vecMaxs = *((Vector*)pData->m_Value.m_Vector);
-	pProp->SetCollisionBounds( pProp->OBBMins(), vecMaxs );
+	pProp->SetCollisionBounds( pProp->OBBMinsPreScaled(), vecMaxs );
 }
 
 static void RecvProxy_VectorDirtySurround( const CRecvProxyData *pData, void *pStruct, void *pOut )
@@ -320,21 +365,29 @@ static void SendProxy_SolidFlags( const SendProp *pProp, const void *pStruct, co
 BEGIN_NETWORK_TABLE_NOBASE( CCollisionProperty, DT_CollisionProperty )
 
 #ifdef CLIENT_DLL
-	RecvPropVector( RECVINFO(m_vecMins), 0, RecvProxy_OBBMins ),
-	RecvPropVector( RECVINFO(m_vecMaxs), 0, RecvProxy_OBBMaxs ),
+	RecvPropVector( RECVINFO(m_vecMinsPreScaled), 0, RecvProxy_OBBMinsPreScaled ),
+	RecvPropVector( RECVINFO(m_vecMaxsPreScaled), 0, RecvProxy_OBBMaxsPreScaled ),
+	RecvPropVector( RECVINFO(m_vecMins), 0 ),
+	RecvPropVector( RECVINFO(m_vecMaxs), 0 ),
 	RecvPropInt( RECVINFO( m_nSolidType ),		0, RecvProxy_Solid ),
 	RecvPropInt( RECVINFO( m_usSolidFlags ),	0, RecvProxy_SolidFlags ),
 	RecvPropInt( RECVINFO(m_nSurroundType), 0, RecvProxy_IntDirtySurround ),
 	RecvPropInt( RECVINFO(m_triggerBloat), 0, RecvProxy_IntDirtySurround ), 
+	RecvPropVector( RECVINFO(m_vecSpecifiedSurroundingMinsPreScaled), 0, RecvProxy_VectorDirtySurround ),
+	RecvPropVector( RECVINFO(m_vecSpecifiedSurroundingMaxsPreScaled), 0, RecvProxy_VectorDirtySurround ),
 	RecvPropVector( RECVINFO(m_vecSpecifiedSurroundingMins), 0, RecvProxy_VectorDirtySurround ),
 	RecvPropVector( RECVINFO(m_vecSpecifiedSurroundingMaxs), 0, RecvProxy_VectorDirtySurround ),
 #else
+	SendPropVector( SENDINFO(m_vecMinsPreScaled), 0, SPROP_NOSCALE),
+	SendPropVector( SENDINFO(m_vecMaxsPreScaled), 0, SPROP_NOSCALE),
 	SendPropVector( SENDINFO(m_vecMins), 0, SPROP_NOSCALE),
 	SendPropVector( SENDINFO(m_vecMaxs), 0, SPROP_NOSCALE),
 	SendPropInt( SENDINFO( m_nSolidType ),		3, SPROP_UNSIGNED, SendProxy_Solid ),
 	SendPropInt( SENDINFO( m_usSolidFlags ),	FSOLID_MAX_BITS, SPROP_UNSIGNED, SendProxy_SolidFlags ),
 	SendPropInt( SENDINFO( m_nSurroundType ), SURROUNDING_TYPE_BIT_COUNT, SPROP_UNSIGNED ),
 	SendPropInt( SENDINFO(m_triggerBloat), 0, SPROP_UNSIGNED),
+	SendPropVector( SENDINFO(m_vecSpecifiedSurroundingMinsPreScaled), 0, SPROP_NOSCALE),
+	SendPropVector( SENDINFO(m_vecSpecifiedSurroundingMaxsPreScaled), 0, SPROP_NOSCALE),
 	SendPropVector( SENDINFO(m_vecSpecifiedSurroundingMins), 0, SPROP_NOSCALE),
 	SendPropVector( SENDINFO(m_vecSpecifiedSurroundingMaxs), 0, SPROP_NOSCALE),
 #endif
@@ -363,6 +416,8 @@ CCollisionProperty::~CCollisionProperty()
 void CCollisionProperty::Init( CBaseEntity *pEntity )
 {
 	m_pOuter = pEntity;
+	m_vecMinsPreScaled.GetForModify().Init();
+	m_vecMaxsPreScaled.GetForModify().Init();
 	m_vecMins.GetForModify().Init();
 	m_vecMaxs.GetForModify().Init();
 	m_flRadius = 0.0f;
@@ -374,6 +429,8 @@ void CCollisionProperty::Init( CBaseEntity *pEntity )
 	m_nSurroundType = USE_OBB_COLLISION_BOUNDS;
 	m_vecSurroundingMins = vec3_origin;
 	m_vecSurroundingMaxs = vec3_origin;
+	m_vecSpecifiedSurroundingMinsPreScaled.GetForModify().Init();
+	m_vecSpecifiedSurroundingMaxsPreScaled.GetForModify().Init();
 	m_vecSpecifiedSurroundingMins.GetForModify().Init();
 	m_vecSpecifiedSurroundingMaxs.GetForModify().Init();
 }
@@ -599,22 +656,73 @@ const matrix3x4_t& CCollisionProperty::CollisionToWorldTransform() const
 //-----------------------------------------------------------------------------
 // Sets the collision bounds + the size
 //-----------------------------------------------------------------------------
-void CCollisionProperty::SetCollisionBounds( const Vector& mins, const Vector &maxs )
+void CCollisionProperty::SetCollisionBounds( const Vector &mins, const Vector &maxs )
 {
-	if ( (m_vecMins == mins) && (m_vecMaxs == maxs) )
-		return;
-		
-	m_vecMins = mins;
-	m_vecMaxs = maxs;
+	if ( ( m_vecMinsPreScaled != mins ) || ( m_vecMaxsPreScaled != maxs ) )
+	{
+		m_vecMinsPreScaled = mins;
+		m_vecMaxsPreScaled = maxs;
+	}
+
+	bool bDirty = false;
+
+	// Check if it's a scaled model
+	CBaseAnimating *pAnim = GetOuter()->GetBaseAnimating();
+	if ( pAnim && pAnim->GetModelScale() != 1.0f )
+	{
+		// Do the scaling
+		Vector vecNewMins = mins * pAnim->GetModelScale();
+		Vector vecNewMaxs = maxs * pAnim->GetModelScale();
+
+		if ( ( m_vecMins != vecNewMins ) || ( m_vecMaxs != vecNewMaxs ) )
+		{
+			m_vecMins = vecNewMins;
+			m_vecMaxs = vecNewMaxs;
+			bDirty = true;
+		}
+	}
+	else
+	{
+		// No scaling needed!
+		if ( ( m_vecMins != mins ) || ( m_vecMaxs != maxs ) )
+		{
+			m_vecMins = mins;
+			m_vecMaxs = maxs;
+			bDirty = true;
+		}
+	}
 	
-	//ASSERT_COORD( mins );
-	//ASSERT_COORD( maxs );
+	if ( bDirty )
+	{
+		//ASSERT_COORD( m_vecMins.Get() );
+		//ASSERT_COORD( m_vecMaxs.Get() );
 
-	Vector vecSize;
-	VectorSubtract( maxs, mins, vecSize );
-	m_flRadius = vecSize.Length() * 0.5f;
+		Vector vecSize;
+		VectorSubtract( m_vecMaxs, m_vecMins, vecSize );
+		m_flRadius = vecSize.Length() * 0.5f;
 
-	MarkSurroundingBoundsDirty();
+		MarkSurroundingBoundsDirty();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Rebuilds the scaled bounds from the prescaled bounds after a model's scale has changed
+//-----------------------------------------------------------------------------
+void CCollisionProperty::RefreshScaledCollisionBounds( void )
+{
+	SetCollisionBounds( m_vecMinsPreScaled, m_vecMaxsPreScaled );
+
+	SurroundingBoundsType_t nSurroundType = static_cast< SurroundingBoundsType_t >( m_nSurroundType.Get() );
+	if ( nSurroundType == USE_SPECIFIED_BOUNDS )
+	{
+		SetSurroundingBoundsType( nSurroundType, 
+								  &(m_vecSpecifiedSurroundingMinsPreScaled.Get()), 
+								  &(m_vecSpecifiedSurroundingMaxsPreScaled.Get()) );
+	}
+	else
+	{
+		SetSurroundingBoundsType( nSurroundType );
+	}
 }
 
 
@@ -629,20 +737,6 @@ float CCollisionProperty::BoundingRadius2D() const
 
 	vecSize.z = 0;	
 	return vecSize.Length() * 0.5f;
-}
-
-
-//-----------------------------------------------------------------------------
-// Bounding representation (OBB)
-//-----------------------------------------------------------------------------
-const Vector& CCollisionProperty::OBBMins( ) const
-{
-	return m_vecMins.Get();
-}
-
-const Vector& CCollisionProperty::OBBMaxs( ) const
-{
-	return m_vecMaxs.Get();
 }
 
 
@@ -943,15 +1037,15 @@ void CCollisionProperty::ComputeRotationExpandedBounds( Vector *pVecWorldMins, V
 	else
 	{
 		float flMaxVal;
-		flMaxVal = max( FloatMakePositive(m_vecMins.Get().x), FloatMakePositive(m_vecMaxs.Get().x) );
+		flMaxVal = MAX( FloatMakePositive(m_vecMins.Get().x), FloatMakePositive(m_vecMaxs.Get().x) );
 		pVecWorldMins->x = -flMaxVal;
 		pVecWorldMaxs->x = flMaxVal;
 
-		flMaxVal = max( FloatMakePositive(m_vecMins.Get().y), FloatMakePositive(m_vecMaxs.Get().y) );
+		flMaxVal = MAX( FloatMakePositive(m_vecMins.Get().y), FloatMakePositive(m_vecMaxs.Get().y) );
 		pVecWorldMins->y = -flMaxVal;
 		pVecWorldMaxs->y = flMaxVal;
 
-		flMaxVal = max( FloatMakePositive(m_vecMins.Get().z), FloatMakePositive(m_vecMaxs.Get().z) );
+		flMaxVal = MAX( FloatMakePositive(m_vecMins.Get().z), FloatMakePositive(m_vecMaxs.Get().z) );
 		pVecWorldMins->z = -flMaxVal;
 		pVecWorldMaxs->z = flMaxVal;
 	}
@@ -1085,10 +1179,32 @@ void CCollisionProperty::SetSurroundingBoundsType( SurroundingBoundsType_t type,
 	else
 	{
 		Assert( pMins && pMaxs );
-		m_vecSpecifiedSurroundingMins = *pMins;
-		m_vecSpecifiedSurroundingMaxs = *pMaxs;
-		m_vecSurroundingMins = *pMins;
-		m_vecSurroundingMaxs = *pMaxs;
+		m_vecSpecifiedSurroundingMinsPreScaled = *pMins;
+		m_vecSpecifiedSurroundingMaxsPreScaled = *pMaxs;
+
+		// Check if it's a scaled model
+		CBaseAnimating *pAnim = GetOuter()->GetBaseAnimating();
+		if ( pAnim && pAnim->GetModelScale() != 1.0f )
+		{
+			// Do the scaling
+			Vector vecNewMins = *pMins * pAnim->GetModelScale();
+			Vector vecNewMaxs = *pMaxs * pAnim->GetModelScale();
+
+			m_vecSpecifiedSurroundingMins = vecNewMins;
+			m_vecSpecifiedSurroundingMaxs = vecNewMaxs;
+			m_vecSurroundingMins = vecNewMins;
+			m_vecSurroundingMaxs = vecNewMaxs;
+
+		}
+		else
+		{
+			// No scaling needed!
+			m_vecSpecifiedSurroundingMins = *pMins;
+			m_vecSpecifiedSurroundingMaxs = *pMaxs;
+			m_vecSurroundingMins = *pMins;
+			m_vecSurroundingMaxs = *pMaxs;
+			
+		}
 
 		ASSERT_COORD( m_vecSurroundingMins );
 		ASSERT_COORD( m_vecSurroundingMaxs );
@@ -1173,14 +1289,14 @@ void CCollisionProperty::CreatePartitionHandle()
 {
 	// Put the entity into the spatial partition.
 	Assert( m_Partition == PARTITION_INVALID_HANDLE );
-	m_Partition = partition->CreateHandle( GetEntityHandle() );
+	m_Partition = ::partition->CreateHandle( GetEntityHandle() );
 }
 
 void CCollisionProperty::DestroyPartitionHandle()
 {
 	if ( m_Partition != PARTITION_INVALID_HANDLE )
 	{
-		partition->DestroyHandle( m_Partition );
+		::partition->DestroyHandle( m_Partition );
 		m_Partition = PARTITION_INVALID_HANDLE;
 	}
 }
@@ -1198,7 +1314,7 @@ void CCollisionProperty::UpdateServerPartitionMask( )
 
 	// Remove it from whatever lists it may be in at the moment
 	// We'll re-add it below if we need to.
-	partition->Remove( handle );
+	::partition->Remove( handle );
 
 	// Don't bother with deleted things
 	if ( !m_pOuter->edict() )
@@ -1212,7 +1328,7 @@ void CCollisionProperty::UpdateServerPartitionMask( )
 	bool bIsSolid = IsSolid() || IsSolidFlagSet(FSOLID_TRIGGER);
 	if ( bIsSolid || m_pOuter->IsEFlagSet(EFL_USE_PARTITION_WHEN_NOT_SOLID) )
 	{
-		partition->Insert( PARTITION_ENGINE_NON_STATIC_EDICTS, handle );
+		::partition->Insert( PARTITION_ENGINE_NON_STATIC_EDICTS, handle );
 	}
 
 	if ( !bIsSolid )
@@ -1230,7 +1346,7 @@ void CCollisionProperty::UpdateServerPartitionMask( )
 		mask |=	PARTITION_ENGINE_TRIGGER_EDICTS;
 	}
 	Assert( mask != 0 );
-	partition->Insert( mask, handle );
+	::partition->Insert( mask, handle );
 #endif
 }
 
@@ -1293,11 +1409,11 @@ void CCollisionProperty::UpdatePartition( )
 				WorldSpaceSurroundingBounds( &vecSurroundMins, &vecSurroundMaxs );
 				vecSurroundMins -= Vector( 1, 1, 1 );
 				vecSurroundMaxs += Vector( 1, 1, 1 );
-				partition->ElementMoved( GetPartitionHandle(), vecSurroundMins,  vecSurroundMaxs );
+				::partition->ElementMoved( GetPartitionHandle(), vecSurroundMins,  vecSurroundMaxs );
 			}
 			else
 			{
-				partition->ElementMoved( GetPartitionHandle(), GetCollisionOrigin(),  GetCollisionOrigin() );
+				::partition->ElementMoved( GetPartitionHandle(), GetCollisionOrigin(),  GetCollisionOrigin() );
 			}
 		}
 	}

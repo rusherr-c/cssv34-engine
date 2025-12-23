@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -290,7 +290,6 @@ void CToolDemoFile::Close()
 
 int CToolDemoFile::GetSize()
 {
-	g_pFileSystem->Seek( m_hDemoFile, 0,  FILESYSTEM_SEEK_TAIL );
-	return g_pFileSystem->Tell( m_hDemoFile );
+	return g_pFileSystem->Size( m_hDemoFile );
 }
 

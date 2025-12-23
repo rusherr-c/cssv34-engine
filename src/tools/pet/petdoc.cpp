@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 //=============================================================================//
 
 #include "petdoc.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "toolutils/enginetools_int.h"
 #include "filesystem.h"
@@ -197,10 +197,6 @@ bool CPetDoc::LoadFromFile( const char *pFileName )
 	SetDirty( false );
 
 	if ( !pFileName[0] )
-		return false;
-
-	const char *pGame = Q_stristr( pFileName, "\\game\\" );
-	if ( !pGame )
 		return false;
 
 	Q_strncpy( m_pFileName, pFileName, sizeof( m_pFileName ) );
@@ -393,6 +389,7 @@ void CPetDoc::ReplaceParticleSystemDefinition( CDmeParticleSystemDefinition *pPa
 	{
 		CAppUndoScopeGuard guard( NOTIFY_SETDIRTYFLAG, "Replace Particle System", "Replace Particle System" );
 		CDmrParticleSystemList particleSystemList( GetParticleSystemDefinitionList() );
+		pParticleSystem->SetFileId( m_hRoot->GetFileId(), TD_ALL );
 		particleSystemList.AddToTail( pParticleSystem );
 		return;
 	}
@@ -406,6 +403,7 @@ void CPetDoc::ReplaceParticleSystemDefinition( CDmeParticleSystemDefinition *pPa
 	CAppUndoScopeGuard guard( NOTIFY_SETDIRTYFLAG, "Replace Particle System", "Replace Particle System" );
 
 	particleSystemList.Set( nFoundIndex, pParticleSystem );
+	pParticleSystem->SetFileId( m_hRoot->GetFileId(), TD_ALL );
 
 	// Find all CDmeParticleChilds referring to this function
 	CUtlVector< CDmeParticleChild* > children;

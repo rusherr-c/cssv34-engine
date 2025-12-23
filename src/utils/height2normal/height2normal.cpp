@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -190,9 +190,11 @@ void ProcessFiles( const char *pNormalFileNameWithoutExtension,
 		}
 
 		strcpy( buf, pNormalFileNameWithoutExtension );
-		char *tmp = ( char * )Q_stristr( buf, "_normal" );
-		Assert( tmp );
-		tmp[0] = 0;
+
+		// Strip '_normal' off the end because we're looking for '_height' 
+		char *pcUnderscore = Q_stristr( buf, "_normal" );
+		*pcUnderscore = NULL;
+
 		if( animated )
 		{
 			sprintf( heightTGAFileName, "%s_height%03d.tga", buf, frameID + startFrame );

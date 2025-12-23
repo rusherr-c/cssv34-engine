@@ -15,7 +15,13 @@
 #include "tier1/strtools.h"
 #include "limits.h"
 
+// Matched with the memdbgoff at end of header
+#include "memdbgon.h"
+
 #if defined( OSX )
+#ifndef wcsdup
+// The mem override tools may provide a copy of this if active, otherwise it is not available in OS X's libc due to
+// being introduced in POSIX-20008
 inline wchar_t *wcsdup(const wchar_t *pString)
 {
 	wchar_t *pMemory;
@@ -31,6 +37,7 @@ inline wchar_t *wcsdup(const wchar_t *pString)
 
 	return NULL;
 }
+#endif
 
 inline size_t strnlen(const char *s, size_t n)
 {
@@ -66,7 +73,7 @@ public:
 	// which are about to be destroyed. It can also be explicitly invoked with
 	// std::move().
 	// Move constructor:
-	CUtlString( CUtlString&& rhs ) noexcept
+	CUtlString( CUtlString&& rhs )
 	{
 		// Move the string pointer from the source to this -- be sure to
 		// zero out the source to avoid double frees.
@@ -74,7 +81,7 @@ public:
 		rhs.m_pString = 0;
 	}
 	// Move assignment operator:
-	CUtlString& operator=( CUtlString&& rhs ) noexcept
+	CUtlString& operator=( CUtlString&& rhs )
 	{
 		// Move the string pointer from the source to this -- be sure to
 		// zero out the source to avoid double frees.
@@ -456,5 +463,7 @@ template < typename T > struct UTLConstStringCaselessStringEqualFunctor { bool o
 // Helper function for CUtlMaps with a CUtlString key
 inline bool UtlStringLessFunc( const CUtlString &lhs, const CUtlString &rhs ) { return V_strcmp( lhs.Get(), rhs.Get() ) < 0; } 
 inline bool UtlStringCaseInsensitiveLessFunc( const CUtlString &lhs, const CUtlString &rhs ) { return V_stricmp( lhs.Get(), rhs.Get() ) < 0; } 
+
+#include "memdbgoff.h"
 
 #endif // UTLSTRING_H

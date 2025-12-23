@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 
 /* Example how to plug this into an existing shader:
 
@@ -85,7 +85,7 @@
 ==================================================================================================== */
 
 #include "BaseVSShader.h"
-#include "mathlib/VMatrix.h"
+#include "mathlib/vmatrix.h"
 #include "emissive_scroll_blended_pass_helper.h"
 #include "convar.h"
 
@@ -124,9 +124,9 @@ void InitParamsEmissiveScrollBlendedPass( CBaseVSShader *pShader, IMaterialVar**
 void InitEmissiveScrollBlendedPass( CBaseVSShader *pShader, IMaterialVar** params, EmissiveScrollBlendedPassVars_t &info )
 {
 	// Load textures
-	pShader->LoadTexture( info.m_nBaseTexture );
+	pShader->LoadTexture( info.m_nBaseTexture, TEXTUREFLAGS_SRGB );
 	pShader->LoadTexture( info.m_nFlowTexture );
-	pShader->LoadTexture( info.m_nEmissiveTexture );
+	pShader->LoadTexture( info.m_nEmissiveTexture, TEXTUREFLAGS_SRGB );
 }
 
 void DrawEmissiveScrollBlendedPass( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynamicAPI *pShaderAPI,

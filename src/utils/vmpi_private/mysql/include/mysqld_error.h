@@ -1,10 +1,3 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
-//
-// Purpose: 
-//
-// $NoKeywords: $
-//
-//=============================================================================//
 /* Copyright (C) 2000 MySQL AB
 
    This program is free software; you can redistribute it and/or modify

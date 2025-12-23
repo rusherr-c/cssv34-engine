@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,9 +12,9 @@
 #include "choreowidgetdrawhelper.h"
 #include <vgui/ILocalize.h>
 
-using namespace vgui;
-
 extern vgui::ILocalize *g_pLocalize;
+
+using namespace vgui;
 
 CloseCaptionTool *g_pCloseCaptionTool = 0;
 
@@ -853,7 +853,7 @@ void CloseCaptionTool::ComputeStreamWork( CChoreoWidgetDrawHelper &helper, int a
 				}
 				else
 				{
-					int r, g, b;
+					int r = 0, g = 0, b = 0;
 					COLORREF newcolor;
 					if ( 3 == swscanf( args, L"%i,%i,%i", &r, &g, &b ) )
 					{
@@ -876,7 +876,7 @@ void CloseCaptionTool::ComputeStreamWork( CChoreoWidgetDrawHelper &helper, int a
 				{
 					// player and npc color selector
 					// e.g.,. 255,255,255:200,200,200
-					int pr, pg, pb, nr, ng, nb;
+					int pr = 0, pg = 0, pb = 0, nr = 0, ng = 0, nb = 0;
 					COLORREF newcolor;
 					if ( 6 == swscanf( args, L"%i,%i,%i:%i,%i,%i", &pr, &pg, &pb, &nr, &ng, &nb ) )
 					{

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: CS's custom C_PlayerResource
 //
@@ -33,9 +33,15 @@ public:
 	const Vector	GetBombsiteAPosition();
 	const Vector	GetBombsiteBPosition();
 	const Vector	GetHostageRescuePosition( int index );
+	int				GetPlayerClass( int iIndex );
 
 	bool			IsBombSpotted( void ) const;
 	bool			IsPlayerSpotted( int iIndex );
+
+	const char		*GetClanTag( int index );
+
+	int				GetNumMVPs( int iIndex );
+	bool			HasDefuser( int iIndex );
 
 protected:
 
@@ -58,6 +64,12 @@ protected:
 
 	bool	m_bBombSpotted;
 	bool	m_bPlayerSpotted[ MAX_PLAYERS + 1 ];
+	int		m_iPlayerClasses[ MAX_PLAYERS + 1 ];
+
+	char	m_szClan[MAX_PLAYERS+1][MAX_CLAN_TAG_LENGTH];
+
+	int		m_iMVPs[ MAX_PLAYERS + 1 ];	 
+	bool	m_bHasDefuser[ MAX_PLAYERS + 1 ];
 };
 
 

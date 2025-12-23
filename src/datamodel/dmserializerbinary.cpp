@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -288,7 +288,7 @@ DmElementHandle_t CDmSerializerBinary::UnserializeElementIndex( CUtlBuffer &buf,
 	if ( nElementIndex == ELEMENT_INDEX_EXTERNAL )
 	{
 		char idstr[ 40 ];
-		buf.GetStringManualCharCount( idstr, sizeof( idstr ) );
+		buf.GetString( idstr );
 		DmObjectId_t id;
 		UniqueIdFromString( &id, idstr, sizeof( idstr ) );
 		return g_pDataModelImp->FindOrCreateElementHandle( id );
@@ -508,7 +508,7 @@ bool CDmSerializerBinary::UnserializeElements( CUtlBuffer &buf, DmFileId_t filei
 			pType = typeBuf;
 		}
 
-		buf.GetStringManualCharCount( pName, 2048 );
+		buf.GetString( pName );
 		buf.Get( &id, sizeof(DmObjectId_t) );
 
 		if ( idConflictResolution == CR_FORCE_COPY )

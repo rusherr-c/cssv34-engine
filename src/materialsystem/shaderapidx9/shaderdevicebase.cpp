@@ -1,17 +1,14 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
-//===========================================================================//
-
-#ifndef _X360
-#include <windows.h>
-#endif
-
+//=============================================================================//
+#define DISABLE_PROTECTED_THINGS
+#include "togl/rendermechanism.h"
 #include "shaderdevicebase.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/convar.h"
 #include "tier1/utlbuffer.h"
 #include "tier0/icommandline.h"
@@ -22,6 +19,7 @@
 #include "shaderapibase.h"
 #include "shaderapi/ishadershadow.h"
 #include "shaderapi_global.h"
+#include "winutils.h"
 
 #ifdef _X360
 #include "xbox/xbox_win32stubs.h"
@@ -39,7 +37,6 @@ IShaderShadow *g_pShaderShadow;
 bool g_bUseShaderMutex = false;	// Shader mutex globals
 bool g_bShaderAccessDisallowed;
 CShaderMutex g_ShaderMutex;
-
 
 //-----------------------------------------------------------------------------
 // FIXME: Hack related to setting command-line values for convars. Remove!!!
@@ -66,7 +63,7 @@ static void InitShaderAPICVars( )
 	static CShaderAPIConVarAccessor g_ConVarAccessor;
 	if ( g_pCVar )
 	{
-		ConVar_Register( 0, &g_ConVarAccessor );
+		ConVar_Register( FCVAR_MATERIAL_SYSTEM_THREAD, &g_ConVarAccessor );
 	}
 }
 
@@ -75,8 +72,23 @@ static void InitShaderAPICVars( )
 //-----------------------------------------------------------------------------
 // Read dx support levels
 //-----------------------------------------------------------------------------
-#define SUPPORT_CFG_FILE "dxsupport.cfg"
-#define SUPPORT_CFG_OVERRIDE_FILE "dxsupport_override.cfg"
+#if defined( DX_TO_GL_ABSTRACTION )
+	#if defined( OSX )
+		// OSX
+		#define SUPPORT_CFG_FILE "dxsupport_mac.cfg"
+		// TODO: make this different for Mac?
+		#define SUPPORT_CFG_OVERRIDE_FILE "dxsupport_override.cfg"
+	#else
+		// Linux/Win GL
+		#define SUPPORT_CFG_FILE "dxsupport_linux.cfg"
+		// TODO: make this different for Linux?
+		#define SUPPORT_CFG_OVERRIDE_FILE "dxsupport_override.cfg"
+	#endif
+#else
+	// D3D
+	#define SUPPORT_CFG_FILE "dxsupport.cfg"
+	#define SUPPORT_CFG_OVERRIDE_FILE "dxsupport_override.cfg"
+#endif
 
 
 //-----------------------------------------------------------------------------
@@ -495,7 +507,7 @@ static void OverrideKeyValues( KeyValues *pDst, KeyValues *pSrc )
 	{
 		// Match each group in pSrc to one in pDst containing the same "name" value:
 		KeyValues * pDstGroup = FindMatchingGroup( pDst, pSrcGroup );
-		Assert( pDstGroup );
+		//Assert( pDstGroup );
 		if ( pDstGroup )
 		{
 			OverrideValues_R( pDstGroup, pSrcGroup );
@@ -524,7 +536,7 @@ KeyValues *CShaderDeviceMgrBase::ReadDXSupportKeyValues()
 	if ( IsX360() && g_pFullFileSystem->GetDVDMode() == DVDMODE_STRICT )
 	{
 		// 360 dvd optimzation, expect it inside the platform zip
-		pPathID = "CORE";
+		pPathID = "PLATFORM";
 	}
 
 	// First try to read a game-specific config, if it exists
@@ -550,6 +562,7 @@ KeyValues *CShaderDeviceMgrBase::ReadDXSupportKeyValues()
 	m_pDXSupport = pCfg;
 	return pCfg;
 }
+
 
 
 //-----------------------------------------------------------------------------
@@ -579,6 +592,14 @@ void CShaderDeviceMgrBase::ReadDXSupportLevels( HardwareCaps_t &caps )
 		if ( nDXSupportLevel != 0 )
 		{
 			caps.m_nDXSupportLevel = nDXSupportLevel;
+			// Don't slam up the dxlevel level to 92 on DX10 cards in OpenGL Linux/Win mode (otherwise Intel will get dxlevel 92 when we want 90)
+			if ( !( IsOpenGL() && ( IsLinux() || IsWindows() ) ) )
+			{
+				if ( caps.m_bDX10Card )
+				{
+					caps.m_nDXSupportLevel = 92;
+				}
+			}
 		}
 		else
 		{
@@ -596,10 +617,22 @@ void CShaderDeviceMgrBase::LoadHardwareCaps( KeyValues *pGroup, HardwareCaps_t &
 	if( !pGroup )
 		return;
 
-	caps.m_UseFastClipping = ReadBool( pGroup, "NoUserClipPlanes", caps.m_UseFastClipping );
+	// don't just blanket kill clip planes on POSIX, only shoot them down if we're running ARB, or asked for nouserclipplanes.
+	//FIXME need to take into account the caps bit that GLM can now provide, so NV can use normal clipping and ATI can fall back to fastclip.
+	
+	if ( CommandLine()->FindParm("-arbmode") || CommandLine()->CheckParm( "-nouserclip" ) )
+	{
+		caps.m_UseFastClipping = true;
+	}
+	else
+	{
+		caps.m_UseFastClipping = ReadBool( pGroup, "NoUserClipPlanes", caps.m_UseFastClipping );
+	}
+
 	caps.m_bNeedsATICentroidHack = ReadBool( pGroup, "CentroidHack", caps.m_bNeedsATICentroidHack );
 	caps.m_bDisableShaderOptimizations = ReadBool( pGroup, "DisableShaderOptimizations", caps.m_bDisableShaderOptimizations );
 }
+
 
 
 //-----------------------------------------------------------------------------
@@ -665,6 +698,11 @@ static unsigned long GetRam()
 {
 	MEMORYSTATUS stat;
 	GlobalMemoryStatus( &stat );
+	
+	char buf[256];
+	V_snprintf( buf, sizeof( buf ), "GlobalMemoryStatus: %llu\n", (uint64)(stat.dwTotalPhys) );
+	Plat_DebugString( buf );
+
 	return (stat.dwTotalPhys / (1024 * 1024));
 }
 
@@ -716,8 +754,13 @@ bool CShaderDeviceMgrBase::GetRecommendedConfigurationInfo( int nAdapter, int nD
 	// Next, override with cpu-speed based overrides
 	const CPUInformation& pi = *GetCPUInformation();
 	int nCPUSpeedMhz = (int)(pi.m_Speed / 1000000.0f);
+		
 	bool bAMD = Q_stristr( pi.m_szProcessorID, "amd" ) != NULL;
-	DevMsg( "cpu speed %d MHz %s\n", nCPUSpeedMhz, pi.m_szProcessorID );
+	
+	char buf[256];
+	V_snprintf( buf, sizeof( buf ), "CShaderDeviceMgrBase::GetRecommendedConfigurationInfo: CPU speed: %d MHz, Processor: %s\n", nCPUSpeedMhz, pi.m_szProcessorID );
+	Plat_DebugString( buf );
+
 	KeyValues *pCPUKeyValues = FindCPUSpecificConfig( pCfg, nCPUSpeedMhz, bAMD );
 	LoadConfig( pCPUKeyValues, pConfiguration );
 
@@ -731,7 +774,7 @@ bool CShaderDeviceMgrBase::GetRecommendedConfigurationInfo( int nAdapter, int nD
 	int nTextureMemorySize = GetVidMemBytes( nAdapter );
 	int vidMemMB = nTextureMemorySize / ( 1024 * 1024 );
 	KeyValues *pVidMemKeyValues = FindVidMemSpecificConfig( pCfg, vidMemMB );
-	if ( pVidMemKeyValues )
+	if ( pVidMemKeyValues && nTextureMemorySize > 0 )
 	{
 		if ( CommandLine()->FindParm( "-debugdxsupport" ) )
 		{
@@ -782,16 +825,22 @@ bool CShaderDeviceMgrBase::GetRecommendedConfigurationInfo( int nAdapter, int nD
 //-----------------------------------------------------------------------------
 int CShaderDeviceMgrBase::GetClosestActualDXLevel( int nDxLevel ) const
 {
-	if ( nDxLevel <= 69 )
-		return 60;
-	if ( nDxLevel <= 79 )
-		return 70;
+	if ( nDxLevel < ABSOLUTE_MINIMUM_DXLEVEL ) 
+		return ABSOLUTE_MINIMUM_DXLEVEL;
+
 	if ( nDxLevel == 80 )
 		return 80;
 	if ( nDxLevel <= 89 )
 		return 81;
+
+	if ( IsOpenGL() )
+	{
+		return ( nDxLevel <= 90 ) ? 90 : 92;
+	}
+
 	if ( nDxLevel <= 94 )
 		return 90;
+
 	if ( IsX360() && nDxLevel <= 98 )
 		return 98;
 	if ( nDxLevel <= 99 )
@@ -866,10 +915,28 @@ CShaderDeviceBase::CShaderDeviceBase()
 	m_nAdapter = -1;
 	m_hWnd = NULL;
 	m_hWndCookie = NULL;
+	m_dwThreadId = ThreadGetCurrentId();
 }
 
 CShaderDeviceBase::~CShaderDeviceBase()
 {
+}
+
+void CShaderDeviceBase::SetCurrentThreadAsOwner()
+{
+	m_dwThreadId = ThreadGetCurrentId();
+}
+
+void CShaderDeviceBase::RemoveThreadOwner()
+{
+	m_dwThreadId = 0xFFFFFFFF;
+}
+
+bool CShaderDeviceBase::ThreadOwnsDevice()
+{
+	if ( ThreadGetCurrentId() == m_dwThreadId )
+		return true;
+	return false;
 }
 
 
@@ -895,10 +962,11 @@ bool CShaderDeviceBase::IsAAEnabled() const
 //-----------------------------------------------------------------------------
 #define MATERIAL_SYSTEM_WINDOW_ID		0xFEEDDEAD
 
-static HWND GetTopmostParentWindow( HWND hWnd )
+#ifdef USE_ACTUAL_DX
+static VD3DHWND GetTopmostParentWindow( VD3DHWND hWnd )
 {
 	// Find the parent window...
-	HWND hParent = GetParent( hWnd );
+	VD3DHWND hParent = GetParent( hWnd );
 	while ( hParent )
 	{
 		hWnd = hParent;
@@ -908,7 +976,7 @@ static HWND GetTopmostParentWindow( HWND hWnd )
 	return hWnd;
 }
 
-static BOOL CALLBACK EnumChildWindowsProc( HWND hWnd, LPARAM lParam )
+static BOOL CALLBACK EnumChildWindowsProc( VD3DHWND hWnd, LPARAM lParam )
 {
 	int windowId = GetWindowLongPtr( hWnd, GWLP_USERDATA );
 	if (windowId == MATERIAL_SYSTEM_WINDOW_ID)
@@ -923,20 +991,21 @@ static BOOL CALLBACK EnumChildWindowsProc( HWND hWnd, LPARAM lParam )
 	return TRUE;
 }
 
-static BOOL CALLBACK EnumWindowsProc( HWND hWnd, LPARAM lParam )
+static BOOL CALLBACK EnumWindowsProc( VD3DHWND hWnd, LPARAM lParam )
 {
 	EnumChildWindows( hWnd, EnumChildWindowsProc, lParam );
 	return TRUE;
 }
 
-static BOOL CALLBACK EnumWindowsProcNotThis( HWND hWnd, LPARAM lParam )
+static BOOL CALLBACK EnumWindowsProcNotThis( VD3DHWND hWnd, LPARAM lParam )
 {
-	if ( g_pShaderDevice && ( GetTopmostParentWindow( (HWND)g_pShaderDevice->GetIPCHWnd() ) == hWnd ) )
+	if ( g_pShaderDevice && ( GetTopmostParentWindow( (VD3DHWND)g_pShaderDevice->GetIPCHWnd() ) == hWnd ) )
 		return TRUE;
 
 	EnumChildWindows( hWnd, EnumChildWindowsProc, lParam );
 	return TRUE;
 }
+#endif
 
 //-----------------------------------------------------------------------------
 // Adds a hook to let us know when other instances are setting the mode
@@ -948,7 +1017,8 @@ static BOOL CALLBACK EnumWindowsProcNotThis( HWND hWnd, LPARAM lParam )
 #define WINDOW_PROC FARPROC
 #endif
 
-static LRESULT CALLBACK ShaderDX8WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
+#ifdef USE_ACTUAL_DX
+static LRESULT CALLBACK ShaderDX8WndProc(VD3DHWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
 #if !defined( _X360 )
 	// FIXME: Should these IPC messages tell when an app has focus or not?
@@ -986,6 +1056,7 @@ static LRESULT CALLBACK ShaderDX8WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPA
 	return DefWindowProc( hWnd, msg, wParam, lParam );
 #endif
 }
+#endif
 
 
 //-----------------------------------------------------------------------------
@@ -994,9 +1065,9 @@ static LRESULT CALLBACK ShaderDX8WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPA
 void CShaderDeviceBase::InstallWindowHook( void* hWnd )
 {
 	Assert( m_hWndCookie == NULL );
-
+#ifdef USE_ACTUAL_DX
 #if !defined( _X360 )
-	HWND hParent = GetTopmostParentWindow( (HWND)hWnd );
+	VD3DHWND hParent = GetTopmostParentWindow( (VD3DHWND)hWnd );
 
 	// Attach a child window to the parent; we're gonna store special info there
 	// We can't use the USERDATA, cause other apps may want to use this.
@@ -1018,22 +1089,25 @@ void CShaderDeviceBase::InstallWindowHook( void* hWnd )
 		0, 0, 0, 0, hParent, NULL, hInst, NULL );
 
 	// Marks it as a material system window
-	SetWindowLongPtr( (HWND)m_hWndCookie, GWLP_USERDATA, MATERIAL_SYSTEM_WINDOW_ID );
+	SetWindowLongPtr( (VD3DHWND)m_hWndCookie, GWLP_USERDATA, MATERIAL_SYSTEM_WINDOW_ID );
+#endif
 #endif
 }
 
 void CShaderDeviceBase::RemoveWindowHook( void* hWnd )
 {
+#ifdef USE_ACTUAL_DX
 #if !defined( _X360 )
 	if ( m_hWndCookie )
 	{
-		DestroyWindow( (HWND)m_hWndCookie ); 
+		DestroyWindow( (VD3DHWND)m_hWndCookie ); 
 		m_hWndCookie = 0;
 	}
 
-	HWND hParent = GetTopmostParentWindow( (HWND)hWnd );
+	VD3DHWND hParent = GetTopmostParentWindow( (VD3DHWND)hWnd );
 	HINSTANCE hInst = (HINSTANCE)GetWindowLongPtr( hParent, GWLP_HINSTANCE );
 	UnregisterClass( "shaderdx8", hInst );
+#endif
 #endif
 }
 
@@ -1043,6 +1117,7 @@ void CShaderDeviceBase::RemoveWindowHook( void* hWnd )
 //-----------------------------------------------------------------------------
 void CShaderDeviceBase::SendIPCMessage( IPCMessage_t msg )
 {
+#ifdef USE_ACTUAL_DX
 #if !defined( _X360 )
 	// Gotta send this to all windows, since we don't know which ones
 	// are material system apps...
@@ -1054,6 +1129,7 @@ void CShaderDeviceBase::SendIPCMessage( IPCMessage_t msg )
 	{
 		EnumWindows( EnumWindowsProcNotThis, (DWORD)msg );
 	}
+#endif
 #endif
 }
 
@@ -1067,7 +1143,7 @@ int CShaderDeviceBase::FindView( void* hWnd ) const
 	// Look for the view in the list of views
 	for (int i = m_Views.Count(); --i >= 0; )
 	{
-	if (m_Views[i].m_HWnd == (HWND)hwnd)
+	if (m_Views[i].m_HWnd == (VD3DHWND)hwnd)
 	return i;
 	}
 	*/
@@ -1093,7 +1169,7 @@ bool CShaderDeviceBase::AddView( void* hWnd )
 	// default swap chain. This here says we're gonna use a part of the
 	// existing buffer and just grab that.
 	int view = m_Views.AddToTail();
-	m_Views[view].m_HWnd = (HWND)hwnd;
+	m_Views[view].m_HWnd = (VD3DHWND)hwnd;
 	//	memcpy( &m_Views[view].m_PresentParamters, m_PresentParameters, sizeof(m_PresentParamters) );
 
 	HRESULT hr;
@@ -1130,7 +1206,7 @@ void CShaderDeviceBase::SetView( void* hWnd )
 	g_pShaderAPI->GetViewports( &viewport, 1 );
 
 	// Get the window (*not* client) rect of the view window
-	m_ViewHWnd = (HWND)hWnd;
+	m_ViewHWnd = (VD3DHWND)hWnd;
 	GetWindowSize( m_nWindowWidth, m_nWindowHeight );
 
 	// Reset the viewport (takes into account the view rect)
@@ -1144,13 +1220,28 @@ void CShaderDeviceBase::SetView( void* hWnd )
 //-----------------------------------------------------------------------------
 void CShaderDeviceBase::GetWindowSize( int& nWidth, int& nHeight ) const
 {
+#if defined( USE_SDL )
+
+	// this matches up to what the threaded material system does
+	g_pShaderAPI->GetBackBufferDimensions( nWidth, nHeight );
+
+#else
+
 	// If the window was minimized last time swap buffers happened, or if it's iconic now, 
 	// return 0 size
-	if ( !m_bIsMinimized && !IsIconic( (HWND)m_hWnd ) )
+#ifdef _WIN32
+	if ( !m_bIsMinimized && !IsIconic( ( HWND )m_hWnd ) )
+#else
+	if ( !m_bIsMinimized && !IsIconic( (VD3DHWND)m_hWnd ) )
+#endif
 	{
 		// NOTE: Use the 'current view' (which may be the same as the main window) 
 		RECT rect;
-		GetClientRect( (HWND)m_ViewHWnd, &rect );
+#ifdef _WIN32
+		GetClientRect( ( HWND )m_ViewHWnd, &rect );
+#else
+		toglGetClientRect( (VD3DHWND)m_ViewHWnd, &rect );
+#endif
 		nWidth = rect.right - rect.left;
 		nHeight = rect.bottom - rect.top;
 	}
@@ -1158,6 +1249,8 @@ void CShaderDeviceBase::GetWindowSize( int& nWidth, int& nHeight ) const
 	{
 		nWidth = nHeight = 0;
 	}
+
+#endif
 }
 
 

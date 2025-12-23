@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,6 +20,18 @@
 #include "obstacle_pushaway.h"
 #include "props_shared.h"
 
+//=============================================================================
+// HPE_BEGIN
+//=============================================================================
+// [dwenger] Necessary for stats tracking
+#include "cs_gamestats.h"
+
+//[tj] Necessary for fast rescue achievement
+#include "cs_achievement_constants.h"
+//=============================================================================
+// HPE_END
+//=============================================================================
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -27,6 +39,9 @@
 
 #define DrawLine( from, to, duration, red, green, blue )		NDebugOverlay::Line( from, to, red, green, blue, true, 0.1f )
 #define HOSTAGE_PUSHAWAY_THINK_CONTEXT	"HostagePushawayThink"
+
+#define HOSTAGE_BBOX_VEC_MIN	Vector( -13, -13, 0 )
+#define HOSTAGE_BBOX_VEC_MAX	Vector( 13, 13, 72 )
 
 
 ConVar mp_hostagepenalty( "mp_hostagepenalty", "13", FCVAR_NOTIFY, "Terrorist are kicked for killing too much hostages" );
@@ -41,13 +56,15 @@ ConVar sv_pushaway_hostage_force( "sv_pushaway_hostage_force", "20000", FCVAR_RE
 ConVar sv_pushaway_max_hostage_force( "sv_pushaway_max_hostage_force", "1000", FCVAR_REPLICATED | FCVAR_CHEAT, "Maximum of how hard the hostage is pushed away from physics objects." );
 
 const int NumHostageModels = 4;
-static char *HostageModel[NumHostageModels] = 
+static const char *HostageModel[NumHostageModels] = 
 {
 	"models/Characters/Hostage_01.mdl",
 	"models/Characters/Hostage_02.mdl",
 	"models/Characters/hostage_03.mdl",
 	"models/Characters/hostage_04.mdl",
 };
+
+Vector DropToGround( CBaseEntity *pMainEnt, const Vector &vPos, const Vector &vMins, const Vector &vMaxs );
 
 //-----------------------------------------------------------------------------------------------------
 LINK_ENTITY_TO_CLASS( hostage_entity, CHostage );
@@ -176,6 +193,10 @@ void CHostage::Spawn( void )
 
 	m_lastKnownArea = NULL;
 
+	// Need to make sure the hostages are on the ground when they spawn
+	Vector GroundPos = DropToGround( this, GetAbsOrigin(), HOSTAGE_BBOX_VEC_MIN, HOSTAGE_BBOX_VEC_MAX );
+	SetAbsOrigin( GroundPos );
+
 	if (TheNavMesh)
 	{
 		Vector pos = GetAbsOrigin();
@@ -224,6 +245,19 @@ int CHostage::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 
 	if (player)
 	{
+        //=============================================================================
+        // HPE_BEGIN
+        // [dwenger] Track which player injured the hostage
+        //=============================================================================
+
+        player->SetInjuredAHostage(true);
+		CSGameRules()->HostageInjured();
+
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+
+
 		if ( !( player->m_iDisplayHistoryBits & DHF_HOSTAGE_INJURED ) )
 		{
 			player->HintMessage( "#Hint_careful_around_hostages", FALSE );
@@ -269,11 +303,11 @@ float CHostage::GetModifiedDamage( float flDamage, int nHitGroup )
 }
 
 //-----------------------------------------------------------------------------------------------------
-void CHostage::TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr )
+void CHostage::TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr, CDmgAccumulator *pAccumulator )
 {
 	CTakeDamageInfo scaledInfo = info;
 	scaledInfo.SetDamage( GetModifiedDamage( info.GetDamage(), ptr->hitgroup ) );
-	BaseClass::TraceAttack( scaledInfo, vecDir, ptr );
+	BaseClass::TraceAttack( scaledInfo, vecDir, ptr, pAccumulator );
 }
 
 //-----------------------------------------------------------------------------------------------------
@@ -309,6 +343,15 @@ void CHostage::Event_Killed( const CTakeDamageInfo &info )
 {
 	// tell the game logic that we've died
 	CSGameRules()->CheckWinConditions();
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Let the game know that a hostage has been killed
+	//=============================================================================
+	CSGameRules()->HostageKilled();
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 
 	CCSPlayer *attacker = ToCSPlayer( info.GetAttacker() );
 
@@ -389,6 +432,35 @@ void CHostage::HostageRescueZoneTouch( inputdata_t &inputdata )
 
 		// update game rules
 		CSGameRules()->m_iHostagesRescued++;
+
+        //=============================================================================
+        // HPE_BEGIN
+        // [dwenger] Hostage rescue achievement processing
+        //=============================================================================
+
+        // Track last rescuer
+        if ( CSGameRules()->m_pLastRescuer == NULL )
+        {
+            // No rescuer yet, so assign one & set rescuer count to 1
+            CSGameRules()->m_pLastRescuer = player;
+            CSGameRules()->m_iNumRescuers = 1;
+        }
+        else
+        {
+            if ( CSGameRules()->m_pLastRescuer != player )
+            {
+                // Rescuer changed
+                CSGameRules()->m_pLastRescuer = player;
+                CSGameRules()->m_iNumRescuers++;
+            }
+        }
+
+		bool roundIsAlreadyOver = (CSGameRules()->m_iRoundWinStatus != WINNER_NONE);
+
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+
 		if (CSGameRules()->CheckWinConditions() == false)
 		{
 			// this hostage didn't win the round, so announce its rescue to everyone
@@ -400,6 +472,69 @@ void CHostage::HostageRescueZoneTouch( inputdata_t &inputdata )
 			// avoid having the announcer talk over himself
 			announceTimer.Start( 2.0f );
 		}
+        //=============================================================================
+        // HPE_BEGIN
+        // [dwenger] Awarding of hostage rescue achievement
+        //=============================================================================
+
+        else
+        {
+            //Check hostage rescue achievements
+            if ( CSGameRules()->m_iNumRescuers == 1 && !CSGameRules()->WasHostageKilled())
+            {
+				//check for unrescued hostages
+				bool allHostagesRescued = true;				
+				CHostage* hostage = NULL;
+				int iNumHostages = g_Hostages.Count();				
+
+				for ( int i = 0 ; i < iNumHostages; i++ )
+				{
+					hostage = g_Hostages[i];
+
+					if ( hostage->m_iHealth > 0 && !hostage->IsRescued() )
+					{
+						allHostagesRescued = false;
+						break;
+					}
+				}
+
+				if (allHostagesRescued)
+				{
+					player->AwardAchievement(CSRescueAllHostagesInARound);
+
+					//[tj] fast version                
+					if (gpGlobals->curtime - CSGameRules()->GetRoundStartTime() < AchievementConsts::FastHostageRescue_Time)
+					{
+						if ( player )
+						{
+							player->AwardAchievement(CSFastHostageRescue);
+						}
+					}
+				}
+            }
+			//=============================================================================
+			// HPE_BEGIN:
+			// [menglish] If this rescue ended the round give an mvp to the rescuer
+			//=============================================================================
+
+            if ( player && !roundIsAlreadyOver)
+            {
+			    player->IncrementNumMVPs( CSMVP_HOSTAGERESCUE );
+            }
+
+			//=============================================================================
+			// HPE_END
+			//=============================================================================
+        }
+
+        if ( player )
+        {
+            CCS_GameStats.Event_HostageRescued( player );
+        }
+
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
 	}
 }
 
@@ -624,19 +759,19 @@ void CHostage::AvoidPhysicsProps( void )
 		{
 			mass = pInterface->GetMass();
 		}
-		mass = min( mass, maxMass );
+		mass = MIN( mass, maxMass );
 		mass -= minMass;
-		mass = max( mass, 0 );
+		mass = MAX( mass, 0 );
 		mass /= (maxMass-minMass); // bring into a 0..1 range
 
 		// Push away from the collision point. The closer our center is to the collision point,
 		// the harder we push away.
 		Vector vPushAway = (WorldSpaceCenter() - props[i]->WorldSpaceCenter());
 		float flDist = VectorNormalize( vPushAway );
-		flDist = max( flDist, 1 );
+		flDist = MAX( flDist, 1 );
 
 		float flForce = sv_pushaway_hostage_force.GetFloat() / flDist * mass;
-		flForce = min( flForce, sv_pushaway_max_hostage_force.GetFloat() );
+		flForce = MIN( flForce, sv_pushaway_max_hostage_force.GetFloat() );
 		vPushAway *= flForce;
 
 		ApplyForce( vPushAway );
@@ -700,7 +835,7 @@ void CHostage::HostageThink( void )
 		m_isAdjusted = true;
 
 		// HACK - figure out why the default bbox is 6 units too low
-		SetCollisionBounds( Vector( -13, -13, 0 ), Vector( 13, 13, 72 ) );
+		SetCollisionBounds( HOSTAGE_BBOX_VEC_MIN, HOSTAGE_BBOX_VEC_MAX );
 	}
 
 	const float deltaT = HOSTAGE_THINK_INTERVAL;
@@ -834,6 +969,21 @@ void CHostage::Idle( void )
  */
 void CHostage::Follow( CCSPlayer *leader )
 {
+    //=============================================================================
+    // HPE_BEGIN
+    // [dwenger] Set variable to track whether player is currently rescuing hostages
+    //=============================================================================
+
+    if ( leader )
+    {
+        leader->IncrementNumFollowers();
+        leader->SetIsRescuing(true);
+    }
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
 	m_leader = leader;
 	m_isWaitingForLeader = false;
 	m_lastLeaderID = (leader) ? leader->GetUserID() : 0;
@@ -1037,7 +1187,7 @@ bool CHostage::GetSimpleGroundHeightWithFloor( const Vector &pos, float *height,
 		// our current nav area also serves as a ground polygon
 		if (m_lastKnownArea && m_lastKnownArea->IsOverlapping( pos ))
 		{
-			*height = max( (*height), m_lastKnownArea->GetZ( pos ) );
+			*height = MAX( (*height), m_lastKnownArea->GetZ( pos ) );
 		}
 
 		return true;

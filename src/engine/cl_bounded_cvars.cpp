@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  baseclientstate.cpp: implementation of the CBaseClientState class.
 //
@@ -8,6 +8,7 @@
 #include "convar.h"
 #include "convar_serverbounded.h"
 #include "sys.h"
+#include "net.h"
 
 
 // These are the server cvars that control our cvars.
@@ -27,28 +28,19 @@ extern ConVar  sv_client_predict;
 // rate
 // ------------------------------------------------------------------------------------------ //
 
-void CL_RateCvarChanged( IConVar *pConVar, const char *pOldValue, float flOldValue )
-{
-	ConVarRef var( pConVar );
-
-	// write rate to registry
-	char rate[128];
-
-	Q_snprintf( rate, sizeof(rate), "%u", var.GetInt() );
-
-	Sys_SetRegKeyValue("Software\\Valve\\Steam", "Rate", rate );
-}
-
 class CBoundedCvar_Rate : public ConVar_ServerBounded
 {
 public:
 	CBoundedCvar_Rate() :
 	  ConVar_ServerBounded( 
-		  "rate", 
-		  "10000", 
-		  FCVAR_USERINFO, 
-		  "Max bytes/sec the host can receive data", 
-		  CL_RateCvarChanged )
+		  "rate",
+#if defined( _X360 )
+		  "6000",
+#else
+		  V_STRINGIFY(DEFAULT_RATE),
+#endif
+		  FCVAR_ARCHIVE | FCVAR_USERINFO, 
+		  "Max bytes/sec the host can receive data" )
 	  {
 	  }
 
@@ -128,7 +120,7 @@ public:
 	  ConVar_ServerBounded( 
 		  "cl_updaterate",
 		  "20", 
-		  FCVAR_ARCHIVE | FCVAR_USERINFO, 
+		  FCVAR_ARCHIVE | FCVAR_USERINFO | FCVAR_NOT_CONNECTED, 
 		  "Number of packets per second of updates you are requesting from the server" )
 	{
 	}

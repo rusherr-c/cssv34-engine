@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Handles joining clients together in a matchmaking session before a multiplayer
 //			game, tracking new players and dropped players during the game, and reporting
@@ -278,7 +278,7 @@ void CMatchmaking::AddSessionPropertyInternal( KeyValues *pProperty )
 		break;
 
 	default:
-		Warning( "Session option type #d not recognized/n", pProperty->GetInt( "type" ) );
+		Warning( "Session option type %d not recognized/n", pProperty->GetInt( "type" ) );
 		break;
 
 	}
@@ -1063,7 +1063,7 @@ void CMatchmaking::ClientDropped( CClientInfo *pClient )
 		return;
 	}
 
-	Warning( "Dropped player: %d!", pClient->m_id );
+	Warning( "Dropped player: %llu!", pClient->m_id );
 
 	// Do this first, before the team assignment gets cleared
 	RemovePlayersFromSession( pClient );
@@ -1558,9 +1558,6 @@ void CMatchmaking::ChangeTeam( const char *pTeamName )
 //-----------------------------------------------------------------------------
 bool CMatchmaking::ProcessCheckpoint( MM_Checkpoint *pMsg )
 {
-#ifdef _LINUX
-	return false;
-#else
 	switch( pMsg->m_Checkpoint )
 	{
 	case MM_Checkpoint::CHECKPOINT_CHANGETEAM:
@@ -1772,7 +1769,6 @@ bool CMatchmaking::ProcessCheckpoint( MM_Checkpoint *pMsg )
 		break;
 	}
 	return true;
-#endif
 }
 
 //-----------------------------------------------------------------------------

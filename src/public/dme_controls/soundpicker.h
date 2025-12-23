@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -50,7 +50,7 @@ public:
 	virtual void Activate();
 
 	// Forward arrow keys to the list
-	virtual void OnKeyCodeTyped( vgui::KeyCode code );
+	virtual void OnKeyCodePressed( vgui::KeyCode code );
 
 	// Sets the current sound choice
 	void SetSelectedSound( PickType_t type, const char *pSoundName );

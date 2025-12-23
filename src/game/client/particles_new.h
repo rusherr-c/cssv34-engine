@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: provide client-side access to the new particle system, with similar
 // usage to CSimpleEmitter
@@ -14,9 +14,10 @@
 
 #include "particlemgr.h"
 #include "particles/particles.h"
-#include "ParticleSphereRenderer.h"
+#include "particlesphererenderer.h"
 #include "smartptr.h"
 #include "particles_simple.h"
+#include "tier1/utlobjectreference.h"
 
 
 //-----------------------------------------------------------------------------
@@ -26,7 +27,9 @@ class CNewParticleEffect : public IParticleEffect, public CParticleCollection, p
 {
 public:
 	DECLARE_CLASS_NOBASE( CNewParticleEffect );
+	DECLARE_REFERENCED_CLASS( CNewParticleEffect );
 
+public:
 	friend class CRefCountAccessor;
 
 	// list management
@@ -74,6 +77,8 @@ public:
 												 const char *pDebugName = NULL );
 	virtual int DrawModel( int flags );
 
+	void DebugDrawBbox ( bool bCulled );
+
 	// CParticleCollection overrides
 public:
 	void StopEmission( bool bInfiniteOnly = false, bool bRemoveAllParticles = false, bool bWakeOnStop = false );
@@ -86,7 +91,10 @@ public:
 	void SetControlPointUpVector( int nWhichPoint, const Vector &v );
 	void SetControlPointRightVector( int nWhichPoint, const Vector &v );
 
-	FORCEINLINE EHANDLE const &CNewParticleEffect::GetControlPointEntity( int nWhichPoint )
+	void SetIsViewModelEffect ( bool bIsViewModelEffect ) { m_bViewModelEffect = bIsViewModelEffect; }
+	bool GetIsViewModelEffect () { return m_bViewModelEffect; }
+
+	FORCEINLINE EHANDLE const &GetControlPointEntity( int nWhichPoint )
 	{
 		return m_hControlPointOwners[ nWhichPoint ];
 	}
@@ -147,6 +155,8 @@ protected:
 	// holds the min/max bounds used to manage this thing in the client leaf system
 	Vector		m_LastMin;
 	Vector		m_LastMax;
+
+	bool		m_bViewModelEffect;
 
 private:
 	// Update the reference count.
@@ -304,7 +314,7 @@ inline void CNewParticleEffect::MarkShouldPerformCullCheck( bool bEnable )
 inline CSmartPtr<CNewParticleEffect> CNewParticleEffect::Create( CBaseEntity *pOwner, const char *pParticleSystemName, const char *pDebugName )
 {
 	CNewParticleEffect *pRet = new CNewParticleEffect( pOwner, pParticleSystemName );
-	pRet->m_pDebugName = pDebugName;
+	pRet->m_pDebugName = pDebugName ? pDebugName : pParticleSystemName;
 	pRet->SetDynamicallyAllocated( true );
 	return pRet;
 }
@@ -312,10 +322,16 @@ inline CSmartPtr<CNewParticleEffect> CNewParticleEffect::Create( CBaseEntity *pO
 inline CSmartPtr<CNewParticleEffect> CNewParticleEffect::Create( CBaseEntity *pOwner, CParticleSystemDefinition *pDef, const char *pDebugName )
 {
 	CNewParticleEffect *pRet = new CNewParticleEffect( pOwner, pDef );
-	pRet->m_pDebugName = pDebugName;
+	pRet->m_pDebugName = pDebugName ? pDebugName : pDef->GetName();
 	pRet->SetDynamicallyAllocated( true );
 	return pRet;
 }
+
+//--------------------------------------------------------------------------------
+// If you use an HPARTICLEFFECT instead of a cnewparticleeffect *, you get a pointer
+// which will go to null when the effect is deleted
+//--------------------------------------------------------------------------------
+typedef CUtlReference<CNewParticleEffect> HPARTICLEFFECT;
 
 
 #endif // PARTICLES_NEW_H

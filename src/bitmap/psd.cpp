@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -204,7 +204,7 @@ static inline void CMYKToRGB( RGBA8888_t &color )
 static void PSDConvertToRGBA8888( int nChannelsCount, PSDMode_t mode, PSDPalette_t &palette, Bitmap_t &bitmap )
 {
 	bool bShouldFillInAlpha = false;
-	unsigned char *pDest = bitmap.m_pBits;
+	unsigned char *pDest = bitmap.GetBits();
 
 	switch( mode )
 	{
@@ -216,9 +216,9 @@ static void PSDConvertToRGBA8888( int nChannelsCount, PSDMode_t mode, PSDPalette
 		{
 			// Convert from palette
 			bShouldFillInAlpha = ( nChannelsCount == 1 );
-			for( int j=0; j < bitmap.m_nHeight; ++j )
+			for( int j=0; j < bitmap.Height(); ++j )
 			{
-				for ( int k = 0; k < bitmap.m_nWidth; ++k, pDest += 4 )
+				for ( int k = 0; k < bitmap.Width(); ++k, pDest += 4 )
 				{
 					unsigned char nPaletteIndex = pDest[0];
 					pDest[0] = palette.m_pRed[nPaletteIndex];
@@ -233,9 +233,9 @@ static void PSDConvertToRGBA8888( int nChannelsCount, PSDMode_t mode, PSDPalette
 		{
 			// Monochrome
 			bShouldFillInAlpha = ( nChannelsCount == 1 );
-			for( int j=0; j < bitmap.m_nHeight; ++j )
+			for( int j=0; j < bitmap.Height(); ++j )
 			{
-				for ( int k = 0; k < bitmap.m_nWidth; ++k, pDest += 4 )
+				for ( int k = 0; k < bitmap.Width(); ++k, pDest += 4 )
 				{
 					pDest[1] = pDest[0];
 					pDest[2] = pDest[0];
@@ -248,9 +248,9 @@ static void PSDConvertToRGBA8888( int nChannelsCount, PSDMode_t mode, PSDPalette
 		{
 			// NOTE: The conversion will fill in alpha by default
 			bShouldFillInAlpha = false;
-			for( int j=0; j < bitmap.m_nHeight; ++j )
+			for( int j=0; j < bitmap.Height(); ++j )
 			{
-				for ( int k = 0; k < bitmap.m_nWidth; ++k, pDest += 4 )
+				for ( int k = 0; k < bitmap.Width(); ++k, pDest += 4 )
 				{
 					CMYKToRGB( *((RGBA8888_t*)pDest) );
 				}
@@ -262,12 +262,12 @@ static void PSDConvertToRGBA8888( int nChannelsCount, PSDMode_t mode, PSDPalette
 	if ( bShouldFillInAlpha )
 	{
 		// No alpha channel, fill in white
-		unsigned char *pDest = bitmap.m_pBits;
-		for( int j=0; j < bitmap.m_nHeight; ++j )
+		unsigned char *pDestAlpha = bitmap.GetBits();
+		for( int j=0; j < bitmap.Height(); ++j )
 		{
-			for ( int k = 0; k < bitmap.m_nWidth; ++k, pDest += 4 )
+			for ( int k = 0; k < bitmap.Width(); ++k, pDestAlpha += 4 )
 			{
-				pDest[3] = 0xFF;
+				pDestAlpha[3] = 0xFF;
 			}
 		}
 	}
@@ -295,19 +295,19 @@ static int s_pChannelIndex[MODE_COUNT+1][4] =
 
 static void PSDReadUncompressedChannels( CUtlBuffer &buf, int nChannelsCount, PSDMode_t mode, PSDPalette_t &palette, Bitmap_t &bitmap )
 {
-	unsigned char *pChannelRow = (unsigned char*)_alloca( bitmap.m_nWidth );
+	unsigned char *pChannelRow = (unsigned char*)_alloca( bitmap.Width() );
 	for ( int i=0; i<nChannelsCount; ++i )
 	{
 		int nIndex = s_pChannelIndex[mode][i];
 		Assert( nIndex != -1 );
 
-		unsigned char *pDest = bitmap.m_pBits;
-		for( int j=0; j < bitmap.m_nHeight; ++j )
+		unsigned char *pDest = bitmap.GetBits();
+		for( int j=0; j < bitmap.Height(); ++j )
 		{
-			buf.Get( pChannelRow, bitmap.m_nWidth );
+			buf.Get( pChannelRow, bitmap.Width() );
 
 			// Collate the channels together
-			for ( int k = 0; k < bitmap.m_nWidth; ++k, pDest += 4 )
+			for ( int k = 0; k < bitmap.Width(); ++k, pDest += 4 )
 			{
 				pDest[nIndex] = pChannelRow[k];
 			}
@@ -323,17 +323,17 @@ static void PSDReadUncompressedChannels( CUtlBuffer &buf, int nChannelsCount, PS
 //-----------------------------------------------------------------------------
 static void PSDReadCompressedChannels( CUtlBuffer &buf, int nChannelsCount, PSDMode_t mode, PSDPalette_t &palette, Bitmap_t &bitmap )
 {
-	unsigned char *pChannelRow = (unsigned char*)_alloca( bitmap.m_nWidth );
+	unsigned char *pChannelRow = (unsigned char*)_alloca( bitmap.Width() );
 	for ( int i=0; i<nChannelsCount; ++i )
 	{
 		int nIndex = s_pChannelIndex[mode][i];
 		Assert( nIndex != -1 );
 
-		unsigned char *pDest = bitmap.m_pBits;
-		for( int j=0; j < bitmap.m_nHeight; ++j )
+		unsigned char *pDest = bitmap.GetBits();
+		for( int j=0; j < bitmap.Height(); ++j )
 		{
 			unsigned char *pSrc = pChannelRow;
-			unsigned int nPixelsRemaining = bitmap.m_nWidth;
+			unsigned int nPixelsRemaining = bitmap.Width();
 			while ( nPixelsRemaining > 0 )
 			{
 				int nCount = buf.GetChar();
@@ -358,7 +358,7 @@ static void PSDReadCompressedChannels( CUtlBuffer &buf, int nChannelsCount, PSDM
 			Assert( nPixelsRemaining == 0 );
 
 			// Collate the channels together
-			for ( int k = 0; k < bitmap.m_nWidth; ++k, pDest += 4 )
+			for ( int k = 0; k < bitmap.Width(); ++k, pDest += 4 )
 			{
 				pDest[nIndex] = pChannelRow[k];
 			}
@@ -448,7 +448,7 @@ bool PSDReadFileRGBA8888( CUtlBuffer &buf, Bitmap_t &bitmap )
 	{
 		// Skip the data that indicates the length of each compressed row in bytes
 		// NOTE: There are two bytes per row per channel
-		unsigned int nLineLengthData = sizeof(unsigned short) * bitmap.m_nHeight * nChannelsCount;
+		unsigned int nLineLengthData = sizeof(unsigned short) * bitmap.Height() * nChannelsCount;
 		buf.SeekGet( CUtlBuffer::SEEK_CURRENT, nLineLengthData );
 		PSDReadCompressedChannels( buf, ( nChannelsCount > 4 ) ? 4 : nChannelsCount, mode, palette, bitmap );
 	}

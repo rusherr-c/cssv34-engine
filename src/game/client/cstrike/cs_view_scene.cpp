@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Responsible for drawing the scene
 //
@@ -19,11 +19,11 @@
 #include "radio_status.h"
 #include "glow_overlay.h"
 #include "materialsystem/imesh.h"
-#include "materialsystem/ITexture.h"
-#include "materialsystem/IMaterial.h"
-#include "materialsystem/IMaterialVar.h"
+#include "materialsystem/itexture.h"
+#include "materialsystem/imaterial.h"
+#include "materialsystem/imaterialvar.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
-#include "DetailObjectSystem.h"
+#include "detailobjectsystem.h"
 #include "tier0/vprof.h"
 #include "engine/IEngineTrace.h"
 #include "engine/ivmodelinfo.h"
@@ -35,8 +35,8 @@
 #include "c_cs_player.h"
 #include "cs_gamerules.h"
 #include "shake.h"
-#include "ClientEffectPrecacheSystem.h"
-#include <vgui/isurface.h>
+#include "clienteffectprecachesystem.h"
+#include <vgui/ISurface.h>
 
 CLIENTEFFECT_REGISTER_BEGIN( PrecacheCSViewScene )
 CLIENTEFFECT_MATERIAL( "effects/flashbang" )
@@ -62,6 +62,7 @@ ConVarFlags s_flaggedConVars[] =
 {
 	{ "r_screenfademinsize", FCVAR_CHEAT },
 	{ "r_screenfademaxsize", FCVAR_CHEAT },
+	{ "developer", FCVAR_CHEAT },
 };
 
 void CCSViewRender::Init( void )
@@ -136,13 +137,13 @@ void CCSViewRender::PerformNightVisionEffect( const CViewSetup &view )
 			{
 				pPlayer->m_flNightVisionAlpha += 15;
 
-				pPlayer->m_flNightVisionAlpha = min( pPlayer->m_flNightVisionAlpha, iMaxValue );
+				pPlayer->m_flNightVisionAlpha = MIN( pPlayer->m_flNightVisionAlpha, iMaxValue );
 			}
 			else 
 			{
 				pPlayer->m_flNightVisionAlpha -= 40;
 
-				pPlayer->m_flNightVisionAlpha = max( pPlayer->m_flNightVisionAlpha, 0 );
+				pPlayer->m_flNightVisionAlpha = MAX( pPlayer->m_flNightVisionAlpha, 0 );
 				
 			}
 
@@ -188,7 +189,7 @@ void CCSViewRender::PerformFlashbangEffect( const CViewSetup &view )
 	{
 		pPlayer->m_flFlashAlpha += 45;
 		
-		pPlayer->m_flFlashAlpha = min( pPlayer->m_flFlashAlpha, pPlayer->m_flFlashMaxAlpha );
+		pPlayer->m_flFlashAlpha = MIN( pPlayer->m_flFlashAlpha, pPlayer->m_flFlashMaxAlpha );
 
 		overlaycolor[0] = overlaycolor[1] = overlaycolor[2] = pPlayer->m_flFlashAlpha;
 
@@ -283,8 +284,8 @@ void CCSViewRender::PerformFlashbangEffect( const CViewSetup &view )
 		flAlpha = flAlphaPercentage *= pPlayer->m_flFlashMaxAlpha; // scale a [0..1) value to a [0..MaxAlpha] value for the alpha.
 
 		// make sure the alpha is in the range of [0..MaxAlpha]
-		flAlpha = max ( flAlpha, 0 );
-		flAlpha = min ( flAlpha, pPlayer->m_flFlashMaxAlpha);
+		flAlpha = MAX ( flAlpha, 0 );
+		flAlpha = MIN ( flAlpha, pPlayer->m_flFlashMaxAlpha);
 	}
 
 	overlaycolor[0] = overlaycolor[1] = overlaycolor[2] = flAlpha;

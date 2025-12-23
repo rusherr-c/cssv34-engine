@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1159,8 +1159,9 @@ void CDmeTestMesh::SetUpBones( CDmeTransform *pTransform, int nMaxBoneCount, mat
 	Vector		pos[MAXSTUDIOBONES];
 	Quaternion	q[MAXSTUDIOBONES];
 
-	InitPose( &studioHdr, pos, q );
-	AccumulatePose( &studioHdr, NULL, pos, q, nSequence, flCycle, pPoseParameter, BoneMask( ), 1.0f, flTime );
+	IBoneSetup boneSetup( &studioHdr, BoneMask(), pPoseParameter );
+	boneSetup.InitPose( pos, q );
+	boneSetup.AccumulatePose( pos, q, nSequence, flCycle, 1.0f, flTime, NULL );
 
 	// FIXME: Try enabling this?
 //	CalcAutoplaySequences( pStudioHdr, NULL, pos, q, pPoseParameter, BoneMask( ), flTime );

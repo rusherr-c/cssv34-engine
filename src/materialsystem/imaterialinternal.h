@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -63,7 +63,7 @@ public:
 	virtual void	Uncache( bool bPreserveVars = false ) = 0;
 	virtual void	Precache() = 0;
 	// If supplied, pKeyValues and pPatchKeyValues should come from LoadVMTFile()
-	virtual bool	PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL ) = 0;
+	virtual bool	PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL, int nFindContext = MATERIAL_FINDCONTEXT_NONE ) = 0;
 
 	// reload all textures used by this materals
 	virtual void	ReloadTextures() = 0;
@@ -150,7 +150,7 @@ public:
 	virtual void ReloadFromWhitelistIfMarked() = 0;
 };
 
-extern void InsertKeyValues( KeyValues& dst, KeyValues& src, bool bCheckForExistence );
+extern void InsertKeyValues( KeyValues& dst, KeyValues& src, bool bCheckForExistence, bool bRecursive = false );
 extern void WriteKeyValuesToFile( const char *pFileName, KeyValues& keyValues );
 extern void ExpandPatchFile( KeyValues& keyValues, KeyValues &patchKeyValues );
 // patchKeyValues accumulates keys applied by VMT patch files (this is necessary to make $fallbackmaterial

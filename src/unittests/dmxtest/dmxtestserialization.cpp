@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Unit test program  for DMX testing
 //
@@ -223,7 +223,7 @@ bool AssertEqualsTest( bool quiet, const T& src1, const T& src2 )
 	{
 		if ( !quiet )
 		{
-			AssertEquals( src1, src2 );
+			AssertMsg( 0, "Results not equal, expecting equal\n" );
 		}
 		return false;
 	}
@@ -476,7 +476,7 @@ bool AssertEqualElementHierarchies( bool quiet, DmElementHandle_t src1, DmElemen
 	{
 		if ( !quiet )
 		{
-			AssertMsg2( 0, "Q_strcmp( pSrc1->GetName(), pSrc2->GetName() )", pSrc1->GetName(), pSrc2->GetName() );
+			AssertMsg2( 0, "Q_strcmp( %s, %s )", pSrc1->GetName(), pSrc2->GetName() );
 		}
 		retval = false;
 	}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		Combine guard gun, strider destroyer
 //
@@ -232,8 +232,8 @@ BEGIN_DATADESC( CWeaponCGuard )
 
 	DEFINE_FIELD( m_flChargeTime,	FIELD_TIME ),
 	DEFINE_FIELD( m_bFired,			FIELD_BOOLEAN ),
-	DEFINE_FIELD( m_beamIndex,		FIELD_INTEGER ),
-	DEFINE_FIELD( m_haloIndex,		FIELD_INTEGER ),
+//	DEFINE_FIELD( m_beamIndex,		FIELD_INTEGER ),
+//	DEFINE_FIELD( m_haloIndex,		FIELD_INTEGER ),
 
 END_DATADESC()
 

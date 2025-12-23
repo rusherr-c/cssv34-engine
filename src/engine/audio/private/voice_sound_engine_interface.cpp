@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -186,7 +186,6 @@ CAudioMixer *CAudioSourceVoice::CreateMixer( int initialStreamPosition )
 		return NULL;
 	}
 
-	ReferenceAdd( pMixer );
 	return pMixer;
 }
 
@@ -212,7 +211,7 @@ int CAudioSourceVoice::GetOutputData( void **pData, int samplePosition, int samp
 
 int CAudioSourceVoice::SampleRate()
 {
-	return VOICE_OUTPUT_SAMPLE_RATE;
+	return Voice_SamplesPerSec();
 }
 
 int CAudioSourceVoice::SampleSize()
@@ -222,7 +221,7 @@ int CAudioSourceVoice::SampleSize()
 
 int CAudioSourceVoice::SampleCount()
 {
-	return VOICE_OUTPUT_SAMPLE_RATE;
+	return Voice_SamplesPerSec();
 }
 
 void CAudioSourceVoice::ReferenceAdd(CAudioMixer *pMixer)
@@ -276,7 +275,7 @@ void VoiceSE_Idle(float frametime)
 		if(g_VoiceOverdriveDuration == 0)
 			return;
 
-		g_VoiceOverdriveDuration = max(g_VoiceOverdriveDuration-frametime, 0);
+		g_VoiceOverdriveDuration = max(g_VoiceOverdriveDuration-frametime, 0.f);
 	}
 
 	float percent = g_VoiceOverdriveDuration / voice_overdrivefadetime.GetFloat();

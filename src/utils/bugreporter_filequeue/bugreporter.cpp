@@ -1,15 +1,20 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
-//#define PROTECTED_THINGS_DISABLE
+//#define PROTECTED_THINGS_DISABLE 
 #undef PROTECT_FILEIO_FUNCTIONS
 #undef fopen
-#include <windows.h>
+#include "winlite.h"
 #include <time.h>
+#ifdef WIN32
 #include <io.h>
 #include <direct.h>
+#else
+#include <sys/stat.h>
+#define _stat stat
+#endif
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -24,10 +29,24 @@
 
 #include "bugreporter/bugreporter.h"
 #include "filesystem_tools.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "vstdlib/random.h"
 
+#ifdef WIN32
 #define BUGSUB_CONFIG "\\\\bugbait\\bugsub\\config.txt"
+#else
+#ifdef OSX
+#define BUGSUB_CONFIG "/Volumes/bugsub/config.txt"
+#define BUGSUB_MOUNT "/Volumes/bugsub"
+#define BUGSUB_MOUNT_COMMAND "mount_smbfs //guest:@bugbait.valvesoftware.com/bugsub "  BUGSUB_MOUNT
+#else
+// We can't do sudo here, so we rely on /etc/fstab being setup for '/mnt/bugsub'. See comment in CBugReporter::Init().
+#define BUGSUB_CONFIG "/mnt/bugsub/config.txt"
+#define BUGSUB_MOUNT "/mnt/bugsub"
+#define BUGSUB_MOUNT_COMMAND "mount /mnt/bugsub"
+#endif
+#define BUGSUB_UNMOUNT_COMMAND "umount "  BUGSUB_MOUNT
+#endif
 
 class CBugReporter *g_bugreporter = NULL;
 
@@ -183,7 +202,7 @@ public:
 	// These are stubbed here, but are used by the public version...
 	virtual void		SetCSERAddress( const struct netadr_s& adr ) {}
 	virtual void		SetExeName( char const *exename ) {}
-	virtual void		SetGameDirectory( char const *gamedir ) {}
+	virtual void		SetGameDirectory( char const *pchGamedir ) {}
 	virtual void		SetRAM( int ram ) {}
 	virtual void		SetCPU( int cpu ) {}
 	virtual void		SetProcessor( char const *processor ) {}
@@ -218,6 +237,7 @@ private:
 
 	int							m_CurrentBugID;
 	char						m_CurrentBugDirectory[512];
+	bool						m_bMountedBugSub;
 };
 
 bool CUtlSymbol_LessThan(const CUtlSymbol &sym1, const CUtlSymbol &sym2)
@@ -229,6 +249,7 @@ CBugReporter::CBugReporter()
 {
 	m_pBug = NULL;
 	m_CurrentBugID = 0;
+	m_bMountedBugSub = false;
 	m_LevelMap.SetLessFunc(&CUtlSymbol_LessThan);
 	g_bugreporter = this;
 }
@@ -256,6 +277,43 @@ bool CBugReporter::Init( CreateInterfaceFn engineFactory )
 	// Load our bugreporter_text options file 
 	m_OptionsFile = new KeyValues( "OptionsFile" );
 
+#ifdef POSIX
+	// check if we can see the config file
+	struct _stat mount_info;
+	if (_stat(BUGSUB_CONFIG, &mount_info))
+	{
+		// if not we may need to mount bugbait
+		if ( _stat(BUGSUB_MOUNT, &mount_info ) )
+		{
+			// make the mount dir if needed
+			mkdir( BUGSUB_MOUNT, S_IRWXU | S_IRWXG | S_IRWXO  );
+		}
+		
+		// now run the smbmount on it
+		system( BUGSUB_MOUNT_COMMAND );
+
+#ifdef LINUX
+		if( _stat( BUGSUB_CONFIG, &mount_info ) )
+		{
+			Color clr( 255, 100, 50, 255 );
+
+			// The mount failed - probably because the /etc/fstab entry is missing?
+			ConColorMsg( clr, "ERROR: failed to mount '" BUGSUB_MOUNT "' with '" BUGSUB_MOUNT_COMMAND "'.\n" );
+			ConColorMsg( clr, "Bugsub not set up yet? Do 'sudo apt-get install smbfs', 'sudo mkdir /mnt/bugsub', and add this /etc/fstab:\n" );
+			ConColorMsg( clr, "  bugbait.valvesoftware.com/bugsub /mnt/bugsub smbfs rw,user,username=guest,password=,noauto 0 0\n" );
+			return false;
+		}
+#endif
+
+		m_bMountedBugSub = true;
+	}
+	
+#elif defined(WIN32)
+	
+#else
+#error "need to get to \\bugbait somehow"
+#endif
+	
 	// open file old skool way to avoid steam filesystem restrictions
 	struct _stat cfg_info;
 	if (_stat(BUGSUB_CONFIG, &cfg_info)) {
@@ -268,6 +326,7 @@ bool CBugReporter::Init( CreateInterfaceFn engineFactory )
 	FILE *fp = fopen(BUGSUB_CONFIG, "rb");
 	if (!fp) {
 		AssertMsg(0, "failed to open bugreporter options file" );
+		delete [] buf;
 		return false;
 	}
 
@@ -277,20 +336,40 @@ bool CBugReporter::Init( CreateInterfaceFn engineFactory )
 	if ( !m_OptionsFile->LoadFromBuffer(BUGSUB_CONFIG, buf) )
 	{
 		AssertMsg( 0, "Failed to load bugreporter_text options file." );
-		delete buf;
+		delete [] buf;
 		return false;
 	}
-	strncpy( m_BugRootDirectory, m_OptionsFile->GetString( "bug_directory", "." ), sizeof(m_BugRootDirectory) );
-
+#ifdef WIN32
+	V_strncpy( m_BugRootDirectory, m_OptionsFile->GetString( "bug_directory", "." ), sizeof(m_BugRootDirectory) );
+#elif defined(OSX)
+	V_strncpy( m_BugRootDirectory, m_OptionsFile->GetString( "bug_directory_osx", BUGSUB_MOUNT ), sizeof(m_BugRootDirectory) );
+#elif defined(LINUX)
+	V_strncpy( m_BugRootDirectory, m_OptionsFile->GetString( "bug_directory_linux", BUGSUB_MOUNT ), sizeof(m_BugRootDirectory) );
+#else
+#error
+#endif
+	
 	PopulateLists();
 
+#ifdef WIN32
 	m_UserName = m_BugStrings.AddString(getenv( "username" ));
-	delete buf;
+#elif POSIX
+	m_UserName = m_BugStrings.AddString(getenv( "USER" ));	
+#else
+#error
+#endif
+	delete [] buf;
 	return true;
 }
 
 void CBugReporter::Shutdown()
 {
+#ifdef POSIX
+	if ( m_bMountedBugSub )
+	{
+		system( BUGSUB_UNMOUNT_COMMAND );
+	}
+#endif
 }
 
 char const *CBugReporter::GetUserName()
@@ -509,8 +588,9 @@ void CBugReporter::StartNewBugReport()
 	{
 		VCRHook_LocalTime( &t );
 
-		Q_snprintf(m_CurrentBugDirectory, sizeof(m_CurrentBugDirectory), "%s\\%04i%02i%02i-%02i%02i%02i-%s", 
+		Q_snprintf(m_CurrentBugDirectory, sizeof(m_CurrentBugDirectory), "%s%c%04i%02i%02i-%02i%02i%02i-%s", 
 				   m_BugRootDirectory,
+				   CORRECT_PATH_SEPARATOR,
 				   t.tm_year + 1900, t.tm_mon+1, t.tm_mday,
 				   t.tm_hour, t.tm_min, t.tm_sec,
 				   m_BugStrings.String(m_UserName));
@@ -518,7 +598,7 @@ void CBugReporter::StartNewBugReport()
 			break;
 
 		// sleep for a second or two then try again
-		Sleep(RandomInt(1000,2000));
+		ThreadSleep(RandomInt(1000,2000));
 	} while ( 1 );
 	_mkdir(m_CurrentBugDirectory);
 }
@@ -588,7 +668,7 @@ bool CBugReporter::CommitBugReport( int& bugSubmissionId )
 	// Write it out to the file
 	// Need to use native calls to bypass steam filesystem
 	char szBugFileName[1024];
-	Q_snprintf(szBugFileName, sizeof(szBugFileName), "%s\\bug.txt", m_CurrentBugDirectory );
+	Q_snprintf(szBugFileName, sizeof(szBugFileName), "%s%cbug.txt", m_CurrentBugDirectory, CORRECT_PATH_SEPARATOR );
 	FILE *fp = fopen(szBugFileName, "wb");
 	if (!fp) 
 		return false;

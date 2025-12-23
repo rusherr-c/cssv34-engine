@@ -1,7 +1,7 @@
 BEGIN {use File::Basename; push @INC, dirname($0); }
 require "valve_perl_helpers.pl";
 use Cwd;
-# use String::CRC32;
+use String::CRC32;
 
 my $txtfilename = shift;
 my $arg = shift;
@@ -15,7 +15,7 @@ if( $arg =~ m/-x360/i )
 }
 
 # Get the changelist number for the Shader Auto Checkout changelist. Will create the changelist if it doesn't exist.
-#my $changelistnumber = `valve_p4_create_changelist.cmd ..\\..\\..\\game\\hl2\\shaders \"Shader Auto Checkout VCS\"`;
+my $changelistnumber = `valve_p4_create_changelist.cmd ..\\..\\..\\game\\hl2\\shaders \"Shader Auto Checkout VCS\"`;
 # Get rid of the newline
 $changelistnumber =~ s/\n//g;
 

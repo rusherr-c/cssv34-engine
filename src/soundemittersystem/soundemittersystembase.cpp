@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,7 @@
 #include "vstdlib/random.h"
 #include "checksum_crc.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
+#include "ifilelist.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -29,7 +30,6 @@ static IFileSystem* filesystem = 0;
 // Purpose: 
 //-----------------------------------------------------------------------------
 CSoundEmitterSystemBase::CSoundEmitterSystemBase() : 
-	m_ActorGenders( true, 0, 0 ),  // Case insensitive
 	m_nInitCount( 0 ),
 	m_uManifestPlusScriptChecksum( 0 )
 {
@@ -41,7 +41,7 @@ CSoundEmitterSystemBase::CSoundEmitterSystemBase() :
 //-----------------------------------------------------------------------------
 int	 CSoundEmitterSystemBase::First() const
 {
-	return 0;
+	return m_Sounds.FirstHandle();
 }
 
 //-----------------------------------------------------------------------------
@@ -51,11 +51,7 @@ int	 CSoundEmitterSystemBase::First() const
 //-----------------------------------------------------------------------------
 int CSoundEmitterSystemBase::Next( int i ) const
 {
-	if ( ++i >= m_Sounds.Count() )
-	{
-		return m_Sounds.InvalidIndex();
-	}
-	return i;
+	return m_Sounds.NextHandle(i);
 }
 
 //-----------------------------------------------------------------------------
@@ -63,7 +59,7 @@ int CSoundEmitterSystemBase::Next( int i ) const
 //-----------------------------------------------------------------------------
 int	CSoundEmitterSystemBase::InvalidIndex() const
 {
-	return m_Sounds.InvalidIndex();
+	return m_Sounds.InvalidHandle();
 }
 
 //-----------------------------------------------------------------------------
@@ -176,19 +172,13 @@ static void AccumulateFileNameAndTimestampIntoChecksum( CRC32_t *crc, char const
 	CRC32_ProcessBuffer( crc, filename, Q_strlen( filename ) );
 }
 
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Output : Returns true on success, false on failure.
 //-----------------------------------------------------------------------------
-bool CSoundEmitterSystemBase::ModInit()
+bool CSoundEmitterSystemBase::InternalModInit()
 {
-	++m_nInitCount;
-
-	if ( m_nInitCount > 1 )
-	{
-		return true;
-	}
-
 	/*
 	if ( m_SoundKeyValues.Count() > 0 )
 	{
@@ -226,6 +216,11 @@ bool CSoundEmitterSystemBase::ModInit()
 				AddSoundsFromFile( sub->GetString(), true );
 				continue;
 			}
+			else if ( !Q_stricmp( sub->GetName(), "faceposer_file" ) )
+			{
+				// do nothing for these files; they're only used for faceposer
+				continue;
+			}
 
 			Warning( "CSoundEmitterSystemBase::BaseInit:  Manifest '%s' with bogus file type '%s', expecting 'declare_file' or 'precache_file'\n", 
 				MANIFEST_FILE, sub->GetName() );
@@ -249,20 +244,37 @@ bool CSoundEmitterSystemBase::ModInit()
 	return true;
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+// Output : Returns true on success, false on failure.
+//-----------------------------------------------------------------------------
+bool CSoundEmitterSystemBase::ModInit()
+{
+	++m_nInitCount;
+
+	if ( m_nInitCount > 1 )
+	{
+		return true;
+	}
+
+	return InternalModInit();
+}
+
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CSoundEmitterSystemBase::ModShutdown()
+void CSoundEmitterSystemBase::InternalModShutdown()
 {
-	if ( --m_nInitCount > 0 )
-		return;
-
 	int i;
 	m_SoundKeyValues.RemoveAll();
-	for ( i = 0; i < m_Sounds.Count(); ++i )
+
+	for ( UtlHashHandle_t nIndex = m_Sounds.FirstHandle(); nIndex != m_Sounds.InvalidHandle(); nIndex = m_Sounds.NextHandle( nIndex ) )
 	{
-		delete m_Sounds[ i ];
+		delete m_Sounds[ nIndex ];
 	}
+
 	m_Sounds.Purge();
 
 	for ( i = 0; i < m_SavedOverrides.Count() ; ++i )
@@ -274,16 +286,31 @@ void CSoundEmitterSystemBase::ModShutdown()
 	m_ActorGenders.Purge();
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CSoundEmitterSystemBase::ModShutdown()
+{
+	if ( --m_nInitCount > 0 )
+		return;
+
+	InternalModShutdown();
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Input  : *pName - 
 //-----------------------------------------------------------------------------
 int	CSoundEmitterSystemBase::GetSoundIndex( const char *pName ) const
 {
+	if ( !pName )
+		return -1;
+
 	CSoundEntry search;
 	search.m_Name = pName;
-	int idx = m_Sounds.Find( &search );
-	if ( idx == m_Sounds.InvalidIndex() )
+	UtlHashHandle_t idx = m_Sounds.Find( pName );
+	if ( idx == m_Sounds.InvalidHandle() )
 		return -1;
 
 	return idx;
@@ -296,7 +323,7 @@ int	CSoundEmitterSystemBase::GetSoundIndex( const char *pName ) const
 //-----------------------------------------------------------------------------
 bool CSoundEmitterSystemBase::IsValidIndex( int index )
 {
-	return m_Sounds.IsValidIndex( index );
+	return m_Sounds.IsValidHandle( index );
 }
 
 //-----------------------------------------------------------------------------
@@ -309,7 +336,7 @@ const char *CSoundEmitterSystemBase::GetSoundName( int index )
 	if ( !IsValidIndex( index ) )
 		return "";
 
-	return m_Sounds[ index ]->m_Name.String();
+	return m_Sounds[ index ]->m_Name.Get();
 }
 
 //-----------------------------------------------------------------------------
@@ -424,7 +451,7 @@ bool CSoundEmitterSystemBase::GetParametersForSound( const char *soundname, CSou
 
 CSoundParametersInternal *CSoundEmitterSystemBase::InternalGetParametersForSound( int index )
 {
-	if ( !m_Sounds.IsValidIndex( index ) )
+	if ( !m_Sounds.IsValidHandle( index ) )
 	{
 		Assert( !"CSoundEmitterSystemBase::InternalGetParametersForSound:  Bogus index" );
 		return NULL;
@@ -604,10 +631,10 @@ void CSoundEmitterSystemBase::LoadGlobalActors()
 		KeyValues *pvkActor;
 		for ( pvkActor = allActors->GetFirstSubKey(); pvkActor != NULL; pvkActor = pvkActor->GetNextKey() )
 		{
-			int idx = m_ActorGenders.Find( pvkActor->GetName() );
-			if ( idx == m_ActorGenders.InvalidIndex() )
+			UtlHashHandle_t idx = m_ActorGenders.Find( pvkActor->GetName() );
+			if ( idx == m_ActorGenders.InvalidHandle() )
 			{
-				if ( m_ActorGenders.Count() + 1 == m_ActorGenders.InvalidIndex() )
+				if ( m_ActorGenders.Count() > 254 )
 				{
 					Warning( "Exceeded max number of actors in scripts/global_actors.txt\n" );
 					break;
@@ -643,8 +670,8 @@ gender_t CSoundEmitterSystemBase::GetActorGender( char const *actormodel )
 		Q_FileBase( actormodel, actor, sizeof( actor ) );
 	}
 
-	int idx = m_ActorGenders.Find( actor );
-	if ( idx == m_ActorGenders.InvalidIndex() )
+	UtlHashHandle_t idx = m_ActorGenders.Find( actor );
+	if ( idx == m_ActorGenders.InvalidHandle() )
 		return GENDER_NONE;
 
 	return m_ActorGenders[ idx ];
@@ -800,7 +827,7 @@ soundlevel_t CSoundEmitterSystemBase::LookupSoundLevel( const char *soundname )
 // Purpose: 
 // Input  : *filename - 
 //-----------------------------------------------------------------------------
-void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPreload, bool bIsOverride /*=false*/ )
+void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPreload, bool bIsOverride /*=false*/, bool bRefresh /*=false*/ )
 {
 	CSoundScriptFile sf;
 	sf.hFilename = filesystem->FindOrAddFileName( filename );
@@ -822,7 +849,7 @@ void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPre
 		{
 			if ( pKeys->GetFirstSubKey() )
 			{
-				if ( m_Sounds.Count() + 1 == m_Sounds.InvalidIndex() )
+				if ( m_Sounds.Count() >= 65534 )
 				{
 					Warning( "Exceeded maximum number of sound emitter entries\n" );
 					break;
@@ -845,11 +872,9 @@ void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPre
 					++newOverrideCount;
 				}
 
-				bool add = true;
-				int lookup = m_Sounds.Find( pEntry );
-				if ( lookup != m_Sounds.InvalidIndex() )
+				UtlHashHandle_t lookup = m_Sounds.Insert( pEntry ); // insert returns existing item if found
+				if ( m_Sounds[ lookup ] != pEntry )
 				{
-					add = false;
 					if ( bIsOverride )
 					{
 						MEM_ALLOC_CREDIT();
@@ -868,9 +893,13 @@ void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPre
 						InitSoundInternalParameters( pKeys->GetName(), pKeys, pEntry->m_SoundParams );
 						pEntry->m_SoundParams.SetShouldPreload( bPreload ); // this gets handled by game code after initting.
 
-						m_Sounds[ lookup ] = pEntry;
+						m_Sounds.ReplaceKey( lookup, pEntry );
 
 						++replaceCount;
+					}
+					else if ( bRefresh )
+					{
+						InitSoundInternalParameters( pKeys->GetName(), pKeys, m_Sounds[ lookup ]->m_SoundParams );
 					}
 #if 0
 					else
@@ -879,15 +908,12 @@ void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPre
 					}
 #endif
 				}
-				
-				if ( add )
+				else
 				{
 					MEM_ALLOC_CREDIT();
 
 					InitSoundInternalParameters( pKeys->GetName(), pKeys, pEntry->m_SoundParams );
 					pEntry->m_SoundParams.SetShouldPreload( bPreload ); // this gets handled by game code after initting.
-
-					m_Sounds.Insert( pEntry );
 				}
 			}
 			pKeys = pKeys->GetNextKey();
@@ -913,7 +939,7 @@ void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPre
 	
 	if ( bIsOverride )
 	{
-		Warning( "SoundEmitter:  adding map sound overrides from %s [%i total, %i replacements, %i duplicated replacements]\n", 
+		DevMsg( "SoundEmitter:  adding map sound overrides from %s [%i total, %i replacements, %i duplicated replacements]\n", 
 			filename,
 			newOverrideCount,
 			replaceCount,
@@ -921,6 +947,43 @@ void CSoundEmitterSystemBase::AddSoundsFromFile( const char *filename, bool bPre
 	}
 
 	Assert( scriptindex >= 0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Reload a sound emitter file (used to refresh files after sv_pure is turned on)
+//-----------------------------------------------------------------------------
+void CSoundEmitterSystemBase::ReloadSoundEntriesInList( IFileList *pFilesToReload )
+{
+	int i, c;
+	c = m_SoundKeyValues.Count();
+	CUtlVector< const char * > processed;
+	for ( i = 0; i < c ; i++ )
+	{
+		const char *pszFileName = GetSoundScriptName( i );
+		if ( pszFileName && pszFileName[0] )
+		{
+			if ( processed.Find( pszFileName) == processed.InvalidIndex() && pFilesToReload->IsFileInList( pszFileName ) )
+			{
+				Msg( "Reloading sound file '%s' due to pure settings.\n", pszFileName );
+
+				AddSoundsFromFile( pszFileName, false, false, true );
+				
+				// Now mark this file name as being reloaded
+				processed.AddToTail( pszFileName );
+			}
+		}
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Force ModShutdown and ModInit, skips checks for how many systems have 
+// requested inits (for con commands).
+//-----------------------------------------------------------------------------
+void CSoundEmitterSystemBase::Flush()
+{
+	InternalModShutdown();
+	InternalModInit();
 }
 
 
@@ -1401,9 +1464,9 @@ void CSoundEmitterSystemBase::RenameSound( const char *soundname, const char *ne
 
 	// Copy out old entry
 	CSoundEntry *pEntry = m_Sounds[ oldindex ];
-	pEntry->m_Name = newname;
 	// Remove it
-	m_Sounds.Remove( oldindex );
+	m_Sounds.Remove( pEntry );
+	pEntry->m_Name = newname;
 	// Re-insert in new spot
 	m_Sounds.Insert( pEntry );
 
@@ -1546,7 +1609,7 @@ soundlevel_t CSoundEmitterSystemBase::LookupSoundLevelByHandle( char const *soun
 
 // Called from both client and server (single player) or just one (server only in dedicated server and client only if connected to a remote server)
 // Called by LevelInitPreEntity to override sound scripts for the mod with level specific overrides based on custom mapnames, etc.
-void CSoundEmitterSystemBase::AddSoundOverrides( char const *scriptfile )
+void CSoundEmitterSystemBase::AddSoundOverrides( char const *scriptfile, bool bPreload /*= false*/ )
 {
 	FileNameHandle_t handle = filesystem->FindOrAddFileName( scriptfile );
 	if ( m_OverrideFiles.Find( handle ) != m_OverrideFiles.InvalidIndex() )
@@ -1554,48 +1617,37 @@ void CSoundEmitterSystemBase::AddSoundOverrides( char const *scriptfile )
 
 	m_OverrideFiles.AddToTail( handle );
 	// These are overrides
-	AddSoundsFromFile( scriptfile, false, true );
+	AddSoundsFromFile( scriptfile, bPreload, true );
 }
 
 // Called by either client or server in LevelShutdown to clear out custom overrides
 void CSoundEmitterSystemBase::ClearSoundOverrides()
 {
 	int i;
-	CUtlSymbolTable removeNames;
-	CUtlVector< CUtlSymbol > toRemove;
+	int removed = 0;
 
-	// Build a list of names to remove.  I'm reluctant to try and remove while walking CUtlDict since it's an RB tree and there's
-	//  no telling what will happen to the tree traversal if I'm removing while traversing it...  or I haven't dug into it at least...
-	for ( i = 0; i < m_Sounds.Count(); ++i )
+	for ( UtlHashHandle_t i = m_Sounds.FirstHandle(); i != m_Sounds.InvalidHandle(); )
 	{
 		CSoundEntry *entry = m_Sounds[ i ];
 		if ( entry->IsOverride() )
 		{
-			CUtlSymbol sym = removeNames.AddString( m_Sounds[ i ]->m_Name.String() );
-			toRemove.AddToTail( sym );
+			i = m_Sounds.RemoveAndAdvance( i );
+			++removed;
+		}
+		else
+		{
+			i = m_Sounds.NextHandle( i );
 		}
 	}
 
-	if ( toRemove.Count() > 0 || m_SavedOverrides.Count() > 0 )
+	if (removed > 0 || m_SavedOverrides.Count() > 0 )
 	{
 		Warning( "SoundEmitter:  removing map sound overrides [%i to remove, %i to restore]\n", 
-			toRemove.Count(),
+			removed,
 			m_SavedOverrides.Count() );
 	}
 
-	// Now remove them by name
-	int c = toRemove.Count();
-	for ( i = 0; i < c; ++i )
-	{
-		CSoundEntry entry;
-		entry.m_Name = removeNames.String( toRemove[ i ] );
-		int idx = m_Sounds.Find( &entry );
-		delete m_Sounds[ idx ];
-		m_Sounds[ idx ] = 0;
-		m_Sounds.Remove( idx );
-	}
-
-	// Now restor the original entries into the main dictionary.
+	// Now restore the original entries into the main dictionary.
 	for ( i = 0; i < m_SavedOverrides.Count(); ++i )
 	{
 		CSoundEntry *entry = m_SavedOverrides[ i ];

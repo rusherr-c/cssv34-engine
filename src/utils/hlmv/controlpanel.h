@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -58,7 +58,11 @@
 #define IDC_ILLUMPOSITION			2025
 #define IDC_OVERLAY_WIREFRAME		2026
 #define IDC_PLAYSOUNDS				2027
-//#define IDC_PARALLAXMAP			2028
+#define IDC_MESSAGES				2028
+#define IDC_SHADERS					2029
+//#define IDC_PARALLAXMAP			2030
+#define IDC_SHOWORIGINAXIS			2029
+#define IDC_ORIGINAXISLENGTH		2030
 
 #define MAX_SEQUENCES				5
 #define IDC_SEQUENCE0				3000
@@ -89,12 +93,15 @@
 #define IDC_BLENDSEQUENCECHANGES	3203
 #define IDC_BLENDNOW				3204
 #define IDC_BLENDTIME				3205
+#define IDC_ACTIVITY_MODIFIERS		3206
+#define IDC_ANIMATEWEAPONS			3207
 
 #define IDC_BODYPART				4001
 #define IDC_SUBMODEL				4002
 #define IDC_CONTROLLER				4003
 #define IDC_CONTROLLERVALUE			4004
 #define IDC_SKINS					4005
+#define IDC_MATERIALS				4006
 
 #define IDC_BONE_BONELIST			5000
 #define IDC_BONE_GENERATEQC			5001
@@ -125,6 +132,8 @@
 #define IDC_ATTACHMENT_WINDOW_FIRST	5024
 #define IDC_ATTACHMENT_WINDOW_LAST	5100
 #define IDC_BONE_HITBOX_NAME		5101
+#define IDC_BONE_SAVE_HITBOXES		5102
+#define IDC_BONE_LOAD_HITBOXES		5103
 
 #define IDC_FLEX					7001
 #define IDC_FLEXDEFAULTS			7002
@@ -241,6 +250,8 @@ class ControlPanel : public mxWindow
 	mxCheckBox *cbEnableHead;
 	mxCheckBox *cbIllumPosition;
 	mxCheckBox *cbPlaySounds;
+	mxCheckBox *cbShowOriginAxis;
+	mxSlider *leOriginAxisLength;
 
 	mxChoice *cLODChoice;
 	mxCheckBox *cbAutoLOD;
@@ -262,13 +273,15 @@ class ControlPanel : public mxWindow
 
 	mxSlider *slBlendTime;
 	mxLabel *laBlendTime;
+	mxChoice *cActivityModifiers;
 	mxSlider *slForceFrame;
 	mxLabel	*lForcedFrame;
 	mxRadioButton *rbFrameSelection[MAX_SEQUENCES];
 	mxChoice *cBodypart, *cController, *cSubmodel;
 	mxSlider *slController;
 	mxChoice *cSkin;
-	mxLabel *lModelInfo1, *lModelInfo2, *lModelInfo3, *lModelInfo4;
+	mxChoice *cMaterials;
+	mxLabel *lModelInfo1, *lModelInfo2, *lModelInfo3, *lModelInfo4, *lModelInfo5;
 	//mxChoice *cTextures;
 	//mxCheckBox *cbChrome;
 	//mxLabel *lTexSize;
@@ -332,6 +345,8 @@ class ControlPanel : public mxWindow
 
 	CBoneControlWindow* m_pBoneWindow;
 	CAttachmentsWindow* m_pAttachmentsWindow;
+	mxListBox *cMessageList;
+	mxListBox *cShaderUsed;
 
 public:
 	// CREATORS
@@ -378,13 +393,17 @@ public:
 	void setOverbright( bool b );
 	void setLODMetric( float metric );
 	void setPolycount( int polycount );
+	void setModelInfo( int nVertCount, int nIndexCount, int nTriCount );
 	void setTransparent( bool isTransparent );
 	void updatePoseParameters( void );
 	void setFOV( float fov );
 	void setPlaySounds( bool b );
+	void setShowOriginAxis( bool b );
+	void setOriginAxisLength( float originAxisLength );
 
 	void initSequenceChoices();
-	void setSequence(int index);
+	void setSequence( int index );
+	void showActivityModifiers( int sequence );
 	void updateGroundSpeed( void );
 	void setOverlaySequence(int num, int index, float weight);
 	void updateTransitionAmount();
@@ -407,6 +426,7 @@ public:
 	void setBoneControllerValue (int index, float value);
 
 	void initSkinChoices();
+	void initMaterialChoices();
 
 	void setModelInfo ();
 
@@ -415,6 +435,7 @@ public:
 	void initLODs();
 
 	void centerView ();
+	void UpdateMaterialList ();
 	void viewmodelView();
 
 	void fullscreen ();
@@ -423,6 +444,7 @@ public:
 
 	void ConvertFlexData();
 	void initFlexes ();
+	void connectFlexes( CStudioHdr* hdr );
 
 	int GetCurrentHitboxSet( void );
 
@@ -432,6 +454,9 @@ public:
 	void BuildEventQCString();
 
 	void CreateSortedSequenceList( CStudioHdr* hdr, int *pSequence );
+	void SetFrameSlider( float flFrame );
+
+	void UnloadAllMergedModels();
 
 public:
 	// Sets up the main tabs
@@ -444,6 +469,7 @@ public:
 	void SetupAttachmentsWindow( mxTab *pTab );
 	void SetupIKRuleWindow( mxTab *pTab );
 	void SetupEventWindow( mxTab *pTab );
+	bool m_bVMTInfoLoaded;
 };
 
 

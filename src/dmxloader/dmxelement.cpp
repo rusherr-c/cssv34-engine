@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -338,8 +338,10 @@ void CDmxElement::RemoveAllElementsRecursive()
 //-----------------------------------------------------------------------------
 // Method to unpack data into a structure
 //-----------------------------------------------------------------------------
-void CDmxElement::UnpackIntoStructure( void *pData, const DmxElementUnpackStructure_t *pUnpack ) const
+void CDmxElement::UnpackIntoStructure( void *pData, size_t DestSizeInBytes, const DmxElementUnpackStructure_t *pUnpack ) const
 {
+	void *pDataEnd = ( char * )pData + DestSizeInBytes;
+
 	for ( ; pUnpack->m_AttributeType != AT_UNKNOWN; ++pUnpack )
 	{
 		char *pDest = (char*)pData + pUnpack->m_nOffset;
@@ -366,8 +368,16 @@ void CDmxElement::UnpackIntoStructure( void *pData, const DmxElementUnpackStruct
 
 			// Convert the default string into the target
 			int nLen = Q_strlen( pUnpack->m_pDefaultString );
-			CUtlBuffer buf( pUnpack->m_pDefaultString, nLen, CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER );
-			temp.Unserialize( pUnpack->m_AttributeType, buf );
+			if ( nLen > 0 )
+			{
+				CUtlBuffer buf( pUnpack->m_pDefaultString, nLen, CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER );
+				temp.Unserialize( pUnpack->m_AttributeType, buf );
+			}
+			else
+			{
+				CUtlBuffer buf;
+				temp.Unserialize( pUnpack->m_AttributeType, buf );				
+			}
 			pAttribute = &temp;
 		}
 
@@ -379,6 +389,12 @@ void CDmxElement::UnpackIntoStructure( void *pData, const DmxElementUnpackStruct
 
 		if ( pAttribute->GetType() == AT_STRING )
 		{
+			if ( pDest + pUnpack->m_nSize > pDataEnd )
+			{
+				Warning( "ERROR Memory corruption: CDmxElement::UnpackIntoStructure string buffer overrun!\n" );
+				continue;
+			}
+
 			// Strings get special treatment: they are stored as in-line arrays of chars
 			Q_strncpy( pDest, pAttribute->GetValueString(), pUnpack->m_nSize );
 			continue;
@@ -388,15 +404,27 @@ void CDmxElement::UnpackIntoStructure( void *pData, const DmxElementUnpackStruct
 		// replication
 		if ( ( pAttribute->GetType() == AT_FLOAT ) && ( pUnpack->m_nSize == sizeof( fltx4 ) ) )
 		{
-			memcpy( pDest + 0 * sizeof( float) , pAttribute->m_pData, sizeof( float ) );
-			memcpy( pDest + 1 * sizeof( float) , pAttribute->m_pData, sizeof( float ) );
-			memcpy( pDest + 2 * sizeof( float) , pAttribute->m_pData, sizeof( float ) );
-			memcpy( pDest + 3 * sizeof( float) , pAttribute->m_pData, sizeof( float ) );
+			if ( pDest + 4 * sizeof( float ) > pDataEnd )
+			{
+				Warning( "ERROR Memory corruption: CDmxElement::UnpackIntoStructure float buffer overrun!\n" );
+				continue;
+			}
+
+			memcpy( pDest + 0 * sizeof( float ) , pAttribute->m_pData, sizeof( float ) );
+			memcpy( pDest + 1 * sizeof( float ) , pAttribute->m_pData, sizeof( float ) );
+			memcpy( pDest + 2 * sizeof( float ) , pAttribute->m_pData, sizeof( float ) );
+			memcpy( pDest + 3 * sizeof( float ) , pAttribute->m_pData, sizeof( float ) );
 		}
 		else
 		{
+			if ( pDest + pUnpack->m_nSize > pDataEnd )
+			{
+				Warning( "ERROR Memory corruption: CDmxElement::UnpackIntoStructure memcpy buffer overrun!\n" );
+				continue;
+			}
+
 			AssertMsg( pUnpack->m_nSize == CDmxAttribute::AttributeDataSize( pAttribute->GetType() ), 
-					   ( "CDmxElement::UnpackIntoStructure: Incorrect size to unpack data into in attribute \"%s\"!\n", pUnpack->m_pAttributeName ) );
+					   "CDmxElement::UnpackIntoStructure: Incorrect size to unpack data into in attribute \"%s\"!\n", pUnpack->m_pAttributeName );
 			memcpy( pDest, pAttribute->m_pData, pUnpack->m_nSize );
 		}
 	}
@@ -406,7 +434,7 @@ void CDmxElement::UnpackIntoStructure( void *pData, const DmxElementUnpackStruct
 //-----------------------------------------------------------------------------
 // Creates attributes based on the unpack structure
 //-----------------------------------------------------------------------------
-void CDmxElement::AddAttributesFromStructure( const void *pData, const DmxElementUnpackStructure_t *pUnpack )
+void CDmxElement::AddAttributesFromStructure_Internal( const void *pData, size_t byteCount, const DmxElementUnpackStructure_t *pUnpack )
 {
 	for ( ; pUnpack->m_AttributeType != AT_UNKNOWN; ++pUnpack )
 	{
@@ -415,23 +443,27 @@ void CDmxElement::AddAttributesFromStructure( const void *pData, const DmxElemen
 		// NOTE: This does not work with array data at the moment
 		if ( IsArrayType( pUnpack->m_AttributeType ) )
 		{
-			AssertMsg( 0, ( "CDmxElement::AddAttributesFromStructure: Array attribute types not currently supported!\n" ) );
+			AssertMsg( 0, "CDmxElement::AddAttributesFromStructure: Array attribute types not currently supported!\n" );
 			continue;
 		}
 
 		if ( pUnpack->m_AttributeType == AT_VOID )
 		{
-			AssertMsg( 0, ( "CDmxElement::AddAttributesFromStructure: Binary blob attribute types not currently supported!\n" ) );
+			AssertMsg( 0, "CDmxElement::AddAttributesFromStructure: Binary blob attribute types not currently supported!\n" );
 			continue;
 		}
 
 		if ( HasAttribute( pUnpack->m_pAttributeName ) )
 		{
-			AssertMsg( 0, ( "CDmxElement::AddAttributesFromStructure: Attribute %s already exists!\n", pUnpack->m_pAttributeName ) );
+			AssertMsg( 0, "CDmxElement::AddAttributesFromStructure: Attribute %s already exists!\n", pUnpack->m_pAttributeName );
 			continue;
 		}
 
 		{
+			if ( (size_t)(pUnpack->m_nOffset + pUnpack->m_nSize) > byteCount )
+			{
+				Msg( "Buffer underread! Mismatched type/type-descriptor.\n" );
+			}
 			CDmxElementModifyScope modify( this );
 			CDmxAttribute *pAttribute = AddAttribute( pUnpack->m_pAttributeName );
 			if ( pUnpack->m_AttributeType == AT_STRING )
@@ -449,7 +481,7 @@ void CDmxElement::AddAttributesFromStructure( const void *pData, const DmxElemen
 				}
 
 				AssertMsg( nSize == CDmxAttribute::AttributeDataSize( pUnpack->m_AttributeType ), 
-						   ( "CDmxElement::UnpackIntoStructure: Incorrect size to unpack data into in attribute \"%s\"!\n", pUnpack->m_pAttributeName ) );
+						   "CDmxElement::UnpackIntoStructure: Incorrect size to unpack data into in attribute \"%s\"!\n", pUnpack->m_pAttributeName );
 				pAttribute->SetValue( pUnpack->m_AttributeType, pSrc, nSize );
 			}
 		}

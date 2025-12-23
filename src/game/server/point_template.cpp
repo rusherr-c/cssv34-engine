@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Point entity used to create templates out of other entities or groups of entities
 //
@@ -375,7 +375,7 @@ bool CPointTemplate::CreateInstance( const Vector &vecOrigin, const QAngle &vecA
 		pEntity->SetAbsOrigin( vecNewOrigin );
 		pEntity->SetAbsAngles( vecNewAngles );
 
-		pSpawnList[i].m_pEntity = pEntity;
+		pSpawnList[i].m_hEntity = pEntity;
 		pSpawnList[i].m_nDepth = 0;
 		pSpawnList[i].m_pDeferredParent = NULL;
 	}
@@ -384,9 +384,9 @@ bool CPointTemplate::CreateInstance( const Vector &vecOrigin, const QAngle &vecA
 
 	for ( i = 0; i < iTemplates; ++i )
 	{
-		if ( pSpawnList[i].m_pEntity )
+		if ( pSpawnList[i].m_hEntity )
 		{
-			pEntities->AddToTail( pSpawnList[i].m_pEntity );
+			pEntities->AddToTail( pSpawnList[i].m_hEntity );
 		}
 	}
 

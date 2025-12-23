@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2007, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,6 +11,7 @@
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "materialsystem/imaterial.h"
 #include "materialsystem/imaterialvar.h"
+#include "materialsystem/imesh.h"
 #include "optimize.h"
 #include "mathlib/vmatrix.h"
 #include "tier0/vprof.h"
@@ -60,12 +61,12 @@ CStudioRender::CStudioRender()
 	m_GlintHeight = 0;
 
 	// Cache-align our important matrices
-	g_pMemAlloc->PushAllocDbgInfo( __FILE__, __LINE__ );
+	MemAlloc_PushAllocDbgInfo( __FILE__, __LINE__ );
 
 	m_PoseToWorld = (matrix3x4_t*)MemAlloc_AllocAligned( MAXSTUDIOBONES * sizeof(matrix3x4_t), 32 );
 	m_PoseToDecal = (matrix3x4_t*)MemAlloc_AllocAligned( MAXSTUDIOBONES * sizeof(matrix3x4_t), 32 );
 
-	g_pMemAlloc->PopAllocDbgInfo();
+	MemAlloc_PopAllocDbgInfo();
 	m_nDecalId = 1;
 }
 
@@ -77,45 +78,44 @@ CStudioRender::~CStudioRender()
 
 void CStudioRender::InitDebugMaterials( void )
 {
-#ifdef _WIN32
 	m_pMaterialMRMWireframe = 
-		g_pMaterialSystem->FindMaterial( "debug/debugmrmwireframe", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugmrmwireframe", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialMRMWireframe->IncrementReferenceCount();
 
 	m_pMaterialMRMWireframeZBuffer = 
-		g_pMaterialSystem->FindMaterial( "debug/debugmrmwireframezbuffer", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugmrmwireframezbuffer", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialMRMWireframeZBuffer->IncrementReferenceCount();
 
 	m_pMaterialMRMNormals = 
-		g_pMaterialSystem->FindMaterial( "debug/debugmrmnormals", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugmrmnormals", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialMRMNormals->IncrementReferenceCount();
 
 	m_pMaterialTangentFrame = 
-		g_pMaterialSystem->FindMaterial( "debug/debugvertexcolor", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugvertexcolor", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialTangentFrame->IncrementReferenceCount();
 
 	m_pMaterialTranslucentModelHulls = 
-		g_pMaterialSystem->FindMaterial( "debug/debugtranslucentmodelhulls", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugtranslucentmodelhulls", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialTranslucentModelHulls->IncrementReferenceCount();
 
 	m_pMaterialSolidModelHulls = 
-		g_pMaterialSystem->FindMaterial( "debug/debugsolidmodelhulls", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugsolidmodelhulls", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialSolidModelHulls->IncrementReferenceCount();
 
 	m_pMaterialAdditiveVertexColorVertexAlpha = 
-		g_pMaterialSystem->FindMaterial( "debug/additivevertexcolorvertexalpha", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/additivevertexcolorvertexalpha", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialAdditiveVertexColorVertexAlpha->IncrementReferenceCount();
 
 	m_pMaterialModelBones = 
-		g_pMaterialSystem->FindMaterial( "debug/debugmodelbones", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugmodelbones", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialModelBones->IncrementReferenceCount();
 
 	m_pMaterialModelEnvCubemap =
-		g_pMaterialSystem->FindMaterial( "debug/env_cubemap_model", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/env_cubemap_model", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialModelEnvCubemap->IncrementReferenceCount();
 	
 	m_pMaterialWorldWireframe = 
-		g_pMaterialSystem->FindMaterial( "debug/debugworldwireframe", TEXTURE_GROUP_OTHER, true );
+		g_pMaterialSystem->FindMaterial( "//platform/materials/debug/debugworldwireframe", TEXTURE_GROUP_OTHER, true );
 	m_pMaterialWorldWireframe->IncrementReferenceCount();
 
 	if( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 90 )
@@ -125,30 +125,64 @@ void CStudioRender::InitDebugMaterials( void )
 		pVMTKeyValues->SetInt( "$alphatest", 0 );
 		pVMTKeyValues->SetInt( "$nocull", 0 );
 		m_pDepthWrite[0][0] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite00", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pDepthWrite[0][0]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "DepthWrite" );
 		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
 		pVMTKeyValues->SetInt( "$alphatest", 0 );
 		pVMTKeyValues->SetInt( "$nocull", 1 );
 		m_pDepthWrite[0][1] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite01", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pDepthWrite[0][1]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "DepthWrite" );
 		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
 		pVMTKeyValues->SetInt( "$alphatest", 1 );
 		pVMTKeyValues->SetInt( "$nocull", 0 );
 		m_pDepthWrite[1][0] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite10", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pDepthWrite[1][0]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "DepthWrite" );
 		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
 		pVMTKeyValues->SetInt( "$alphatest", 1 );
 		pVMTKeyValues->SetInt( "$nocull", 1 );
 		m_pDepthWrite[1][1] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite11", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pDepthWrite[1][1]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 0 );
+		pVMTKeyValues->SetInt( "$nocull", 0 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		m_pSSAODepthWrite[0][0] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite00", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pSSAODepthWrite[0][0]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 0 );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		m_pSSAODepthWrite[0][1] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite01", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pSSAODepthWrite[0][1]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 1 );
+		pVMTKeyValues->SetInt( "$nocull", 0 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		m_pSSAODepthWrite[1][0] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite10", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pSSAODepthWrite[1][0]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 1 );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		m_pSSAODepthWrite[1][1] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite11", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		m_pSSAODepthWrite[1][1]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "EyeGlint" );
 		m_pGlintBuildMaterial = g_pMaterialSystem->CreateMaterial( "___glintbuildmaterial", pVMTKeyValues );
 	}
-
-#endif // _WIN32
 }
 
 void CStudioRender::ShutdownDebugMaterials( void )
@@ -215,24 +249,19 @@ void CStudioRender::ShutdownDebugMaterials( void )
 	}
 
 	// DepthWrite materials
-	if ( m_pDepthWrite[0][0] )
+	for ( int32 i = 0; i < 4; i++ )
 	{
-		m_pDepthWrite[0][0]->DecrementReferenceCount();
-	}
+		if ( m_pDepthWrite[ ( i & 0x2 ) >> 1 ][ i & 0x1 ] )
+		{
+			m_pDepthWrite[ ( i & 0x2 ) >> 1 ][ i & 0x1 ]->DecrementReferenceCount();
+			m_pDepthWrite[ ( i & 0x2 ) >> 1 ][ i & 0x1 ] = NULL;
+		}
 
-	if ( m_pDepthWrite[0][1] )
-	{
-		m_pDepthWrite[0][1]->DecrementReferenceCount();
-	}
-
-	if ( m_pDepthWrite[1][0] )
-	{
-		m_pDepthWrite[1][0]->DecrementReferenceCount();
-	}
-
-	if ( m_pDepthWrite[1][1] )
-	{
-		m_pDepthWrite[1][1]->DecrementReferenceCount();
+		if ( m_pSSAODepthWrite[ ( i & 0x2 ) >> 1 ][ i & 0x1 ] )
+		{
+			m_pSSAODepthWrite[ ( i & 0x2 ) >> 1 ][ i & 0x1 ]->DecrementReferenceCount();
+			m_pSSAODepthWrite[ ( i & 0x2 ) >> 1 ][ i & 0x1 ] = NULL;
+		}
 	}
 
 	if ( m_pGlintBuildMaterial )
@@ -396,6 +425,13 @@ void CStudioRender::GetFlexStats( )
 void CStudioRender::DrawModel( const DrawModelInfo_t& info, const StudioRenderContext_t &rc, 
 	matrix3x4_t *pBoneToWorld, const FlexWeights_t &flex, int flags )
 {
+	if ( ( flags & STUDIORENDER_GENERATE_STATS ) != 0 )
+	{
+		ModelStats( info, rc, pBoneToWorld, flex, flags );
+
+		return;
+	}
+
 	VPROF( "CStudioRender::DrawModel");
 
 	m_pRC = const_cast< StudioRenderContext_t* >( &rc );
@@ -429,6 +465,13 @@ void CStudioRender::DrawModel( const DrawModelInfo_t& info, const StudioRenderCo
 	m_VertexCache.StartModel();
 
 	m_pStudioHdr = info.m_pStudioHdr;
+	if ( !info.m_pHardwareData->m_pLODs )
+	{
+		// If we are missing LODs then print the model name before returning
+		// so we can perhaps correct the underlying problem.
+		Msg( "Missing LODs for %s, lod index is %d.\n", m_pStudioHdr->pszName(), info.m_Lod );
+		return;
+	}
 	m_pStudioMeshes = info.m_pHardwareData->m_pLODs[info.m_Lod].m_pMeshData;
 
 	// Bone to world must be set before calling drawmodel; it uses that here
@@ -443,7 +486,7 @@ void CStudioRender::DrawModel( const DrawModelInfo_t& info, const StudioRenderCo
 	// This code assumes the model has been rendered!
 	// So skip if the model hasn't been rendered
 	// Also, skip if we're rendering to the shadow depth map
-	if ( ( m_pStudioMeshes != 0 ) && !(flags & STUDIORENDER_SHADOWDEPTHTEXTURE) )
+	if ( ( m_pStudioMeshes != 0 ) && !( flags & ( STUDIORENDER_SHADOWDEPTHTEXTURE | STUDIORENDER_SSAODEPTHTEXTURE )) )
 	{
 		if ((flags & STUDIORENDER_DRAW_GROUP_MASK) != STUDIORENDER_DRAW_TRANSLUCENT_ONLY)
 		{
@@ -507,12 +550,21 @@ void CStudioRender::DrawModelStaticProp( const DrawModelInfo_t& info,
 	m_pStudioHdr = info.m_pStudioHdr;
 	m_pStudioMeshes = info.m_pHardwareData->m_pLODs[lod].m_pMeshData;
 
+	if ( ( flags & STUDIORENDER_GENERATE_STATS ) != 0 )
+	{
+		FlexWeights_t	flex;
+
+		ModelStats( info, rc, m_pBoneToWorld, flex, flags | STUDIORENDER_DRAW_NO_FLEXES );
+
+		return;
+	}
+
 	R_StudioRenderModel( pRenderContext, info.m_Skin, info.m_Body, info.m_HitboxSet, info.m_pClientEntity,
 		info.m_pHardwareData->m_pLODs[lod].ppMaterials, 
 		info.m_pHardwareData->m_pLODs[lod].pMaterialFlags, flags, BONE_USED_BY_ANYTHING, lod, info.m_pColorMeshes);
 
 	// If we're not shadow depth mapping
-	if ( ( flags & STUDIORENDER_SHADOWDEPTHTEXTURE ) == 0 )
+	if ( ( flags & ( STUDIORENDER_SHADOWDEPTHTEXTURE | STUDIORENDER_SSAODEPTHTEXTURE ) ) == 0 )
 	{
 		// FIXME: Should this occur in a separate call?
 		// Draw all the decals on this model
@@ -542,3 +594,169 @@ void CStudioRender::DrawModelStaticProp( const DrawModelInfo_t& info,
 	m_pBoneToWorld = NULL;
 	m_pRC = NULL;
 }
+
+
+
+
+// UNDONE: Currently no flex supported, no per instance cubemap or other lighting state supported, no eyeballs supported
+// NOTE: This is a fast path for simple models with skeletons but not many other features
+void CStudioRender::DrawModelArray( const DrawModelInfo_t &drawInfo, const StudioRenderContext_t &rc, int arrayCount, model_array_instance_t *pInstanceData, int instanceStride, int flags )
+{
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s %d", __FUNCTION__, arrayCount );
+
+#ifndef SWDS												// no drawing on dedicated server
+#if 0
+	FlexWeights_t flex;
+	memset(&flex, 0, sizeof(flex));
+	for ( int i = 0; i < arrayCount; i++ )
+	{
+		DrawModel( drawInfo, rc, &pInstanceData[i].modelToWorld, flex, flags );
+	}
+	return;
+#endif
+
+	m_pRC = const_cast< StudioRenderContext_t* >( &rc );
+	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
+
+	// Preserve the matrices if we're skinning
+	pRenderContext->MatrixMode( MATERIAL_MODEL );
+	pRenderContext->PushMatrix();
+	pRenderContext->LoadIdentity();
+	pRenderContext->SetNumBoneWeights( 0 );
+
+	// get the studio mesh data for this lod
+	studiomeshdata_t *pMeshDataBase = drawInfo.m_pHardwareData->m_pLODs[drawInfo.m_Lod].m_pMeshData;
+	IMaterial **ppMaterials = drawInfo.m_pHardwareData->m_pLODs[drawInfo.m_Lod].ppMaterials;
+	int *pMaterialFlags = drawInfo.m_pHardwareData->m_pLODs[drawInfo.m_Lod].pMaterialFlags;
+	studiohdr_t *pStudioHdr = drawInfo.m_pStudioHdr;
+	m_bDrawTranslucentSubModels = false;
+
+	int skin = drawInfo.m_Skin;
+	short *pskinref	= pStudioHdr->pSkinref( 0 );
+	if ( skin > 0 && skin < pStudioHdr->numskinfamilies )
+	{
+		pskinref += ( skin * pStudioHdr->numskinref );
+	}
+
+	for ( int body = 0; body < pStudioHdr->numbodyparts; ++body ) 
+	{
+		mstudiobodyparts_t  *pbodypart = pStudioHdr->pBodypart( body );
+
+		int index = drawInfo.m_Body / pbodypart->base;
+		index = index % pbodypart->nummodels;
+		mstudiomodel_t *pSubmodel = pbodypart->pModel( index );
+
+
+		for ( int meshIndex = 0; meshIndex < pSubmodel->nummeshes; ++meshIndex )
+		{
+			mstudiomesh_t *pmesh = pSubmodel->pMesh(meshIndex);
+			studiomeshdata_t *pMeshData = &pMeshDataBase[pmesh->meshid];
+			Assert( pMeshData );
+
+			if ( !pMeshData->m_NumGroup )
+				continue;
+
+			if ( !pMaterialFlags )
+				continue;
+
+			StudioModelLighting_t lighting = LIGHTING_HARDWARE;
+			int materialFlags = pMaterialFlags[pskinref[pmesh->material]];
+
+			IMaterial* pMaterial = R_StudioSetupSkinAndLighting( pRenderContext, pskinref[ pmesh->material ], ppMaterials, materialFlags, drawInfo.m_pClientEntity, NULL, lighting );
+			if ( !pMaterial )
+				continue;
+
+			// eyeball! can't do those in array mode yet
+			Assert( pmesh->materialtype != 1 );
+			//R_StudioDrawMesh( pRenderContext, pmesh, pMeshData, lighting, pMaterial, NULL, drawInfo.m_Lod );
+			// Draw all the various mesh groups...
+			for ( int meshGroupIndex = 0; meshGroupIndex < pMeshData->m_NumGroup; ++meshGroupIndex )
+			{
+				studiomeshgroup_t* pGroup = &pMeshData->m_pMeshGroup[meshGroupIndex];
+
+				// Older models are merely flexed while new ones are also delta flexed
+				Assert(!(pGroup->m_Flags & MESHGROUP_IS_FLEXED));
+				Assert(!(pGroup->m_Flags & MESHGROUP_IS_DELTA_FLEXED));
+				IMesh *pMesh = pGroup->m_pMesh;
+
+				// Needed when we switch back and forth between hardware + software lighting
+				if ( IsPC() && pGroup->m_MeshNeedsRestore )
+				{
+					VertexCompressionType_t compressionType = CompressionType( pMesh->GetVertexFormat() );
+					switch ( compressionType )
+					{
+					case VERTEX_COMPRESSION_ON:
+						R_StudioRestoreMesh<VERTEX_COMPRESSION_ON>( pmesh, pGroup );
+					case VERTEX_COMPRESSION_NONE:
+					default:
+						R_StudioRestoreMesh<VERTEX_COMPRESSION_NONE>( pmesh, pGroup );
+						break;
+					}
+					pGroup->m_MeshNeedsRestore = false;
+				}
+				pMesh->SetColorMesh( NULL, 0 );
+
+				MaterialPrimitiveType_t stripType = MATERIAL_TRIANGLES;
+				pMesh->SetPrimitiveType(stripType);
+				if ( pStudioHdr->numbones > 1 )
+				{
+					byte *pData = (byte *)pInstanceData;
+					for ( int i = 0;i < arrayCount; i++, pData += instanceStride )
+					{
+						matrix3x4_t *pBones = &( ((model_array_instance_t *)pData)->modelToWorld );
+						pRenderContext->LoadMatrix( pBones[0] );
+						for (int j = 0; j < pGroup->m_NumStrips; ++j)
+						{
+							OptimizedModel::StripHeader_t* pStrip = &pGroup->m_pStripData[j];
+							// Reset bone state if we're hardware skinning
+							pRenderContext->SetNumBoneWeights( pStrip->numBones );
+							for (int k = 0; k < pStrip->numBoneStateChanges; ++k)
+							{
+								OptimizedModel::BoneStateChangeHeader_t* pStateChange = pStrip->pBoneStateChange(k);
+								if ( pStateChange->newBoneID < 0 )
+									break;
+
+								pRenderContext->LoadBoneMatrix( pStateChange->hardwareID, pBones[pStateChange->newBoneID] );
+							}
+							MaterialPrimitiveType_t localStripType = pStrip->flags & OptimizedModel::STRIP_IS_TRISTRIP ? MATERIAL_TRIANGLE_STRIP : MATERIAL_TRIANGLES;
+
+							if ( localStripType != stripType )
+							{
+								pMesh->SetPrimitiveType( localStripType );
+								stripType = localStripType;
+							}
+							pMesh->Draw( pStrip->indexOffset, pStrip->numIndices );
+						}
+					}
+					pRenderContext->SetNumBoneWeights( 0 );
+				}
+				else
+				{
+					byte *pData = (byte *)pInstanceData;
+					for ( int i = 0;i < arrayCount; i++, pData += instanceStride )
+					{
+						matrix3x4_t *pBones = &( ((model_array_instance_t *)pData)->modelToWorld );
+						pRenderContext->LoadMatrix( pBones[0] );
+						for (int j = 0; j < pGroup->m_NumStrips; ++j)
+						{
+							OptimizedModel::StripHeader_t* pStrip = &pGroup->m_pStripData[j];
+							MaterialPrimitiveType_t localStripType = pStrip->flags & OptimizedModel::STRIP_IS_TRISTRIP ? MATERIAL_TRIANGLE_STRIP : MATERIAL_TRIANGLES;
+
+							if ( localStripType != stripType )
+							{
+								pMesh->SetPrimitiveType( localStripType );
+								stripType = localStripType;
+							}
+							pMesh->Draw( pStrip->indexOffset, pStrip->numIndices );
+						}
+					}
+				}
+			}
+		}
+	}
+
+	pRenderContext->MatrixMode( MATERIAL_MODEL );
+	pRenderContext->PopMatrix();
+#endif
+}
+

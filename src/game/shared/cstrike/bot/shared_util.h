@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: dll-agnostic routines (no dll dependencies here)
 //
@@ -48,40 +48,23 @@ inline char *CloneString( const char *str )
 	return cloneStr;
 }
 
-//--------------------------------------------------------------------------------------------------------
-/**
- * Simple utility function to allocate memory and duplicate a wide string
- */
-#ifdef _WIN32
-inline wchar_t *CloneWString( const wchar_t *str )
-{
-	wchar_t *cloneStr = new wchar_t [ wcslen(str)+1 ];
-	wcscpy( cloneStr, str );
-	return cloneStr;
-}
-#endif
-
 //--------------------------------------------------------------------------------------------------------------
 /**
  *  snprintf-alike that allows multiple prints into a buffer
  */
-char * BufPrintf(char *buf, int& len, const char *fmt, ...);
+char * BufPrintf(char *buf, int& len, PRINTF_FORMAT_STRING const char *fmt, ...);
 
 //--------------------------------------------------------------------------------------------------------------
 /**
  *  wide char version of BufPrintf
  */
-#ifdef _WIN32
-wchar_t * BufWPrintf(wchar_t *buf, int& len, const wchar_t *fmt, ...);
-#endif
+wchar_t * BufWPrintf(wchar_t *buf, int& len, PRINTF_FORMAT_STRING const wchar_t *fmt, ...);
 
 //--------------------------------------------------------------------------------------------------------------
 /**
  *  convenience function that prints an int into a static wchar_t*
  */
-#ifdef _WIN32
 const wchar_t * NumAsWString( int val );
-#endif
 
 //--------------------------------------------------------------------------------------------------------------
 /**
@@ -93,7 +76,7 @@ const char * NumAsString( int val );
 /**
  *  convenience function that composes a string into a static char*
  */
-char * SharedVarArgs(char *format, ...);
+char * SharedVarArgs(PRINTF_FORMAT_STRING const char *format, ...);
 
 #include "tier0/memdbgoff.h"
 

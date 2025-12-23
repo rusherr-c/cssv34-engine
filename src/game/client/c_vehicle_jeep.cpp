@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -76,7 +76,7 @@ void C_PropJeep::Simulate( void )
 
 		int iAttachment = LookupAttachment( "headlight" );
 
-		if ( iAttachment != -1 )
+		if ( iAttachment != INVALID_PARTICLE_ATTACHMENT )
 		{
 			GetAttachment( iAttachment, vVector, vAngle );
 			AngleVectors( vAngle, &vecForward, &vecRight, &vecUp );

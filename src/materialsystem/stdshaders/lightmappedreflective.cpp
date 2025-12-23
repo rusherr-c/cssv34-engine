@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,7 @@
 //===========================================================================//
 
 #include "BaseVSShader.h"
-#include "mathlib/VMatrix.h"
+#include "mathlib/vmatrix.h"
 #include "common_hlsl_cpp_consts.h" // hack hack hack!
 
 #include "lightmappedreflective_vs20.inc"
@@ -67,11 +67,11 @@ BEGIN_VS_SHADER( LightmappedReflective_DX90, "Help for Lightmapped Reflective" )
 	{
 		if( params[REFRACTTEXTURE]->IsDefined() )
 		{
-			LoadTexture( REFRACTTEXTURE );
+			LoadTexture( REFRACTTEXTURE, g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER || IsOSX() ? TEXTUREFLAGS_SRGB : 0 );
 		}
 		if( params[REFLECTTEXTURE]->IsDefined() )
 		{
-			LoadTexture( REFLECTTEXTURE );
+			LoadTexture( REFLECTTEXTURE, g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER || IsOSX() ? TEXTUREFLAGS_SRGB : 0 );
 		}
 		if ( params[NORMALMAP]->IsDefined() )
 		{
@@ -79,7 +79,8 @@ BEGIN_VS_SHADER( LightmappedReflective_DX90, "Help for Lightmapped Reflective" )
 		}
 		if( params[BASETEXTURE]->IsDefined() )
 		{
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
+			
 			if( params[ENVMAPMASK]->IsDefined() )
 			{
 				LoadTexture( ENVMAPMASK );
@@ -102,28 +103,31 @@ BEGIN_VS_SHADER( LightmappedReflective_DX90, "Help for Lightmapped Reflective" )
 			SetInitialShadowState( );
 			if( bRefraction )
 			{
-				pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
-				pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
-				if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
-				{
-					pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
-				}
+				pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );	// Refract
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER || IsOSX() );
+				
+				pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );	// Base
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, true );
 			}
+			
 			if( bReflection )
 			{
-				pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
-				pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
-				if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
-				{
-					pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, true );
-				}
+				pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );	// Reflect
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER || IsOSX() );
+				
+				pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );	// Lightmap
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER3, g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE );
 			}
+			
 			if( params[BASETEXTURE]->IsTexture() )
 			{
 				// BASETEXTURE
 				pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, true );
+				
 				// LIGHTMAP
 				pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER3, g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE );
 
 				if ( params[ENVMAPMASK]->IsTexture() )
 				{

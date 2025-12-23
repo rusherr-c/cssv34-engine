@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,6 +29,6 @@ struct ParseContext_t
 	bool		bCustomDirectoryNotMade;
 };
 
-void ProcessPerfData( IMySQL *pSQL, char const *pGameName, char const *pPerfString );
+void ProcessPerfData( IMySQL *pSQL, time_t fileTime, char const *pGameName, char const *pPerfString );
 
 #endif // BASE_GAMESTATS_PARSE_H

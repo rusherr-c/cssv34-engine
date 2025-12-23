@@ -1,16 +1,16 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================
 
 #include "dme_controls/DmePicker.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui_controls/TextEntry.h"
 #include "vgui_controls/ListPanel.h"
 #include "vgui_controls/Button.h"
 #include "datamodel/dmelement.h"
-#include "vgui/isurface.h"
+#include "vgui/ISurface.h"
 #include "vgui/iinput.h"
 #include "dme_controls/dmecontrols_utils.h"
 
@@ -102,17 +102,17 @@ void CDmePicker::Activate( const CUtlVector< DmePickerInfo_t >&vec )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CDmePicker::OnKeyCodeTyped( KeyCode code )
+void CDmePicker::OnKeyCodePressed( KeyCode code )
 {
 	if (( code == KEY_UP ) || ( code == KEY_DOWN ) || ( code == KEY_PAGEUP ) || ( code == KEY_PAGEDOWN ))
 	{
-		KeyValues *pMsg = new KeyValues("KeyCodeTyped", "code", code);
+		KeyValues *pMsg = new KeyValues("KeyCodePressed", "code", code);
 		vgui::ipanel()->SendMessage( m_pDmeBrowser->GetVPanel(), pMsg, GetVPanel());
 		pMsg->deleteThis();
 	}
 	else
 	{
-		BaseClass::OnKeyCodeTyped( code );
+		BaseClass::OnKeyCodePressed( code );
 	}
 }
 

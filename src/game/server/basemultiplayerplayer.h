@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 //=============================================================================
 #ifndef BASEMULTIPLAYERPLAYER_H
@@ -19,17 +19,21 @@ class CBaseMultiplayerPlayer : public CAI_ExpresserHost<CBasePlayer>
 public:
 
 	CBaseMultiplayerPlayer();
+	~CBaseMultiplayerPlayer();
+
+	virtual void		Spawn( void );
 
 	virtual void		PostConstructor( const char *szClassname );
 	virtual void		ModifyOrAppendCriteria( AI_CriteriaSet& criteriaSet );
 
 	virtual bool			SpeakIfAllowed( AIConcept_t concept, const char *modifiers = NULL, char *pszOutResponseChosen = NULL, size_t bufsize = 0, IRecipientFilter *filter = NULL );
 	virtual IResponseSystem *GetResponseSystem();
-	AI_Response				*SpeakConcept( int iConcept );
+	bool					SpeakConcept( AI_Response& response, int iConcept );
 	virtual bool			SpeakConceptIfAllowed( int iConcept, const char *modifiers = NULL, char *pszOutResponseChosen = NULL, size_t bufsize = 0, IRecipientFilter *filter = NULL );
 
 	virtual bool		CanHearAndReadChatFrom( CBasePlayer *pPlayer );
 	virtual bool		CanSpeak( void ) { return true; }
+	virtual bool		CanBeAutobalanced() { return true; }
 
 	virtual void		Precache( void )
 	{
@@ -43,6 +47,8 @@ public:
 	virtual bool		CanSpeakVoiceCommand( void ) { return true; }
 	virtual bool		ShouldShowVoiceSubtitleToEnemy( void );
 	virtual void		NoteSpokeVoiceCommand( const char *pszScenePlayed ) {}
+
+	virtual void OnAchievementEarned( int iAchievement ) {}
 
 	enum
 	{
@@ -66,7 +72,24 @@ public:
 
 	virtual int	CalculateTeamBalanceScore( void );
 
-	void AwardAchievement( int iAchievement );
+	void AwardAchievement( int iAchievement, int iCount = 1 );
+	int	GetPerLifeCounterKV( const char *name );
+	void SetPerLifeCounterKV( const char *name, int value );
+	void ResetPerLifeCounters( void );
+
+	KeyValues *GetPerLifeCounterKeys( void ) { return m_pAchievementKV; }
+
+	void EscortScoringThink( void );
+	void StartScoringEscortPoints( float flRate );
+	void StopScoringEscortPoints( void );
+	float m_flAreaCaptureScoreAccumulator;
+	float m_flCapPointScoreRate;
+
+	float GetConnectionTime( void ) { return m_flConnectionTime; }
+
+	// Command rate limiting.
+	bool ShouldRunRateLimitedCommand( const CCommand &args );
+	bool ShouldRunRateLimitedCommand( const char *pszCommand );
 
 protected:
 	virtual CAI_Expresser *CreateExpresser( void );
@@ -80,6 +103,11 @@ private:
 	float m_flLastForcedChangeTeamTime;
 
 	int m_iBalanceScore;	// a score used to determine which players are switched to balance the teams
+
+	KeyValues	*m_pAchievementKV;
+
+	// This lets us rate limit the commands the players can execute so they don't overflow things like reliable buffers.
+	CUtlDict<float,int>	m_RateLimitLastCommandTimes;
 };
 
 //-----------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,48 +12,33 @@
 #if !defined TEXTCONSOLE_UNIX_H
 #define TEXTCONSOLE_UNIX_H
 
-
 #ifndef _WIN32
 
-
-#include <termios.h>
 #include <stdio.h>
 #include "textconsole.h"
-
-
-typedef enum
-{
-    ESCAPE_CLEAR = 0,
-    ESCAPE_RECEIVED,
-    ESCAPE_BRACKET_RECEIVED
-} escape_sequence_t;
-
 
 class CTextConsoleUnix : public CTextConsole
 {
 public:
-	virtual ~CTextConsoleUnix()
-	{
-	};
+	virtual ~CTextConsoleUnix() { }
 
+	// CTextConsole
 	bool		Init();
-	void		ShutDown( void );
-	void		PrintRaw( char * pszMsg, int nChars = 0 );
-	void		Echo( char * pszMsg, int nChars = 0 );
-	char *		GetLine( void );
-	int			GetWidth( void );
+	void		ShutDown();
+	void		Print( char * pszMsg );
+
+	void		SetTitle( char *pszTitle );
+	void		SetStatusLine( char *pszStatus );
+	void		UpdateStatus();
+
+	char *		GetLine( int index, char *buf, int buflen );
+	int			GetWidth();
 
 private:
-	int kbhit( void );
-
 	bool m_bConDebug;
-
-	struct termios termStored;
-	FILE *tty;
+	FILE *m_tty;
 };
-
 
 #endif // _ndef WIN32
 
-
-#endif // !defined
+#endif // !defined TEXTCONSOLE_UNIX_H

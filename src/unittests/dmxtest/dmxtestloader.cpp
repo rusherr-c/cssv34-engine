@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Unit test program  for DMX testing
 //
@@ -137,7 +137,7 @@ void TestReadFile( CDmxElement *pRoot )
 	Shipping_Assert( idVec.Count() == 3 );
 
 	TestStruct_t testStruct;
-	pRoot->UnpackIntoStructure( &testStruct, s_TestStructUnpack );
+	pRoot->UnpackIntoStructure( &testStruct, sizeof( testStruct ), s_TestStructUnpack );
 
 	Shipping_Assert( testStruct.m_bBool == true );
 	Shipping_Assert( testStruct.m_nInt == 2 );
@@ -151,7 +151,7 @@ void TestReadFile( CDmxElement *pRoot )
 	Shipping_Assert( MatricesAreEqual( testStruct.m_Matrix, mattest, 1e-3 ) );
 	Shipping_Assert( !Q_stricmp( testStruct.m_pStringBuf, "test" ) );
 
-	pElement6->UnpackIntoStructure( &testStruct, s_TestStructUnpack );
+	pElement6->UnpackIntoStructure( &testStruct, sizeof( testStruct ), s_TestStructUnpack );
 
 	Shipping_Assert( testStruct.m_bBool == true );
 	Shipping_Assert( testStruct.m_nInt == 5 );

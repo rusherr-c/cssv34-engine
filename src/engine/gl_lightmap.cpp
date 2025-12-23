@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -39,7 +39,7 @@
 
 ALIGN128 Vector4D blocklights[NUM_BUMP_VECTS+1][ MAX_LIGHTMAP_DIM_INCLUDING_BORDER * MAX_LIGHTMAP_DIM_INCLUDING_BORDER ];
 
-ConVar r_avglightmap( "r_avglightmap", "0", FCVAR_CHEAT );
+ConVar r_avglightmap( "r_avglightmap", "0", FCVAR_CHEAT | FCVAR_MATERIAL_SYSTEM_THREAD );
 ConVar r_maxdlights( "r_maxdlights", "32" );
 extern ConVar r_unloadlightmaps;
 extern bool g_bHunkAllocLightmaps;
@@ -235,7 +235,7 @@ static void AddSingleDynamicLightToBumpLighting( dlight_t& dl, SurfaceHandle_t s
 	// and compute what light would have to come in along that direction
 	// in order to produce the same illumination on the flat lightmap. That's
 	// computed by dividing the flat lightmap color by n dot l.
-	Vector lightDirection, texelWorldPosition;
+	Vector lightDirection(0, 0, 0), texelWorldPosition;
 #if 1
 	bool useLightDirection = (dl.m_OuterAngle != 0.0f) &&
 		(fabs(dl.m_Direction.LengthSqr() - 1.0f) < 1e-3);
@@ -1333,6 +1333,46 @@ void CacheAndUnloadLightmapData()
 	host_state.worldbrush->unloadedlightmaps = true;
 }
 
+//sorts the surfaces in place
+static void SortSurfacesByLightmapID( SurfaceHandle_t *pToSort, int iSurfaceCount )
+{
+	SurfaceHandle_t *pSortTemp = (SurfaceHandle_t *)stackalloc( sizeof( SurfaceHandle_t ) * iSurfaceCount );
+	
+	//radix sort
+	for( int radix = 0; radix != 4; ++radix )
+	{
+		//swap the inputs for the next pass
+		{
+			SurfaceHandle_t *pTemp = pToSort;
+			pToSort = pSortTemp;
+			pSortTemp = pTemp;
+		}
+
+		int iCounts[256] = { 0 };
+		int iBitOffset = radix * 8;
+		for( int i = 0; i != iSurfaceCount; ++i )
+		{
+			uint8 val = (materialSortInfoArray[MSurf_MaterialSortID( pSortTemp[i] )].lightmapPageID >> iBitOffset) & 0xFF;
+			++iCounts[val];
+		}
+
+		int iOffsetTable[256];
+		iOffsetTable[0] = 0;
+		for( int i = 0; i != 255; ++i )
+		{
+			iOffsetTable[i + 1] = iOffsetTable[i] + iCounts[i];
+		}
+
+		for( int i = 0; i != iSurfaceCount; ++i )
+		{
+			uint8 val = (materialSortInfoArray[MSurf_MaterialSortID( pSortTemp[i] )].lightmapPageID >> iBitOffset) & 0xFF;
+			int iWriteIndex = iOffsetTable[val];
+			pToSort[iWriteIndex] = pSortTemp[i];
+			++iOffsetTable[val];
+		}
+	}
+}
+
 void R_RedownloadAllLightmaps()
 {
 #ifdef _DEBUG
@@ -1357,16 +1397,37 @@ void R_RedownloadAllLightmaps()
 	CMatRenderContextPtr pRenderContext( materials );
 	ICallQueue *pCallQueue = pRenderContext->GetCallQueue();
 	if ( !host_state.worldbrush->unloadedlightmaps )
-	{
-		matrix3x4_t xform;
-		SetIdentityMatrix(xform);
-		for( int surfaceIndex = 0; surfaceIndex < host_state.worldbrush->numsurfaces; surfaceIndex++ )
+	{		
+		int iSurfaceCount = host_state.worldbrush->numsurfaces;
+		
+		SurfaceHandle_t *pSortedSurfaces = (SurfaceHandle_t *)stackalloc( sizeof( SurfaceHandle_t ) * iSurfaceCount );
+		for( int surfaceIndex = 0; surfaceIndex < iSurfaceCount; surfaceIndex++ )
 		{
 			SurfaceHandle_t surfID = SurfaceHandleFromIndex( surfaceIndex );
+			pSortedSurfaces[surfaceIndex] = surfID;
+		}
+
+		SortSurfacesByLightmapID( pSortedSurfaces, iSurfaceCount ); //sorts in place, so now the array really is sorted
+
+		if( pCallQueue )
+			pCallQueue->QueueCall( materials, &IMaterialSystem::BeginUpdateLightmaps );
+		else
+			materials->BeginUpdateLightmaps();
+		
+		matrix3x4_t xform;
+		SetIdentityMatrix(xform);
+		for( int surfaceIndex = 0; surfaceIndex < iSurfaceCount; surfaceIndex++ )
+		{
+			SurfaceHandle_t surfID = pSortedSurfaces[surfaceIndex];
 
 			ASSERT_SURF_VALID( surfID );
 			R_BuildLightMap( &cl_dlights[0], pCallQueue, surfID, xform, bOnlyUseLightStyles );
 		}
+
+		if( pCallQueue )
+			pCallQueue->QueueCall( materials, &IMaterialSystem::EndUpdateLightmaps );
+		else
+			materials->EndUpdateLightmaps();		
 
 		if ( !g_bHunkAllocLightmaps && r_unloadlightmaps.GetInt() == 1 )
 		{

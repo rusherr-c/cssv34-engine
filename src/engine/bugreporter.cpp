@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,20 +9,36 @@
 #ifndef _LINUX
 #undef fopen
 #endif
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include "winlite.h"
 #include <winsock2.h> // INADDR_ANY defn
+#include <direct.h>
+#elif defined(POSIX)
+#include <sys/stat.h>
+
+#ifdef OSX
+#include <copyfile.h>
+#import <mach/mach_host.h>
+#import <sys/sysctl.h>
+#elif defined(LINUX)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#endif
+#define GetLastError() errno
+#elif defined( _X360 )
+#else
+#error
 #endif
 
 #include <time.h>
-#include <direct.h>
 
 #include "client.h"
 #include <vgui_controls/Frame.h>
 #include <vgui/ISystem.h>
 #include <vgui/ISurface.h>
 #include <vgui/IInput.h>
-#include <vgui/IVgui.h>
+#include <vgui/IVGui.h>
 #include <KeyValues.h>
 #include <vgui_controls/BuildGroup.h>
 #include <vgui_controls/Tooltip.h>
@@ -44,7 +60,7 @@
 #include "cl_main.h"
 #include "gl_model_private.h"
 #include "tier2/tier2.h"
-#include "tier1/UtlString.h"
+#include "tier1/utlstring.h"
 #include "tier1/callqueue.h"
 #include "vstdlib/jobthread.h"
 
@@ -66,7 +82,6 @@
 #include "eiface.h"
 #include "gl_matsysiface.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
-#include "steam.h"
 #include "FindSteamServers.h"
 #include "vstdlib/random.h"
 #ifndef SWDS
@@ -86,10 +101,17 @@
 #define SUCCEED_SOUND	"common/bugreporter_succeeded"
 
 // Fixme, move these to buguiddata.res script file?
+#ifdef WIN32
 #define BUG_REPOSITORY_URL "\\\\fileserver\\bugs"
+#elif defined(OSX)
+#define BUG_REPOSITORY_URL "/Volumes/bugs"
+#elif defined(LINUX)
+#define BUG_REPOSITORY_URL "\\\\fileserver\\bugs"
+#else
+//#error
+#endif
 #define REPOSITORY_VALIDATION_FILE "info.txt"
 
-#define BUG_REPORTER_OLD_DLLNAME "bugreporter" 
 #define BUG_REPORTER_DLLNAME "bugreporter_filequeue" 
 #define BUG_REPORTER_PUBLIC_DLLNAME "bugreporter_public" 
 
@@ -113,9 +135,47 @@ using namespace vgui;
 
 unsigned long GetRam()
 {
+#ifdef WIN32
 	MEMORYSTATUS stat;
 	GlobalMemoryStatus( &stat );
 	return (stat.dwTotalPhys / (1024 * 1024));
+#elif defined(OSX)
+	int mib[2] = { CTL_HW, HW_MEMSIZE };
+	u_int namelen = sizeof(mib) / sizeof(mib[0]);
+	uint64_t memsize;
+	size_t len = sizeof(memsize);
+	
+	if (sysctl(mib, namelen, &memsize, &len, NULL, 0) >= 0) 
+	{
+		return memsize / (1024*1024);
+	}
+	else
+		return 0;
+#elif defined( LINUX )
+	unsigned long Ram = 0;
+	FILE *fh = fopen( "/proc/meminfo", "r" );
+	if( fh )
+	{
+		char buf[ 256 ];
+		const char szMemTotal[] = "MemTotal:";
+
+		while( fgets( buf, sizeof( buf ), fh ) )
+		{
+			if ( !Q_strnicmp( buf, szMemTotal, sizeof( szMemTotal ) - 1 ) )
+			{
+				// Should already be in kB
+				Ram = atoi( buf + sizeof( szMemTotal ) - 1 ) / 1024;
+				break;
+			}
+		}
+
+		fclose( fh );
+	}
+	return Ram;
+#else
+	Assert( !"Impl GetRam" );
+	return 0;
+#endif
 }
 
 const char *GetInternalBugReporterDLL( void )
@@ -124,20 +184,12 @@ const char *GetInternalBugReporterDLL( void )
 	if ( CommandLine()->CheckParm("-bugreporterdll", &pBugReportedDLL ) )
 		return pBugReportedDLL;
 
-	char *gamedir = com_gamedir;
-	gamedir = Q_strrchr( gamedir, '\\' ) +1;
-	if (!Q_stricmp(gamedir, "hl2")
-		|| !Q_stricmp(gamedir, "ep2")
-		|| !Q_stricmp(gamedir, "episodic"))
-	{
-		return BUG_REPORTER_OLD_DLLNAME;
-	}
-
 	return BUG_REPORTER_DLLNAME;
 }
 
 void DisplaySystemVersion( char *osversion, int maxlen )
 {
+#ifdef WIN32
 	osversion[ 0 ] = 0;
 	OSVERSIONINFOEX osvi;
 	BOOL bOsVersionInfoEx;
@@ -226,6 +278,69 @@ void DisplaySystemVersion( char *osversion, int maxlen )
 		Q_strncat ( osversion, "Win32s ", maxlen, COPY_ALL_CHARACTERS );
 		break;
 	}
+#elif defined(OSX)
+	FILE *fpVersionInfo = popen( "/usr/bin/sw_vers", "r" );
+	const char *pszSearchString = "ProductVersion:\t";
+	const int cchSearchString = Q_strlen( pszSearchString );
+	char rgchVersionLine[1024];
+		
+	if ( !fpVersionInfo )
+		Q_strncat ( osversion, "OSXU ", maxlen, COPY_ALL_CHARACTERS );
+	else
+	{
+		while ( fgets( rgchVersionLine, sizeof(rgchVersionLine), fpVersionInfo ) )
+		{
+			if ( !Q_strnicmp( rgchVersionLine, pszSearchString, cchSearchString ) )
+			{
+				const char *pchVersion = rgchVersionLine + cchSearchString;
+				if ( !Q_strnicmp( pchVersion, "10.", Q_strlen( "10." ) ) )
+				{
+					pchVersion += 3; // move past "10."
+					if( *pchVersion == '4' && *(pchVersion+1) == '.' )
+					{
+						Q_strncat ( osversion, "OSX104 ", maxlen, COPY_ALL_CHARACTERS );
+						break;
+					}
+					else if ( *pchVersion == '5' && *(pchVersion+1) == '.' )
+					{
+						Q_strncat ( osversion, "OSX105 ", maxlen, COPY_ALL_CHARACTERS );
+						break;
+					}
+					else if ( *pchVersion == '6' && *(pchVersion+1) == '.' )
+					{
+						Q_strncat ( osversion, "OSX106 ", maxlen, COPY_ALL_CHARACTERS );
+						break;
+					}
+					else if ( *pchVersion == '7' && *(pchVersion+1) == '.' )
+					{
+						Q_strncat ( osversion, "OSX107 ", maxlen, COPY_ALL_CHARACTERS );
+						break;
+					}
+				}
+				break;
+			}
+		}
+		pclose( fpVersionInfo );
+	}
+#elif defined(LINUX)
+	FILE *fpKernelVer = fopen( "/proc/version_signature", "r" );
+
+	if ( !fpKernelVer )
+	{
+		Q_strncat ( osversion, "Linux ", maxlen, COPY_ALL_CHARACTERS );
+	}
+	else
+	{
+		fgets( osversion, maxlen, fpKernelVer );
+		osversion[ maxlen - 1 ] = 0;
+
+		char *szlf = Q_strrchr( osversion, '\n' );
+		if( szlf )
+			*szlf = '\0';
+
+		fclose( fpKernelVer );
+	}
+#endif
 }
 
 static int GetNumberForMap()
@@ -237,7 +352,6 @@ static int GetNumberForMap()
 	CL_SetupMapName( modelloader->GetName( host_state.worldmodel ), mapname, sizeof( mapname ) );
 
 	KeyValues *resfilekeys = new KeyValues( "mapnumber" );
-
 	if ( resfilekeys->LoadFromFile( g_pFileSystem, "scripts/bugreport_mapnumber.txt", "GAME" ) )
 	{
 		KeyValues *entry = resfilekeys->GetFirstSubKey();
@@ -252,6 +366,7 @@ static int GetNumberForMap()
 			entry = entry->GetNextKey();
 		}
 	}
+	resfilekeys->deleteThis();
 
 	char szNameCopy[ 128 ];
 
@@ -261,7 +376,7 @@ static int GetNumberForMap()
 		return 1; 
 
 	Q_strncpy( szNameCopy, pszResult + 1, sizeof( szNameCopy ) );
-	if ( !szNameCopy || !*szNameCopy )
+	if ( !szNameCopy[0] )
 		return 1;
 	
 //	in case we can't use tchar.h, this will do the same thing
@@ -276,9 +391,6 @@ static int GetNumberForMap()
 	//add 1 because pvcs has 0 as the first map number, not 1 (and it is not 0-based).
 	return atoi(szNameCopy) + 1;		
 }
-
-
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Generic dialog for displaying animating steam progress logo
@@ -437,10 +549,10 @@ public:
 		}
 	}
 
-	void			Init();
+	bool			Init();
 	void			Shutdown();
 
-	virtual void	OnKeyCodeTyped(KeyCode code);
+	virtual void	OnKeyCodePressed( KeyCode code );
 
 	void			ParseDefaultParams( void );
 	void			ParseCommands( const CCommand &args );
@@ -588,7 +700,7 @@ protected:
 	vgui::DHANDLE< CBugReportFinishedDialog > m_hFinishedDialog;
 	bool						m_bWaitForFinish;
 	float						m_flPauseTime;
-	TSteamGlobalUserID			m_SteamID;
+	CSteamID					m_SteamID;
 	netadr_t					m_cserIP;
 	bool						m_bQueryingSteamForCSER;
 	bool						m_bIsPublic;
@@ -614,8 +726,6 @@ CBugUIPanel::CBugUIPanel( bool bIsPublic, vgui::Panel *parent ) :
 	m_pBugReporter = NULL;
 	m_hBugReporter = 0;
 	m_bQueryingSteamForCSER = false;
-
-	memset( &m_SteamID, 0x00, sizeof(m_SteamID) );
 	
 	// Default server address (hardcoded in case not running on steam)
 	char const *cserIP = "207.173.177.12:27013";
@@ -704,10 +814,6 @@ CBugUIPanel::CBugUIPanel( bool bIsPublic, vgui::Panel *parent ) :
 	{
 		LoadControlSettings("Resource\\BugUIPanel_Public.res");
 	}
-	else if (!V_strcasecmp(V_UnqualifiedFileName(m_sDllName), BUG_REPORTER_OLD_DLLNAME)) 
-	{
-		LoadControlSettings("Resource\\BugUIPanel.res");
-	}
 	else 
 	{
 		LoadControlSettings("Resource\\BugUIPanel_Filequeue.res");
@@ -719,8 +825,8 @@ CBugUIPanel::CBugUIPanel( bool bIsPublic, vgui::Panel *parent ) :
 	int w = GetWide();
 	int h = GetTall();
 
-	int x = ( videomode->GetModeWidth() - w ) / 2;
-	int y = ( videomode->GetModeHeight() - h ) / 2;
+	int x = ( videomode->GetModeStereoWidth() - w ) / 2;
+	int y = ( videomode->GetModeStereoHeight() - h ) / 2;
 
 	// Hidden by default
 	SetVisible( false );
@@ -731,7 +837,7 @@ CBugUIPanel::CBugUIPanel( bool bIsPublic, vgui::Panel *parent ) :
 	SetPos( x, y );
 }
 
-void CBugUIPanel::Init()
+bool CBugUIPanel::Init()
 {
 	Color clr( 50, 100, 255, 255 );
 
@@ -749,8 +855,8 @@ void CBugUIPanel::Init()
 		int w = GetWide();
 		int h = GetTall();
 	
-		int x = ( videomode->GetModeWidth() - w ) / 2;
-		int y = ( videomode->GetModeHeight() - h ) / 2;
+		int x = ( videomode->GetModeStereoWidth() - w ) / 2;
+		int y = ( videomode->GetModeStereoHeight() - h ) / 2;
 
 
 		SetPos( x, y );
@@ -768,27 +874,31 @@ void CBugUIPanel::Init()
 				if ( m_pBugReporter->Init( g_AppSystemFactory ) )
 				{
 					m_bCanSubmit = true;
-					m_bLoggedIn = true;;
+					m_bLoggedIn = true;
 				}
 				else
 				{
 					m_pBugReporter = NULL;
 					ConColorMsg( clr, "m_pBugReporter->Init() failed\n" );
+					return false;
 				}
 			}
 			else
 			{
-				ConColorMsg( clr, "Couldn't get interface '%s' from '%s'\n", INTERFACEVERSION_BUGREPORTER, m_sDllName.Get() );
+				ConColorMsg( clr, "Couldn't get interface '%s' from '%s'\n", INTERFACEVERSION_BUGREPORTER, m_sDllName.String() );
+				return false;
 			}
 		}
 		else
 		{
-			ConColorMsg( clr, "Couldn't get factory '%s'\n", m_sDllName.Get() );
+			ConColorMsg( clr, "Couldn't get factory '%s'\n", m_sDllName.String() );
+			return false;
 		}
 	}
 	else
 	{
-		ConColorMsg( clr, "Couldn't load '%s'\n", m_sDllName.Get() );
+		ConColorMsg( clr, "Couldn't load '%s'\n", m_sDllName.String() );
+		return false;
 	}
 
 	if ( m_bCanSubmit )
@@ -817,16 +927,15 @@ void CBugUIPanel::Init()
 
 		m_pIncludedFiles->SetVisible( false );
 		m_pSubmitter->SetVisible( false );
-#ifndef NO_STEAM
-		if ( SteamUser() )
+
+		if ( Steam3Client().SteamUser() )
 		{
-			m_pSubmitterLabel->SetText( SteamUser()->GetSteamID().Render() );
+			m_pSubmitterLabel->SetText( Steam3Client().SteamUser()->GetSteamID().Render() );
 		}
 		else
 		{
 			m_pSubmitterLabel->SetText( "PublicUser" );
 		}
-#endif
 
 		m_pSubmitterLabel->SetVisible( true );
 
@@ -844,6 +953,8 @@ void CBugUIPanel::Init()
 	Q_FixSlashes( m_szVMFContentDirFullpath );
 
 	m_pBuildNumber->SetText( va( "%d", build_number() ) );
+
+	return false;
 }
 
 void CBugUIPanel::Shutdown()
@@ -951,7 +1062,7 @@ void CBugUIPanel::OnTick()
 		{
 			if ( m_pProgressDialog )
 			{
-				float percent = clamp( 1.0f - ( m_flPauseTime - system()->GetFrameTime() ) / (float)PUBLIC_BUGREPORT_WAIT_TIME, 0.0f, 1.0f );
+				float percent = clamp( 1.0f - (float)( m_flPauseTime - system()->GetFrameTime() ) / (float)PUBLIC_BUGREPORT_WAIT_TIME, 0.0f, 1.0f );
 				m_pProgressDialog->SetProgress( percent );
 			}
 		}
@@ -977,7 +1088,7 @@ void CBugUIPanel::GetDataFileBase( char const *suffix, char *buf, int bufsize )
 
 	char who[ 128 ];
 	Q_strncpy( who, suffix, sizeof( who ) );
-	_strlwr( who );
+	Q_strlower( who );
 
 	if ( m_pBugReporter && m_pBugReporter->IsPublicUI() )
 	{
@@ -1120,12 +1231,12 @@ void CBugUIPanel::OnChooseArea(vgui::Panel *panel)
 	if (panel != m_pGameArea)
 		return;
 
-	if (Q_strcmp(BUG_REPORTER_OLD_DLLNAME, GetInternalBugReporterDLL()))
+	if (!Q_strcmp(BUG_REPORTER_DLLNAME, GetInternalBugReporterDLL()))
 	{
 		int area_index = m_pGameArea->GetActiveItem();
 		int c = m_pBugReporter->GetLevelCount(area_index);
 		int item = -1;
-		const char *currentLevel = cl.IsActive() ? cl.m_szLevelNameShort : "console";
+		const char *currentLevel = cl.IsActive() ? cl.m_szLevelBaseName : "console";
 
 		m_pMapNumber->DeleteAllItems();
 		
@@ -1157,7 +1268,7 @@ void CBugUIPanel::OnDirectorySelected( char const *dir )
 	Q_FixSlashes( m_szVMFContentDirFullpath );
 	Q_StripTrailingSlash( m_szVMFContentDirFullpath );
 
-	if ( m_hDirectorySelectDialog != NULL )
+	if ( m_hDirectorySelectDialog != 0 )
 	{
 		m_hDirectorySelectDialog->MarkForDeletion();
 	}
@@ -1199,7 +1310,7 @@ void CBugUIPanel::OnFileSelected( char const *fullpath )
 	char ext[ 10 ];
 	Q_ExtractFileExtension( relativepath, ext, sizeof( ext ) );
 
-	if ( m_hFileOpenDialog != NULL )
+	if ( m_hFileOpenDialog != 0 )
 	{
 		m_hFileOpenDialog->MarkForDeletion();
 	}
@@ -1237,7 +1348,7 @@ void CBugUIPanel::OnIncludeFile()
 	if ( !m_hFileOpenDialog.Get() )
 	{
 		m_hFileOpenDialog = new FileOpenDialog( this, "Choose file to include", true );
-		if ( m_hFileOpenDialog != NULL )
+		if ( m_hFileOpenDialog != 0 )
 		{
 			m_hFileOpenDialog->AddFilter("*.*", "All Files (*.*)", true);
 		}
@@ -1267,9 +1378,11 @@ void CBugUIPanel::Activate()
 {
 	if ( !m_bValidated )
 	{
-		m_bValidated = true;
-		Init();
-		DetermineSubmitterName();
+		if ( Init() )
+		{
+			m_bValidated = true;
+			DetermineSubmitterName();
+		}
 	}
 
 	if ( m_pGameArea->GetItemCount() != 0 )
@@ -1279,20 +1392,9 @@ void CBugUIPanel::Activate()
 			m_pGameArea->ActivateItem( iArea );
 	}
 
-	if (!Q_strcmp(BUG_REPORTER_OLD_DLLNAME, GetInternalBugReporterDLL()))
-	{
-	    if( m_pMapNumber->GetItemCount() != 0 )
-		{
-			m_pMapNumber->SetVisible(false);
-			int iMapNumber = GetNumberForMap();
-			if ( iMapNumber != 0 )
-				m_pMapNumber->ActivateItem( iMapNumber );
-		}
-	}
-	else
 	{
 		int c = m_pMapNumber->GetItemCount();
-		const char *currentLevel = cl.IsActive() ? cl.m_szLevelNameShort : "console";
+		const char *currentLevel = cl.IsActive() ? cl.m_szLevelBaseName : "console";
 		int item = -1;
 
 		for ( int i = 0; i < c; i++ )
@@ -1331,7 +1433,7 @@ void CBugUIPanel::Activate()
 		m_pPosition->SetText( va( "%f %f %f", org.x, org.y, org.z ) );
 		m_pOrientation->SetText( va( "%f %f %f", ang.x, ang.y, ang.z ) );
 
-		m_pLevelName->SetText( cl.m_szLevelNameShort );
+		m_pLevelName->SetText( cl.m_szLevelBaseName );
 		m_pSaveGame->SetEnabled( ( cl.m_nMaxClients == 1 ) ? true : false );
 		m_pSaveBSP->SetEnabled( true );
 		m_pSaveVMF->SetEnabled( true );
@@ -1414,25 +1516,25 @@ bool CBugUIPanel::IsValidEmailAddress( char const *email )
 	// make sure all the characters in the string are valid
 	{for (const char *sz = email; *sz; sz++)
 	{
-		if (!isalnum(*sz) && *sz != '.' && *sz != '-' && *sz != '@' && *sz != '_')
+		if (!V_isalnum(*sz) && *sz != '.' && *sz != '-' && *sz != '@' && *sz != '_')
 			return false;
 	}}
 
 	// make sure it has letters, then the '@', then letters, then '.', then letters
 	const char *sz = email;
-	if (!isalnum(*sz))
+	if (!V_isalnum(*sz))
 		return false;
 	sz = strstr(sz, "@");
 	if (!sz)
 		return false;
 	sz++;
-	if (!isalnum(*sz))
+	if (!V_isalnum(*sz))
 		return false;
 	sz = strstr(sz, ".");
 	if (!sz)
 		return false;
 	sz++;
-	if (!isalnum(*sz))
+	if (!V_isalnum(*sz))
 		return false;
 	
 	return true;
@@ -1683,14 +1785,7 @@ void CBugUIPanel::OnSubmit()
 	m_pOrientation->GetText( orientation, sizeof( orientation ) );
 	m_pBuildNumber->GetText( build, sizeof( build ) );
 
-	if ( g_pFileSystem->IsSteam() )
-	{
-		Q_strncat( build, " (Steam)", sizeof(build), COPY_ALL_CHARACTERS );
-	}
-	else
-	{
-		Q_strncat( build, " (VSS)", sizeof(build), COPY_ALL_CHARACTERS );
-	}
+	Q_strncat( build, " (Steam)", sizeof(build), COPY_ALL_CHARACTERS );
 
 	MaterialAdapterInfo_t info;
 	materials->GetDisplayAdapterInfo( materials->GetCurrentAdapter(), info );
@@ -1702,7 +1797,17 @@ void CBugUIPanel::OnSubmit()
 		dxlevel = COM_DXLevelToString( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() ) ;
 	}
 
-	Q_snprintf( driverinfo, sizeof( driverinfo ), "Driver Name:  %s\nVendorId / DeviceId:  0x%x / 0x%x\nSubSystem / Rev:  0x%x / 0x%x\nDXLevel:  %s\nVid:  %i x %i\nFramerate:  %.3f",
+	char osversion[ 256 ];
+	DisplaySystemVersion( osversion, sizeof( osversion ) );
+
+	Q_snprintf( driverinfo, sizeof( driverinfo ), 
+		"OS Version:  %s\n"
+		"Driver Name:  %s\n"
+		"VendorId / DeviceId:  0x%x / 0x%x\n"
+		"SubSystem / Rev:  0x%x / 0x%x\n"
+		"DXLevel:  %s\nVid:  %i x %i\n"
+		"Framerate:  %.3f\n",
+		osversion,
 		info.m_pDriverName,
 		info.m_VendorID,
 		info.m_DeviceID,
@@ -1912,8 +2017,6 @@ void CBugUIPanel::OnSubmit()
 
 	m_pBugReporter->SetDXVersion( vHigh, vLow, info.m_VendorID, info.m_DeviceID );
 
-	char osversion[ 128 ];
-	DisplaySystemVersion( osversion, sizeof( osversion ) );
 	m_pBugReporter->SetOSVersion( osversion );
 
 	m_pBugReporter->ResetIncludedFiles();
@@ -1939,7 +2042,7 @@ void CBugUIPanel::OnSubmit()
 		char gd[ 256 ];
 		Q_FileBase( com_gamedir, gd, sizeof( gd ) );
 		buginfo.Printf( "GameDirectory:  %s\n", gd );
-		buginfo.Printf( "Ram:  %i\n", GetRam() );
+		buginfo.Printf( "Ram:  %lu\n", GetRam() );
 		buginfo.Printf( "CPU:  %i\n", (int)fFrequency );
 		buginfo.Printf( "Processor:  %s\n", pi.m_szProcessorID );
 		buginfo.Printf( "DXLevel:  %d\n", nDxLevel );
@@ -2020,7 +2123,8 @@ void CBugUIPanel::OnSubmit()
 			m_hZip = (HZIP)0;
 		}
 
-		m_pBugReporter->SetSteamUserID( &m_SteamID, sizeof( m_SteamID ) );
+		uint64 un64SteamID = m_SteamID.ConvertToUint64();
+		m_pBugReporter->SetSteamUserID( &un64SteamID, sizeof( un64SteamID ) );
 	}
 	else
 	{
@@ -2142,6 +2246,30 @@ void NonFileSystem_CreatePath (const char *path)
 	}
 }
 
+#ifdef LINUX
+#define COPYFILE_ALL 0
+#define BSIZE 65535
+int copyfile( const char *local, const char *remote, void *ignored, int ignoredFlags )
+{
+	ssize_t bytes;
+	int fps, fpd;
+	char buffer[BSIZE];
+
+	if ( (fps = open( local , O_RDONLY ) ) == -1 ) 
+		return -1;
+	
+	if ( (fpd = open( remote, O_WRONLY | O_CREAT | O_TRUNC, 0644 ) ) == -1 )
+		return -1;
+
+	while((bytes = read(fps, buffer, BSIZE)) > 0)
+		write(fpd, buffer, bytes);
+
+	close(fpd);
+	close(fps);
+	return 0;
+}
+#endif
+
 bool CBugUIPanel::UploadFile( char const *local, char const *remote, bool bDeleteLocal )
 {
 	Msg( "Uploading %s to %s\n", local, remote );
@@ -2165,7 +2293,13 @@ bool CBugUIPanel::UploadFile( char const *local, char const *remote, bool bDelet
 	if ( !g_pFileSystem->IsSteam() )
 	{
 		g_pFileSystem->Close( hLocal );
-		bResult = CopyFile( local, remote, false );
+#ifdef WIN32
+		bResult = CopyFile( local, remote, false ) ? true : false;
+#elif POSIX
+		bResult = (0 == copyfile( local, remote, NULL, COPYFILE_ALL )); 
+#else
+#error
+#endif
 	}
 	else
 	{
@@ -2193,7 +2327,7 @@ bool CBugUIPanel::UploadFile( char const *local, char const *remote, bool bDelet
 		int nRemainingBytes = nLocalFileSize;
 		while ( nRemainingBytes > 0 )
 		{
-			int nBytesToCopy = min( nRemainingBytes, nCopyBufferSize );
+			int nBytesToCopy = MIN( nRemainingBytes, nCopyBufferSize );
 			g_pFileSystem->Read( pCopyBuf, nBytesToCopy, hLocal );
 			fwrite( pCopyBuf, nBytesToCopy, 1, r );
 			nRemainingBytes -= nBytesToCopy;
@@ -2273,7 +2407,7 @@ bool CBugUIPanel::UploadBugSubmission( char const *levelname, int bugId, char co
 
 	if ( vmf && vmf[ 0 ] )
 	{
-		Q_snprintf( localfile, sizeof( localfile ), "%s.vmf", m_szVMFContentDirFullpath, levelname );
+		Q_snprintf( localfile, sizeof( localfile ), "%s/%s.vmf", m_szVMFContentDirFullpath, levelname );
 		if ( g_pFileSystem->FileExists( localfile, NULL ) )
 		{
 			Q_snprintf( remotefile, sizeof( remotefile ), "%s/%s.vmf", GetSubmissionURL(bugId), vmf );
@@ -2500,19 +2634,6 @@ void CBugUIPanel::PopulateControls()
 
 	int area_index = GetArea();
 	m_pGameArea->ActivateItem( area_index );
-
-	if (!Q_strcmp(BUG_REPORTER_OLD_DLLNAME, GetInternalBugReporterDLL()))
-	{
-		m_pMapNumber->DeleteAllItems();
-
-		c = m_pBugReporter->GetMapNumberCount();
-		for ( i = 0; i < c; i++ )
-		{
-			m_pMapNumber->AddItem( m_pBugReporter->GetMapNumber( i ), NULL );
-		}
-
-		m_pMapNumber->ActivateItem( GetNumberForMap() );
-	}
 }
 
 char const *CBugUIPanel::GetSubmitter()
@@ -2548,16 +2669,17 @@ void CBugUIPanel::SuccessSound( int bugId )
 	Cbuf_AddText( va( "play %s\n", SUCCEED_SOUND ) );
 }
 
-void CBugUIPanel::OnKeyCodeTyped(KeyCode code)
+void CBugUIPanel::OnKeyCodePressed(KeyCode code)
 {
-	if ( code == KEY_ESCAPE )
+	if ( code == KEY_ESCAPE || 
+		 GetBaseButtonCode( code ) == KEY_XBUTTON_B )
 	{
 		Close();
 		WipeData();
 	}
 	else
 	{
-		BaseClass::OnKeyCodeTyped( code );
+		BaseClass::OnKeyCodePressed( code );
 	}
 }
 
@@ -2718,21 +2840,19 @@ bool CBugUIPanel::AutoFillToken( char const *token, bool partial )
 
 void CBugUIPanel::CheckContinueQueryingSteamForCSERList()
 {
-#ifndef NO_STEAM
-	if ( !m_bQueryingSteamForCSER || !SteamUtils() )
+	if ( !m_bQueryingSteamForCSER || !Steam3Client().SteamUtils() )
 	{
 		return;
 	}
-
+	
 	uint32 unIP;
 	uint16 usPort;
-	SteamUtils()->GetCSERIPPort( &unIP, &usPort );
+	Steam3Client().SteamUtils()->GetCSERIPPort( &unIP, &usPort );
 	if ( unIP )
 	{
 		m_cserIP.SetIPAndPort( unIP, usPort );
 		m_bQueryingSteamForCSER = false;
 	}
-#endif
 }
 
 static CBugUIPanel *g_pBugUI = NULL;
@@ -2800,7 +2920,9 @@ void CEngineBugReporter::InstallBugReportingUI( vgui::Panel *parent, IEngineBugR
 	bool bIsPublic = true;
 	
 	char fn[ 512 ];
-	Q_snprintf( fn, sizeof( fn ), "%s.dll", GetInternalBugReporterDLL() );
+
+	Q_snprintf( fn, sizeof( fn ), "%s%s", GetInternalBugReporterDLL(), DLL_EXT_STRING );
+
 	bool bCanUseInternal = g_pFileSystem->FileExists( fn, "EXECUTABLE_PATH" );
 
 	switch ( type )
@@ -2821,15 +2943,11 @@ void CEngineBugReporter::InstallBugReportingUI( vgui::Panel *parent, IEngineBugR
 					bIsPublic = false;
 				}
 #if !defined( _X360 )
-#ifndef NO_STEAM
 				// otherwise, if Steam is running and connected to beta, autoselect the internal bug db
-				else if ( SteamUtils() )
+				else if ( k_EUniverseBeta == GetSteamUniverse() )
 				{
-					EUniverse eUniverse = SteamUtils()->GetConnectedUniverse();
-					if ( k_EUniverseBeta == eUniverse )
-						bIsPublic = false;
+					bIsPublic = false;
 				}
-#endif
 #endif
 			}
 		}
@@ -2914,12 +3032,12 @@ int CBugUIPanel::GetArea()
 	m_pTitle->SetMaximumCharCount( iNewTitleLength );
 
 	char *gamedir = com_gamedir;
-	gamedir = Q_strrchr( gamedir, '\\' ) +1;
+	gamedir = Q_strrchr( gamedir, CORRECT_PATH_SEPARATOR ) + 1;
 
 	for ( int i = 0; i < m_pBugReporter->GetAreaMapCount(); i++ )
 	{
 		char szAreaMap[MAX_PATH];
-        Q_strcpy( szAreaMap, m_pBugReporter->GetAreaMap( i ) );
+		V_strcpy_safe( szAreaMap, m_pBugReporter->GetAreaMap( i ) );
 		char *pszAreaDir = Q_strrchr( szAreaMap, '@' );
 		char *pszAreaPrefix = Q_strrchr( szAreaMap, '%' );
 		int iDirLength = 0;
@@ -2941,12 +3059,12 @@ int CBugUIPanel::GetArea()
 
 		char szDirectory[MAX_PATH];
 		Q_memmove( szDirectory, pszAreaDir, iDirLength );
-        szDirectory[iDirLength] = 0;
+		szDirectory[iDirLength] = 0;
 
 		if ( pszAreaDir && pszAreaPrefix )
 		{
 			if ( !Q_strcmp( szDirectory, gamedir) 
-				&& mapname && Q_strstr( mapname, pszAreaPrefix ) )
+				&& Q_strstr( mapname, pszAreaPrefix ) )
 			{
 				return i+1;
 			}

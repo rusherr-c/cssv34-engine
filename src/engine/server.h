@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -62,7 +62,7 @@ public: // IServer implementation
 
 public: 
 	void	InitMaxClients( void );
-	bool	SpawnServer( char *mapname, char *startspot );
+	bool	SpawnServer( const char *szMapName, const char *szMapFile, const char *startspot );
 	void	SetQueryPortFromSteamServer();
 	void	CopyPureServerWhitelistToStringTable();
 	void 	RemoveClientFromGame( CBaseClient *client );
@@ -73,6 +73,7 @@ public:
 
 	// This is true when we start a level and sv_pure is set to 1.
 	bool	IsInPureServerMode() const;
+	CPureServerWhitelist * GetPureServerWhitelist() const;
 	
 	inline  CGameClient *Client( int i ) { return static_cast<CGameClient*>(m_Clients[i]); };
 
@@ -82,7 +83,7 @@ protected :
 	void		ReloadWhitelist( const char *pMapName );
 
 	CBaseClient *CreateNewClient( int slot );
-	bool		FinishCertificateCheck( netadr_t &adr, int nAuthProtocol, const char *szRawCertificate );
+	bool		FinishCertificateCheck( netadr_t &adr, int nAuthProtocol, const char *szRawCertificate, int clientChallenge );
 	void		SendClientDatagrams ( int clientCount, CGameClient** clients, CFrameSnapshot* pSnapshot );
 	void		CopyTempEntities( CFrameSnapshot* pSnapshot );
 	void		AssignClassIds();
@@ -98,6 +99,7 @@ public:
 	
 	int			num_edicts;
 	int			max_edicts;
+	int			free_edicts; // how many edicts in num_edicts are free, in use is num_edicts - free_edicts
 	edict_t		*edicts;			// Can array index now, edict_t is fixed
 	IChangeInfoAccessor *edictchangeinfo; // HACK to allow backward compat since we can't change edict_t layout
 
@@ -113,6 +115,8 @@ public:
 	bf_write			m_FullSendTables;
 	CUtlMemory<byte>	m_FullSendTablesBuffer;
 
+	bool		m_bLoadedPlugins;
+
 public:
 
 	// New style precache lists are done this way
@@ -123,6 +127,9 @@ public:
 	INetworkStringTable *GetSoundPrecacheTable( void ) const;
 	INetworkStringTable *GetDecalPrecacheTable( void ) const;
 	
+	INetworkStringTable *GetDynamicModelsTable( void ) const { return m_pDynamicModelsTable; }
+
+
 	// Accessors to model precaching stuff
 	int			PrecacheModel( char const *name, int flags, model_t *model = NULL );
 	model_t		*GetModel( int index );
@@ -142,7 +149,12 @@ public:
 
 	void		DumpPrecacheStats( INetworkStringTable *table );
 
+	bool		IsHibernating() const;
+	void		UpdateHibernationState();
+
 private:
+	void		SetHibernating( bool bHibernating );
+
 	CPrecacheItem	model_precache[ MAX_MODELS ];
 	CPrecacheItem	generic_precache[ MAX_GENERIC ];
 	CPrecacheItem	sound_precache[ MAX_SOUNDS ];
@@ -153,7 +165,10 @@ private:
 	INetworkStringTable *m_pGenericPrecacheTable;
 	INetworkStringTable *m_pDecalPrecacheTable;
 
+	INetworkStringTable *m_pDynamicModelsTable;
+
 	CPureServerWhitelist *m_pPureServerWhitelist;
+	bool m_bHibernating; 	// Are we hibernating.  Hibernation makes server process consume approx 0 CPU when no clients are connected
 };
 
 //============================================================================
@@ -161,15 +176,17 @@ private:
 class IServerGameDLL;
 class IServerGameEnts;
 class IServerGameClients;
+class IServerGameTags;
 extern IServerGameDLL	*serverGameDLL;
-extern bool g_bServerGameDLLGreaterThanV5;
-extern bool g_bServerGameDLLGreaterThanV4;
+extern int g_iServerGameDLLVersion;
 extern IServerGameEnts *serverGameEnts;
 
 extern IServerGameClients *serverGameClients;
 extern int g_iServerGameClientsVersion;	// This matches the number at the end of the interface name (so for "ServerGameClients004", this would be 4).
 
 extern IHLTVDirector *serverGameDirector;
+
+extern IServerGameTags *serverGameTags;
 
 // Master server address struct for use in building heartbeats
 extern	ConVar	skill;

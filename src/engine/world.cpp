@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,15 +26,6 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
-
-//-----------------------------------------------------------------------------
-// Method to convert edict to index
-//-----------------------------------------------------------------------------
-static inline int IndexOfEdict( edict_t* pEdict )
-{
-	return (int)(pEdict - sv.edicts);
-}
-
 
 
 //============================================================================

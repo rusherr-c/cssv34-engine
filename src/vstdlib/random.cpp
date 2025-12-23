@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Random number generator
 //
@@ -126,7 +126,10 @@ int CUniformRandomStream::GenerateRandomNumber()
 	{
 		DebuggerBreakIfDebugging();
 		Warning("CUniformRandomStream had an array overrun: tried to write to element %d of 0..31. Contact Tom or Elan.\n", j);
-		j = ( j % NTAB ) & 0x7fffffff;
+		// Ensure that NTAB is a power of two.
+		COMPILE_TIME_ASSERT( ( NTAB & ( NTAB - 1 ) ) == 0 );
+		// Clamp j.
+		j &= NTAB - 1;
 	}
 
 	m_iy=m_iv[j];
@@ -167,8 +170,14 @@ int CUniformRandomStream::RandomInt( int iLow, int iHigh )
 	unsigned int maxAcceptable;
 	unsigned int x = iHigh-iLow+1;
 	unsigned int n;
+
+	// If you hit either of these assert, you're not getting back the random number that you thought you were.
+	Assert( x == iHigh-(int64)iLow+1 ); // Check that we didn't overflow int
+	Assert( x-1 <= MAX_RANDOM_RANGE ); // Check that the values provide an acceptable range
+
 	if (x <= 1 || MAX_RANDOM_RANGE < x-1)
 	{
+		Assert( iLow == iHigh ); // This is the only time it is OK to have a range containing a single number
 		return iLow;
 	}
 

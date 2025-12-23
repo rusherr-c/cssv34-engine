@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2006, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: fixed "color" attribute of lights to be of type Color, rather than Vector4
 // this should have been put in a *long* time ago, but I somehow missed creating the updater between 3 and 4
@@ -110,8 +110,8 @@ void CImportSFMV9::BuildList( CDmElement *pElement, CUtlRBTree< CDmElement *, in
 	{
 		if ( pAttribute->GetType() == AT_ELEMENT )
 		{
-			CDmElement *pElement = pAttribute->GetValueElement<CDmElement>( );
-			BuildList( pElement, list );
+			CDmElement *pElementAt = pAttribute->GetValueElement<CDmElement>( );
+			BuildList( pElementAt, list );
 			continue;
 		}
 

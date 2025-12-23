@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -39,7 +39,7 @@
 #include <vgui/IInputInternal.h>
 #include <vgui/ISurface.h>
 #include "tier0/vcrmode.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include "vgui_internal.h"
 #include "filesystem_helpers.h"
@@ -807,14 +807,14 @@ double CSystem::GetTimeSinceLastUse()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Get the drives a user has available on thier system
+// Purpose: Get the drives a user has available on their system
 //-----------------------------------------------------------------------------
 int CSystem::GetAvailableDrives(char *buf, int bufLen)
 {
-#ifndef _X360
-	return GetLogicalDriveStrings(bufLen, buf);
-#else
+#if defined( _X360 ) || defined ( OSX )
 	return 0;
+#else // Windows
+	return GetLogicalDriveStrings( bufLen, buf );
 #endif
 }
 

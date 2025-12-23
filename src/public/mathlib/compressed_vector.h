@@ -27,6 +27,9 @@
 
 #include "mathlib/mathlib.h"
 
+#if defined( _X360 )
+#pragma bitfield_order( push, lsb_to_msb )
+#endif
 //=========================================================
 // fit a 3D vector into 32 bits
 //=========================================================
@@ -55,8 +58,8 @@ inline Vector32& Vector32::operator=(const Vector &vOther)
 
 	static float expScale[4] = { 4.0f, 16.0f, 32.f, 64.f };
 
-	float fmax = max( fabs( vOther.x ), fabs( vOther.y ) );
-	fmax = max( fmax, (float)fabs( vOther.z ) );
+	float fmax = Max( fabs( vOther.x ), fabs( vOther.y ) );
+	fmax = Max( fmax, (float)fabs( vOther.z ) );
 
 	for (exp = 0; exp < 3; exp++)
 	{

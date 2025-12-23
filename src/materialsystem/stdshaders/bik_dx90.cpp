@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -82,7 +82,11 @@ BEGIN_VS_SHADER( Bik, "Help for Bik" )
 				SET_STATIC_PIXEL_SHADER( bik_ps20 );
 			}
 
-			pShaderShadow->EnableSRGBWrite( false );
+			// The 360 needs an sRGB write, but NOT an sRGB read!
+			if ( IsX360() )
+				pShaderShadow->EnableSRGBWrite( true );
+			else
+				pShaderShadow->EnableSRGBWrite( false );
 
 //			EnableAlphaBlending( SHADER_BLEND_SRC_ALPHA, SHADER_BLEND_ONE_MINUS_SRC_ALPHA );
 		}

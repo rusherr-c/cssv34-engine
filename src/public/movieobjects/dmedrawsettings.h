@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2006, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing draw settings for Dme things
 //
@@ -86,15 +86,20 @@ public:
 
 	void BindGray();
 
+	void BindUnlitGray();
+
+	bool GetDeltaHighlight() const { return m_bDeltaHighlight; }
+	void SetDeltaHighlight( bool bDeltaHighlight ) { m_bDeltaHighlight.Set( bDeltaHighlight ); }
+
 	bool IsAMaterialBound() const {
 		return m_IsAMaterialBound;
 	}
 
 	void DrawDag( CDmeDag *pDag );
 
-protected:
+	CUtlVector< Vector > &GetHighlightPoints() { return m_vHighlightPoints; }
 
-	void BuildKnownDrawableTypes();
+public:
 
 	CDmaVar< int > m_DrawType;
 	CDmaVar< bool > m_bBackfaceCulling;
@@ -104,6 +109,13 @@ protected:
 	CDmaVar< bool > m_bNormals;
 	CDmaVar< float > m_NormalLength;
 	CDmaVar< Color > m_Color;
+	CDmaVar< bool > m_bDeltaHighlight;
+	CDmaVar< float > m_flHighlightSize;
+	CDmaVar< Color > m_cHighlightColor;
+
+protected:
+
+	void BuildKnownDrawableTypes();
 
 	static bool s_bWireframeMaterialInitialized;
 	static CMaterialReference s_WireframeMaterial;
@@ -114,11 +126,17 @@ protected:
 	static bool s_bFlatGrayMaterial;
 	static CMaterialReference s_FlatGrayMaterial;
 
-	static CUtlRBTree< UtlSymId_t > s_KnownDrawableTypes;
-	CUtlRBTree< UtlSymId_t > m_NotDrawable;
+	static bool s_bUnlitGrayMaterial;
+	static CMaterialReference s_UnlitGrayMaterial;
+
+	static CUtlRBTree< CUtlSymbol > s_KnownDrawableTypes;
+	CUtlRBTree< CUtlSymbol > m_NotDrawable;
 
 	CUtlStack< DrawType_t > m_drawTypeStack;
 	bool m_IsAMaterialBound;
+
+	// Points to highlight
+	CUtlVector< Vector > m_vHighlightPoints;
 };
 
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Serves as the base panel for the entire matchmaking UI
 //
@@ -13,15 +13,15 @@
 #include "sessionlobbydialog.h"
 #include "sessionbrowserdialog.h"
 #include "vgui_controls/Label.h"
-#include "vgui_controls/messagedialog.h"
+#include "vgui_controls/MessageDialog.h"
 #include "vgui/ISurface.h"
 #include "EngineInterface.h"
 #include "game/client/IGameClientExports.h"
-#include "gameui_interface.h"
+#include "GameUI_Interface.h"
 #include "engine/imatchmaking.h"
 #include "KeyValues.h"
 #include "vstdlib/jobthread.h"
-#include "basepanel.h"
+#include "BasePanel.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -158,10 +158,25 @@ void CMatchmakingBasePanel::OnCommand( const char *pCommand )
 	{
 		OnOpenRankedMatchDialog();
 	}
-	else if ( !Q_stricmp( "OpenAchievementsDialog", pCommand ) )
-	{
-		OnOpenAchievementsDialog();
-	}
+    else if ( !Q_stricmp( "OpenAchievementsDialog", pCommand ) )
+    {
+        OnOpenAchievementsDialog();
+    }
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Specific code for CS Achievements Display
+    //=============================================================================
+
+    else if ( !Q_stricmp( "OpenCSAchievementsDialog", pCommand ) )
+    {
+        OnOpenCSAchievementsDialog();
+    }
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
 	else if ( !Q_stricmp( "LevelLoadingStarted", pCommand ) )
 	{
 		OnLevelLoadingStarted();
@@ -278,11 +293,26 @@ void CMatchmakingBasePanel::OnCommand( const char *pCommand )
 	{
 		PopDialog();
 	}
-	else if ( !Q_stricmp( pCommand, "show_achievements_dialog" ) )
-	{
-		OnOpenAchievementsDialog();
-	}
-	else if ( !Q_stricmp( pCommand, "ShowSessionOptionsDialog" ) )
+    else if ( !Q_stricmp( pCommand, "show_achievements_dialog" ) )
+    {
+        OnOpenAchievementsDialog();
+    }
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Specific code for CS Achievements Display
+    //=============================================================================
+
+    else if ( !Q_stricmp( pCommand, "show_csachievements_dialog" ) )
+    {
+        OnOpenCSAchievementsDialog();
+    }
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+    else if ( !Q_stricmp( pCommand, "ShowSessionOptionsDialog" ) )
 	{
 		// Need to close the client options dialog and open the host options equivalent
 		PopDialog();
@@ -851,6 +881,27 @@ void CMatchmakingBasePanel::OnOpenAchievementsDialog()
 	PushDialog( m_hAchievementsDialog );
 }
 
+//=============================================================================
+// HPE_BEGIN:
+// [dwenger] Specific code for CS Achievements Display
+//=============================================================================
+
+void CMatchmakingBasePanel::OnOpenCSAchievementsDialog()
+{
+    if ( !ValidateSigninAndStorage( false, "OpenCSAchievementsDialog" ) )
+        return;
+
+    if ( !m_hAchievementsDialog.Get() )
+    {
+        // $TODO(HPE):  m_hAchievementsDialog = new CAchievementsDialog_XBox( this );
+    }
+    PushDialog( m_hAchievementsDialog );
+}
+
+//=============================================================================
+// HPE_END
+//=============================================================================
+
 void CMatchmakingBasePanel::OnOpenSessionOptionsDialog( const char *pResourceName )
 {
 	if ( !m_hSessionOptionsDialog.Get() )
@@ -944,38 +995,5 @@ void CMatchmakingBasePanel::OnKeyCodePressed( vgui::KeyCode code )
 	default:
 		BaseClass::OnKeyCodePressed( code );
 		break;
-	}
-}
-//-----------------------------------------------------------------------------
-// Dev command to award an achievement
-//-----------------------------------------------------------------------------
-CON_COMMAND( award_achievement, "Award an achievement by ID" )
-{
-	if ( args.ArgC() >= 2 )
-	{
-#ifdef _X360
-		int userIdx = XBX_GetPrimaryUserId();
-		int id = atoi( args.Arg( 1 ) );
-		if ( id >= 0 )
-		{
-			XUSER_ACHIEVEMENT ach;
-			ach.dwUserIndex = userIdx;
-			ach.dwAchievementId = 
-			XUserWriteAchievements( 1, &ach, NULL );
-		}
-		else
-		{
-			int idx = 0;
-			const int ct = 148-43+1;
-			XUSER_ACHIEVEMENT achs[ct];
-			for ( int i = 43; i <= 148; ++i )
-			{
-				achs[idx].dwUserIndex = userIdx;
-				achs[idx].dwAchievementId = i;
-				++idx;
-			}
-			XUserWriteAchievements( ct, achs, NULL );
-		}
-#endif
 	}
 }

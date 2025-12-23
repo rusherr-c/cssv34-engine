@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #ifndef _NAV_PATH_H_
 #define _NAV_PATH_H_
 
-#include "nav_area.h"
+#include "cs_nav_area.h"
 #include "bot_util.h"
 
 class CImprovLocomotor;

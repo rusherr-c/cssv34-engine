@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -257,7 +257,7 @@ public:
 
 
 ConVar r_worldlights	("r_worldlights", "4", 0, "number of world lights to use per vertex" );
-ConVar r_radiosity		("r_radiosity", "2", FCVAR_CHEAT, "0: no radiosity\n1: radiosity with ambient cube (6 samples)\n2: radiosity with 162 samples\n3: 162 samples for static props, 6 samples for everything else" );
+ConVar r_radiosity		("r_radiosity", "4", FCVAR_CHEAT, "0: no radiosity\n1: radiosity with ambient cube (6 samples)\n2: radiosity with 162 samples\n3: 162 samples for static props, 6 samples for everything else" );
 ConVar r_worldlightmin	("r_worldlightmin", "0.0002" );
 ConVar r_avglight		("r_avglight", "1", FCVAR_CHEAT);
 static ConVar r_drawlightcache		("r_drawlightcache", "0", FCVAR_CHEAT, "0: off\n1: draw light cache entries\n2: draw rays\n");
@@ -889,11 +889,12 @@ static float LightIntensityAndDirectionAtPointOld( dworldlight_t* pLight,
 	// hack
 	if ( (1.f-pm.fraction) * dist > 8 )
 	{
+#ifndef SWDS
 		if (r_drawlightcache.GetInt() == 2)
 		{
 			CDebugOverlay::AddLineOverlay( mid, pm.endpos, 255, 0, 0, 255, true, 3 );
 		}
-
+#endif
 		return 0.f;
 	}
 
@@ -997,18 +998,22 @@ static float LightIntensityAndDirectionAtPointNew( dworldlight_t* pLight, lightz
 			// hit!
 			if ( dist > pSample->m_flHitDistance + 8  )		// shadow hit
 			{
+#ifndef SWDS
 				if (r_drawlightcache.GetInt() == 2 )
 				{
 					CDebugOverlay::AddLineOverlay( mid, pLight->origin, 0, 0, 0, 255, true, 3 );
 				}
+#endif
 				return 0;
 			}
 			else
 			{
+#ifndef SWDS
 				if (r_drawlightcache.GetInt() == 2 )
 				{
 					CDebugOverlay::AddLineOverlay( mid, pLight->origin, 0, 255, 0, 255, true, 3 );
 				}
+#endif
 				return ratio;
 			}
 
@@ -1023,7 +1028,6 @@ static float LightIntensityAndDirectionAtPointNew( dworldlight_t* pLight, lightz
 	Ray_t ray;
 	ray.Init( pLight->origin, epnt );	// trace from light to object
 	g_pEngineTraceClient->TraceRay( ray, MASK_OPAQUE, pTraceFilter, &pm );
-	pm.fraction = 1-pm.fraction;
 	float flHitDistance = ( pm.startsolid ) ? FLT_EPSILON : ( pm.fraction ) * flTraceDistance;
 	
 	if ( pSample )
@@ -1033,11 +1037,12 @@ static float LightIntensityAndDirectionAtPointNew( dworldlight_t* pLight, lightz
 	}
 	if ( dist > flHitDistance + 8)
 	{
+#ifndef SWDS
 		if (r_drawlightcache.GetInt() == 2 )
 		{
 			CDebugOverlay::AddLineOverlay( mid, pLight->origin, 255, 0, 0, 255, true, 3 );
 		}
-
+#endif
 		return 0.f;
 	}
 	return ratio;
@@ -1812,7 +1817,7 @@ static void AddDLightsForStaticProps( LightingStateInfo_t& info, LightingState_t
 //-----------------------------------------------------------------------------
 
 
-ConVar r_lightcache_zbuffercache( "r_lightcache_zbuffercache", "0" );
+ConVar r_lightcache_zbuffercache( "r_lightcache_zbuffercache", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
 
 static void AddStaticLighting( 
 	CBaseLightCache* pCache, 
@@ -1953,6 +1958,7 @@ static int FindRecentCacheEntryWithinRadius( int count, CacheInfo_t* pCache, con
 //-----------------------------------------------------------------------------
 static void DebugRenderLightcache( Vector &sampleOrigin, LightingState_t& lightingState, bool bDebugModel )
 {
+#ifndef SWDS
 	// draw the cache entry defined by the sampling origin
 	Vector cacheOrigin, cacheMins, cacheMaxs, lightMins, lightMaxs;
 	ComputeLightcacheBounds( sampleOrigin, &cacheMins, &cacheMaxs );
@@ -2030,6 +2036,7 @@ static void DebugRenderLightcache( Vector &sampleOrigin, LightingState_t& lighti
 			CDebugOverlay::AddBoxOverlay( lightingState.locallight[j]->origin, lightMins, lightMaxs, vec3_angle, 255, 255, 100, 0, 0.0f );
 		}
 	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -2150,11 +2157,10 @@ static ITexture *FindEnvCubemapForPoint( const Vector& origin )
 		int smallestIndex = 0;
 		Vector blah = origin - pBrushData->m_pCubemapSamples[0].origin;
 		float smallestDist = DotProduct( blah, blah );
-		int i;
-		for( i = 1; i < pBrushData->m_nCubemapSamples; i++ )
+		for( int i = 1; i < pBrushData->m_nCubemapSamples; i++ )
 		{
-			Vector blah = origin - pBrushData->m_pCubemapSamples[i].origin;
-			float dist = DotProduct( blah, blah );
+			Vector ign = origin - pBrushData->m_pCubemapSamples[i].origin;
+			float dist = DotProduct( ign, ign );
 			if( dist < smallestDist )
 			{
 				smallestDist = dist;

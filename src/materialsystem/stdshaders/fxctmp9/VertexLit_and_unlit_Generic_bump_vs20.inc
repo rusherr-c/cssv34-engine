@@ -43,6 +43,27 @@ public:
 		m_bUSE_WITH_2B = true;
 #endif
 	}
+private:
+	int m_nUSE_STATIC_CONTROL_FLOW;
+#ifdef _DEBUG
+	bool m_bUSE_STATIC_CONTROL_FLOW;
+#endif
+public:
+	void SetUSE_STATIC_CONTROL_FLOW( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nUSE_STATIC_CONTROL_FLOW = i;
+#ifdef _DEBUG
+		m_bUSE_STATIC_CONTROL_FLOW = true;
+#endif
+	}
+	void SetUSE_STATIC_CONTROL_FLOW( bool i )
+	{
+		m_nUSE_STATIC_CONTROL_FLOW = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bUSE_STATIC_CONTROL_FLOW = true;
+#endif
+	}
 public:
 	vertexlit_and_unlit_generic_bump_vs20_Static_Index( )
 	{
@@ -54,19 +75,23 @@ public:
 		m_bUSE_WITH_2B = false;
 #endif // _DEBUG
 		m_nUSE_WITH_2B = 0;
+#ifdef _DEBUG
+		m_bUSE_STATIC_CONTROL_FLOW = false;
+#endif // _DEBUG
+		m_nUSE_STATIC_CONTROL_FLOW = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bHALFLAMBERT && m_bUSE_WITH_2B;
+		bool bAllStaticVarsDefined = m_bHALFLAMBERT && m_bUSE_WITH_2B && m_bUSE_STATIC_CONTROL_FLOW;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 24 * m_nHALFLAMBERT ) + ( 48 * m_nUSE_WITH_2B ) + 0;
+		return ( 24 * m_nHALFLAMBERT ) + ( 48 * m_nUSE_WITH_2B ) + ( 96 * m_nUSE_STATIC_CONTROL_FLOW ) + 0;
 	}
 };
-#define shaderStaticTest_vertexlit_and_unlit_generic_bump_vs20 vsh_forgot_to_set_static_HALFLAMBERT + vsh_forgot_to_set_static_USE_WITH_2B + 0
+#define shaderStaticTest_vertexlit_and_unlit_generic_bump_vs20 vsh_forgot_to_set_static_HALFLAMBERT + vsh_forgot_to_set_static_USE_WITH_2B + vsh_forgot_to_set_static_USE_STATIC_CONTROL_FLOW + 0
 class vertexlit_and_unlit_generic_bump_vs20_Dynamic_Index
 {
 private:

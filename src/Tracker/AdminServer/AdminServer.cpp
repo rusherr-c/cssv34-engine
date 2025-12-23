@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,7 +16,7 @@
 #include <vgui/IVGui.h>
 #include <vgui/ILocalize.h>
 #include <KeyValues.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 
 // expose the server browser interfaces
 CAdminServer g_AdminServerSingleton;

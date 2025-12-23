@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 //
 //
@@ -15,7 +15,7 @@
 #include "vphysics/friction.h"
 #include "vphysicsupdateai.h"
 #include "physics_npc_solver.h"
-#include "sprite.h"
+#include "Sprite.h"
 #include "weapon_striderbuster.h"
 #include "npc_strider.h"
 #include "vguiscreen.h"
@@ -1003,7 +1003,9 @@ void CPropJeepEpisodic::UpdateCargoEntry( void )
 
 	// Slerp our quaternions to find where we are this frame
 	Quaternion	qtTarget;
-	AngleQuaternion( pProp->PreferredCarryAngles() + QAngle( 0, 90, 0 ), qtTarget );	// FIXME: Find the real offset to make this sit properly
+	QAngle qa( 0, 90, 0 );
+	qa += pProp->PreferredCarryAngles();
+	AngleQuaternion( qa, qtTarget );	// FIXME: Find the real offset to make this sit properly
 	Quaternion	qtCurrent;
 	AngleQuaternion( pProp->GetLocalAngles(), qtCurrent );
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,7 +26,7 @@
 using namespace vgui;
 
 
-void VGUIMessageBox( vgui::Panel *pParent, const char *pTitle, const char *pMsg, ... );
+void VGUIMessageBox( vgui::Panel *pParent, const char *pTitle, PRINTF_FORMAT_STRING const char *pMsg, ... );
 
 //-----------------------------------------------------------------------------
 // Purpose: Main dialog for media browser

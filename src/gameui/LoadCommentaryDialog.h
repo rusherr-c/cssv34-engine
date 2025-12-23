@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,8 +11,8 @@
 #endif
 
 #include "vgui_controls/Frame.h"
-#include "FileSystem.h"
-#include "UtlVector.h"
+#include "filesystem.h"
+#include "utlvector.h"
 
 
 #define COMMENTARY_MAPFILENAME_MAX_LEN MAX_PATH
@@ -45,6 +45,7 @@ protected:
 	vgui::PanelListPanel *m_pGameList;
 
 	virtual void OnCommand( const char *command );
+	virtual void OnKeyCodePressed( vgui::KeyCode code );
 
 	void ScanCommentaryFiles();
 	void CreateCommentaryItemList();

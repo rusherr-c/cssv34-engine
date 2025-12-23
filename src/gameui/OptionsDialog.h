@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -28,11 +28,16 @@ public:
 	void Run();
 	virtual void Activate();
 
+	void OnKeyCodePressed( vgui::KeyCode code );
+
+	vgui::PropertyPage* GetOptionsSubMultiplayer( void ) { return m_pOptionsSubMultiplayer; }
+
 	MESSAGE_FUNC( OnGameUIHidden, "GameUIHidden" );	// called when the GameUI is hidden
 
 private:
 	class COptionsSubAudio *m_pOptionsSubAudio;
 	class COptionsSubVideo *m_pOptionsSubVideo;
+	vgui::PropertyPage *m_pOptionsSubMultiplayer;
 };
 
 
@@ -87,7 +92,7 @@ private:
 	void	FillInDefaultBindings( void );
 
 	bool	ShouldSkipOption( KeyValues *pKey );
-	void	ReadOptionsFromFile( char *pchFileName );
+	void	ReadOptionsFromFile( const char *pchFileName );
 	void	SortOptions( void );
 
 	void	InitializeSliderDefaults( void );

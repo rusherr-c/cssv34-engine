@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,11 +12,11 @@
 #include "dt_shared.h"
 
 #ifdef CLIENT_DLL
-#include "vgui_controls/controls.h"
-#include "vgui/isurface.h"
-#include "vgui/ischeme.h"
-#include "vgui/ilocalize.h"
-#include "vgui/vgui.h"
+#include "vgui_controls/Controls.h"
+#include "vgui/ISurface.h"
+#include "vgui/IScheme.h"
+#include "vgui/ILocalize.h"
+#include "vgui/VGUI.h"
 #include "tier1/KeyValues.h"
 #include "toolframework/itoolframework.h"
 #endif
@@ -75,6 +75,17 @@ CWeaponIFMSteadyCam::CWeaponIFMSteadyCam()
 	m_vecOffset.Init();
 	m_hFont = vgui::INVALID_FONT;
 	m_nTextureId = -1;
+#endif
+}
+
+CWeaponIFMSteadyCam::~CWeaponIFMSteadyCam()
+{
+#ifdef CLIENT_DLL
+	if ( vgui::surface() && m_nTextureId != -1 )
+	{
+		vgui::surface()->DestroyTextureID( m_nTextureId );
+		m_nTextureId = -1;
+	}
 #endif
 }
 
@@ -571,7 +582,7 @@ void CWeaponIFMSteadyCam::DrawArmLength( int x, int y, int w, int h, Color clr )
 //-----------------------------------------------------------------------------
 void CWeaponIFMSteadyCam::DrawFOV( int x, int y, int w, int h, Color clrEdges, Color clrTriangle )
 {
-	if ( m_nTextureId < 0 )
+	if ( m_nTextureId == -1 )
 	{
 		m_nTextureId = vgui::surface()->CreateNewTextureID();
 		vgui::surface()->DrawSetTextureFile( m_nTextureId, "vgui/white", true, false );

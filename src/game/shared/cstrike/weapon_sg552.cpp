@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -32,7 +32,10 @@ public:
 	virtual void SecondaryAttack();
 	virtual void PrimaryAttack();
 
+ 	virtual float GetInaccuracy() const;
 	virtual float GetMaxSpeed() const;
+	virtual bool Reload();
+	virtual bool Deploy();
 
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_SG552; }
 
@@ -66,30 +69,49 @@ CWeaponSG552::CWeaponSG552()
 }
 
 
-
 void CWeaponSG552::SecondaryAttack()
 {
-	#ifndef CLIENT_DLL
-		CCSPlayer *pPlayer = GetPlayerOwner();
-		if ( !pPlayer )
-			return;
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
+		return;
 
-		if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV())
-		{
-			pPlayer->SetFOV( pPlayer, 55, 0.2f );
-		}
-		else if (pPlayer->GetFOV() == 55)
-		{
-			pPlayer->SetFOV( pPlayer, 0, 0.15f );
-		}
-		else 
-		{
-			//FIXME: This seems wrong
-			pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV() );
-		}
-	#endif
+	if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV())
+	{
+		pPlayer->SetFOV( pPlayer, 55, 0.2f );
+		m_weaponMode = Secondary_Mode;
+	}
+	else if (pPlayer->GetFOV() == 55)
+	{
+		pPlayer->SetFOV( pPlayer, 0, 0.15f );
+		m_weaponMode = Secondary_Mode;
+	}
+	else 
+	{
+		//FIXME: This seems wrong
+		pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV() );
+		m_weaponMode = Primary_Mode;
+	}
 
 	m_flNextSecondaryAttack = gpGlobals->curtime + 0.3;
+}
+
+float CWeaponSG552::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.035f + 0.45f * m_flAccuracy;
+		else if (pPlayer->GetAbsVelocity().Length2D() > 140)
+			return 0.035f + 0.075f * m_flAccuracy;
+		else
+			return 0.02f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
 }
 
 void CWeaponSG552::PrimaryAttack()
@@ -100,28 +122,16 @@ void CWeaponSG552::PrimaryAttack()
 
 	bool bZoomed = pPlayer->GetFOV() < pPlayer->GetDefaultFOV();
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		SG552Fire( 0.035f + 0.45f * m_flAccuracy, bZoomed );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 140)
-		SG552Fire( 0.035f + 0.075f * m_flAccuracy, bZoomed );
-	else
-		SG552Fire( 0.02f * m_flAccuracy, bZoomed );
-}
-
-
-void CWeaponSG552::SG552Fire( float flSpread, bool bZoomed )
-{
 	float flCycleTime = GetCSWpnData().m_flCycleTime;
 
 	if ( bZoomed )
 		flCycleTime = 0.135f;
 
-	if ( !CSBaseGunFire( flSpread, flCycleTime, true ) )
+	if ( !CSBaseGunFire( flCycleTime, m_weaponMode ) )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
-
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
@@ -145,3 +155,16 @@ float CWeaponSG552::GetMaxSpeed() const
 	else
 		return 200; // zoomed in.
 }	
+
+
+bool CWeaponSG552::Reload()
+{
+	m_weaponMode = Primary_Mode;
+	return BaseClass::Reload();
+}
+
+bool CWeaponSG552::Deploy()
+{
+	m_weaponMode = Primary_Mode;
+	return BaseClass::Deploy();
+}

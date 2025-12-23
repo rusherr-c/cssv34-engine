@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -280,7 +280,7 @@ void BuyPresetListBox::PerformLayout()
 	//!! need to make it recalculate scroll positions
 	m_vbar->SetVisible(true);
 	m_vbar->SetEnabled(false);
-	m_vbar->SetRange( 0, (max( 0, vpixels - tall + m_iDefaultHeight ))  );
+	m_vbar->SetRange( 0, (MAX( 0, vpixels - tall + m_iDefaultHeight ))  );
 	m_vbar->SetRangeWindow( m_iDefaultHeight );
 	m_vbar->SetButtonPressedScrollValue( m_iDefaultHeight ); // standard height of labels/buttons etc.
 	m_vbar->SetPos(wide - m_iScrollbarSize, 1);
@@ -288,7 +288,7 @@ void BuyPresetListBox::PerformLayout()
 
 	m_visibleIndex = visibleIndex;
 
-	int top = max( 0, m_vbar->GetValue() );
+	int top = MAX( 0, m_vbar->GetValue() );
 
 	m_pPanelEmbedded->SetPos( 1, -top );
 	m_pPanelEmbedded->SetSize( wide-m_iScrollbarSize -2, vpixels );
@@ -317,24 +317,24 @@ void BuyPresetListBox::PerformLayout()
 
 		int vpos = 0;
 
-		int wide, tall;
-		GetSize( wide, tall );
+		int tempWide, tempTall;
+		GetSize( tempWide, tempTall );
 
 		int vtop, vbottom;
 		m_vbar->GetRange( vtop, vbottom );
 
-		int top = max( 0, m_vbar->GetValue() ); // top pixel in the embedded panel
-		int bottom = top + tall - 2;
+		int tempTop = MAX( 0, m_vbar->GetValue() ); // top pixel in the embedded panel
+		int bottom = tempTop + tempTall - 2;
 
 		int itemTop, itemLeft, itemBottom, itemRight;
 		m_items[m_visibleIndex].panel->GetBounds( itemLeft, itemTop, itemRight, itemBottom );
 		itemBottom += itemTop;
 		itemRight += itemLeft;
 
-		if ( itemTop < top )
+		if ( itemTop < tempTop )
 		{
 			// item's top is too high
-			vpos -= ( top - itemTop );
+			vpos -= ( tempTop - itemTop );
 
 			m_vbar->SetValue(vpos);
 			OnSliderMoved(vpos);

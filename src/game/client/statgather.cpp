@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2008, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: module for gathering performance stats for upload so that we can
 //  monitor performance regressions and improvements
@@ -46,7 +46,7 @@ class CStatsRecorder : public CAutoGameSystem
 	{
 		T maxsofar = -16000000;
 		for( int i = 0; i < STATS_WINDOW_SIZE; i++ )
-			maxsofar = max( maxsofar, m_StatsBuffer[i].*field );
+			maxsofar = MAX( maxsofar, m_StatsBuffer[i].*field );
 		return maxsofar;
 	}
 
@@ -54,7 +54,7 @@ class CStatsRecorder : public CAutoGameSystem
 	{
 		T minsofar = 16000000;
 		for( int i = 0; i < STATS_WINDOW_SIZE; i++ )
-			minsofar = min( minsofar, m_StatsBuffer[i].*field );
+			minsofar = MIN( minsofar, m_StatsBuffer[i].*field );
 		return minsofar;
 	}
 
@@ -130,7 +130,7 @@ char const *CStatsRecorder::GetPerfStatsString( int iType )
 		float flMinFrameRate = MinStat( &StatsBufferRecord_t::m_flFrameRate );
 		float flMaxFrameRate = MaxStat( &StatsBufferRecord_t::m_flFrameRate );
 
-		const CPUInformation *cpu = GetCPUInformation();
+		const CPUInformation &cpu = GetCPUInformation();
 		MaterialAdapterInfo_t gpu;
 		materials->GetDisplayAdapterInfo( materials->GetCurrentAdapter(), gpu );
 
@@ -150,9 +150,9 @@ char const *CStatsRecorder::GetPerfStatsString( int iType )
 			flAverageFrameRate,
 			flMinFrameRate,
 			flMaxFrameRate,
-			cpu->m_szProcessorID,
-			cpu->m_Speed * ( 1.0 / 1.0e9 ),
-			cpu->m_nPhysicalProcessors,
+			cpu.m_szProcessorID,
+			cpu.m_Speed * ( 1.0 / 1.0e9 ),
+			cpu.m_nPhysicalProcessors,
 			SafeString( gpu.m_pDriverName ),
 			gpu.m_VendorID,
 			gpu.m_DeviceID,
@@ -175,7 +175,7 @@ char const *CStatsRecorder::GetPerfStatsString( int iType )
 		return s_cPerfString;
 	}
 	case PERFDATA_SHUTDOWN:
-		V_snprintf( s_cPerfString, sizeof( s_cPerfString ), "PERFDATA:TotalLevelTime:%d NumLevels:%d",
+		V_snprintf( s_cPerfString, sizeof( s_cPerfString ), "PERFDATA:TotalLevelTime=%d NumLevels=%d",
 			(int) m_flTotalTimeInLevels, m_iNumLevels );
 		return s_cPerfString;
 

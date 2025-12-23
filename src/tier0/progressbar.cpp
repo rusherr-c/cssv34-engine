@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,11 +8,6 @@
 #include "pch_tier0.h"
 #include "vstdlib/pch_vstdlib.h"
 
-#if defined(_WIN32) && !defined(_X360)
-#define WINDOWS_LEAN_AND_MEAN
-#define _WIN32_WINNT 0x0502
-#include <windows.h>
-#endif
 #include <assert.h>
 #include "tier0/platform.h"
 #include "tier0/progressbar.h"

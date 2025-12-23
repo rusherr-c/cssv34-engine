@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -168,6 +168,10 @@ public:
 	void UnbindVertexBuffer( ID3D10Buffer *pBuffer );
 	void UnbindIndexBuffer( ID3D10Buffer *pBuffer );
 
+	void PrintfVA( char *fmt, va_list vargs ) {}
+	void Printf( PRINTF_FORMAT_STRING const char *fmt, ... ) {}
+	float Knob( char *knobname, float *setvalue = NULL ) { return 0.0f;}
+
 private:
 
 	// Returns a d3d texture associated with a texture handle
@@ -282,6 +286,10 @@ private:
 	}
 
 	void CopyRenderTargetToTextureEx( ShaderAPITextureHandle_t texID, int nRenderTargetID, Rect_t *pSrcRect, Rect_t *pDstRect )
+	{
+	}
+
+	void CopyTextureToRenderTargetEx( int nRenderTargetID, ShaderAPITextureHandle_t textureHandle, Rect_t *pSrcRect = NULL, Rect_t *pDstRect = NULL )
 	{
 	}
 
@@ -436,6 +444,10 @@ private:
 
 	// Forces Z buffering on or off
 	void OverrideDepthEnable( bool bEnable, bool bDepthEnable );
+	// Forces alpha writes on or off
+	void OverrideAlphaWriteEnable( bool bOverrideEnable, bool bAlphaWriteEnable );
+	//forces color writes on or off
+	void OverrideColorWriteEnable( bool bOverrideEnable, bool bColorWriteEnable );
 
 	// Sets the shade mode
 	void ShadeMode( ShaderShadeMode_t mode );
@@ -444,7 +456,7 @@ private:
 	void Bind( IMaterial* pMaterial );
 
 	// Returns the nearest supported format
-	ImageFormat GetNearestSupportedFormat( ImageFormat fmt ) const;
+	ImageFormat GetNearestSupportedFormat( ImageFormat fmt, bool bFilteringRequired = true ) const;
 	ImageFormat GetNearestRenderTargetFormat( ImageFormat fmt ) const;
 
 	// Sets the texture state
@@ -468,6 +480,7 @@ private:
 		ImageFormat srcFormat, bool bSrcIsTiled, void *imageData );
 	void TexSubImage2D( int level, int cubeFace, int xOffset, int yOffset, int zOffset, int width, int height,
 		ImageFormat srcFormat, int srcStride, bool bSrcIsTiled, void *imageData );
+	void TexImageFromVTF( IVTFTexture *pVTF, int iVTFFrame );
 
 	bool TexLock( int level, int cubeFaceID, int xOffset, int yOffset, 
 		int width, int height, CPixelWriter& writer );
@@ -508,6 +521,7 @@ private:
 
 	// stuff that isn't to be used from within a shader
 	void ClearBuffersObeyStencil( bool bClearColor, bool bClearDepth );
+	void ClearBuffersObeyStencilEx( bool bClearColor, bool bClearAlpha, bool bClearDepth );
 	void PerformFullScreenStencilOperation( void );
 	void ReadPixels( int x, int y, int width, int height, unsigned char *data, ImageFormat dstFormat );
 	virtual void ReadPixels( Rect_t *pSrcRect, Rect_t *pDstRect, unsigned char *data, ImageFormat dstFormat, int nDstStride );
@@ -615,7 +629,6 @@ private:
 	virtual void AcquireThreadOwnership() {}
 	virtual void ReleaseThreadOwnership() {}
 
-	virtual bool SupportsNormalMapCompression() const { return false; }
 	virtual bool SupportsBorderColor() const { return false; }
 	virtual bool SupportsFetch4() const { return false; }
 	virtual void EnableBuffer2FramesAhead( bool bEnable ) {}
@@ -868,6 +881,9 @@ private:
 	{
 	}
 
+	virtual void SetPSNearAndFarZ( int pshReg )
+	{
+	}
 
 	int GetPackedDeformationInformation( int nMaskOfUnderstoodDeformations,
 										 float *pConstantValuesOut,

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Handles joining clients together in a matchmaking session before a multiplayer
 //			game, tracking new players and dropped players during the game, and reporting
@@ -216,7 +216,7 @@ void CMatchmaking::HandleJoinRequest( netpacket_t *pPacket )
 
 		if ( tempClient.m_cPlayers > nSlotsOpen )
 		{
-			Msg( "Session Full.\n", m_CurrentState );
+			Msg( "Session Full.\n" );
 			joinResponse.m_ResponseType = joinResponse.JOINRESPONSE_SESSIONFULL;
 		}
 		else

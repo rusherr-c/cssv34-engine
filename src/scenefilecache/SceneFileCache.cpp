@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Cache for VCDs. PC async loads and uses the datacache to manage.
 // 360 uses a baked resident image of aggregated compiled VCDs.
@@ -224,13 +224,16 @@ int CSceneFileCache::FindSceneInImage( const char *pSceneName )
 	SceneImageEntry_t *pEntries = (SceneImageEntry_t *)( (byte *)pHeader + pHeader->nSceneEntryOffset );
 
 	char szCleanName[MAX_PATH];
+
 	V_strncpy( szCleanName, pSceneName, sizeof( szCleanName ) );
 	V_strlower( szCleanName );
-#ifdef _LINUX
+#ifdef POSIX
 	V_FixSlashes( szCleanName, '\\' );
 #else
 	V_FixSlashes( szCleanName );
 #endif
+	V_SetExtension( szCleanName, ".vcd", sizeof( szCleanName ) );
+
 	CRC32_t crcFilename = CRC32_ProcessSingleBuffer( szCleanName, strlen( szCleanName ) );
 
 	// use binary search, entries are sorted by ascending crc
@@ -288,23 +291,22 @@ bool CSceneFileCache::GetSceneDataFromImage( const char *pFileName, int iScene, 
 
 	SceneImageEntry_t *pEntries = (SceneImageEntry_t *)( (byte *)pHeader + pHeader->nSceneEntryOffset );
 	unsigned char *pData = (unsigned char *)pHeader + pEntries[iScene].nDataOffset;
-	CLZMA lzma;
 	bool bIsCompressed;
-	bIsCompressed = lzma.IsCompressed( pData );
+	bIsCompressed = CLZMA::IsCompressed( pData );
 	if ( bIsCompressed )
 	{
-		int originalSize = lzma.GetActualSize( pData );
+		int originalSize = CLZMA::GetActualSize( pData );
 		if ( pSceneData )
 		{
 			int nMaxLen = *pSceneLength;
 			if ( originalSize <= nMaxLen )
 			{
-				lzma.Uncompress( pData, pSceneData );
+				CLZMA::Uncompress( pData, pSceneData );
 			}
 			else
 			{
 				unsigned char *pOutputData = (unsigned char *)malloc( originalSize );
-				lzma.Uncompress( pData, pOutputData );
+				CLZMA::Uncompress( pData, pOutputData );
 				V_memcpy( pSceneData, pOutputData, nMaxLen );
 				free( pOutputData );
 			}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,8 +16,8 @@
 #include "tier0/icommandline.h"
 #include "tier1/utlrbtree.h"
 #include "tier1/utlbuffer.h"
-#include "tier1/keyvalues.h"
-#include "FileSystem.h"
+#include "tier1/KeyValues.h"
+#include "filesystem.h"
 #include "FileSystem_Tools.h"
 #include "cmdlib.h"
 

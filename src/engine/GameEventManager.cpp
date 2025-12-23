@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -25,7 +25,7 @@
 static CGameEventManager s_GameEventManager;
 CGameEventManager &g_GameEventManager = s_GameEventManager;
 
-static char *s_GameEnventTypeMap[] = 
+static const char *s_GameEnventTypeMap[] = 
 {	"local",	// 0 : don't network this field
 	"string",	// 1 : zero terminated ASCII string
 	"float",	// 2 : float 32 bit
@@ -35,7 +35,7 @@ static char *s_GameEnventTypeMap[] =
 	"bool",		// 6 : unsigned int 1 bit
 	NULL };
 
-static ConVar net_showevents( "net_showevents", "0", 0, "Dump game events to console (1=client only, 2=all)." );
+static ConVar net_showevents( "net_showevents", "0", FCVAR_CHEAT, "Dump game events to console (1=client only, 2=all)." );
 
 // Expose CVEngineServer to the engine.
 
@@ -326,7 +326,7 @@ IGameEvent *CGameEventManager::CreateEvent( const char *name, bool bForce )
 	// event is known but no one listen to it
 	if ( descriptor->listeners.Count() == 0 && !bForce )
 	{
-		return false;
+		return NULL;
 	}
 
 	// create & return the new event 
@@ -407,6 +407,8 @@ bool CGameEventManager::FireEventIntern( IGameEvent *event, bool bServerOnly, bo
 		return false;
 	}
 
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s (name: %s listeners: %d)", __FUNCTION__, tmDynamicString( TELEMETRY_LEVEL0, event->GetName() ), descriptor->listeners.Count() );
+
 	// show game events in console
 	if ( net_showevents.GetInt() > 0 )
 	{
@@ -420,14 +422,12 @@ bool CGameEventManager::FireEventIntern( IGameEvent *event, bool bServerOnly, bo
 			ConMsg( "Server event \"%s\", Tick %i:\n", descriptor->name, sv.GetTick() );
 			ConPrintEvent( event );
 		}
-
-		
 	}
 
 	for ( int i = 0; i < descriptor->listeners.Count(); i++ )
 	{
 		CGameEventCallback *listener = descriptor->listeners.Element( i );
-		
+
 		Assert ( listener );
 
 		// don't trigger server listners for clientside only events
@@ -452,6 +452,8 @@ bool CGameEventManager::FireEventIntern( IGameEvent *event, bool bServerOnly, bo
 		if ( listener->m_nListenerType == CLIENTSIDE_OLD ||
 			 listener->m_nListenerType == SERVERSIDE_OLD )
 		{
+			tmZone( TELEMETRY_LEVEL1, TMZF_NONE, "FireGameEvent (i: %d, listenertype: %d (old))", i, listener->m_nListenerType );
+
 			// legacy support for old system
 			IGameEventListener *pCallback = static_cast<IGameEventListener*>(listener->m_pCallback);
 			CGameEvent *pEvent = static_cast<CGameEvent*>(event);
@@ -460,6 +462,8 @@ bool CGameEventManager::FireEventIntern( IGameEvent *event, bool bServerOnly, bo
 		}
 		else
 		{
+			tmZone( TELEMETRY_LEVEL1, TMZF_NONE, "FireGameEvent (i: %d, listenertype: %d (new))", i, listener->m_nListenerType );
+
 			// new system
 			IGameEventListener2 *pCallback =  static_cast<IGameEventListener2*>(listener->m_pCallback);
 
@@ -761,6 +765,8 @@ bool CGameEventManager::RegisterEvent( KeyValues * event)
 		// event not known yet, create new one
 		int index = m_GameEvents.AddToTail();
 		descriptor =  &m_GameEvents.Element(index);
+
+		AssertMsg2( V_strlen( event->GetName() ) <= MAX_EVENT_NAME_LENGTH, "Event named '%s' exceeds maximum name length %d", event->GetName(), MAX_EVENT_NAME_LENGTH );
 
 		Q_strncpy( descriptor->name, event->GetName(), MAX_EVENT_NAME_LENGTH );	
 	}

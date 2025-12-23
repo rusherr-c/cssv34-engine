@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -216,9 +216,7 @@ CCareerBaseBox::CCareerBaseBox(Panel *parent, const char *panelName, bool loadRe
 		const int BufLen = strlen(panelName) + 32;
 		char *buf = new char[BufLen];
 		Q_snprintf( buf, BufLen, "Resource/Career/%s.res", panelName );
-		if (buf != nullptr)
-			LoadControlSettings( buf );
-
+		LoadControlSettings( buf );
 		delete[] buf;
 	}
 }
@@ -389,7 +387,7 @@ void CCareerBaseBox::AddButton( vgui::Button *pButton )
 //--------------------------------------------------------------------------------------------------------------
 CCareerQueryBox::CCareerQueryBox(vgui::Panel *parent, const char *panelName, const char *resourceName) : CCareerBaseBox(parent, panelName, (resourceName == NULL))
 {
-	if ( resourceName != nullptr )
+	if ( resourceName )
 	{
 		LoadControlSettings( resourceName );
 	}
@@ -872,8 +870,8 @@ void CWeaponSelectBox::PopulateControls()
 	wchar_t buf[BufLen];
 	for ( i=maxClips-1; i>=0; --i )
 	{
-		char* clipsOrMore = "#Cstrike_BuyPresetEditClipsOrMore";
-		char* clips = "#Cstrike_BuyPresetEditClips";
+		const char* clipsOrMore = "#Cstrike_BuyPresetEditClipsOrMore";
+		const char* clips = "#Cstrike_BuyPresetEditClips";
 		if ( i == 1 )
 		{
 			clipsOrMore = "#Cstrike_BuyPresetEditClipOrMore";
@@ -942,7 +940,7 @@ void CWeaponSelectBox::UpdateClips()
 		wchar_t buf[BufLen];
 		g_pVGuiLocalize->ConstructString( buf, sizeof(buf),
 			g_pVGuiLocalize->Find( "#Cstrike_BuyPresetsBullets" ),
-			2, NumAsWString( min( maxRounds, numClips * buyClipSize ) ), NumAsWString( maxRounds ) );
+			2, NumAsWString( MIN( maxRounds, numClips * buyClipSize ) ), NumAsWString( maxRounds ) );
 		m_pBullets->SetText( buf );
 	}
 	else

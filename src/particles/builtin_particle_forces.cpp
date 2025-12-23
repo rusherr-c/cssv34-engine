@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: particle system code
 //
@@ -14,6 +14,7 @@
 
 #ifdef USE_BLOBULATOR
 // TODO: These should be in public by the time the SDK ships
+#include "../common/blobulator/Physics/PhysParticle.h"
 #include "../common/blobulator/Physics/PhysParticleCache_inl.h"
 #include "../common/blobulator/Physics/PhysTiler.h"
 #endif
@@ -166,6 +167,12 @@ class C_OP_AttractToControlPoint : public CParticleOperatorInstance
 	}
 
 
+	virtual uint64 GetReadControlPointMask() const
+	{
+		return 1ULL << m_nControlPointNumber;
+	}
+
+
 	virtual void AddForces( FourVectors *pAccumulatedForces, 
 							CParticleCollection *pParticles,
 							int nBlocks,
@@ -197,8 +204,8 @@ void C_OP_AttractToControlPoint::AddForces( FourVectors *pAccumulatedForces,
 	{
 		FourVectors ofs=*pPos;
 		ofs -= Center;
-		fltx4 len=ofs.length();
-		ofs *= MulSIMD( fForceScale, ReciprocalSIMD( len )); // normalize and scale
+		fltx4 len = ofs.length();
+		ofs *= MulSIMD( fForceScale, ReciprocalSaturateSIMD( len )); // normalize and scale
 		ofs *= Pow_FixedPoint_Exponent_SIMD( len, power_frac ); // * 1/pow(dist, exponent)
 		fltx4 bGood = CmpGtSIMD( len, Four_Epsilons );
 		ofs.x = AndSIMD( bGood, ofs.x );
@@ -218,6 +225,8 @@ BEGIN_PARTICLE_OPERATOR_UNPACK( C_OP_AttractToControlPoint )
 	DMXELEMENT_UNPACK_FIELD( "control point number", "0", int, m_nControlPointNumber )
 END_PARTICLE_OPERATOR_UNPACK( C_OP_AttractToControlPoint )
 
+
+#undef USE_BLOBULATOR // TODO (Ilya): Must fix this code
 
 #ifdef USE_BLOBULATOR
 
@@ -259,8 +268,8 @@ class C_OP_LennardJonesForce : public CParticleOperatorInstance
 	float m_fMaxAttraction;
 
 private:
-	//virtual void addParticleForce(ImpParticle* a, ImpParticleCacheNode* bcn, float flStrength, float ts) const;
-	virtual void addParticleForce(ImpParticle* a, ImpParticle* b, float distSq, float flStrength, float ts) const;
+	//virtual void addParticleForce(PhysParticle* a, PhysParticleCacheNode* bcn, float flStrength, float ts) const;
+	virtual void addParticleForce(PhysParticle* a, PhysParticle* b, float distSq, float flStrength, float ts) const;
 };
 
 
@@ -268,7 +277,7 @@ private:
 
 // TODO: I should make sure I don't have divide by zero errors.
 // TODO: ts is not used
-void C_OP_LennardJonesForce::addParticleForce(ImpParticle* a, ImpParticle* b, float distSq, float flStrength, float ts) const
+void C_OP_LennardJonesForce::addParticleForce(PhysParticle* a, PhysParticle* b, float distSq, float flStrength, float ts) const
 {
 	float d = sqrtf(distSq);
 
@@ -351,10 +360,10 @@ void C_OP_LennardJonesForce::AddForces( FourVectors *pAccumulatedForces,
 	// However, not every block is full. Thus, nParticles may be
 	// less than nBlocks*4. Could get rid of this if the swizzling/unswizzling
 	// loop were better written.
-	static SmartArray<ImpParticle> imp_particles_sa; // This doesn't specify alignment, might have problems with SSE
+	static SmartArray<PhysParticle> imp_particles_sa; // This doesn't specify alignment, might have problems with SSE
 	while(imp_particles_sa.size < nParticles+4)
 	{
-		imp_particles_sa.pushAutoSize(ImpParticle());
+		imp_particles_sa.pushAutoSize(PhysParticle());
 	}
 	
 	/*
@@ -372,7 +381,7 @@ void C_OP_LennardJonesForce::AddForces( FourVectors *pAccumulatedForces,
 	{
 		FourVectors ofs=*pPos;
 
-		ImpParticle* particle = &(imp_particles_sa[p]);
+		PhysParticle* particle = &(imp_particles_sa[p]);
 		particle->force.clear();
 		if(p < nParticles)
 		{
@@ -431,13 +440,13 @@ void C_OP_LennardJonesForce::AddForces( FourVectors *pAccumulatedForces,
 	// Calculate number of near neighbors for each particle
 	for(int i = 0; i < nParticles; i++)
 	{
-		ImpParticle *b1 = &(imp_particles_sa[i]);
+		PhysParticle *b1 = &(imp_particles_sa[i]);
 
-		ImpParticleAndDist* node = pCache->get(b1);
+		PhysParticleAndDist* node = pCache->get(b1);
 
 		while(node->particle != NULL)
 		{
-			ImpParticle* b2 = node->particle;
+			PhysParticle* b2 = node->particle;
 
 			 // Compare addresses of the two particles. This makes sure we apply a force only once between a pair of particles.
 			if(b1 < b2 && node->distSq < nearNeighborInteractionRadiusSq)
@@ -454,13 +463,13 @@ void C_OP_LennardJonesForce::AddForces( FourVectors *pAccumulatedForces,
 	// Calculate forces on particles due to other particles
 	for(int i = 0; i < nParticles; i++)
 	{
-		ImpParticle *b1 = &(imp_particles_sa[i]);
+		PhysParticle *b1 = &(imp_particles_sa[i]);
 
-		ImpParticleAndDist* node = pCache->get(b1);
+		PhysParticleAndDist* node = pCache->get(b1);
 
 		while(node->particle != NULL)
 		{
-			ImpParticle* b2 = node->particle;
+			PhysParticle* b2 = node->particle;
 
 			// Compare addresses of the two particles. This makes sure we apply a force only once between a pair of particles.
 			if(b1 < b2)

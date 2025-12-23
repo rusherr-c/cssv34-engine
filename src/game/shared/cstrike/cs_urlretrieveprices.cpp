@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 #ifdef _WIN32
 #include "winlite.h"
 #include "winsock.h"
-#elif _LINUX
+#elif POSIX
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define SOCKET int
@@ -67,7 +67,7 @@ bool ParseHTTPResponse( SOCKET socketHTML, uint32 *unPageHash = NULL )
 	char szHeaderBuf[ MED_BUFFER_SIZE ];
 	char szBodyBuf[ MED_BUFFER_SIZE ];
 
-	DWORD dwRet = 0;
+	int dwRet = 0;
 	bool bFinishedHeaderRead = false;
 	int iRecvPosition = 0;
 	int cCharsInLine = 0;

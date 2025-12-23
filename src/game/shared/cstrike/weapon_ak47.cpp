@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,6 @@
 
 #include "cbase.h"
 #include "weapon_csbasegun.h"
-
 
 #if defined( CLIENT_DLL )
 
@@ -31,12 +30,11 @@ public:
 
 	virtual void PrimaryAttack();
 
+	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_AK47; }
 
 private:
-
-	void AK47Fire( float flSpread );
-
 	CAK47( const CAK47 & );
 };
 
@@ -59,14 +57,38 @@ CAK47::CAK47()
 {
 }
 
-void CAK47::AK47Fire( float flSpread )
+
+float CAK47::GetInaccuracy() const
 {
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.04f + 0.4f * m_flAccuracy;
+		else if (pPlayer->GetAbsVelocity().Length2D() > 140)
+			return 0.04f + 0.07f * m_flAccuracy;
+		else
+			return 0.0275f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
+
+void CAK47::PrimaryAttack()
+{
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
+		return;
 
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
@@ -79,19 +101,3 @@ void CAK47::AK47Fire( float flSpread )
 	else
 		pPlayer->KickBack ( 1, 0.375, 0.175, 0.0375, 5.75, 1.75, 8 );
 }
-
-
-void CAK47::PrimaryAttack()
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-	
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		AK47Fire( 0.04f + 0.4f * m_flAccuracy );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 140)
-		AK47Fire( 0.04f + 0.07f * m_flAccuracy );
-	else
-		AK47Fire( 0.0275f * m_flAccuracy );
-}
-

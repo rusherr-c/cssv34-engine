@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -24,7 +24,7 @@
 #include "dme_controls/elementpropertiestree.h"
 #include "tier0/icommandline.h"
 #include "materialsystem/imaterialsystem.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "toolutils/savewindowpositions.h"
 #include "foundrydoc.h"
 #include "toolutils/toolwindowfactory.h"
@@ -814,9 +814,9 @@ void CFoundryTool::OnCommand( const char *cmd )
 		int idx = Q_atoi( pSuffix );
 		OpenFileFromHistory( idx );
 	}
-	else if ( const char *pSuffix = StringAfterPrefix( cmd, "OnTool" ) )
+	else if ( const char *pSuffixTool = StringAfterPrefix( cmd, "OnTool" ) )
 	{
-		int idx = Q_atoi( pSuffix );
+		int idx = Q_atoi( pSuffixTool );
 		enginetools->SwitchToTool( idx );
 	}
 	else if ( !V_stricmp( cmd, "OnUndo" ) )
@@ -853,7 +853,7 @@ void CFoundryTool::OnNew()
 	{
 		if ( m_pDoc->IsDirty() )
 		{
-			SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_SAVE_QUERY,
+			SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY,
 				new KeyValues( "OnNew" ) );
 			return;
 		}
@@ -867,7 +867,7 @@ void CFoundryTool::OnOpen( )
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetVMFFileName();
 	}
 
@@ -889,7 +889,7 @@ void CFoundryTool::OnSave()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( NULL, "vmf", NULL );
+		SaveFile( NULL, "vmf", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -897,7 +897,7 @@ void CFoundryTool::OnSaveAs()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( m_pDoc->GetVMFFileName(), "vmf", NULL );
+		SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -919,7 +919,7 @@ void CFoundryTool::OnClose()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnClose" ) );
 		return;
 	}
@@ -953,7 +953,7 @@ void CFoundryTool::OpenSpecificFile( const char *pFileName )
 
 		if ( m_pDoc->IsDirty() )
 		{
-			nFlags = FOSM_SHOW_SAVE_QUERY;
+			nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 			pSaveFileName = m_pDoc->GetVMFFileName();
 		}
 		else
@@ -1048,7 +1048,7 @@ bool CFoundryTool::CanQuit()
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
 		// Show Save changes Yes/No/Cancel and re-quit if hit yes/no
-		SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetVMFFileName(), "vmf", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnQuit" ) );
 		return false;
 	}

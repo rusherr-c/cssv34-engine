@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -23,6 +23,7 @@
 #include "iefx.h"
 #include "tier1/convar.h"
 #include "cmodel_engine.h"
+#include "video/ivideoservices.h"
 
 class CCommand;
 
@@ -52,9 +53,9 @@ struct MovieInfo_t
 	enum
 	{
 		FMOVIE_TGA	= ( 1 << 0 ),
-		FMOVIE_AVI	= ( 1 << 1 ),
+		FMOVIE_VID	= ( 1 << 1 ),
 		FMOVIE_WAV	= ( 1 << 2 ),
-		FMOVIE_AVISOUND	= ( 1 << 3 ),
+		FMOVIE_VIDSOUND = ( 1 << 3 ),
 		FMOVIE_JPG = ( 1<< 4 )
 	};
 
@@ -95,17 +96,17 @@ struct MovieInfo_t
 	}
 
 
-	bool	DoAVI() const
+	bool	DoVideo() const
 	{
-		return ( type & FMOVIE_AVI ) ? true : false;
+		return ( type & FMOVIE_VID ) ? true : false;
 	}
 
-	bool	DoAVISound() const
+	bool	DoVideoSound() const
 	{
-		return ( type & FMOVIE_AVISOUND ) ? true : false;
+		return ( type & FMOVIE_VIDSOUND ) ? true : false;
 	}
 
-	char	moviename[ 256 ];
+	char	moviename[ MAX_PATH ];
 	int		movieframe;
 
 	int		type;
@@ -119,7 +120,7 @@ extern MovieInfo_t cl_movieinfo;
 // cl_main.cpp
 //
 
-void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, float flFrameRate, int jpeg_quality );
+void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, float flFrameRate, int jpeg_quality, VideoSystem_t videoSystem = VideoSystem::NONE );
 bool CL_IsRecordingMovie();
 void CL_EndMovie();
 
@@ -144,6 +145,7 @@ void Callback_SoundChanged( void *object, INetworkStringTable *stringTable, int 
 void Callback_DecalChanged( void *object, INetworkStringTable *stringTable, int stringNumber, const char *newString, const void *newData );
 void Callback_InstanceBaselineChanged( void *object, INetworkStringTable *stringTable, int stringNumber, const char *newString, const void *newData );
 void Callback_UserInfoChanged( void *object, INetworkStringTable *stringTable, int stringNumber, const char *newString, const void *newData );
+void Callback_DynamicModelsChanged( void *object, INetworkStringTable *stringTable, int stringNumber, const char *newString, const void *newData );
 
 void CL_InstallAndInvokeClientStringTableCallbacks();
 void CL_HookClientStringTables();
@@ -178,8 +180,9 @@ bool CL_IsHL2Demo();
 bool CL_IsPortalDemo();
 void CL_SetSteamCrashComment();
 
-void CL_CheckForPureServerWhitelist();
-void CL_HandlePureServerWhitelist( CPureServerWhitelist *pWhitelist );
+void CL_CheckForPureServerWhitelist( /* out */ IFileList *&pFilesToReload );
+void CL_ReloadFilesInList( IFileList *pFilesToReload );
+void CL_HandlePureServerWhitelist( CPureServerWhitelist *pWhitelist, /* out */ IFileList *&pFilesToReload );
 
 // Special mode where the client uses a console window and has no graphics. Useful for stress-testing a server
 // without having to round up 32 people.

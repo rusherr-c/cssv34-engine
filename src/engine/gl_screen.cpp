@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: master for refresh, status bar, console, chat, notify, etc
 //
@@ -27,6 +27,10 @@
 #include "matchmaking.h"
 #include "datacache/idatacache.h"
 #include "sys_dll.h"
+#if defined( REPLAY_ENABLED )
+#include "replay_internal.h"
+#endif
+#include "tier0/vprof.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -207,6 +211,8 @@ inline void SCR_ShowVCRPlaybackAmount()
 //-----------------------------------------------------------------------------
 void SCR_UpdateScreen( void )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	R_StudioCheckReinitLightingCache();
 	
 	// Always force the Gamma Table to be rebuilt. Otherwise,
@@ -247,15 +253,22 @@ void SCR_UpdateScreen( void )
 	}
 
 	materials->BeginFrame( host_frametime );
-	EngineVGui()->Simulate();
+	{
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "EngineVGui_Simulate" );
+		EngineVGui()->Simulate();
+	}
 
 	ClientDLL_FrameStageNotify( FRAME_RENDER_START );
 
 	// Simulation meant to occur before any views are rendered
 	// This needs to happen before the client DLL is called because the client DLL depends on 
 	// some of the setup in FRAME_RENDER_START.
-	g_EngineRenderer->FrameBegin();
-	toolframework->RenderFrameBegin();
+	{
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "FrameBegin" );
+	
+		g_EngineRenderer->FrameBegin();
+		toolframework->RenderFrameBegin();
+	}
 
 	cl.UpdateAreaBits_BackwardsCompatible();
 	
@@ -266,11 +279,38 @@ void SCR_UpdateScreen( void )
 
 	CL_TakeSnapshotAndSwap();	   
 	
+#if defined( REPLAY_ENABLED )
+	if ( g_pReplay )
+	{
+		g_pReplay->CL_Render();
+	}
+#endif
+
 	ClientDLL_FrameStageNotify( FRAME_RENDER_END );
 
-	toolframework->RenderFrameEnd();
+	{
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "FrameEnd" );
 
-	g_EngineRenderer->FrameEnd();
-	materials->EndFrame();
+		toolframework->RenderFrameEnd();
+
+		g_EngineRenderer->FrameEnd();
+	}
+
+	// moved dynamic model update here because this takes the materials lock
+	// and materials->EndFrame() is where we will synchronize anyway.
+	// Moved here to leave as much of the frame as possible to overlap threads in the case
+	// where we actually have models to load here
+	{
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "modelloader->UpdateDynamicModels" );
+		VPROF( "UpdateDynamicModels" );
+		CMDLCacheCriticalSection critsec( g_pMDLCache );
+		modelloader->UpdateDynamicModels();
+	}
+
+	{
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "materials_EndFrame" );
+
+		materials->EndFrame();
+	}
 }
 

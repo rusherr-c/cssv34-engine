@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  baseclientstate.cpp: implementation of the CBaseClientState class.
 //
@@ -28,6 +28,9 @@
 #include "vgui_askconnectpanel.h"
 #include "cmd.h"
 #include "tier1/convar.h"
+#include "baseclientstate.h"
+
+extern CClientState	cl;
 
 //-----------------------------------------------------------------------------
 // Purpose: Displays the options menu
@@ -178,17 +181,20 @@ void CPluginGameUIDialog::OnCommand( const char *cmd )
 	{
 		if ( Q_strlen(m_szEntryCommand) > 0 )
 		{
+			// Check that we can add the two execution markers
+			if ( !Cbuf_HasRoomForExecutionMarkers( 2 ) )
+			{
+				AssertMsg( false, "CPluginGameUIDialog::OnCommand called but there is no room for the execution markers. Ignoring command." );
+				return;
+			}
+
 			char userCMD[ 512 ];
 			char entryText[ 255 ];
 			m_Entry->GetText( entryText, sizeof(entryText) );
 			Q_snprintf( userCMD, sizeof(userCMD), "%s %s\n", m_szEntryCommand, entryText );
 			
 			// Only let them run commands marked with FCVAR_CLIENTCMD_CAN_EXECUTE.
-			Cbuf_AddExecutionMarker( eCmdExecutionMarker_Enable_FCVAR_CLIENTCMD_CAN_EXECUTE );
-
-			Cbuf_AddText( userCMD );
-
-			Cbuf_AddExecutionMarker( eCmdExecutionMarker_Disable_FCVAR_CLIENTCMD_CAN_EXECUTE );
+			Cbuf_AddTextWithMarkers( eCmdExecutionMarker_Enable_FCVAR_CLIENTCMD_CAN_EXECUTE, userCMD, eCmdExecutionMarker_Disable_FCVAR_CLIENTCMD_CAN_EXECUTE );
 		}
 		Close();
 		g_PluginManager->OnPanelClosed();
@@ -440,7 +446,7 @@ void CPluginHudMessage::ShowMessage( const wchar_t *text, int time, Color clr, b
 	int textW, textH;
 	m_Message->GetContentSize( textW, textH );
 	
-	textW = min( textW + MESSAGE_X_INSET + 10, MAX_TEXT_LEN_PIXELS ); 
+	textW = min( textW + MESSAGE_X_INSET + 10, (int)MAX_TEXT_LEN_PIXELS ); 
 	SetSize( textW, m_iTargetH ); // the "small" animation event changes our size
 }
 
@@ -526,6 +532,10 @@ void CPluginUIManager::Show( DIALOG_TYPE type, KeyValues *kv )
 	// Check for the special DIALOG_ASKCONNECT command.
 	if ( type == DIALOG_ASKCONNECT )
 	{
+		// Don't allow this prompt on QuickPlay servers
+		if ( cl.IsClientConnectionViaMatchMaking() )
+			return;
+		
 		// Do the askconnect dialog.
 		float flDuration = kv->GetFloat( "time", 4.0f );
 		const char *pIP = kv->GetString( "title", NULL );

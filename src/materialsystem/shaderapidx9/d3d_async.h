@@ -1,10 +1,12 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
 //===========================================================================//
+
+#ifdef D3D_ASYNC_SUPPORTED
 
 #ifndef D3DASYNC_H
 #define D3DASYNC_H
@@ -13,11 +15,21 @@
 #pragma once
 #endif
 
-#define SHADERAPI_USE_SMP 1
+// Set this to 1 to allow d3d calls to be buffered and played back on another thread
+// Slamming this off - it's causing very hot D3D9 function calls to not be inlined and contain a bunch of unused code. (Does this code even work/add real value any more?)
+#define SHADERAPI_USE_SMP 0
+
+// Set this to 1 to allow buffering of the whole frame to memory and then playback (singlethreaded).  
+// This is for debugging only and is used to test the performance of just calling D3D and rendering without other CPU overhead.
+#define SHADERAPI_BUFFER_D3DCALLS 0
+
+#if SHADERAPI_BUFFER_D3DCALLS && !SHADERAPI_USE_SMP
+#	error "SHADERAPI_USE_SMP must be 1 for SHADERAPI_BUFFER_D3DCALLS to work!"
+#endif
+
 #include "recording.h"
 #include "strtools.h"
-#include <d3d9.h>
-#include <d3dx9.h>
+#include "glmgr/dxabstract.h"
 
 #ifdef NDEBUG
 #define DO_D3D(x) Dx9Device()->x
@@ -113,6 +125,7 @@ enum PushBufferCommand
 	PBCMD_ASYNC_UNLOCK_VB,
 	PBCMD_ASYNC_LOCK_IB,									// see code
 	PBCMD_ASYNC_UNLOCK_IB,
+	PBCMD_SET_SCISSOR_RECT,									// RECT
 };
 
 
@@ -124,11 +137,21 @@ class D3DDeviceWrapper
 {
 private:
 	IDirect3DDevice9 *m_pD3DDevice;
+	bool m_bSupportsTessellation;
+	int m_nCurrentTessLevel;
+	TessellationMode_t m_nTessellationMode;
+
 #if SHADERAPI_USE_SMP
 	uintptr_t m_pASyncThreadHandle;
 	PushBuffer *m_pCurPushBuffer;
 	uint32 *m_pOutputPtr;
 	size_t m_PushBufferFreeSlots;
+#endif
+
+#if SHADERAPI_BUFFER_D3DCALLS
+	bool m_bBufferingD3DCalls;
+#	define SHADERAPI_BUFFER_MAXRENDERTARGETS 4
+	IDirect3DSurface9 *m_StoredRenderTargets[SHADERAPI_BUFFER_MAXRENDERTARGETS];
 #endif
 
 	PushBuffer *FindFreePushBuffer( PushBufferState newstate );	// find a free push buffer and change its state
@@ -147,7 +170,8 @@ private:
 
 
 	void SubmitIfNotBusy(void);
-	
+
+#if	SHADERAPI_USE_SMP	
 	template<class T> FORCEINLINE void PushStruct( PushBufferCommand cmd, T const *str )
 	{
 		int nwords=N_DWORDS( T );
@@ -269,10 +293,67 @@ private:
 		m_pOutputPtr += 7;
 	}
 
+#else
+	template<class T> FORCEINLINE void PushStruct( PushBufferCommand cmd, T const *str )
+	{
+	}
+	
+	FORCEINLINE void AllocatePushBufferSpace(size_t nSlots)
+	{
+	}
+
+	// simple methods for pushing a few words into output buffer
+	FORCEINLINE void Push( PushBufferCommand cmd )
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, int arg1)
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, void *ptr )
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, void *ptr, void *ptr1 )
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, void *arg1, uint32 arg2, uint32 arg3, uint32 arg4,
+					  void *arg5)
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, uint32 arg1, void *ptr )
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, uint32 arg1, void *ptr, int arg2, int arg3 )
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, int arg1, int arg2)
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, int arg1, int arg2, int arg3)
+	{
+	}
+
+	FORCEINLINE void Push( PushBufferCommand cmd, int arg1, int arg2, int arg3, int arg4, int arg5, int arg6 )
+	{
+	}
+
+#endif
+
 	FORCEINLINE bool ASyncMode(void) const
 	{
 #if SHADERAPI_USE_SMP
+#	if SHADERAPI_BUFFER_D3DCALLS
+		return m_bBufferingD3DCalls;
+#	else
 		return (m_pASyncThreadHandle != 0 );
+#	endif
 #else
 		return false;
 #endif
@@ -299,6 +380,9 @@ private:
 
 public:
 
+#if SHADERAPI_BUFFER_D3DCALLS
+	void ExecuteAllWork( void );
+#endif
 	void RunThread( void );									// this is what the worker thread runs
 
 	void SetASyncMode( bool onoff );
@@ -315,11 +399,19 @@ public:
 #if SHADERAPI_USE_SMP
 		m_pASyncThreadHandle = 0;
 #endif
+#if SHADERAPI_BUFFER_D3DCALLS
+		m_bBufferingD3DCalls = false;
+#endif
 	}
 	
 	void SetDevicePtr(IDirect3DDevice9 *pD3DDev )
 	{
 		m_pD3DDevice = pD3DDev;
+	}
+
+	void SetSupportsTessellation( bool bSupportsTessellation )
+	{
+		m_bSupportsTessellation = bSupportsTessellation;
 	}
 
 	void ShutDownDevice(void)
@@ -346,12 +438,17 @@ public:
 		D3DFORMAT Format,
 		D3DPOOL Pool,
 		IDirect3DCubeTexture9 ** ppCubeTexture,
-		HANDLE* pSharedHandle
+		HANDLE* pSharedHandle,
+		char *debugLabel = NULL				// <-- OK to not pass this arg, only passed through on DX_TO_GL_ABSTRACTION
 		)
 	{
 		Synchronize();
 		return m_pD3DDevice->CreateCubeTexture( EdgeLength, Levels, Usage, Format, Pool,
-												ppCubeTexture, pSharedHandle );
+												ppCubeTexture, pSharedHandle
+											#if defined( DX_TO_GL_ABSTRACTION )
+												,debugLabel
+											#endif
+											  );
 	}
 
 	HRESULT CreateVolumeTexture(
@@ -363,13 +460,18 @@ public:
 		D3DFORMAT Format,
 		D3DPOOL Pool,
 		IDirect3DVolumeTexture9** ppVolumeTexture,
-		HANDLE* pSharedHandle
+		HANDLE* pSharedHandle,
+		char *debugLabel = NULL				// <-- OK to not pass this arg, only passed through on DX_TO_GL_ABSTRACTION
 		)
 	{
 		Synchronize();
 		return m_pD3DDevice->CreateVolumeTexture( Width, Height, Depth, Levels,
 												  Usage, Format, Pool, ppVolumeTexture,
-												  pSharedHandle);
+												  pSharedHandle
+											#if defined( DX_TO_GL_ABSTRACTION )
+												,debugLabel
+											#endif
+												  );
 	}
 
 	HRESULT CreateOffscreenPlainSurface( UINT Width,
@@ -392,12 +494,17 @@ public:
 		D3DFORMAT Format,
 		D3DPOOL Pool,
 		IDirect3DTexture9** ppTexture,
-		HANDLE* pSharedHandle
+		HANDLE* pSharedHandle,
+		char *debugLabel = NULL				// <-- OK to not pass this arg, only passed through on DX_TO_GL_ABSTRACTION
 		)
 	{
 		Synchronize();
 		return m_pD3DDevice->CreateTexture( Width, Height, Levels, Usage, 
-											Format, Pool, ppTexture, pSharedHandle );
+											Format, Pool, ppTexture, pSharedHandle
+											#if defined( DX_TO_GL_ABSTRACTION )
+												,debugLabel
+											#endif
+											);
 	}
 
 	HRESULT GetRenderTargetData(
@@ -424,7 +531,10 @@ public:
 
 	HRESULT TestCooperativeLevel( void )
 	{
+	// hack!  We are going to assume that calling this immediately when in buffered mode isn't going to cause problems.
+#if !SHADERAPI_BUFFER_D3DCALLS
 		Synchronize();
+#endif
 		return m_pD3DDevice->TestCooperativeLevel();
 	}
 
@@ -468,6 +578,7 @@ public:
 		RECORD_FLOAT( pplane[1] );
 		RECORD_FLOAT( pplane[2] );
 		RECORD_FLOAT( pplane[3] );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace( 6 );
@@ -477,6 +588,7 @@ public:
 			m_pOutputPtr += 6;
 		}
 		else
+#endif
 			DO_D3D( SetClipPlane( idx, pplane ) );
 	}
 
@@ -485,11 +597,13 @@ public:
 		RECORD_COMMAND( DX8_SET_VERTEX_DECLARATION, 1 );
 		RECORD_INT( ( int ) decl );
 
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			Push( PBCMD_SET_VERTEXDECLARATION, decl );
 		}
 		else
+#endif
 			DO_D3D( SetVertexDeclaration( decl ) );
 	}
 
@@ -498,9 +612,11 @@ public:
 		RECORD_COMMAND( DX8_SET_VIEWPORT, 1 );
 		RECORD_STRUCT( vp, sizeof( *vp ));
 
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 			PushStruct( PBCMD_SETVIEWPORT, vp );
 		else
+#endif
 			DO_D3D( SetViewport( vp ) );
 	}
 
@@ -508,6 +624,14 @@ public:
 		DWORD RenderTargetIndex,
 		IDirect3DSurface9 ** ppRenderTarget)
 	{
+#if SHADERAPI_BUFFER_D3DCALLS
+		if ( ASyncMode() )
+		{
+			Assert( RenderTargetIndex >= 0 && RenderTargetIndex < SHADERAPI_BUFFER_MAXRENDERTARGETS );
+			*ppRenderTarget = m_StoredRenderTargets[RenderTargetIndex];
+			return D3D_OK;
+		}
+#endif
 		Synchronize();
 		return m_pD3DDevice->GetRenderTarget( RenderTargetIndex, ppRenderTarget );
 	}
@@ -558,6 +682,9 @@ public:
 		if (ASyncMode())
 		{
 			Push( PBCMD_SET_RENDER_TARGET, idx, new_rt );
+#if SHADERAPI_BUFFER_D3DCALLS
+			m_StoredRenderTargets[idx] = new_rt;
+#endif
 		}
 		else
 		{
@@ -589,16 +716,37 @@ public:
 			DO_D3D( SetRenderState( state, val ) );
 	}
 
+	FORCEINLINE void SetRenderStateInline( D3DRENDERSTATETYPE state, DWORD val )
+	{
+		//		Assert( state >= 0 && state < MAX_NUM_RENDERSTATES );
+		RECORD_RENDER_STATE( state, val ); 
+		if (ASyncMode())
+		{
+			SetRenderState( state, val );
+		}
+		else
+		{
+#ifdef DX_TO_GL_ABSTRACTION
+			DO_D3D( SetRenderStateInline( state, val ) );
+#else
+			DO_D3D( SetRenderState( state, val ) );
+#endif
+		}
+	}
+
 	FORCEINLINE void SetScissorRect( const RECT *pScissorRect )
 	{
 		RECORD_COMMAND( DX8_SET_SCISSOR_RECT, 1 );
 		RECORD_STRUCT( pScissorRect, 4 * sizeof(LONG) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
-			// Is this just for XBox?
-			Assert( 0 );
+			AllocatePushBufferSpace( 5 );
+			m_pOutputPtr[0] = PBCMD_SET_SCISSOR_RECT;
+			memcpy( m_pOutputPtr + 1, pScissorRect, sizeof( *pScissorRect ) );
 		}
 		else
+#endif
 			DO_D3D( SetScissorRect( pScissorRect ) );
 	}
 
@@ -609,6 +757,7 @@ public:
 		RECORD_INT( StartRegister );
 		RECORD_INT( Vector4fCount );
 		RECORD_STRUCT( pConstantData, Vector4fCount * 4 * sizeof(float) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(3+4*Vector4fCount);
@@ -619,6 +768,7 @@ public:
 			m_pOutputPtr+=3+4*Vector4fCount;
 		}
 		else
+#endif
 			DO_D3D( SetVertexShaderConstantF( StartRegister, pConstantData, Vector4fCount ) );
 	}
 
@@ -629,6 +779,7 @@ public:
 		RECORD_INT( StartRegister );
 		RECORD_INT( BoolCount );
 		RECORD_STRUCT( pConstantData, BoolCount * sizeof(int) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(3+BoolCount);
@@ -639,6 +790,7 @@ public:
 			m_pOutputPtr+=3+BoolCount;
 		}
 		else
+#endif
 			DO_D3D( SetVertexShaderConstantB( StartRegister, pConstantData, BoolCount ) );
 	}
 
@@ -649,6 +801,7 @@ public:
 		RECORD_INT( StartRegister );
 		RECORD_INT( Vector4IntCount );
 		RECORD_STRUCT( pConstantData, Vector4IntCount * 4 * sizeof(int) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(3+4*Vector4IntCount);
@@ -659,6 +812,7 @@ public:
 			m_pOutputPtr+=3+4*Vector4IntCount;
 		}
 		else
+#endif
 			DO_D3D( SetVertexShaderConstantI( StartRegister, pConstantData, Vector4IntCount ) );
 	}
 
@@ -669,6 +823,7 @@ public:
 		RECORD_INT( StartRegister );
 		RECORD_INT( Vector4fCount );
 		RECORD_STRUCT( pConstantData, Vector4fCount * 4 * sizeof(float) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(3+4*Vector4fCount);
@@ -679,6 +834,7 @@ public:
 			m_pOutputPtr+=3+4*Vector4fCount;
 		}
 		else
+#endif
 			DO_D3D( SetPixelShaderConstantF( StartRegister, pConstantData, Vector4fCount ) );
 	}
 
@@ -689,6 +845,7 @@ public:
 		RECORD_INT( StartRegister );
 		RECORD_INT( BoolCount );
 		RECORD_STRUCT( pConstantData, BoolCount * sizeof(int) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(3+BoolCount);
@@ -699,6 +856,7 @@ public:
 			m_pOutputPtr+=3+BoolCount;
 		}
 		else
+#endif
 			DO_D3D( SetPixelShaderConstantB( StartRegister, pConstantData, BoolCount ) );
 	}
 
@@ -709,6 +867,7 @@ public:
 		RECORD_INT( StartRegister );
 		RECORD_INT( Vector4IntCount );
 		RECORD_STRUCT( pConstantData, Vector4IntCount * 4 * sizeof(int) );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(3+4*Vector4IntCount);
@@ -719,6 +878,7 @@ public:
 			m_pOutputPtr+=3+4*Vector4IntCount;
 		}
 		else
+#endif
 			DO_D3D( SetPixelShaderConstantI( StartRegister, pConstantData, Vector4IntCount ) );
 	}
 
@@ -728,6 +888,7 @@ public:
 					  CONST RECT * pDestRect,
 					  D3DTEXTUREFILTERTYPE Filter )
 	{
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace(1+1+1+N_DWORDS( RECT )+1+1+N_DWORDS( RECT ) + 1);
@@ -748,6 +909,7 @@ public:
 			return S_OK;									// !bug!
 		}
 		else
+#endif
 			return m_pD3DDevice->
 				StretchRect( pSourceSurface, pSourceRect, pDestSurface, pDestRect, Filter );
 	}
@@ -877,6 +1039,13 @@ public:
 		return hr;
 	}
 
+#ifndef DX_TO_GL_ABSTRACTION
+	FORCEINLINE HRESULT  UpdateSurface(	IDirect3DSurface9* pSourceSurface, CONST RECT* pSourceRect, IDirect3DSurface9* pDestSurface, CONST POINT* pDestPoint )
+	{
+		return m_pD3DDevice->UpdateSurface( pSourceSurface, pSourceRect, pDestSurface, pDestPoint );
+	}
+#endif
+
 	void Release( IDirect3DIndexBuffer9* ib )
 	{
 		Synchronize();
@@ -892,7 +1061,6 @@ public:
 	FORCEINLINE void Unlock( IDirect3DVertexBuffer9* vb )
 	{
 		// needed for d3d on pc only
-#ifndef _XBOX
 		if ( ASyncMode() )
 			Push(PBCMD_UNLOCK_VB, vb);
 		else
@@ -904,13 +1072,12 @@ public:
 				Warning( "Vertex Buffer Unlock Failed in %s on line %d\n", V_UnqualifiedFileName(__FILE__), __LINE__ );
 			}
 		}
-#endif
 	}
 
 	FORCEINLINE void Unlock( IDirect3DVertexBuffer9* vb, LockedBufferContext *lb, size_t unlock_size)
 	{
 		// needed for d3d on pc only
-#ifndef _XBOX
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace( 1+N_DWORDS_IN_PTR+N_DWORDS( LockedBufferContext )+1 );
@@ -922,6 +1089,7 @@ public:
 			*(m_pOutputPtr++)=unlock_size;
 		}
 		else
+#endif
 		{
 			HRESULT hr = vb->Unlock();
 
@@ -930,13 +1098,11 @@ public:
 				Warning( "Vertex Buffer Unlock Failed in %s on line %d\n", V_UnqualifiedFileName(__FILE__), __LINE__ );
 			}
 		}
-#endif
 	}
 
 	FORCEINLINE void Unlock( IDirect3DIndexBuffer9* ib )
 	{
 		// needed for d3d on pc only
-#ifndef _XBOX
 		if ( ASyncMode() )
 			Push(PBCMD_UNLOCK_IB, ib);
 		else
@@ -948,13 +1114,12 @@ public:
 				Warning( "Index Buffer Unlock Failed in %s on line %d\n", V_UnqualifiedFileName(__FILE__), __LINE__ );
 			}
 		}
-#endif
 	}
 
 	FORCEINLINE void Unlock( IDirect3DIndexBuffer9* ib, LockedBufferContext *lb, size_t unlock_size)
 	{
 		// needed for d3d on pc only
-#ifndef _XBOX
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			AllocatePushBufferSpace( 1+N_DWORDS_IN_PTR+N_DWORDS( LockedBufferContext )+1 );
@@ -966,6 +1131,7 @@ public:
 			*(m_pOutputPtr++)=unlock_size;
 		}
 		else
+#endif
 		{
 			HRESULT hr = ib->Unlock( );
 
@@ -974,19 +1140,17 @@ public:
 				Warning( "Index Buffer Unlock Failed in %s on line %d\n", V_UnqualifiedFileName(__FILE__), __LINE__ );
 			}
 		}
-#endif
 	}
 
 	void ShowCursor( bool onoff)
 	{
-#ifndef _XBOX
 		Synchronize();
 		DO_D3D( ShowCursor(onoff) );
-#endif
 	}
 
 	FORCEINLINE void Clear( int count, D3DRECT const *pRects, int Flags, D3DCOLOR color, float Z, int stencil)
 	{
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			int n_rects_words = count * N_DWORDS( D3DRECT );
@@ -1006,6 +1170,7 @@ public:
 			*(m_pOutputPtr++) = stencil;
 		}
 		else
+#endif
 			DO_D3D( Clear(count, pRects, Flags, color, Z, stencil) );
 	}
 	
@@ -1107,20 +1272,32 @@ public:
 
 	HRESULT CreateVertexShader(
 		CONST DWORD * pFunction,
-		IDirect3DVertexShader9** ppShader
+		IDirect3DVertexShader9** ppShader,
+		const char *pShaderName,
+		char *debugLabel = NULL
 		)
 	{
 		Synchronize();
-		return m_pD3DDevice->CreateVertexShader( pFunction, ppShader );
+		#ifdef DX_TO_GL_ABSTRACTION
+			return m_pD3DDevice->CreateVertexShader( pFunction, ppShader, pShaderName, debugLabel );
+		#else
+			return m_pD3DDevice->CreateVertexShader( pFunction, ppShader );
+		#endif
 	}
 
 	HRESULT CreatePixelShader(
 		CONST DWORD * pFunction,
-		IDirect3DPixelShader9** ppShader
+		IDirect3DPixelShader9** ppShader,
+	    const char *pShaderName,
+		char *debugLabel = NULL
 		)
 	{
 		Synchronize();
-		return m_pD3DDevice->CreatePixelShader( pFunction, ppShader );
+		#ifdef DX_TO_GL_ABSTRACTION
+			return m_pD3DDevice->CreatePixelShader( pFunction, ppShader, pShaderName, debugLabel );
+		#else
+			return m_pD3DDevice->CreatePixelShader( pFunction, ppShader );
+		#endif
 	}
 
 
@@ -1183,8 +1360,7 @@ public:
 		UINT MinIndex,
 		UINT NumVertices,
 		UINT StartIndex,
-		UINT PrimitiveCount
-		)
+		UINT PrimitiveCount	)
 	{
 		RECORD_COMMAND( DX8_DRAW_INDEXED_PRIMITIVE, 6 );
 		RECORD_INT( Type );
@@ -1200,11 +1376,59 @@ public:
 //			SubmitIfNotBusy();
 		}
 		else
-			DO_D3D( DrawIndexedPrimitive( Type, BaseVertexIndex, MinIndex, NumVertices,
-										  StartIndex, PrimitiveCount ) );
+		{
+			DO_D3D( DrawIndexedPrimitive( Type, BaseVertexIndex, MinIndex, NumVertices, StartIndex, PrimitiveCount ) );
+		}
 	}
 
+#ifndef DX_TO_GL_ABSTRACTION
+	FORCEINLINE void DrawTessellatedIndexedPrimitive( INT BaseVertexIndex, UINT MinIndex, UINT NumVertices,
+													  UINT StartIndex, UINT PrimitiveCount )
+	{
+		// Setup our stream-source frequencies
+		DO_D3D( SetStreamSourceFreq( 0, D3DSTREAMSOURCE_INDEXEDDATA | PrimitiveCount  ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_MORPH, D3DSTREAMSOURCE_INSTANCEDATA | 1ul  ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_SUBDQUADS, D3DSTREAMSOURCE_INSTANCEDATA | 1ul ) );
 
+		int nIndicesPerPatch = ( ( ( m_nCurrentTessLevel + 1 ) * 2 + 2 ) * m_nCurrentTessLevel ) - 2;
+		int nVerticesPerPatch = m_nCurrentTessLevel + 1;
+		nVerticesPerPatch *= nVerticesPerPatch;
+		int nPrimitiveCount = nIndicesPerPatch - 2;
+		DO_D3D( DrawIndexedPrimitive( D3DPT_TRIANGLESTRIP, 0, 0, nVerticesPerPatch, 0, nPrimitiveCount ) );
+
+		// Disable instancing
+		DO_D3D( SetStreamSourceFreq( 0, 1ul ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_MORPH, 1ul ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_SUBDQUADS, 1ul ) );
+	}
+
+	FORCEINLINE void DrawTessellatedPrimitive( UINT StartVertex, UINT PrimitiveCount )
+	{
+
+		// Setup our stream-source frequencies
+		DO_D3D( SetStreamSourceFreq( 0, D3DSTREAMSOURCE_INDEXEDDATA | PrimitiveCount  ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_MORPH, D3DSTREAMSOURCE_INSTANCEDATA | 1ul  ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_SUBDQUADS, D3DSTREAMSOURCE_INSTANCEDATA | 1ul ) );
+
+		int nIndicesPerPatch = ( ( ( m_nCurrentTessLevel + 1 ) * 2 + 2 ) * m_nCurrentTessLevel ) - 2;
+		int nVerticesPerPatch = m_nCurrentTessLevel + 1;
+		nVerticesPerPatch *= nVerticesPerPatch;
+		int nPrimitiveCount = nIndicesPerPatch - 2;
+		DO_D3D( DrawIndexedPrimitive( D3DPT_TRIANGLESTRIP, 0, 0, nVerticesPerPatch, 0, nPrimitiveCount ) );
+
+		// Disable instancing
+		DO_D3D( SetStreamSourceFreq( 0, 1ul ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_MORPH, 1ul ) );
+		DO_D3D( SetStreamSourceFreq( VertexStreamSpec_t::STREAM_SUBDQUADS, 1ul ) );
+	}
+
+	FORCEINLINE void SetTessellationLevel( float level )
+	{
+		// Track our current tessellation level
+		m_nCurrentTessLevel = (int)ceil( level );
+	}
+#endif
+	
 	void SetMaterial( D3DMATERIAL9 const *mat)
 	{
 		RECORD_COMMAND( DX8_SET_MATERIAL, 1 );
@@ -1230,6 +1454,27 @@ public:
 		else
 			DO_D3D( SetVertexShader( pShader ) );
 	}
+
+#ifdef DX_TO_GL_ABSTRACTION
+	FORCEINLINE HRESULT LinkShaderPair( IDirect3DVertexShader9* vs, IDirect3DPixelShader9* ps )
+	{
+		Assert ( !ASyncMode() );
+		return DO_D3D( LinkShaderPair( vs, ps ) );
+	}
+
+	HRESULT QueryShaderPair( int index, GLMShaderPairInfo *infoOut )
+	{
+		Assert ( !ASyncMode() );
+		return DO_D3D( QueryShaderPair( index, infoOut ) );
+	}
+
+	void SetMaxUsedVertexShaderConstantsHint( uint nMaxReg )
+	{
+		Assert( !ASyncMode() );
+		DO_D3D( SetMaxUsedVertexShaderConstantsHint( nMaxReg ) );
+	}
+
+#endif
 
 	void EvictManagedResources( void )
 	{
@@ -1268,10 +1513,11 @@ public:
 	HRESULT Present(
 		CONST RECT * pSourceRect,
 		CONST RECT * pDestRect,
-		HWND hDestWindowOverride,
+		VD3DHWND hDestWindowOverride,
 		CONST RGNDATA * pDirtyRegion)
 	{
 		RECORD_COMMAND( DX8_PRESENT, 0 );
+#if SHADERAPI_USE_SMP
 		if ( ASyncMode() )
 		{
 			// need to deal with ret code here
@@ -1294,12 +1540,28 @@ public:
 			return S_OK;									// not good - caller wants to here about lost devices
 		}
 		else
+#endif
 			return m_pD3DDevice->Present( pSourceRect, pDestRect, 
 									  hDestWindowOverride, pDirtyRegion );
 	}
 	
+
+#if defined( DX_TO_GL_ABSTRACTION )
+
+	void AcquireThreadOwnership( )
+	{
+		m_pD3DDevice->AcquireThreadOwnership();
+	}
+
+	void ReleaseThreadOwnership( )
+	{
+		m_pD3DDevice->ReleaseThreadOwnership();
+	}
+
+#endif
+
 };
 
-
-
 #endif // D3DASYNC_H
+
+#endif // #if D3D_ASYNC_SUPPORTED

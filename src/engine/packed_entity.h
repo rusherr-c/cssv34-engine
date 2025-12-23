@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,12 +20,15 @@
 
 #include "common.h"
 
+// Matched with the memdbgoff at end of header
+#include "memdbgon.h"
+
 // This is extra spew to the files cltrace.txt + svtrace.txt
 // #define DEBUG_NETWORKING 1
 
 #if defined( DEBUG_NETWORKING )
 #include "convar.h"
-void SpewToFile( char const* pFmt, ... );
+void SpewToFile( PRINTF_FORMAT_STRING char const* pFmt, ... );
 extern ConVar  sv_packettrace;
 #define TRACE_PACKET( text ) if ( sv_packettrace.GetInt() ) { SpewToFile text ; };
 #else
@@ -201,6 +204,8 @@ inline bool PackedEntity::ShouldCheckCreationTick() const
 {
 	return m_nShouldCheckCreationTick == 1 ? true : false;
 }
+
+#include "memdbgoff.h"
 
 #endif // PACKED_ENTITY_H
 

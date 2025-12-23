@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The morph operator class - sets morph target weights on meshes
 //
@@ -10,13 +10,15 @@
 #pragma once
 #endif
 
+#include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "movieobjects/dmeoperator.h"
 
 
 //-----------------------------------------------------------------------------
 // Forward declarations
 //-----------------------------------------------------------------------------
-class CDmElement;
 class CDmeMesh;
 
 

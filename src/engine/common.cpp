@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,11 +30,16 @@
 #include "datacache/idatacache.h"
 #include "matchmaking.h"
 #include "tier1/KeyValues.h"
-#ifdef _WIN32
 #include "vgui_baseui_interface.h"
-#endif
 #include "tier2/tier2.h"
 #include "language.h"
+#ifndef SWDS
+#include "cl_steamauth.h"
+#endif
+#include "tier3/tier3.h"
+#include <vgui/ILocalize.h>
+#include "tier1/lzss.h"
+#include "tier1/snappy.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -86,7 +91,7 @@ COM_ExplainDisconnection
 
 ==============================
 */
-void COM_ExplainDisconnection( bool bPrint, char *fmt, ... )
+void COM_ExplainDisconnection( bool bPrint, const char *fmt, ... )
 {
 	if ( IsX360() )
 	{
@@ -107,7 +112,25 @@ void COM_ExplainDisconnection( bool bPrint, char *fmt, ... )
 
 	if ( bPrint )
 	{
-		ConMsg( "%s\n", gszDisconnectReason );
+		if ( gszDisconnectReason[0] == '#' )
+		{
+			wchar_t formatStr[256];
+			const wchar_t *wpchReason = g_pVGuiLocalize ? g_pVGuiLocalize->Find(gszDisconnectReason) : NULL;
+			if ( wpchReason )
+			{
+				wcsncpy(formatStr, wpchReason, sizeof( formatStr ) / sizeof( wchar_t ) );
+
+				char conStr[256];
+				g_pVGuiLocalize->ConvertUnicodeToANSI(formatStr, conStr, sizeof( conStr ));
+				ConMsg( "%s\n", conStr );
+			}
+			else
+				ConMsg( "%s\n", gszDisconnectReason );
+		}
+		else
+		{
+			ConMsg( "%s\n", gszDisconnectReason );
+		}
 	}
 }
 
@@ -117,7 +140,7 @@ COM_ExtendedExplainDisconnection
 
 ==============================
 */
-void COM_ExtendedExplainDisconnection( bool bPrint, char *fmt, ... )
+void COM_ExtendedExplainDisconnection( bool bPrint, const char *fmt, ... )
 {
 	if ( IsX360() )
 	{
@@ -262,7 +285,7 @@ COM_Parse_Line
 Parse a line out of a string
 ==============
 */
-char *COM_ParseLine (char *data)
+const char *COM_ParseLine (const char *data)
 {
 	int c;
 	int len;
@@ -282,7 +305,7 @@ char *COM_ParseLine (char *data)
 		data++;
 		len++;
 		c = *data;
-	} while ( ( c>=' ' || c == '\t' ) && ( len < COM_TOKEN_MAX_LENGTH - 1 ) );
+	} while ( ( c>=' ' || c < 0 || c == '\t' ) && ( len < COM_TOKEN_MAX_LENGTH - 1 ) );
 	
 	com_token[len] = 0;
 
@@ -314,7 +337,7 @@ int COM_TokenWaiting( const char *buffer )
 	p = buffer;
 	while ( *p && *p!='\n')
 	{
-		if ( !isspace( *p ) || isalnum( *p ) )
+		if ( !V_isspace( *p ) || V_isalnum( *p ) )
 			return 1;
 
 		p++;
@@ -326,25 +349,35 @@ int COM_TokenWaiting( const char *buffer )
 
 /*
 ============
+tmpstr512
+
+rotates through a bunch of string buffers of 512 bytes each
+============
+*/
+char *tmpstr512()
+{
+	static char	string[32][512];
+	static int	curstring = 0;
+	curstring = ( curstring + 1 ) & 31;
+	return string[curstring];  
+}
+
+/*
+============
 va
 
 does a varargs printf into a temp buffer, so I don't need to have
 varargs versions of all text functions.
 ============
 */
-char *va( char *format, ... )
+char *va( const char *format, ... )
 {
-	va_list		argptr;
-	static char	string[8][512];
-	static int	curstring = 0;
-	
-	curstring = ( curstring + 1 ) % 8;
-
+	char* outbuf = tmpstr512();
+	va_list argptr;
 	va_start (argptr, format);
-	Q_vsnprintf( string[curstring], sizeof( string[curstring] ), format, argptr );
+	Q_vsnprintf( outbuf, 512, format, argptr );
 	va_end (argptr);
-
-	return string[curstring];  
+	return outbuf;
 }
 
 /*
@@ -355,16 +388,11 @@ prints a vector into a temporary string
 bufffer.
 ============
 */
-char *vstr(Vector& v)
+const char *vstr(Vector& v)
 {
-	static int idx = 0;
-	static char string[16][1024];
-
-	idx++;
-	idx &= 15;
-
-	Q_snprintf(string[idx], sizeof( string[idx] ), "%.2f %.2f %.2f", v[0], v[1], v[2]);
-	return string[idx];  
+	char* outbuf = tmpstr512();
+	Q_snprintf(outbuf, 512, "%.2f %.2f %.2f", v[0], v[1], v[2]);
+	return outbuf;
 }
 
 char    com_basedir[MAX_OSPATH];
@@ -469,19 +497,11 @@ Only used for CopyFile
 */
 void COM_CreatePath (const char *path)
 {
-	char temppath[512];
-	Q_strncpy( temppath, path, sizeof(temppath) );
-	
-	for (char *ofs = temppath+1 ; *ofs ; ofs++)
-	{
-		if (*ofs == '/' || *ofs == '\\')
-		{       // create the directory
-			char old = *ofs;
-			*ofs = 0;
-			Sys_mkdir (temppath);
-			*ofs = old;
-		}
-	}
+	char temppath[1024];
+	Q_strncpy(temppath, path, sizeof(temppath));
+	Q_StripFilename( temppath );
+
+	Sys_mkdir( temppath );
 }
 
 
@@ -489,11 +509,10 @@ void COM_CreatePath (const char *path)
 ===========
 COM_CopyFile
 
-Copies a file over from the net to the local cache, creating any directories
-needed.  This is for the convenience of developers using ISDN from home.
+Copies a file from pSourcePath to pDestPath.
 ===========
 */
-bool COM_CopyFile ( const char *netpath, const char *cachepath)
+bool COM_CopyFile ( const char *pSourcePath, const char *pDestPath )
 {
 	if ( IsX360() )
 		return false;
@@ -502,19 +521,19 @@ bool COM_CopyFile ( const char *netpath, const char *cachepath)
 	char			buf[4096];
 	FileHandle_t in, out;
 
-	in = g_pFileSystem->Open( netpath, "rb" );
+	in = g_pFileSystem->Open( pSourcePath, "rb" );
 
-	assert( in );
+	AssertMsg( in, "COM_CopyFile(): Input file failed to open" );
 
 	if ( in == FILESYSTEM_INVALID_HANDLE )
 		return false;
 		
 	// create directories up to the cache file
-	COM_CreatePath (cachepath);     
+	COM_CreatePath( pDestPath );     
 
-	out = g_pFileSystem->Open( cachepath, "wb" );
+	out = g_pFileSystem->Open( pDestPath, "wb" );
 
-	assert( out );
+	AssertMsg( out, "COM_CopyFile(): Output file failed to open" );
 	
 	if ( out == FILESYSTEM_INVALID_HANDLE )
 	{
@@ -820,6 +839,32 @@ const char *COM_GetModDirectory()
 	return modDir;
 }
 
+
+/*
+================
+Return if we should load content from the _hd folder for this mod
+This logic needs to match with the gameui/OptionsSubVideo.cpp code
+================
+*/
+bool BLoadHDContent( const char *pchModDir, const char *pchBaseDir )
+{
+	char szModSteamInfPath[ 1024 ];
+	V_ComposeFileName( pchModDir, "game_hd.txt", szModSteamInfPath, sizeof( szModSteamInfPath ) );
+	char szFullPath[ 1024 ];
+	V_MakeAbsolutePath( szFullPath, sizeof( szFullPath ), szModSteamInfPath, pchBaseDir );
+
+	FILE *fp = fopen( szFullPath, "rb" );
+	if ( fp )
+	{
+		fclose(fp);
+		return true;
+	}
+	return false;
+}
+
+
+extern void Host_CheckGore( void );
+
 /*
 ================
 COM_InitFilesystem
@@ -832,10 +877,32 @@ void COM_InitFilesystem( const char *pFullModPath )
 #ifndef SWDS	
 	if ( IsPC() )
 	{
-		// get Steam client language
-		char language[128];
+		static char language[128];
 		language[0] = 0;
-		Sys_GetRegKeyValue( "Software\\Valve\\Steam", "Language", language, sizeof(language), "" );
+
+		// There are two language at play here.  The Audio language which is controled by the
+		// properties on the game itself in Steam (at least for now).  And the language Steam is set to.
+        // Under Windows the text in the game is controled by the language Steam is set in, but the audio
+		// is controled by the language set in the game's properties which we can get from Steam3Client
+
+		// A command line override for audio language has also been added.
+		// -audiolanguage <language>
+		// User must have the .vpk files for the language installed though in order to use the command line switch
+		
+		if ( Steam3Client().SteamApps() )
+		{
+			// use -audiolanguage command line to override audio language, otherwise take language from steam
+			Q_strncpy(language, CommandLine()->ParmValue("-audiolanguage", Steam3Client().SteamApps()->GetCurrentGameLanguage()), sizeof( language ) - 1);
+		}
+		else
+		{
+			// still allow command line override even when not running steam
+			if (CommandLine()->CheckParm("-audiolanguage"))
+			{
+				Q_strncpy(language, CommandLine()->ParmValue("-audiolanguage", "english"), sizeof( language ) - 1);
+			}
+		}
+
 		if ( ( Q_strlen(language) > 0 ) && ( Q_stricmp(language, "english") ) )
 		{
 			initInfo.m_pLanguage = language;
@@ -850,26 +917,13 @@ void COM_InitFilesystem( const char *pFullModPath )
 		initInfo.m_pDirectoryName = GetCurrentGame();
 	}
 
+	Host_CheckGore();
+
+	initInfo.m_bLowViolence = g_bLowViolence;
+	initInfo.m_bMountHDContent = BLoadHDContent( initInfo.m_pDirectoryName, GetBaseDirectory() );
+
 	// Load gameinfo.txt and setup all the search paths, just like the tools do.
 	FileSystem_LoadSearchPaths( initInfo );
-
-	// Enable file 
-	KeyValues *modinfo = new KeyValues("ModInfo");
-	if ( modinfo->LoadFromFile( g_pFileSystem, "gameinfo.txt" ) )
-	{
-		// If it's not singleplayer_only
-		if ( V_stricmp( modinfo->GetString("type", "singleplayer_only"), "singleplayer_only") == 0 )
-		{
-			DevMsg( "Disabling whitelist file tracking in filesystem...\n" );
-			g_pFileSystem->EnableWhitelistFileTracking( false );
-		}
-		else
-		{
-			DevMsg( "Enabling whitelist file tracking in filesystem...\n" );
-			g_pFileSystem->EnableWhitelistFileTracking( true );
-		}
-	}
-	modinfo->deleteThis();
 							  
 	// The mod path becomes com_gamedir.
 	Q_MakeAbsolutePath( com_gamedir, sizeof( com_gamedir ), initInfo.m_ModPath );
@@ -879,72 +933,14 @@ void COM_InitFilesystem( const char *pFullModPath )
 	Q_strlower( com_basedir );
 	Q_FixSlashes( com_basedir );
 	
-#ifndef SWDS
+#if !defined( SWDS ) && !defined( DEDICATED )
 	EngineVGui()->SetVGUIDirectories();
 #endif
 
 	// Set LOGDIR to be something reasonable
 	COM_SetupLogDir( NULL );
 
-#ifndef SWDS
-	if ( IsPC() )
-	{
-		//
-		// Get App's Audio Language
-		// 
-		// We need to read the GameInfo.txt file to get the app being run. Then we need to look in the registry for the audio language for this game.
-		// If the games language is non-English then we add a search path entry for this language that looks like this "game\<GAME>_<AUDIOLANG>\sound"
-		modinfo = new KeyValues("ModInfo");
-		if ( modinfo->LoadFromFile( g_pFileSystem, "gameinfo.txt" ) )
-		{
-			const int nSteamAppId =	modinfo->FindKey( "FileSystem" )->GetInt("SteamAppId", 215 );
-			ELanguage eAudioLanguage = k_Lang_English;
-			char szAudioLanguageRegKey[MAX_PATH];
-			long lRegValue;
-
-			// Construct registry key path
-			V_strncpy( szAudioLanguageRegKey, "Software\\Valve\\Steam\\Apps\\", sizeof( szAudioLanguageRegKey ) );
-			itoa( nSteamAppId, &(szAudioLanguageRegKey[strlen( szAudioLanguageRegKey )]), 10 );
-			Sys_GetRegKeyValueInt( szAudioLanguageRegKey, "language", &lRegValue, k_Lang_English );
-			eAudioLanguage = (ELanguage)lRegValue;
-
-			// If audio language is not English and audio language is different from Steam client language then add foreign language audio to the top of the search path
-			// k_Lang_None means the game will follow the language of the Steam client
-			if ( ( k_Lang_English != eAudioLanguage && k_Lang_None != eAudioLanguage ) && ( PchLanguageToELanguage( initInfo.m_pLanguage ) != eAudioLanguage ) )
-			{
-				// Now add all of the foreign language paths to the top of the searchpaths list for 
-				KeyValues *pSearchPaths = modinfo->FindKey( "FileSystem" )->FindKey( "SearchPaths" );
-				CUtlVector<char*> vSearchPaths;
-				for ( KeyValues *pCur=pSearchPaths->GetFirstValue(); pCur; pCur=pCur->GetNextValue() )
-				{
-					const char *pPathID = pCur->GetName();
-					const char *pLocation = pCur->GetString();
-
-					if ( V_stricmp( pPathID, "game" ) == 0 && (NULL == V_strstr( pLocation, "|gameinfo_path|" ) ) )
-					{
-						char *szFullSearchPath = new char[MAX_PATH];
-						
-						Q_snprintf( szFullSearchPath, MAX_PATH, "%s%c%s_%s%c", com_basedir, CORRECT_PATH_SEPARATOR, pLocation, GetLanguageShortName( eAudioLanguage ), CORRECT_PATH_SEPARATOR );
-						vSearchPaths.AddToHead( szFullSearchPath );
-					}
-				}
-
-				// Add each of the search paths in the same order that they occur in GameInfo text. We need to reverse the list because the AddSearchPath can only add singly to the head or tail of the list
-				for ( int i = 0; i < vSearchPaths.Count(); i++ )
-				{
-					char *pcFirstElem = vSearchPaths[i];
-					g_pFileSystem->AddSearchPath( pcFirstElem, "game", PATH_ADD_TO_HEAD );
-					delete [] vSearchPaths[i];
-				}
-#ifdef _DEBUG	
-				g_pFileSystem->PrintSearchPaths();
-#endif
-
-			}
-			modinfo->deleteThis();
-		}
-	}
-#endif
+//	g_pFileSystem->PrintSearchPaths();
 
 }
 
@@ -1084,12 +1080,12 @@ void COM_LogString( char const *pchFile, char const *pchString )
 	fp = g_pFileSystem->Open( pfilename, "a+t");
 	if (fp)
 	{
-		g_pFileSystem->FPrintf(fp, "%s", pchString);
+		g_pFileSystem->Write( pchString, strlen( pchString), fp );
 		g_pFileSystem->Close(fp);
 	}
 }
 
-void COM_Log( char *pszFile, char *fmt, ...)
+void COM_Log( const char *pszFile, const char *fmt, ...)
 {
 	if ( !g_pFileSystem )
 	{
@@ -1170,6 +1166,9 @@ void COM_Init ( void )
 	CharacterSetBuild( &g_BreakSetIncludingColons, "{}()':" );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
 bool COM_IsValidPath( const char *pszFilename )
 {
 	if ( !pszFilename )
@@ -1180,9 +1179,234 @@ bool COM_IsValidPath( const char *pszFilename )
 	if ( Q_strlen( pszFilename ) <= 0    ||
 		Q_strstr( pszFilename, "\\\\" ) ||	// to protect network paths
 		Q_strstr( pszFilename, ":" )    || // to protect absolute paths
-		Q_strstr( pszFilename, ".." ) )    // to protect relative paths
+		Q_strstr( pszFilename, ".." ) ||   // to protect relative paths
+		Q_strstr( pszFilename, "\n" ) ||   // CFileSystem_Stdio::FS_fopen doesn't allow this
+		Q_strstr( pszFilename, "\r" ) )    // CFileSystem_Stdio::FS_fopen doesn't allow this
 	{
 		return false;
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool COM_IsValidLogFilename( const char *pszFilename )
+{
+	if ( !pszFilename || !pszFilename[0] )
+		return false;
+
+	if ( V_stristr( pszFilename, "   " ) || V_stristr( pszFilename, "\t" ) ) // don't multiple spaces or tab
+		return false;
+
+	const char *extension = V_strrchr( pszFilename, '.' );
+	if ( extension )
+	{
+		if ( Q_stricmp( extension, ".log" ) && Q_stricmp( extension, ".txt" ) ) // must use .log or .txt if an extension is specified
+			return false;
+
+		if ( extension == pszFilename ) // bad filename (just an extension)
+			return false;
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+unsigned int COM_GetIdealDestinationCompressionBufferSize_Snappy( unsigned int uncompressedSize )
+{
+	// 4 for the ID, plus whatever Snappy says it would need.
+	return 4 + snappy::MaxCompressedLength( uncompressedSize );
+}
+
+//-----------------------------------------------------------------------------
+void *COM_CompressBuffer_Snappy( const void *source, unsigned int sourceLen, unsigned int *compressedLen, unsigned int maxCompressedLen )
+{
+	Assert( source );
+	Assert( compressedLen );
+
+	// Allocate a buffer big enough to hold the worst case.
+	unsigned nMaxCompressedSize = COM_GetIdealDestinationCompressionBufferSize_Snappy( sourceLen );
+	char *pCompressed = (char*)malloc( nMaxCompressedSize );
+	if ( pCompressed == NULL )
+		return NULL;
+
+	// Do the compression
+	*(uint32 *)pCompressed = SNAPPY_ID;
+	size_t compressed_length;
+	snappy::RawCompress( (const char *)source, sourceLen, pCompressed + sizeof(uint32), &compressed_length );
+	compressed_length += 4;
+	Assert( compressed_length <= nMaxCompressedSize );
+
+	// Check if this result is OK
+	if ( maxCompressedLen != 0 && compressed_length > maxCompressedLen )
+	{
+		free( pCompressed );
+		return NULL;
+	}
+
+	*compressedLen = compressed_length;
+	return pCompressed;
+}
+
+//-----------------------------------------------------------------------------
+bool COM_BufferToBufferCompress_Snappy( void *dest, unsigned int *destLen, const void *source, unsigned int sourceLen )
+{
+	Assert( dest );
+	Assert( destLen );
+	Assert( source );
+
+	// Check if we need to use a temporary buffer
+	unsigned nMaxCompressedSize = COM_GetIdealDestinationCompressionBufferSize_Snappy( sourceLen );
+	unsigned compressedLen = *destLen;
+	if ( compressedLen < nMaxCompressedSize )
+	{
+
+		// Yep.  Use the other function to allocate the buffer of the right size and comrpess into it
+		void *temp = COM_CompressBuffer_Snappy( source, sourceLen, &compressedLen, compressedLen );
+		if ( temp == NULL )
+			return false;
+
+		// Copy over the data
+		V_memcpy( dest, temp, compressedLen );
+		*destLen = compressedLen;
+		free( temp );
+		return true;
+	}
+
+	// We have room and should be able to compress directly
+	*(uint32 *)dest = SNAPPY_ID;
+	size_t compressed_length;
+	snappy::RawCompress( (const char *)source, sourceLen, (char *)dest + sizeof(uint32), &compressed_length );
+	compressed_length += 4;
+	Assert( compressed_length <= nMaxCompressedSize );
+	*destLen = compressed_length;
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+unsigned COM_GetIdealDestinationCompressionBufferSize_LZSS( unsigned int uncompressedSize )
+{
+	// Our LZSS compressor doesn't need any extra space because it will stop and fail
+	// as soon as it figures out it's unable to reduce the size of the data by more than
+	// 32 bytes
+	return uncompressedSize;
+}
+
+//-----------------------------------------------------------------------------
+void *COM_CompressBuffer_LZSS( const void *source, unsigned int sourceLen, unsigned int *compressedLen, unsigned int maxCompressedLen )
+{
+	Assert( source );
+	Assert( compressedLen );
+
+	CLZSS s;
+	unsigned int uCompressedLen = 0;
+	byte *pbOut = s.Compress( (const byte *)source, sourceLen, &uCompressedLen );
+	if ( pbOut && uCompressedLen > 0 && ( uCompressedLen <= maxCompressedLen || maxCompressedLen == 0 ) )
+	{
+		*compressedLen = uCompressedLen;
+		return pbOut;
+	}
+
+	if ( pbOut )
+	{
+		free( pbOut );
+	}
+	return NULL;
+}
+
+//-----------------------------------------------------------------------------
+bool COM_BufferToBufferCompress_LZSS( void *dest, unsigned int *destLen, const void *source, unsigned int sourceLen )
+{
+	Assert( dest );
+	Assert( destLen );
+	Assert( source );
+
+	CLZSS s;
+	unsigned int uCompressedLen = 0;
+	if ( !s.CompressNoAlloc( (const byte *)source, sourceLen, (unsigned char *)dest, &uCompressedLen ) )
+		return false;
+
+	*destLen = uCompressedLen;
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+int COM_GetUncompressedSize( const void *compressed, unsigned int compressedLen )
+{
+	const lzss_header_t *pHeader = (const lzss_header_t *)compressed;
+
+	// Check for our own LZSS compressed data
+	if ( ( compressedLen >= sizeof(lzss_header_t) ) && pHeader->id == LZSS_ID )
+		return LittleLong( pHeader->actualSize );
+
+	// Check for Snappy compressed
+	if ( compressedLen > sizeof(pHeader->id) && pHeader->id == SNAPPY_ID )
+	{
+		size_t snappySize;
+		if ( snappy::GetUncompressedLength( (const char *)compressed + sizeof(pHeader->id), compressedLen-sizeof(pHeader->id), &snappySize ) )
+			return (int)snappySize;
+	}
+
+	return -1;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Generic buffer decompression from source into dest
+//-----------------------------------------------------------------------------
+bool COM_BufferToBufferDecompress( void *dest, unsigned int *destLen, const void *source, unsigned int sourceLen )
+{
+	int nDecompressedSize = COM_GetUncompressedSize( source, sourceLen );
+	if ( nDecompressedSize >= 0 )
+	{
+
+		// Check buffer size
+		if ( (unsigned)nDecompressedSize > *destLen )
+		{
+			Warning( "NET_BufferToBufferDecompress with improperly sized dest buffer (%u in, %u needed)\n", *destLen, nDecompressedSize );
+			return false;
+		}
+
+		const lzss_header_t *pHeader = (const lzss_header_t *)source;
+		if ( pHeader->id == LZSS_ID )
+		{
+			CLZSS s;
+			int nActualDecompressedSize = s.SafeUncompress( (byte *)source, (byte *)dest, *destLen );
+			if ( nActualDecompressedSize != nDecompressedSize )
+			{
+				Warning( "NET_BufferToBufferDecompress: header said %d bytes would be decompressed, but we LZSS decompressed %d\n", nDecompressedSize, nActualDecompressedSize );
+				return false;
+			}
+			*destLen = nDecompressedSize;
+			return true;
+		}
+
+		if ( pHeader->id == SNAPPY_ID )
+		{
+			if ( !snappy::RawUncompress( (const char *)source + 4, sourceLen - 4, (char *)dest ) )
+			{
+				Warning( "NET_BufferToBufferDecompress: Snappy decompression failed\n" );
+				return false;
+			}
+			*destLen = nDecompressedSize;
+			return true;
+		}
+
+		// Mismatch between this routine and COM_GetUncompressedSize
+		AssertMsg( false, "Unknown compression type?" );
+		return false;
+	}
+	else
+	{
+		if ( sourceLen > *destLen )
+		{
+			Warning( "NET_BufferToBufferDecompress with improperly sized dest buffer (%u in, %u needed)\n", *destLen, sourceLen );
+			return false;
+		}
+
+		V_memcpy( dest, source, sourceLen );
+		*destLen = sourceLen;
 	}
 
 	return true;

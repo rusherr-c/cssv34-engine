@@ -1437,7 +1437,7 @@ void TextEntry::OnCursorExited() // outside of window recieve drag scrolling tic
 //-----------------------------------------------------------------------------
 // Purpose: Handle selection of text by mouse
 //-----------------------------------------------------------------------------
-void TextEntry::OnCursorMoved(int x, int y)
+void TextEntry::OnCursorMoved(int ignX, int ignY)
 {
 	if (_mouseSelection)
 	{
@@ -1636,7 +1636,7 @@ void TextEntry::OnKeyCodePressed(KeyCode code)
 	}
 	
 	// Pass on the joystick and mouse codes
-	if ( IsMouseCode(code) || IsJoystickCode(code) || IsJoystickButtonCode(code) ||
+	if ( IsMouseCode(code) || IsNovintButtonCode(code) || IsJoystickCode(code) || IsJoystickButtonCode(code) ||
 	     IsJoystickPOVCode(code) || IsJoystickAxisCode(code) )
 	{
 		Panel::OnKeyCodePressed( code );

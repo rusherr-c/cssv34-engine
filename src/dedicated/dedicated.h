@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,10 +31,13 @@ class IDedicatedServerAPI;
 extern IDedicatedServerAPI *engine;
 
 
+extern char g_szEXEName[ MAX_PATH ];
+
+
 //-----------------------------------------------------------------------------
 // Inner loop: initialize, shutdown main systems, load steam to 
 //-----------------------------------------------------------------------------
-#ifdef _LINUX
+#ifdef POSIX
 #define DEDICATED_BASECLASS CTier2SteamApp
 #else
 #define DEDICATED_BASECLASS CVguiSteamApp

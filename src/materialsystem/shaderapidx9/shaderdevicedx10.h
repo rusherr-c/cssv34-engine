@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -128,6 +128,7 @@ public:
 	// A special path used to tick the front buffer while loading on the 360
 	virtual void EnableNonInteractiveMode( MaterialNonInteractiveMode_t mode, ShaderNonInteractiveInfo_t *pInfo ) {}
 	virtual void RefreshFrontBufferNonInteractive( ) {}
+	virtual void HandleThreadEvent( uint32 threadEvent ) {}
 
 public:
 	// Methods of CShaderDeviceBase

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // smp.cpp : Main window procedure
 //
 

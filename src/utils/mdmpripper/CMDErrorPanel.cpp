@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //#include <windows.h>
 #include "mdmpRipper.h"
 #include "vgui_controls/MessageMap.h"
@@ -8,7 +9,7 @@
 #include "vgui_controls/Frame.h"
 #include "CMDErrorPanel.h"
 #include "vgui_controls/ListPanel.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "vgui/ISystem.h"
 #include "CMDDetailPanel.h"
 

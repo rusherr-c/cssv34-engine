@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: This file provides some of the goldsrc functionality for xwad.
 //
@@ -18,9 +18,9 @@ typedef unsigned char byte;
 typedef int qboolean;
 
 
-void Msg( const char *pMsg, ... );
-void Warning( const char *pMsg, ... );
-void Error( const char *pMsg, ... );
+void Msg( PRINTF_FORMAT_STRING const char *pMsg, ... );
+void Warning( PRINTF_FORMAT_STRING const char *pMsg, ... );
+void Error( PRINTF_FORMAT_STRING const char *pMsg, ... );
 
 int		LoadFile (char *filename, void **bufferptr);
 void	SaveFile (char *filename, void *buffer, int count);

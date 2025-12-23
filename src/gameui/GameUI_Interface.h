@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defines the interface that the GameUI dll exports
 //
@@ -70,8 +70,6 @@ public:
 	// Shows progress desc, returns previous setting... (used with custom progress bars )
 	virtual bool SetShowProgressText( bool show );
 
-	// brings up a login prompt
-	virtual void RefreshSteamLogin();
 	// brings up the new game dialog
 	virtual void ShowNewGameDialog( int chapter );
 
@@ -92,10 +90,20 @@ public:
 
 	virtual void SetProgressOnStart();
 
+	virtual void OnConfirmQuit( void );
+
+	virtual bool IsMainMenuVisible( void );
+
+	// Client DLL is providing us with a panel that it wants to replace the main menu with
+	virtual void SetMainMenuOverride( vgui::VPANEL panel );
+	// Client DLL is telling us that a main menu command was issued, probably from its custom main menu panel
+	virtual void SendMainMenuCommand( const char *pszCommand );
+
 	// state
 	bool IsInLevel();
 	bool IsInBackgroundLevel();
 	bool IsInMultiplayer();
+	bool IsInReplay();
 	bool IsConsoleUI();
 	bool HasSavedThisMenuSession();
 	void SetSavedThisMenuSession( bool bState );

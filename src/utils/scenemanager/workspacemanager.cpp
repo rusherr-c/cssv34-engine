@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -991,7 +991,7 @@ void CWorkspaceManager::OnNewProject()
 
 	if ( ws && ws->FindProjectFile( project_name ) )
 	{
-		Con_Printf( "Project %s already exists in workspace\n" );
+		Con_Printf( "Project %s already exists in workspace\n", project_name );
 		return;
 	}
 
@@ -1339,7 +1339,7 @@ void CWorkspaceManager::OnSoundEditText()
 	memset( &params, 0, sizeof( params ) );
 	Q_snprintf( params.m_szDialogTitle, sizeof( params.m_szDialogTitle ), "Edit text of '%s'", s->GetName() );
 	Q_strcpy( params.m_szPrompt, "Sentence text:" );
-	Q_strcpy( params.m_szInputText, s->GetSentenceText() );
+	V_strcpy_safe( params.m_szInputText, s->GetSentenceText() );
 
 	if ( !InputProperties( &params ) )
 		return;
@@ -1703,8 +1703,8 @@ void CWorkspaceManager::OnChangeVSSProperites()
 	CVSSParams params;
 	memset( &params, 0, sizeof( params ) );
 	Q_snprintf( params.m_szDialogTitle, sizeof( params.m_szDialogTitle ), "VSS Properites" );
-	Q_strcpy( params.m_szUserName, ws->GetVSSUserName() );
-	Q_strcpy( params.m_szProject, ws->GetVSSProject() );
+	V_strcpy_safe( params.m_szUserName, ws->GetVSSUserName() );
+	V_strcpy_safe( params.m_szProject, ws->GetVSSProject() );
 
 	if ( !VSSProperties( &params ) )
 		return;
@@ -1766,7 +1766,7 @@ HIMAGELIST CWorkspaceManager::CreateImageList()
     // Load the icon resources, and add the icons to the image list. 
     HICON hicon;
 	int slot;
-#if defined( _DEBUG )
+#if defined( DBGFLAG_ASSERT )
 	int c = 0;
 #endif
 

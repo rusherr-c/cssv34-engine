@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: CS's custom CPlayerResource
 //
@@ -23,7 +23,6 @@ public:
 
 	virtual void UpdatePlayerData( void );
 	virtual void Spawn( void );
-
 protected:
 
 	CNetworkVar( int, m_iPlayerC4 );  // entity index of C4 carrier or 0
@@ -43,6 +42,11 @@ protected:
 
 	CNetworkVar( bool, m_bBombSpotted );
 	CNetworkArray( bool, m_bPlayerSpotted, MAX_PLAYERS+1 );
+
+	CNetworkArray( string_t, m_szClan, MAX_PLAYERS+1 );
+
+	CNetworkArray( int, m_iMVPs, MAX_PLAYERS + 1 );
+	CNetworkArray( bool, m_bHasDefuser, MAX_PLAYERS + 1);
 
 private:
 	bool m_foundGoalPositions;

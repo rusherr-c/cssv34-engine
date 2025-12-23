@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 #include "cbase.h"
 #include "hudelement.h"
 #include <vgui_controls/Panel.h>
-#include <vgui/isurface.h>
+#include <vgui/ISurface.h>
 #include "clientmode_csnormal.h"
 #include "cs_gamerules.h"
 #include "hud_numericdisplay.h"
@@ -46,6 +46,14 @@ CHudC4::CHudC4( const char *pName ) :
 	m_pIcon = NULL;
 
 	SetHiddenBits( HIDEHUD_PLAYERDEAD );
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Add this to the render group that disappears when the scoreboard is up
+	//=============================================================================
+	RegisterForRenderGroup( "hide_for_scoreboard" );
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 
@@ -66,7 +74,14 @@ bool CHudC4::ShouldDraw()
 		pPlayer = ToCSPlayer( pPlayer->GetObserverTarget() );
 	}
 	
-	return pPlayer && pPlayer->HasC4();
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Added base class call
+	//=============================================================================
+	return pPlayer && pPlayer->HasC4() && CHudElement::ShouldDraw();
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 

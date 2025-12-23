@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -109,7 +109,7 @@ CBaseEntity * CCSBot::FindEntitiesOnPath( float distance, CPushAwayEnumerator *e
 	}
 	else
 	{
-		int startIndex = max( 0, m_pathIndex );
+		int startIndex = MAX( 0, m_pathIndex );
 		float distanceLeft = distance;
 		// HACK: start with an index one lower than normal, so we can trace from the bot's location to the
 		// start of the path nodes.
@@ -546,7 +546,7 @@ bool CCSBot::GetSimpleGroundHeightWithFloor( const Vector &pos, float *height, V
 	{
 		// our current nav area also serves as a ground polygon
 		if (m_lastKnownArea && m_lastKnownArea->IsOverlapping( pos ))
-			*height = max( (*height), m_lastKnownArea->GetZ( pos ) );
+			*height = MAX( (*height), m_lastKnownArea->GetZ( pos ) );
 
 		return true;
 	}
@@ -836,7 +836,7 @@ void CCSBot::ComputeApproachPoints( void )
 	float halfWidth;
 	for( int i=0; i<m_lastKnownArea->GetApproachInfoCount() && m_approachPointCount < MAX_APPROACH_POINTS; ++i )
 	{
-		const CNavArea::ApproachInfo *info = m_lastKnownArea->GetApproachInfo( i );
+		const CCSNavArea::ApproachInfo *info = m_lastKnownArea->GetApproachInfo( i );
 
 		if (info->here.area == NULL || info->prev.area == NULL)
 		{

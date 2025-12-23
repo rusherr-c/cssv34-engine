@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1860,7 +1860,7 @@ void CWeaponRPG::GetWeaponAttachment( int attachmentId, Vector &outVector, Vecto
 {
 	QAngle	angles;
 
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 		
@@ -1904,7 +1904,7 @@ void CWeaponRPG::InitBeam( void )
 
 	CBaseEntity *pEntity = NULL;
 
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 		
@@ -1924,12 +1924,12 @@ void CWeaponRPG::InitBeam( void )
 	beamInfo.m_vecStart = vec3_origin;
 	beamInfo.m_vecEnd = vec3_origin;
 	
-	beamInfo.m_pszModelName = ( IsCarriedByLocalPlayer() ) ? RPG_BEAM_SPRITE_NOZ : RPG_BEAM_SPRITE;
+	beamInfo.m_pszModelName = ( ShouldDrawUsingViewModel() ) ? RPG_BEAM_SPRITE_NOZ : RPG_BEAM_SPRITE;
 	
 	beamInfo.m_flHaloScale = 0.0f;
 	beamInfo.m_flLife = 0.0f;
 	
-	if ( IsCarriedByLocalPlayer() )
+	if ( ShouldDrawUsingViewModel() )
 	{
 		beamInfo.m_flWidth = 2.0f;
 		beamInfo.m_flEndWidth = 2.0f;
@@ -1994,7 +1994,7 @@ void CWeaponRPG::DrawEffects( void )
 
 	float scale = 8.0f + random->RandomFloat( -2.0f, 2.0f );
 
-	int	attachmentID = ( IsCarriedByLocalPlayer() ) ? RPG_GUIDE_ATTACHMENT : RPG_GUIDE_ATTACHMENT_3RD;
+	int	attachmentID = ( ShouldDrawUsingViewModel() ) ? RPG_GUIDE_ATTACHMENT : RPG_GUIDE_ATTACHMENT_3RD;
 
 	GetWeaponAttachment( attachmentID, vecAttachment, &vecDir );
 

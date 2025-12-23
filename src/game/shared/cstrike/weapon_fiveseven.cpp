@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,7 +31,6 @@ public:
 
 	virtual void Spawn();
 
-
 	virtual void PrimaryAttack();
 	virtual void SecondaryAttack();
 	virtual bool Deploy();
@@ -40,14 +39,14 @@ public:
 
 	virtual void WeaponIdle();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_FIVESEVEN; }
 
 private:
 	
 	CWeaponFiveSeven( const CWeaponFiveSeven & );
 	
-	void FiveSevenFire( float flSpread );
-
 	float m_flLastFire;
 };
 
@@ -56,8 +55,11 @@ IMPLEMENT_NETWORKCLASS_ALIASED( WeaponFiveSeven, DT_WeaponFiveSeven )
 BEGIN_NETWORK_TABLE( CWeaponFiveSeven, DT_WeaponFiveSeven )
 END_NETWORK_TABLE()
 
+#if defined CLIENT_DLL
 BEGIN_PREDICTION_DATA( CWeaponFiveSeven )
+	DEFINE_FIELD( m_flLastFire, FIELD_FLOAT ),
 END_PREDICTION_DATA()
+#endif
 
 LINK_ENTITY_TO_CLASS( weapon_fiveseven, CWeaponFiveSeven );
 PRECACHE_WEAPON_REGISTER( weapon_fiveseven );
@@ -83,35 +85,32 @@ bool CWeaponFiveSeven::Deploy()
 	return BaseClass::Deploy();
 }
 
+
+float CWeaponFiveSeven::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 1.5f * (1 - m_flAccuracy);
+		else if (pPlayer->GetAbsVelocity().Length2D() > 5)
+			return 0.255f * (1 - m_flAccuracy);
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			return 0.075f * (1 - m_flAccuracy);
+		else
+			return 0.15f * (1 - m_flAccuracy);
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
 void CWeaponFiveSeven::PrimaryAttack()
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
-		return;
-
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		FiveSevenFire( 1.5f * (1 - m_flAccuracy) );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 5)
-		FiveSevenFire( 0.255f * (1 - m_flAccuracy) );
-	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
-		FiveSevenFire( 0.075f * (1 - m_flAccuracy) );
-	else
-		FiveSevenFire( 0.15f * (1 - m_flAccuracy) );
-}
-
-void CWeaponFiveSeven::SecondaryAttack() 
-{
-}
-
-void CWeaponFiveSeven::FiveSevenFire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
-	pPlayer->m_iShotsFired++;
-
-	if (pPlayer->m_iShotsFired > 1)
 		return;
 
 	// Mark the time of this shot and determine the accuracy modifier based on the last shot fired...
@@ -126,14 +125,17 @@ void CWeaponFiveSeven::FiveSevenFire( float flSpread )
 
 	if (m_iClip1 <= 0)
 	{
-		if (m_bFireOnEmpty)
+		if ( m_bFireOnEmpty )
 		{
 			PlayEmptySound();
-			m_flNextPrimaryAttack = gpGlobals->curtime + 0.2;
+			m_flNextPrimaryAttack = gpGlobals->curtime + 0.1f;
+			m_bFireOnEmpty = false;
 		}
 
 		return;
 	}
+
+	pPlayer->m_iShotsFired++;
 
 	m_iClip1--;
 	pPlayer->DoMuzzleFlash();
@@ -150,7 +152,8 @@ void CWeaponFiveSeven::FiveSevenFire( float flSpread )
 		GetWeaponID(),
 		Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		flSpread ); 
+		GetInaccuracy(),
+		GetSpread()); 
 
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->curtime + GetCSWpnData().m_flCycleTime;
 
@@ -162,9 +165,17 @@ void CWeaponFiveSeven::FiveSevenFire( float flSpread )
 
 	SetWeaponIdleTime( gpGlobals->curtime + 2 );
 
+	// update accuracy
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyImpulseFire[Primary_Mode];
+
 	QAngle angle = pPlayer->GetPunchAngle();
 	angle.x -= 2;
 	pPlayer->SetPunchAngle( angle );
+}
+
+
+void CWeaponFiveSeven::SecondaryAttack() 
+{
 }
 
 

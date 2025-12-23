@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -73,7 +73,7 @@ int CKeyBindings::GetBindingCount( ) const
 	int	nCount = 0;
 	for ( int i = 0; i < BUTTON_CODE_LAST; i++ )
 	{
-		if ( m_KeyInfo[i].Length() )
+		if ( !m_KeyInfo[i].IsEmpty() )
 		{
 			nCount++;
 		}
@@ -90,7 +90,7 @@ void CKeyBindings::WriteBindings( CUtlBuffer &buf )
 {
 	for ( int i = 0; i < BUTTON_CODE_LAST; i++ )
 	{
-		if ( m_KeyInfo[i].Length() )
+		if ( !m_KeyInfo[i].IsEmpty() )
 		{
 			const char *pButtonCode = g_pInputSystem->ButtonCodeToString( (ButtonCode_t)i );
 			buf.Printf( "bind \"%s\" \"%s\"\n", pButtonCode, m_KeyInfo[i].Get() );
@@ -113,7 +113,7 @@ const char *CKeyBindings::ButtonNameForBinding( const char *pBinding )
 
 	for ( int i = 0; i < BUTTON_CODE_LAST; i++ )
 	{
-		if ( !m_KeyInfo[i].Length() )
+		if ( m_KeyInfo[i].IsEmpty() )
 			continue;
 
 		if ( m_KeyInfo[i][0] == '+' )

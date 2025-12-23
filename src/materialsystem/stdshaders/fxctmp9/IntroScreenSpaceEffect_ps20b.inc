@@ -22,6 +22,27 @@ public:
 		m_bCONVERT_TO_SRGB = true;
 #endif
 	}
+private:
+	int m_nLINEAR_TO_SRGB;
+#ifdef _DEBUG
+	bool m_bLINEAR_TO_SRGB;
+#endif
+public:
+	void SetLINEAR_TO_SRGB( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nLINEAR_TO_SRGB = i;
+#ifdef _DEBUG
+		m_bLINEAR_TO_SRGB = true;
+#endif
+	}
+	void SetLINEAR_TO_SRGB( bool i )
+	{
+		m_nLINEAR_TO_SRGB = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bLINEAR_TO_SRGB = true;
+#endif
+	}
 public:
 	introscreenspaceeffect_ps20b_Static_Index( )
 	{
@@ -29,19 +50,23 @@ public:
 		m_bCONVERT_TO_SRGB = true;
 #endif // _DEBUG
 		m_nCONVERT_TO_SRGB =  g_pHardwareConfig->NeedsShaderSRGBConversion();
+#ifdef _DEBUG
+		m_bLINEAR_TO_SRGB = false;
+#endif // _DEBUG
+		m_nLINEAR_TO_SRGB = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bCONVERT_TO_SRGB;
+		bool bAllStaticVarsDefined = m_bCONVERT_TO_SRGB && m_bLINEAR_TO_SRGB;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 10 * m_nCONVERT_TO_SRGB ) + 0;
+		return ( 10 * m_nCONVERT_TO_SRGB ) + ( 20 * m_nLINEAR_TO_SRGB ) + 0;
 	}
 };
-#define shaderStaticTest_introscreenspaceeffect_ps20b 0
+#define shaderStaticTest_introscreenspaceeffect_ps20b psh_forgot_to_set_static_LINEAR_TO_SRGB + 0
 class introscreenspaceeffect_ps20b_Dynamic_Index
 {
 private:

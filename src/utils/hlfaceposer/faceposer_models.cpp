@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,7 +17,7 @@
 #include "checksum_crc.h"
 #include "ViewerSettings.h"
 #include "matsyswin.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "utlbuffer.h" 
 #include "expression.h"
 #include "ProgressDialog.h"
@@ -144,7 +144,7 @@ const char *IFaceposerModels::CFacePoserModel::GetBitmapFilename( int sequence )
 
 	while ( *in )
 	{
-		if ( isalnum( *in ) ||
+		if ( V_isalnum( *in ) ||
 			*in == '_' || 
 			*in == '\\' || 
 			*in == '/' ||
@@ -222,6 +222,18 @@ static float FindPoseCycle( StudioModel *model, int sequence )
 
 	return cycle;
 }
+
+
+void EnableStickySnapshotMode( void )
+{
+	g_pMatSysWindow->EnableStickySnapshotMode( );
+}
+
+void DisableStickySnapshotMode( void )
+{
+	g_pMatSysWindow->DisableStickySnapshotMode( );
+}
+
 
 void IFaceposerModels::CreateNewBitmap( int modelindex, char const *pchBitmapFilename, int sequence, int nSnapShotSize, bool bZoomInOnFace, CExpression *pExpression, mxbitmapdata_t *bitmap )
 {
@@ -374,18 +386,7 @@ void IFaceposerModels::CFacePoserModel::CreateNewBitmap( char const *pchBitmapFi
 		model->m_origin.z += midpoint;
 	}
 
-	pWnd->SuppressResize( true );
-
-	RECT rcClient;
-	HWND wnd = (HWND)pWnd->getHandle();
-
-	WINDOWPLACEMENT wp;
-
-	GetWindowPlacement( wnd, &wp );
-
-	GetClientRect( wnd, &rcClient );
-
-	MoveWindow( wnd, 0, 0, nSnapShotSize + 16, nSnapShotSize + 16, TRUE );
+	g_pMatSysWindow->PushSnapshotMode( nSnapShotSize );
 
 	// Snapshots are taken of the back buffer; 
 	// we need to render to the back buffer but not move it to the front
@@ -398,10 +399,7 @@ void IFaceposerModels::CFacePoserModel::CreateNewBitmap( char const *pchBitmapFi
 	Q_snprintf( fullpath, sizeof( fullpath ), "%s%s", GetGameDirectory(), pchBitmapFilename );
 	pWnd->TakeSnapshotRect( fullpath, 0, 0, nSnapShotSize, nSnapShotSize );
 
-	// Move back to original position
-	SetWindowPlacement( wnd, &wp );
-
-	pWnd->SuppressResize( false );
+	g_pMatSysWindow->PopSnapshotMode( );
 
 	VectorCopy( oldrot, model->m_angles );
 	VectorCopy( oldtrans, model->m_origin );

@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,7 +19,7 @@ static float RangeAdjust( float x )
 
 static float saturate_and_square( float x )
 {
-	x=max(0.0,min(1.0, x) );
+	x=max(0.f,min(1.f, x) );
 	return x * x;
 }
 

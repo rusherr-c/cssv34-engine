@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,6 +12,7 @@
 //=============================================================================//
 #include "cbase.h"
 #include "basetempentity.h"
+#include "fx_cs_shared.h"
 
 
 #define NUM_BULLET_SEED_BITS 8
@@ -36,8 +37,8 @@ public:
 	CNetworkVar( int, m_iWeaponID );
 	CNetworkVar( int, m_iMode );
 	CNetworkVar( int, m_iSeed );
-	CNetworkVar( float, m_flSpread );
-	
+	CNetworkVar( float, m_fInaccuracy );
+	CNetworkVar( float, m_fSpread );
 };
 
 //-----------------------------------------------------------------------------
@@ -64,7 +65,8 @@ IMPLEMENT_SERVERCLASS_ST_NOBASE(CTEFireBullets, DT_TEFireBullets)
 	SendPropInt( SENDINFO( m_iMode ), 1, SPROP_UNSIGNED ),
 	SendPropInt( SENDINFO( m_iSeed ), NUM_BULLET_SEED_BITS, SPROP_UNSIGNED ),
 	SendPropInt( SENDINFO( m_iPlayer ), 6, SPROP_UNSIGNED ), 	// max 64 players, see MAX_PLAYERS
-	SendPropFloat( SENDINFO( m_flSpread ), 10, 0, 0, 1 ),	
+	SendPropFloat( SENDINFO( m_fInaccuracy ), 10, 0, 0, 1 ),	
+	SendPropFloat( SENDINFO( m_fSpread ), 8, 0, 0, 0.1f ),	
 END_SEND_TABLE()
 
 
@@ -79,7 +81,9 @@ void TE_FireBullets(
 	int	iWeaponID,
 	int	iMode,
 	int iSeed,
-	float flSpread )
+	float fInaccuracy,
+	float fSpread
+	)
 {
 	CPASFilter filter( vOrigin );
 	filter.UsePredictionRules();
@@ -88,7 +92,8 @@ void TE_FireBullets(
 	g_TEFireBullets.m_vecOrigin = vOrigin;
 	g_TEFireBullets.m_vecAngles = vAngles;
 	g_TEFireBullets.m_iSeed = iSeed;
-	g_TEFireBullets.m_flSpread = flSpread;
+	g_TEFireBullets.m_fInaccuracy = fInaccuracy;
+	g_TEFireBullets.m_fSpread = fSpread;
 	g_TEFireBullets.m_iMode = iMode;
 	g_TEFireBullets.m_iWeaponID = iWeaponID;
 
@@ -115,6 +120,7 @@ public:
 public:
 	CNetworkVar( int, m_iPlayer );
 	CNetworkVector( m_vecOrigin );
+	CNetworkVar( PlantBombOption_t, m_option );
 };
 
 //-----------------------------------------------------------------------------
@@ -136,6 +142,7 @@ CTEPlantBomb::~CTEPlantBomb( void )
 IMPLEMENT_SERVERCLASS_ST_NOBASE(CTEPlantBomb, DT_TEPlantBomb)
 	SendPropVector( SENDINFO(m_vecOrigin), -1, SPROP_COORD ),
 	SendPropInt( SENDINFO( m_iPlayer ), 6, SPROP_UNSIGNED ), 	// max 64 players, see MAX_PLAYERS
+	SendPropInt( SENDINFO( m_option ), 1, SPROP_UNSIGNED ),
 END_SEND_TABLE()
 
 
@@ -143,11 +150,12 @@ END_SEND_TABLE()
 static CTEPlantBomb g_TEPlantBomb( "Bomb Plant" );
 
 
-void TE_PlantBomb( int iPlayerIndex, const Vector &vOrigin )
+void TE_PlantBomb( int iPlayerIndex, const Vector &vOrigin, PlantBombOption_t option )
 {
 	CPASFilter filter( vOrigin );
 	filter.UsePredictionRules();
 
 	g_TEPlantBomb.m_iPlayer = iPlayerIndex-1;
+	g_TEPlantBomb.m_option = option;
 	g_TEPlantBomb.Create( filter, 0 );
 }

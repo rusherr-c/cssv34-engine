@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,6 +24,7 @@
 #else
 	#include "cs_player.h"
 	#include "cs_simple_hostage.h"
+	#include "cs_gamestats.h"
 #endif
 
 #define ANIM_TOPSPEED_WALK			100
@@ -496,6 +497,12 @@ void CCSPlayerAnimState::DoAnimationEvent( PlayerAnimEvent_t event, int nData )
 		}
 		break;
 
+	case PLAYERANIMEVENT_CLEAR_FIRING:
+		{
+			m_iFireSequence = -1;
+		}
+		break;
+
 	default:
 		Assert( !"CCSPlayerAnimState::DoAnimationEvent" );
 	}
@@ -660,12 +667,25 @@ bool CCSPlayerAnimState::IsOuterGrenadePrimed()
 void CCSPlayerAnimState::ComputeGrenadeSequence( CStudioHdr *pStudioHdr )
 {
 	VPROF( "CCSPlayerAnimState::ComputeGrenadeSequence" );
+
 	if ( m_bThrowingGrenade )
 	{
 		UpdateLayerSequenceGeneric( pStudioHdr, GRENADESEQUENCE_LAYER, m_bThrowingGrenade, m_flGrenadeCycle, m_iGrenadeSequence, false );
 	}
 	else
 	{
+		if ( m_pPlayer )
+		{
+			CBaseCombatWeapon *pWeapon = m_pPlayer->GetActiveWeapon();
+			CBaseCSGrenade *pGren = dynamic_cast<CBaseCSGrenade*>( pWeapon );
+			if ( !pGren )
+			{
+				// The player no longer has a grenade equipped. Bail.
+				m_iLastThrowGrenadeCounter = GetOuterGrenadeThrowCounter();
+				return;
+			}
+		}
+
 		// Priming the grenade isn't an event.. we just watch the player for it.
 		// Also play the prime animation first if he wants to throw the grenade.
 		bool bThrowPending = (m_iLastThrowGrenadeCounter != GetOuterGrenadeThrowCounter());
@@ -679,18 +699,6 @@ void CCSPlayerAnimState::ComputeGrenadeSequence( CStudioHdr *pStudioHdr )
 				if ( TimeSinceLastAnimationStateClear() < 0.4f )
 				{
 					m_flGrenadeCycle = 1;
-					if ( m_pPlayer )
-					{
-						CBaseCombatWeapon *pWeapon = m_pPlayer->GetActiveWeapon();
-						CBaseCSGrenade *pGren = dynamic_cast<CBaseCSGrenade*>( pWeapon );
-						if ( pWeapon && !pGren )
-						{
-							// The player coming into our PVS has a non-grenade weapon equipped.
-							// Either he switched away from it or he has already thrown the grenade.  Bail.
-							m_iLastThrowGrenadeCounter = GetOuterGrenadeThrowCounter();
-							return;
-						}
-					}
 				}
 				else
 				{
@@ -698,9 +706,9 @@ void CCSPlayerAnimState::ComputeGrenadeSequence( CStudioHdr *pStudioHdr )
 				}
 					
 				m_iGrenadeSequence = CalcGrenadePrimeSequence();
+				m_bPrimingGrenade = true;
 			}
 
-			m_bPrimingGrenade = true;
 			UpdateLayerSequenceGeneric( pStudioHdr, GRENADESEQUENCE_LAYER, m_bPrimingGrenade, m_flGrenadeCycle, m_iGrenadeSequence, true );
 			
 			// If we're waiting to throw and we're done playing the prime animation...
@@ -924,6 +932,20 @@ bool CCSPlayerAnimState::HandleJumping()
 	{
 		if ( m_bFirstJumpFrame )
 		{
+
+#if !defined(CLIENT_DLL)
+            //=============================================================================
+            // HPE_BEGIN:
+            // [dwenger] Needed for fun-fact implementation
+            //=============================================================================
+
+			CCS_GameStats.IncrementStat(m_pPlayer, CSSTAT_TOTAL_JUMPS, 1);
+
+            //=============================================================================
+            // HPE_END
+            //=============================================================================
+#endif
+
 			m_bFirstJumpFrame = false;
 			RestartMainSequence();	// Reset the animation.
 		}
@@ -957,7 +979,7 @@ Activity CCSPlayerAnimState::CalcMainActivity()
 	{
 		Activity idealActivity = ACT_IDLE;
 
-		if ( m_pOuter->GetFlags() & FL_DUCKING )
+		if ( m_pOuter->GetFlags() & FL_ANIMDUCKING )
 		{
 			if ( flOuterSpeed > MOVING_MINIMUM_SPEED )
 				idealActivity = ACT_RUN_CROUCH;

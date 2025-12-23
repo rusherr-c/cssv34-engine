@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  Implements the Effects API
 // Created:  YWB 9/5/2000
@@ -68,7 +68,7 @@ void CVEfx::DecalColorShoot( int textureIndex, int entity, const model_t *model,
 		VectorITransform( position, matrix, localPosition );
 	}
 
-	::R_DecalShoot( textureIndex, entity, model, localPosition, saxis, flags, rgbaColor );
+	::R_DecalShoot( textureIndex, entity, model, localPosition, saxis, flags, rgbaColor, NULL );
 }
 
 //-----------------------------------------------------------------------------

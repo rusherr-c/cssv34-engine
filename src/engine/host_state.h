@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,6 +24,7 @@ void	HostState_GameShutdown();
 void	HostState_Shutdown();
 void	HostState_Restart();
 bool	HostState_IsGameShuttingDown();
+bool	HostState_IsShuttingDown();
 void	HostState_OnClientConnected();
 void	HostState_OnClientDisconnected();
 void	HostState_SetSpawnPoint(Vector &position, QAngle &angle);

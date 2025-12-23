@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -632,7 +632,7 @@ bool CMasterMulticastThread::Init( IBaseFileSystem *pPassThru, unsigned short lo
 		if ( !m_hThread )
 		{
 			Term();
-			Warning( "CMasterMulticastThread::Init - CreateThread failed\n", EXPAND_ADDR( *pAddr ) );
+			Warning( "CMasterMulticastThread::Init - CreateThread failed\n" );
 			return false;
 		}
 
@@ -707,7 +707,7 @@ void CMasterMulticastThread::TCP_SendNextChunk( CMulticastFile *pFile, CClientFi
 		sizeof( cPacket ),
 		sizeof( pFile->m_Info ),
 		sizeof( m_iCurActiveChunk ),
-		(int)strlen( pFile->GetFilename() ) + 1,
+		strlen( pFile->GetFilename() ) + 1,
 		iEndByte - iStartByte
 	};
 	

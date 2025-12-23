@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Voice / Sentence streaming & parsing code
 //
@@ -86,7 +86,12 @@ static void			VOX_InitAllEntnames( void );
 
 void VOX_LookupMapnames( void );
 
-static ConCommand vox_reload( "vox_reload", VOX_Init, "Reload sentences.txt file" );
+static void VOX_Reload()
+{
+	VOX_Shutdown();
+	VOX_Init();
+}
+static ConCommand vox_reload( "vox_reload", VOX_Reload, "Reload sentences.txt file", FCVAR_CHEAT );
 
 static CUtlVector<unsigned char> g_GroupLRU;
 static CUtlVector<char> g_SentenceFile;
@@ -451,11 +456,11 @@ int VOX_ParseWordParams(char *psz, voxword_t *pvoxword, int fFirst)
 
 		c = *(++psz);
 		
-		if (!isdigit(c))
+		if (!V_isdigit(c))
 			break;
 
 		// read number
-		while (isdigit(c) && i < sizeof(sznum) - 1)
+		while (V_isdigit(c) && i < sizeof(sznum) - 1)
 		{
 			sznum[i++] = c;
 			c = *(++psz);
@@ -678,7 +683,7 @@ char * VOX_LookupNumber( char *pGroupName, int ipick )
 	int glen = Q_strlen(pGroupName);
 	int slen = Q_strlen("V_NUMBERS");
 	
-	Q_strcpy(sznumbers, "V_NUMBERS");
+	V_strcpy_safe(sznumbers, "V_NUMBERS");
 
 	// insert type character
 	sznumbers[slen] = pGroupName[glen-1];
@@ -987,7 +992,7 @@ char *VOX_LookupGlobalVirtual( int type, SoundSource soundsource, char *pGroupNa
 	
 	for (i = 0; i < CENTNAMESMAX; i++)
 	{
-		if ((g_entnames[i].type == type))
+		if (g_entnames[i].type == type)
 		{
 			if (curtime - g_entnames[i].timestamp[iglobal] <= snd_vox_globaltimeout.GetInt())
 			{
@@ -1031,7 +1036,7 @@ char *VOX_LookupGlobalSeqVirtual( int type, SoundSource soundsource, char *pGrou
 	
 	for (i = 0; i < CENTNAMESMAX; i++)
 	{
-		if ((g_entnames[i].type == type))
+		if (g_entnames[i].type == type)
 		{
 			if (curtime - g_entnames[i].timestampseq[iglobal] <= (snd_vox_seqtimeout.GetInt()/2))
 			{
@@ -1206,7 +1211,7 @@ void VOX_ReplaceVirtualNames( channel_t *pchan )
 
 			// copy word to temp location so we can perform in-place substitutions
 
-			Q_strcpy(szparseword, rgpparseword[i]);
+			V_strcpy_safe(szparseword, rgpparseword[i]);
 
 			// fbymap is true if lookup is performed via mapname instead of via ordinal
 
@@ -1222,11 +1227,16 @@ void VOX_ReplaceVirtualNames( channel_t *pchan )
 				// replace last 2 characters in _MAP__ substring
 				// with imap - this effectively makes all 
 				// '_map_' lookups relative to the mapname
-				pszmaptoken[4] = '0';
-				if (imap < 10)
-					Q_snprintf( &(pszmaptoken[5]), 1, "%1d", imap );	
+				if ( imap >= 10 )
+				{
+					pszmaptoken[4] = (imap/10) + '0';
+					pszmaptoken[5] = (imap%10) + '0';
+				}
 				else
-					Q_snprintf( &(pszmaptoken[4]), 2, "%d", imap );
+				{
+					pszmaptoken[4] = '0';
+					pszmaptoken[5] = imap + '0';
+				}
 			}
 			
 			if ( Q_strstr(szparseword, "V_MYNAME") )
@@ -1277,11 +1287,11 @@ void VOX_ReplaceVirtualNames( channel_t *pchan )
 						// if not found, allocate new ent, give him a name & number, mark as dead
 						char szgroup1[32];
 						char szgroup2[32];
-						Q_strcpy(szgroup1, "V_MYNAME");
+						V_strcpy_safe(szgroup1, "V_MYNAME");
 						szgroup1[8] = chtype;
 						szgroup1[9] = 0;
 
-						Q_strcpy(szgroup2, "V_MYNUM");
+						V_strcpy_safe(szgroup2, "V_MYNUM");
 						szgroup2[7] = chtype;
 						szgroup2[8] = 0;
 
@@ -1572,7 +1582,7 @@ void VOX_LoadSound( channel_t *pchan, const char *pszin )
 
 	int len = Q_strlen( groupname );
 
-	while ( len > 0 && isdigit( groupname[ len - 1 ] ) )
+	while ( len > 0 && V_isdigit( groupname[ len - 1 ] ) )
 	{
 		groupname[ len - 1 ] = 0;
 		--len;
@@ -1671,7 +1681,7 @@ void VOX_AddNumbers( char *pGroupName, CUtlVector< WordBuf >& list )
 		int glen = Q_strlen(pGroupName);
 		int slen = Q_strlen("V_NUMBERS");
 		
-		Q_strcpy(sznumbers, "V_NUMBERS");
+		V_strcpy_safe(sznumbers, "V_NUMBERS");
 
 		// insert type character
 		sznumbers[slen] = pGroupName[glen-1];
@@ -1802,11 +1812,11 @@ void VOX_BuildVirtualNameList( char *word, CUtlVector< WordBuf >& list )
 			// if not found, allocate new ent, give him a name & number, mark as dead
 			char szgroup1[32];
 			char szgroup2[32];
-			Q_strcpy(szgroup1, "V_MYNAME");
+			V_strcpy_safe(szgroup1, "V_MYNAME");
 			szgroup1[8] = chtype;
 			szgroup1[9] = 0;
 
-			Q_strcpy(szgroup2, "V_MYNUM");
+			V_strcpy_safe(szgroup2, "V_MYNUM");
 			szgroup2[7] = chtype;
 			szgroup2[8] = 0;
 
@@ -2093,7 +2103,7 @@ void VOX_TouchSound( const char *pszin, CUtlDict< int, int >& filelist, CUtlRBTr
 		char outbuf[ 1024 ];
 		// Build representative text
 		outbuf[ 0 ] = 0;
-		for ( int i = 0; i < rep.Count(); ++i )
+		for ( i = 0; i < rep.Count(); ++i )
 		{
 			/*
 			if ( !Q_stricmp( rep[ i ].word, "_comma" ) )
@@ -2266,11 +2276,11 @@ int VOX_GroupAdd( const char *pSentenceName )
 	int len = strlen( pSentenceName ) - 1;
 
 	// group members end in a number
-	if ( len <= 0 || !isdigit(pSentenceName[len]) )
+	if ( len <= 0 || !V_isdigit(pSentenceName[len]) )
 		return -1;
 
 	// truncate away the index
-	while ( len > 0 && isdigit(pSentenceName[len]) )
+	while ( len > 0 && V_isdigit(pSentenceName[len]) )
 	{
 		len--;
 	}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -48,8 +48,13 @@ BEGIN_VS_SHADER_FLAGS( WriteZ_DX9, "Help for WriteZ", SHADER_NOT_EDITABLE )
 			DECLARE_STATIC_VERTEX_SHADER( writez_vs20 );
 			SET_STATIC_VERTEX_SHADER( writez_vs20 );
 
-			//No pixel shader, doubles fill rate.
-
+			// No pixel shader on Direct3D, doubles fill rate
+			if ( g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() )
+			{
+				DECLARE_STATIC_PIXEL_SHADER( white_ps20 );
+				SET_STATIC_PIXEL_SHADER( white_ps20 );
+			}
+			
 			// Set stream format (note that this shader supports compression)
 			unsigned int flags = VERTEX_POSITION | VERTEX_FORMAT_COMPRESSED;
 			int nTexCoordCount = 1;
@@ -63,7 +68,12 @@ BEGIN_VS_SHADER_FLAGS( WriteZ_DX9, "Help for WriteZ", SHADER_NOT_EDITABLE )
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( COMPRESSED_VERTS, (int)vertexCompression );
 			SET_DYNAMIC_VERTEX_SHADER( writez_vs20 );
 
-			//No pixel shader, doubles fill rate.
+			// No pixel shader on Direct3D, doubles fill rate
+			if ( g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() )
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( white_ps20 );
+				SET_DYNAMIC_PIXEL_SHADER( white_ps20 );
+			}
 		}
 		Draw();
 	}

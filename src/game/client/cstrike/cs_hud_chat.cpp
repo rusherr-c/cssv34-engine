@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -16,6 +16,7 @@
 #include "engine/IEngineSound.h"
 #include "radio_status.h"
 #include "cstrike/bot/shared_util.h"
+#include "ihudlcd.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -66,7 +67,20 @@ void CHudChatInputLine::ApplySchemeSettings(vgui::IScheme *pScheme)
 
 CHudChat::CHudChat( const char *pElementName ) : BaseClass( pElementName )
 {
-	
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Add this to the render group that disappears when the scoreboard is up
+	//
+	// [pmf] Removed from render group so that chat still works during intermission
+	// (when the scoreboard is forced to be up). The downside is that chat shows
+	// over the scoreboard during regular play, but this might be less of an issue
+	// if we reduce the need to display it constantly by adding HUD support for
+	// live player counts.
+	//=============================================================================
+//	RegisterForRenderGroup("hide_for_scoreboard");
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 void CHudChat::CreateChatInputLine( void )
@@ -108,7 +122,7 @@ void CHudChat::Reset( void )
 void CHudChat::MsgFunc_RadioText( bf_read &msg )
 {
 	int msg_dest = msg.ReadByte();
-	msg_dest = msg_dest;
+	NOTE_UNUSED( msg_dest );
 	int client = msg.ReadByte();
 
 	wchar_t szBuf[6][128];
@@ -164,10 +178,15 @@ void CHudChat::MsgFunc_SayText2( bf_read &msg )
 	if ( bWantsToChat )
 	{
 		int iFilter = CHAT_FILTER_NONE;
+		bool playChatSound = true;
 
 		if ( client > 0 && (g_PR->GetTeam( client ) != g_PR->GetTeam( GetLocalPlayerIndex() )) )
 		{
 			iFilter = CHAT_FILTER_PUBLICCHAT;
+			if ( !( iFilter & GetFilterFlags() ) )
+			{
+				playChatSound = false;
+			}
 		}
 
 		// print raw chat text
@@ -175,8 +194,11 @@ void CHudChat::MsgFunc_SayText2( bf_read &msg )
 
 		Msg( "%s\n", RemoveColorMarkup(ansiString) );
 
-		CLocalPlayerFilter filter;
-		C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "HudChat.Message" );
+		if ( playChatSound )
+		{
+			CLocalPlayerFilter filter;
+			C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "HudChat.Message" );
+		}
 	}
 	else
 	{
@@ -271,6 +293,31 @@ Color CHudChat::GetTextColorForClient( TextColor colorNum, int clientIndex )
 		c = g_ColorDarkGreen;
 		break;
 
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj] Adding support for achievement coloring. 
+    //      Just doing what all the other games do
+    //=============================================================================
+     
+    case COLOR_ACHIEVEMENT:
+        {
+            vgui::IScheme *pSourceScheme = vgui::scheme()->GetIScheme( vgui::scheme()->GetScheme( "SourceScheme" ) ); 
+            if ( pSourceScheme )
+            {
+                c = pSourceScheme->GetColor( "SteamLightGreen", GetBgColor() );
+            }
+            else
+            {
+                c = GetDefaultTextColor();
+            }
+        }
+        break;
+     
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+    
+
 	default:
 		c = g_ColorYellow;
 	}
@@ -291,4 +338,18 @@ int CHudChat::GetFilterForString( const char *pString )
 	}
 
 	return iFilter;
+}
+
+void CHudChat::StartMessageMode( int iMessageModeType )
+{
+	BaseClass::StartMessageMode(iMessageModeType);
+
+	vgui::ipanel()->SetTopmostPopup(GetVPanel(), true);
+}
+
+void CHudChat::StopMessageMode( void )
+{
+	vgui::ipanel()->SetTopmostPopup(GetVPanel(), false);
+
+	BaseClass::StopMessageMode();
 }

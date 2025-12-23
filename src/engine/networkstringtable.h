@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -87,8 +87,8 @@ public:
 	void			UpdateMirrorTable( int tick_ack  );
 	void			CopyStringTable(CNetworkStringTable * table);
 	// buffer IO
-	void			WriteStringTable( CUtlBuffer& buf );
-	bool			ReadStringTable( CUtlBuffer& buf );
+	void			WriteStringTable( bf_write& buf );
+	bool			ReadStringTable( bf_read& buf );
 
 	bool			WriteBaselines( SVC_CreateStringTable &msg, char *msg_buffer, int msg_buffer_size );
 #endif
@@ -176,8 +176,8 @@ public:
 	void		RestoreTick( int tick );
 
 	// Buffer I/O
-	void		WriteStringTables( CUtlBuffer& buf );
-	bool		ReadStringTables( CUtlBuffer& buf );
+	void		WriteStringTables( bf_write& buf );
+	bool		ReadStringTables( bf_read& buf );
 
 	void		WriteUpdateMessage( CBaseClient *client, int tick_ack, bf_write &buf );
 	void		WriteBaselines( bf_write &buf );

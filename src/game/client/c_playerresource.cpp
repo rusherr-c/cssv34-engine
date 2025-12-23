@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Entity that propagates general data needed by clients for every player.
 //
@@ -17,7 +17,6 @@
 #include "tier0/memdbgon.h"
 
 const float PLAYER_RESOURCE_THINK_INTERVAL = 0.2f;
-#define PLAYER_UNCONNECTED_NAME	"unconnected"
 
 IMPLEMENT_CLIENTCLASS_DT_NOBASE(C_PlayerResource, DT_PlayerResource, CPlayerResource)
 	RecvPropArray3( RECVINFO_ARRAY(m_iPing), RecvPropInt( RECVINFO(m_iPing[0]))),
@@ -27,6 +26,8 @@ IMPLEMENT_CLIENTCLASS_DT_NOBASE(C_PlayerResource, DT_PlayerResource, CPlayerReso
 	RecvPropArray3( RECVINFO_ARRAY(m_iTeam), RecvPropInt( RECVINFO(m_iTeam[0]))),
 	RecvPropArray3( RECVINFO_ARRAY(m_bAlive), RecvPropInt( RECVINFO(m_bAlive[0]))),
 	RecvPropArray3( RECVINFO_ARRAY(m_iHealth), RecvPropInt( RECVINFO(m_iHealth[0]))),
+	RecvPropArray3( RECVINFO_ARRAY(m_iAccountID), RecvPropInt( RECVINFO(m_iAccountID[0]))),
+	RecvPropArray3( RECVINFO_ARRAY(m_bValid), RecvPropInt( RECVINFO(m_bValid[0]))),
 END_RECV_TABLE()
 
 BEGIN_PREDICTION_DATA( C_PlayerResource )
@@ -39,6 +40,8 @@ BEGIN_PREDICTION_DATA( C_PlayerResource )
 	DEFINE_PRED_ARRAY( m_iTeam, FIELD_INTEGER, MAX_PLAYERS+1, FTYPEDESC_PRIVATE ),
 	DEFINE_PRED_ARRAY( m_bAlive, FIELD_BOOLEAN, MAX_PLAYERS+1, FTYPEDESC_PRIVATE ),
 	DEFINE_PRED_ARRAY( m_iHealth, FIELD_INTEGER, MAX_PLAYERS+1, FTYPEDESC_PRIVATE ),
+	DEFINE_PRED_ARRAY( m_iAccountID, FIELD_INTEGER, MAX_PLAYERS+1, FTYPEDESC_PRIVATE ),
+	DEFINE_PRED_ARRAY( m_bValid, FIELD_BOOLEAN, MAX_PLAYERS+1, FTYPEDESC_PRIVATE ),
 
 END_PREDICTION_DATA()	
 
@@ -59,7 +62,10 @@ C_PlayerResource::C_PlayerResource()
 	memset( m_iTeam, 0, sizeof( m_iTeam ) );
 	memset( m_bAlive, 0, sizeof( m_bAlive ) );
 	memset( m_iHealth, 0, sizeof( m_iHealth ) );
-
+	memset( m_iAccountID, 0, sizeof( m_iAccountID ) );
+	memset( m_bValid, 0, sizeof( m_bValid ) );
+	m_szUnconnectedName = 0;
+	
 	for ( int i=0; i<MAX_TEAMS; i++ )
 	{
 		m_Colors[i] = COLOR_GREY;
@@ -98,14 +104,23 @@ void C_PlayerResource::UpdatePlayerName( int slot )
 		Error( "UpdatePlayerName with bogus slot %d\n", slot );
 		return;
 	}
+
+	if ( !m_szUnconnectedName )
+	{
+		m_szUnconnectedName = AllocPooledString( PLAYER_UNCONNECTED_NAME );
+	}
+	
 	player_info_t sPlayerInfo;
 	if ( IsConnected( slot ) && engine->GetPlayerInfo( slot, &sPlayerInfo ) )
 	{
 		m_szName[slot] = AllocPooledString( sPlayerInfo.name );
 	}
-	else
+	else 
 	{
-		m_szName[slot] = AllocPooledString( PLAYER_UNCONNECTED_NAME );
+		if ( !IsValid( slot ) )
+		{
+			m_szName[slot] = m_szUnconnectedName;
+		}
 	}
 }
 
@@ -113,7 +128,7 @@ void C_PlayerResource::ClientThink()
 {
 	BaseClass::ClientThink();
 
-	for ( int i = 1; i <= gpGlobals->maxClients; ++i )
+	for ( int i = 1; i <= MAX_PLAYERS; ++i )
 	{
 		UpdatePlayerName( i );
 	}
@@ -129,10 +144,10 @@ const char *C_PlayerResource::GetPlayerName( int iIndex )
 	if ( iIndex < 1 || iIndex > MAX_PLAYERS )
 	{
 		Assert( false );
-		return "ERRORNAME";
+		return PLAYER_ERROR_NAME;
 	}
 	
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
 		return PLAYER_UNCONNECTED_NAME;
 
 	// X360TBD: Network - figure out why the name isn't set
@@ -164,9 +179,9 @@ int C_PlayerResource::GetTeam(int iIndex )
 	}
 }
 
-const char * C_PlayerResource::GetTeamName(int index)
+const char * C_PlayerResource::GetTeamName(int index_)
 {
-	C_Team *team = GetGlobalTeam( index );
+	C_Team *team = GetGlobalTeam( index_ );
 
 	if ( !team )
 		return "Unknown";
@@ -174,9 +189,9 @@ const char * C_PlayerResource::GetTeamName(int index)
 	return team->Get_Name();
 }
 
-int C_PlayerResource::GetTeamScore(int index)
+int C_PlayerResource::GetTeamScore(int index_ )
 {
-	C_Team *team = GetGlobalTeam( index );
+	C_Team *team = GetGlobalTeam( index_ );
 
 	if ( !team )
 		return 0;
@@ -184,34 +199,51 @@ int C_PlayerResource::GetTeamScore(int index)
 	return team->Get_Score();
 }
 
-int C_PlayerResource::GetFrags(int index )
+int C_PlayerResource::GetFrags(int index_ )
 {
 	return 666;
 }
 
-bool C_PlayerResource::IsLocalPlayer(int index)
+bool C_PlayerResource::IsLocalPlayer(int index_ )
 {
 	C_BasePlayer *pPlayer =	C_BasePlayer::GetLocalPlayer();
 
 	if ( !pPlayer )
 		return false;
 
-	return ( index == pPlayer->entindex() );
+	return (index_ == pPlayer->entindex() );
 }
 
 
-bool C_PlayerResource::IsHLTV(int index)
+bool C_PlayerResource::IsHLTV(int index_ )
 {
-	if ( !IsConnected( index ) )
+	if ( !IsConnected( index_ ) && !IsValid( index_ ) )
 		return false;
 
 	player_info_t sPlayerInfo;
 	
-	if ( engine->GetPlayerInfo( index, &sPlayerInfo ) )
+	if ( engine->GetPlayerInfo( index_, &sPlayerInfo ) )
 	{
 		return sPlayerInfo.ishltv;
 	}
 	
+	return false;
+}
+
+bool C_PlayerResource::IsReplay(int index_ )
+{
+#if defined( REPLAY_ENABLED )
+	if ( !IsConnected( index_ ) && !IsValid( index_ ) )
+		return false;
+
+	player_info_t sPlayerInfo;
+
+	if ( engine->GetPlayerInfo( index_, &sPlayerInfo ) )
+	{
+		return sPlayerInfo.isreplay;
+	}
+#endif
+
 	return false;
 }
 
@@ -220,7 +252,7 @@ bool C_PlayerResource::IsHLTV(int index)
 //-----------------------------------------------------------------------------
 bool C_PlayerResource::IsFakePlayer( int iIndex )
 {
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
 		return false;
 
 	// Yuck, make sure it's up to date
@@ -238,7 +270,7 @@ bool C_PlayerResource::IsFakePlayer( int iIndex )
 //-----------------------------------------------------------------------------
 int	C_PlayerResource::GetPing( int iIndex )
 {
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
 		return 0;
 
 	return m_iPing[iIndex];
@@ -249,7 +281,7 @@ int	C_PlayerResource::GetPing( int iIndex )
 /*-----------------------------------------------------------------------------
 int	C_PlayerResource::GetPacketloss( int iIndex )
 {
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsPreservedData( iIndex ) )
 		return 0;
 
 	return m_iPacketloss[iIndex];
@@ -260,7 +292,7 @@ int	C_PlayerResource::GetPacketloss( int iIndex )
 //-----------------------------------------------------------------------------
 int	C_PlayerResource::GetPlayerScore( int iIndex )
 {
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
 		return 0;
 
 	return m_iScore[iIndex];
@@ -271,7 +303,7 @@ int	C_PlayerResource::GetPlayerScore( int iIndex )
 //-----------------------------------------------------------------------------
 int	C_PlayerResource::GetDeaths( int iIndex )
 {
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
 		return 0;
 
 	return m_iDeaths[iIndex];
@@ -282,15 +314,15 @@ int	C_PlayerResource::GetDeaths( int iIndex )
 //-----------------------------------------------------------------------------
 int	C_PlayerResource::GetHealth( int iIndex )
 {
-	if ( !IsConnected( iIndex ) )
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
 		return 0;
 
 	return m_iHealth[iIndex];
 }
 
-const Color &C_PlayerResource::GetTeamColor(int index )
+const Color &C_PlayerResource::GetTeamColor(int index_ )
 {
-	if ( index < 0 || index >= MAX_TEAMS )
+	if ( index_ < 0 || index_ >= MAX_TEAMS )
 	{
 		Assert( false );
 		static Color blah;
@@ -298,7 +330,7 @@ const Color &C_PlayerResource::GetTeamColor(int index )
 	}
 	else
 	{
-		return m_Colors[index];
+		return m_Colors[index_];
 	}
 }
 
@@ -311,4 +343,29 @@ bool C_PlayerResource::IsConnected( int iIndex )
 		return false;
 	else
 		return m_bConnected[iIndex];
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+uint32 C_PlayerResource::GetAccountID( int iIndex )
+{
+	if ( ( iIndex < 0 ) || ( iIndex >= ARRAYSIZE( m_iAccountID ) ) )
+		return 0;
+
+	if ( !IsConnected( iIndex ) && !IsValid( iIndex ) )
+		return 0;
+
+	return m_iAccountID[iIndex];
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool C_PlayerResource::IsValid( int iIndex )
+{
+	if ( ( iIndex < 0 ) || ( iIndex >= ARRAYSIZE( m_bValid ) ) )
+		return false;
+
+	return m_bValid[iIndex];
 }

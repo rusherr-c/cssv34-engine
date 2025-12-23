@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -191,7 +191,7 @@ public:
 
 		unsigned char packetID[2] = { VMPI_PACKETID_FILESYSTEM, VMPI_FSPACKETID_FILE_REQUEST };
 		const void *pChunks[4] = { packetID, &requestID, (void*)pFilename, pPathID };
-		int chunkLengths[4]  = { sizeof( packetID ), sizeof( requestID ), (int)strlen( pFilename ) + 1, (int)strlen( pPathID ) + 1 };
+		int chunkLengths[4]  = { sizeof( packetID ), sizeof( requestID ), strlen( pFilename ) + 1, strlen( pPathID ) + 1 };
 		VMPI_SendChunks( pChunks, chunkLengths, ARRAYSIZE( pChunks ), 0 );
 
 		// Wait for the file ID to come back.

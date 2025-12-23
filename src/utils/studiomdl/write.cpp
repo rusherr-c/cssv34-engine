@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,11 +30,13 @@
 #include "optimize.h"
 #include "studiobyteswap.h"
 #include "byteswap.h"
-#include "materialsystem/IMaterial.h"
-#include "materialsystem/IMaterialVar.h"
+#include "materialsystem/imaterial.h"
+#include "materialsystem/imaterialvar.h"
+#include "mdlobjects/dmeboneflexdriver.h"
 #include "perfstats.h"
 
 #include "tier1/smartptr.h"
+#include "tier2/p4helpers.h"
 
 int totalframes = 0;
 float totalseconds = 0;
@@ -59,6 +61,7 @@ static byte *pStart;
 static byte *pBlockData;
 static byte *pBlockStart;
 
+#undef ALIGN4
 #undef ALIGN16
 #undef ALIGN32
 #define ALIGN4( a ) a = (byte *)((int)((byte *)a + 3) & ~ 3)
@@ -419,6 +422,35 @@ static void WriteBoneInfo( studiohdr_t *phdr )
 	ALIGN4( pData );
 }
 
+// load a preexisting model to remember its sequence names and indices
+CUtlVector< CUtlString > g_vecPreexistingSequences;
+void LoadPreexistingSequenceOrder( const char *pFilename )
+{
+	g_vecPreexistingSequences.RemoveAll();
+
+	if ( !FileExists( pFilename ) )
+		return;
+
+	Msg( "Loading preexisting model: %s\n", pFilename );
+
+	studiohdr_t *pStudioHdr;
+	int len = LoadFile((char*)pFilename, (void **)&pStudioHdr);
+
+	if ( len && pStudioHdr && pStudioHdr->SequencesAvailable() )
+	{
+		Msg( "   Found %i preexisting sequences.\n", pStudioHdr->GetNumSeq() );
+
+		for ( int i=0; i<pStudioHdr->GetNumSeq(); i++ )
+		{
+			//Msg( "   Sequence %i : \"%s\"\n", i, pStudioHdr->pSeqdesc(i).pszLabel() );
+			g_vecPreexistingSequences.AddToTail( pStudioHdr->pSeqdesc(i).pszLabel() );
+		}
+	}
+	else
+	{
+		MdlWarning( "Zero-size file or no sequences.\n" );
+	}
+}
 
 static void WriteSequenceInfo( studiohdr_t *phdr )
 {
@@ -444,8 +476,142 @@ static void WriteSequenceInfo( studiohdr_t *phdr )
 
 	bool bErrors = false;
 
-	for (i = 0; i < g_sequence.Count(); i++, pseqdesc++) 
+
+	// build a table to remap new sequence indices to match the preexisting model
+	bool bUseSeqOrderRemapping = false;
+	int nSeqOrderRemappingTable[MAXSTUDIOSEQUENCES];
+	for (i=0; i<MAXSTUDIOSEQUENCES; i++)
+		nSeqOrderRemappingTable[i] = -1;
+
+	bool bAllowSequenceRemoval = false;
+
+	if ( g_vecPreexistingSequences.Count() )
 	{
+
+		if ( g_sequence.Count() < g_vecPreexistingSequences.Count() && !bAllowSequenceRemoval )
+		{
+			Msg( "\n" );
+			MdlWarning( "This model has fewer sequences than its predecessor.\nPlease confirm sequence deletion: [y/n] " );
+			int nInput = 0;
+			do { nInput = getchar(); } while ( nInput != 121 /* y */ && nInput != 110 /* n */ );
+
+			if ( nInput == 110 )
+			{
+				MdlError( "Model contains fewer sequences than its predecessor!\n" );
+			}
+			else if ( nInput == 121 )
+			{
+				bAllowSequenceRemoval = true;
+			}
+		}
+
+		{
+			Msg( "Building sequence index remapping table...\n" );
+			
+			CUtlVector<int> vecNewIndices;
+			vecNewIndices.RemoveAll();
+
+			// map current sequences to their old indices
+			for (i = 0; i < g_sequence.Count(); i++ )
+			{
+				int nIdx = g_vecPreexistingSequences.Find( g_sequence[i].name );
+				if ( nIdx >= 0 )
+				{
+					nSeqOrderRemappingTable[nIdx] = i;
+				}
+				else
+				{
+					if ( i < g_vecPreexistingSequences.Count() )
+					{
+						Msg( "  Found new sequence \"%s\" using index of old sequence \"%s\".\n", g_sequence[i].name, g_vecPreexistingSequences[i].String() );
+					}
+					else
+					{
+						Msg( "  Found new sequence \"%s\".\n", g_sequence[i].name );
+					}
+					
+					vecNewIndices.AddToTail(i);
+				}
+			}
+
+			// slot new sequences into unused indices
+			while ( vecNewIndices.Count() )
+			{
+				for (i = 0; i < MAXSTUDIOSEQUENCES; i++ )
+				{
+					if ( nSeqOrderRemappingTable[i] == -1 )
+					{
+						nSeqOrderRemappingTable[i] = vecNewIndices[0];
+						vecNewIndices.Remove(0);
+						break;
+					}
+				}
+			}
+
+			// verify no indices are undefined
+			for (i = 0; i < g_sequence.Count(); i++ )
+			{
+				if ( nSeqOrderRemappingTable[i] == -1 )
+				{
+					if ( bAllowSequenceRemoval )
+					{
+						do
+						{
+							for ( int nB=i; nB<g_vecPreexistingSequences.Count(); nB++ )
+							{
+								nSeqOrderRemappingTable[nB] = nSeqOrderRemappingTable[nB+1];
+							}
+						}
+						while (nSeqOrderRemappingTable[i] == -1);
+					}
+					else
+					{
+						MdlError( "Failed to reorder sequence indices.\n" );
+					}
+
+				}
+				else if ( nSeqOrderRemappingTable[i] != i )
+				{
+					bUseSeqOrderRemapping = true;
+				}
+			}
+
+			if ( bUseSeqOrderRemapping )
+			{
+				Msg( "Sequence indices need re-ordering.\n" );
+			}
+			else
+			{
+				Msg( "No re-ordering required.\n" );
+			}
+		}
+	}	
+
+	// build an inverted remapping table so autolayer sequence indices can find their sources later
+	int nSeqOrderRemappingTableInv[MAXSTUDIOSEQUENCES];
+	if ( bUseSeqOrderRemapping )
+	{
+		for (i=0; i<MAXSTUDIOSEQUENCES; i++)
+			nSeqOrderRemappingTableInv[nSeqOrderRemappingTable[i]] = i;
+	}
+	
+	int m;
+	for (m = 0; m < g_sequence.Count(); m++, pseqdesc++) 
+	{
+
+		if ( bUseSeqOrderRemapping )
+		{
+			i = nSeqOrderRemappingTable[m];
+			if ( i != m )
+			{
+				Msg( "   Remapping sequence %i to index %i (%s) to retain existing order.\n", i, m, g_sequence[i].name );
+			}
+		}
+		else
+		{
+			i = m;
+		}
+
 		byte *pSequenceStart = (byte *)pseqdesc;
 
 		AddToStringTable( pseqdesc, &pseqdesc->szlabelindex, g_sequence[i].name );
@@ -524,7 +690,7 @@ static void WriteSequenceInfo( studiohdr_t *phdr )
 			}
 
 			//Adrian - Remove me once we phase out the old event system.
-			if ( isdigit( g_sequence[i].event[j].eventname[0] ) )
+			if ( V_isdigit( g_sequence[i].event[j].eventname[0] ) )
 			{
 				 pevent[j].event = atoi( g_sequence[i].event[j].eventname );
 				 pevent[j].type = 0;
@@ -556,6 +722,18 @@ static void WriteSequenceInfo( studiohdr_t *phdr )
 			pautolayer[j].iSequence = g_sequence[i].autolayer[j].sequence;
 			pautolayer[j].iPose		= g_sequence[i].autolayer[j].pose;
 			pautolayer[j].flags		= g_sequence[i].autolayer[j].flags;
+
+			// autolayer indices are stored by index, so remap them now using the invertex lookup table
+			if ( bUseSeqOrderRemapping )
+			{
+				int nRemapAutoLayer = nSeqOrderRemappingTableInv[ pautolayer[j].iSequence ];
+				if ( nRemapAutoLayer != pautolayer[j].iSequence )
+				{
+					Msg( "       Autolayer remapping index %i to %i.\n", pautolayer[j].iSequence, nRemapAutoLayer );
+					pautolayer[j].iSequence = nRemapAutoLayer;
+				}
+			}
+
 			if (!(pautolayer[j].flags & STUDIO_AL_POSE))
 			{
 				pautolayer[j].start		= g_sequence[i].autolayer[j].start / (g_sequence[i].panim[0][0]->numframes - 1);
@@ -577,16 +755,21 @@ static void WriteSequenceInfo( studiohdr_t *phdr )
 		float *pweight = 0;
 		j = 0;
 		// look up previous sequence weights and try to find a match
-		for (k = 0; k < i; k++)
+		for (k = 0; k < m; k++)
 		{
 			j = 0;
 			// only check newer boneweights than the last one
-			if (pseqdesc[k-i].pBoneweight( 0 ) > pweight)
+			if (pseqdesc[k-m].pBoneweight( 0 ) > pweight)
 			{
-				pweight = pseqdesc[k-i].pBoneweight( 0 );
+				pweight = pseqdesc[k-m].pBoneweight( 0 );
 				for (j = 0; j < g_numbones; j++)
 				{
-					if (g_sequence[i].weight[j] != g_sequence[k].weight[j])
+					// we're not walking the linear sequence list if we're remapping, so we need to remap this check
+					int nRemap = k;
+					if ( bUseSeqOrderRemapping )
+						nRemap = nSeqOrderRemappingTable[k];
+
+					if (g_sequence[i].weight[j] != g_sequence[nRemap].weight[j])
 						break;
 				}
 				if (j == g_numbones)
@@ -1574,11 +1757,70 @@ static void WriteBoneTransforms( studiohdr2_t *phdr, mstudiobone_t *pBone )
 
 
 //-----------------------------------------------------------------------------
+// Write the bone flex drivers
+//-----------------------------------------------------------------------------
+static void WriteBoneFlexDrivers( studiohdr2_t *pStudioHdr2 )
+{
+	ALIGN4( pData );
+
+	pStudioHdr2->m_nBoneFlexDriverCount = 0;
+	pStudioHdr2->m_nBoneFlexDriverIndex = 0;
+
+	CDmeBoneFlexDriverList *pDmeBoneFlexDriverList = GetElement< CDmeBoneFlexDriverList >( g_hDmeBoneFlexDriverList );
+	if ( !pDmeBoneFlexDriverList )
+		return;
+
+	const int nBoneFlexDriverCount = pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Count();
+	if ( nBoneFlexDriverCount <= 0 )
+		return;
+
+	mstudioboneflexdriver_t *pBoneFlexDriver = (mstudioboneflexdriver_t *)pData;
+	pStudioHdr2->m_nBoneFlexDriverCount = nBoneFlexDriverCount;
+	pStudioHdr2->m_nBoneFlexDriverIndex = pData - (byte *)pStudioHdr2;
+	pData += nBoneFlexDriverCount * sizeof( mstudioboneflexdriver_t );
+	ALIGN4( pData );
+
+	for ( int i = 0; i < nBoneFlexDriverCount; ++i )
+	{
+		CDmeBoneFlexDriver *pDmeBoneFlexDriver = pDmeBoneFlexDriverList->m_eBoneFlexDriverList[i];
+		Assert( pDmeBoneFlexDriver );
+		Assert( pDmeBoneFlexDriver->m_eControlList.Count() > 0 );
+		Assert( pDmeBoneFlexDriver->GetValue< int >( "__boneIndex", -1 ) >= 0 );
+
+		pBoneFlexDriver->m_nBoneIndex = pDmeBoneFlexDriver->GetValue< int >( "__boneIndex", 0 );
+		pBoneFlexDriver->m_nControlCount = pDmeBoneFlexDriver->m_eControlList.Count();
+		pBoneFlexDriver->m_nControlIndex = pData - (byte *)pBoneFlexDriver;
+
+		mstudioboneflexdrivercontrol_t *pControl = reinterpret_cast< mstudioboneflexdrivercontrol_t * >( pData );
+
+		for ( int j = 0; j < pBoneFlexDriver->m_nControlCount; ++j )
+		{
+			CDmeBoneFlexDriverControl *pDmeControl = pDmeBoneFlexDriver->m_eControlList[j];
+			Assert( pDmeControl );
+			Assert( pDmeControl->GetValue< int >( "__flexControlIndex", -1 ) >= 0 );
+			Assert( pDmeControl->m_nBoneComponent >= STUDIO_BONE_FLEX_TX );
+			Assert( pDmeControl->m_nBoneComponent <= STUDIO_BONE_FLEX_TZ );
+
+			pControl[j].m_nFlexControllerIndex = pDmeControl->GetValue< int >( "__flexControlIndex", 0 );
+			pControl[j].m_nBoneComponent = pDmeControl->m_nBoneComponent;
+			pControl[j].m_flMin = pDmeControl->m_flMin;
+			pControl[j].m_flMax = pDmeControl->m_flMax;
+		}
+
+		pData += pBoneFlexDriver->m_nControlCount * sizeof( mstudioboneflexdrivercontrol_t );
+		ALIGN4( pData );
+
+		++pBoneFlexDriver;
+	}
+}
+
+
+//-----------------------------------------------------------------------------
 // Write the processed vertices
 //-----------------------------------------------------------------------------
 static void WriteVertices( studiohdr_t *phdr )
 {
-	char			fileName[260];
+	char			fileName[MAX_PATH];
 	byte			*pStart;
 	byte			*pData;
 	int				i;
@@ -1589,17 +1831,17 @@ static void WriteVertices( studiohdr_t *phdr )
 	if (!g_nummodelsbeforeLOD)
 		return;
 
-	strcpy( fileName, gamedir );
+	V_strcpy_safe( fileName, gamedir );
 //	if( *g_pPlatformName )
 //	{
 //		strcat( fileName, "platform_" );
 //		strcat( fileName, g_pPlatformName );
 //		strcat( fileName, "/" );	
 //	}
-	strcat( fileName, "models/" );	
-	strcat( fileName, outname );
+	V_strcat_safe( fileName, "models/" );	
+	V_strcat_safe( fileName, outname );
 	Q_StripExtension( fileName, fileName, sizeof( fileName ) );
-	strcat( fileName, ".vvd" );
+	V_strcat_safe( fileName, ".vvd" );
 
 	if ( !g_quiet )
 	{
@@ -1708,9 +1950,106 @@ static void WriteVertices( studiohdr_t *phdr )
 
 	// fileHeader->length = pData - pStart;
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile( fileName, pStart, pData - pStart );
 	}
 }
+
+
+//-----------------------------------------------------------------------------
+// Computes the maximum absolute value of any component of all vertex animation
+// pos (x,y,z) normal (x,y,z) or wrinkle
+//
+// Returns the fixed point scale and also sets appropriate values & flags in
+// passed studiohdr_t
+//-----------------------------------------------------------------------------
+float ComputeVertAnimFixedPointScale( studiohdr_t *pStudioHdr )
+{
+	float flVertAnimRange = 0.0f;
+
+	for ( int j = 0; j < g_numflexkeys; ++j )
+	{
+		if ( g_flexkey[j].numvanims <= 0 )
+			continue;
+
+		const bool bWrinkleVAnim = ( g_flexkey[j].vanimtype == STUDIO_VERT_ANIM_WRINKLE );
+
+		s_vertanim_t *pVertAnim = g_flexkey[j].vanim;
+
+		for ( int k = 0; k < g_flexkey[j].numvanims; ++k )
+		{
+			if ( fabs( pVertAnim->pos.x ) > flVertAnimRange )
+			{
+				flVertAnimRange = fabs( pVertAnim->pos.x );
+			}
+
+			if ( fabs( pVertAnim->pos.y ) > flVertAnimRange )
+			{
+				flVertAnimRange = fabs( pVertAnim->pos.y );
+			}
+
+			if ( fabs( pVertAnim->pos.z ) > flVertAnimRange )
+			{
+				flVertAnimRange = fabs( pVertAnim->pos.z );
+			}
+
+			if ( fabs( pVertAnim->normal.x ) > flVertAnimRange )
+			{
+				flVertAnimRange = fabs( pVertAnim->normal.x );
+			}
+
+			if ( fabs( pVertAnim->normal.y ) > flVertAnimRange )
+			{
+				flVertAnimRange = fabs( pVertAnim->normal.y );
+			}
+
+			if ( fabs( pVertAnim->normal.z ) > flVertAnimRange )
+			{
+				flVertAnimRange = fabs( pVertAnim->normal.z );
+			}
+
+			if ( bWrinkleVAnim )
+			{
+				if ( fabs( pVertAnim->wrinkle ) > flVertAnimRange )
+				{
+					flVertAnimRange = fabs( pVertAnim->wrinkle );
+				}
+			}
+
+			pVertAnim++;
+		}
+	}
+
+	// Legacy value
+	float flVertAnimFixedPointScale = 1.0 / 4096.0f;
+
+	if ( flVertAnimRange > 0.0f )
+	{
+		if ( flVertAnimRange > 32767 )
+		{
+			MdlWarning( "Flex value too large: %.2f, Max: 32767\n", flVertAnimRange );
+
+			flVertAnimFixedPointScale = 1.0f;
+		}
+		else
+		{
+			const float flTmpScale = flVertAnimRange / 32767.0f;
+			if ( flTmpScale > flVertAnimFixedPointScale )
+			{
+				flVertAnimFixedPointScale = flTmpScale;
+			}
+		}
+	}
+
+	if ( flVertAnimFixedPointScale != 1.0f / 4096.0f )
+	{
+		pStudioHdr->flags |= STUDIOHDR_FLAGS_VERT_ANIM_FIXED_POINT_SCALE;
+		pStudioHdr->flVertAnimFixedPointScale = flVertAnimFixedPointScale;
+	}
+
+	return flVertAnimFixedPointScale;
+}
+
 
 static void WriteModel( studiohdr_t *phdr )
 {
@@ -2027,6 +2366,8 @@ static void WriteModel( studiohdr_t *phdr )
 	}
 	cur = (int)pData;
 
+	const float flVertAnimFixedPointScale = ComputeVertAnimFixedPointScale( phdr );
+
 	// write model
 	for (i = 0; i < g_nummodelsbeforeLOD; i++) 
 	{
@@ -2208,12 +2549,13 @@ static void WriteModel( studiohdr_t *phdr )
 							pvertanim->index = n;
 							pvertanim->speed = 255.0F*pvanim->speed;
 							pvertanim->side  = 255.0F*pvanim->side;
+
 							pvertanim->SetDeltaFloat( pvanim->pos );
 							pvertanim->SetNDeltaFloat( pvanim->normal );
 							
 							if ( bWrinkleVAnim )
 							{
-								( (mstudiovertanim_wrinkle_t*)pvertanim )->SetWrinkleFixed( pvanim->wrinkle );
+								( (mstudiovertanim_wrinkle_t*)pvertanim )->SetWrinkleFixed( pvanim->wrinkle, flVertAnimFixedPointScale );
 							}
 
 							pvertanim = (mstudiovertanim_t*)( (byte*)pvertanim + nVAnimDeltaSize );
@@ -2243,6 +2585,7 @@ static void WriteModel( studiohdr_t *phdr )
 		}
 		cur = (int)pData;
 	}
+
 
 	ALIGN4( pData );
 
@@ -2411,9 +2754,10 @@ void WriteModelFiles(void)
 {
 	FileHandle_t modelouthandle = 0;
 	FileHandle_t blockouthandle = 0;
+	CPlainAutoPtr< CP4File > spFileBlockOut, spFileModelOut;
 	int			total = 0;
 	int			i;
-	char		filename[260];
+	char		filename[MAX_PATH];
 	studiohdr_t *phdr;
 	studiohdr_t *pblockhdr = 0;
 
@@ -2429,13 +2773,22 @@ void WriteModelFiles(void)
 		// write the non-default g_sequence group data to separate files
 		sprintf( g_animblockname, "models/%s.ani", outname );
 
-		strcpy( filename, gamedir );
-		strcat( filename, g_animblockname );	
+		V_strcpy_safe( filename, gamedir );
+		V_strcat_safe( filename, g_animblockname );	
 
 		EnsureFileDirectoryExists( filename );
 
 		if (!g_bVerifyOnly)
 		{
+			spFileBlockOut.Attach( g_p4factory->AccessFile( filename ) );
+			spFileBlockOut->Edit();
+
+			// Create the directory hierarchy for the ANI
+			char parentdir[MAX_PATH];	 
+			V_strcpy_safe( parentdir, filename );
+			V_StripFilename( parentdir );
+			g_pFullFileSystem->CreateDirHierarchy( parentdir );
+
 			blockouthandle = SafeOpenWrite( filename );
 		}
 
@@ -2457,19 +2810,19 @@ void WriteModelFiles(void)
 	phdr->id = IDSTUDIOHEADER;
 	phdr->version = STUDIO_VERSION;
 
-	strcat (outname, ".mdl");
+	V_strcat_safe (outname, ".mdl");
 
 	// strcpy( outname, ExpandPath( outname ) );
 
-	strcpy( filename, gamedir );
+	V_strcpy_safe( filename, gamedir );
 //	if( *g_pPlatformName )
 //	{
 //		strcat( filename, "platform_" );
 //		strcat( filename, g_pPlatformName );
 //		strcat( filename, "/" );
 //	}
-	strcat( filename, "models/" );	
-	strcat( filename, outname );	
+	V_strcat_safe( filename, "models/" );	
+	V_strcat_safe( filename, outname );	
 
 	
 	// Create the directory.
@@ -2482,8 +2835,19 @@ void WriteModelFiles(void)
 		printf ("writing %s:\n", filename);
 	}
 
+	LoadPreexistingSequenceOrder( filename );
+
 	if (!g_bVerifyOnly)
 	{
+		spFileModelOut.Attach( g_p4factory->AccessFile( filename ) );
+		spFileModelOut->Edit();
+
+		// Create the directory hierarchy for the MDL
+		char parentdir[MAX_PATH];	 
+		V_strcpy_safe( parentdir, filename );
+		V_StripFilename( parentdir );
+		g_pFullFileSystem->CreateDirHierarchy( parentdir );
+
 		modelouthandle = SafeOpenWrite (filename);
 	}
 
@@ -2532,8 +2896,10 @@ void WriteModelFiles(void)
 
 	BeginStringTable( );
 
-	strcpy( phdr->name, outname );
-	// AddToStringTable( phdr, &phdr->sznameindex, outname );
+	// Copy the full path for compatibility with older programs
+	//V_strcpy_safe( phdr->name, V_UnqualifiedFileName( outname ) );
+	V_strcpy_safe( phdr->name, outname );
+	AddToStringTable( phdr2, &phdr2->sznameindex, outname );
 
 	WriteBoneInfo( phdr );
 	if( !g_quiet )
@@ -2585,10 +2951,29 @@ void WriteModelFiles(void)
 		printf("bone transforms  %7d bytes\n", pData - pStart - total );
 	}
 	total  = pData - pStart;
+	if ( total > FILEBUFFER )
+	{
+		MdlError( "file exceeds %d bytes (%d)", FILEBUFFER, total );
+	}
+
+	WriteBoneFlexDrivers( phdr2 );
+	if ( !g_quiet )
+	{
+		printf("bone flex driver %7d bytes\n", pData - pStart - total );
+	}
+	total  = pData - pStart;
+	if ( total > FILEBUFFER )
+	{
+		MdlError( "file exceeds %d bytes (%d)", FILEBUFFER, total );
+	}
 
 	pData = WriteStringTable( pData );
 
 	total  = pData - pStart;
+	if ( total > FILEBUFFER )
+	{
+		MdlError( "file exceeds %d bytes (%d)", FILEBUFFER, total );
+	}
 
 	phdr->checksum = 0;
 	for (i = 0; i < total; i += 4)
@@ -2614,6 +2999,10 @@ void WriteModelFiles(void)
 	{
 		printf("total      %7d\n", phdr->length );
 	}
+	if ( phdr->length > FILEBUFFER )
+	{
+		MdlError( "file exceeds %d bytes (%d)", FILEBUFFER, total );
+	}
 
 	// Load materials for this model via the material system so that the
 	// optimizer can ask questions about the materials.
@@ -2622,6 +3011,7 @@ void WriteModelFiles(void)
 	SafeWrite( modelouthandle, pStart, phdr->length );
 
 	g_pFileSystem->Close(modelouthandle);
+	if ( spFileModelOut.IsValid() ) spFileModelOut->Add();
 
 	if (pBlockStart)
 	{
@@ -2642,12 +3032,15 @@ void WriteModelFiles(void)
 			Q_strcat( outname, ".360.ani", sizeof( outname ) );
 			
 			{
+				CP4AutoEditAddFile autop4( outname );
 				SaveFile( outname, pOutBase, finalSize );
 			}
 		}
 
 		SafeWrite( blockouthandle, pBlockStart, pblockhdr->length );
 		g_pFileSystem->Close( blockouthandle );
+		if ( spFileBlockOut.IsValid() ) spFileBlockOut->Add();
+
 
 		if ( !g_quiet )
 		{
@@ -2685,6 +3078,11 @@ void WriteModelFiles(void)
 			}
 		}
 	#endif
+
+		if ( !g_StudioMdlCheckUVCmd.CheckUVs( g_source, g_numsources ) )
+		{
+			MdlError( "UV checks failed\n" );
+		}
 
 		OptimizedModel::WriteOptimizedFiles( phdr, g_bodypart );
 
@@ -2727,7 +3125,7 @@ void WriteModelFiles(void)
 const vertexFileHeader_t * mstudiomodel_t::CacheVertexData( void * pModelData )
 {
 	static vertexFileHeader_t	*pVertexHdr;
-	char						filename[260];
+	char						filename[MAX_PATH];
 
 	Assert( pModelData == NULL );
 
@@ -2738,17 +3136,17 @@ const vertexFileHeader_t * mstudiomodel_t::CacheVertexData( void * pModelData )
 	}
 
 	// load and persist the vertex file
-	strcpy( filename, gamedir );
+	V_strcpy_safe( filename, gamedir );
 //	if( *g_pPlatformName )
 //	{
 //		strcat( filename, "platform_" );
 //		strcat( filename, g_pPlatformName );
 //		strcat( filename, "/" );	
 //	}
-	strcat( filename, "models/" );	
-	strcat( filename, outname );
+	V_strcat_safe( filename, "models/" );	
+	V_strcat_safe( filename, outname );
 	Q_StripExtension( filename, filename, sizeof( filename ) );
-	strcat( filename, ".vvd" );
+	V_strcat_safe( filename, ".vvd" );
 
 	LoadFile(filename, (void**)&pVertexHdr);
 
@@ -3398,6 +3796,7 @@ bool FixupVVDFile(const char *fileName,  const studiohdr_t *pStudioHdr, const vo
 
 	// pFileHdr_new->length =  pData_new-pStart_new;
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile((char*)fileName, pStart_new, pData_new-pStart_new);
 	}
 
@@ -3491,6 +3890,7 @@ bool FixupVTXFile(const char *fileName, const studiohdr_t *pStudioHdr, const ver
 
 	// pVtxHdr->length = VtxLen;
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile((char*)fileName, pVtxBuff, VtxLen);
 	}
 
@@ -3591,6 +3991,7 @@ bool FixupMDLFile(const char *fileName, studiohdr_t *pStudioHdr, const void *pVt
 	}
 
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile((char*)fileName, (void*)pStudioHdr, pStudioHdr->length);
 	}
 
@@ -3606,8 +4007,8 @@ bool FixupMDLFile(const char *fileName, studiohdr_t *pStudioHdr, const void *pVt
 //-----------------------------------------------------------------------------
 bool FixupToSortedLODVertexes(studiohdr_t *pStudioHdr)
 {
-	char							filename[260];
-	char							tmpFileName[260];
+	char							filename[MAX_PATH];
+	char							tmpFileName[MAX_PATH];
 	void							*pVtxBuff;
 	usedVertex_t					*pVertexList;
 	vertexPool_t					*pVertexPools;
@@ -3617,22 +4018,22 @@ bool FixupToSortedLODVertexes(studiohdr_t *pStudioHdr)
 	int								i;
 	const char						*vtxPrefixes[] = {".dx80.vtx", ".dx90.vtx", ".sw.vtx"};
 
-	strcpy( filename, gamedir );
+	V_strcpy_safe( filename, gamedir );
 //	if( *g_pPlatformName )
 //	{
 //		strcat( filename, "platform_" );
 //		strcat( filename, g_pPlatformName );
 //		strcat( filename, "/" );	
 //	}
-	strcat( filename, "models/" );	
-	strcat( filename, outname );
+	V_strcat_safe( filename, "models/" );	
+	V_strcat_safe( filename, outname );
 	Q_StripExtension( filename, filename, sizeof( filename ) );
 
 	// determine lod usage per vertex
 	// all vtx files enumerate model's lod verts, but differ in their mesh makeup
 	// use xxx.dx80.vtx to establish which vertexes are used by each lod
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".dx80.vtx" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".dx80.vtx" );
 	VtxLen = LoadFile( tmpFileName, &pVtxBuff );
 
 	// build the sorted vertex tables
@@ -3643,8 +4044,8 @@ bool FixupToSortedLODVertexes(studiohdr_t *pStudioHdr)
 	}
 
 	// fixup ???.vvd
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".vvd" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".vvd" );
 	if (!FixupVVDFile(tmpFileName, pStudioHdr, pVtxBuff, pVertexPools, numVertexPools, pVertexList, numVertexes))
 	{
 		// data error
@@ -3654,8 +4055,8 @@ bool FixupToSortedLODVertexes(studiohdr_t *pStudioHdr)
 	for (i=0; i<ARRAYSIZE(vtxPrefixes); i++)
 	{
 		// fixup ???.vtx
-		strcpy( tmpFileName, filename );
-		strcat( tmpFileName, vtxPrefixes[i] );
+		V_strcpy_safe( tmpFileName, filename );
+		V_strcat_safe( tmpFileName, vtxPrefixes[i] );
 		if (!FixupVTXFile(tmpFileName, pStudioHdr, pVertexPools, numVertexPools, pVertexList, numVertexes))
 		{
 			// data error
@@ -3664,8 +4065,8 @@ bool FixupToSortedLODVertexes(studiohdr_t *pStudioHdr)
 	}
 
 	// fixup ???.mdl
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".mdl" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".mdl" );
 	if (!FixupMDLFile(tmpFileName, pStudioHdr, pVtxBuff, pVertexPools, numVertexPools, pVertexList, numVertexes))
 	{
 		// data error
@@ -3770,6 +4171,7 @@ bool Clamp_MDL_LODS( const char *fileName, int rootLOD )
 #endif
 
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile( (char *)fileName, pStudioHdr, len );
 	}
 
@@ -3804,6 +4206,7 @@ bool Clamp_VVD_LODS( const char *fileName, int rootLOD )
 	// pNewVvdHdr->length = newLength;
 
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile( (char *)fileName, pNewVvdHdr, newLength );
 	}
 
@@ -4036,6 +4439,7 @@ bool Clamp_VTX_LODS( const char *fileName, int rootLOD, studiohdr_t *pStudioHdr 
 	}
 	
 	{
+		CP4AutoEditAddFile autop4( fileName, "binary" );
 		SaveFile( (char *)fileName, pNewVtxHdr, newLen );
 	}
 
@@ -4049,8 +4453,8 @@ bool Clamp_VTX_LODS( const char *fileName, int rootLOD, studiohdr_t *pStudioHdr 
 
 bool Clamp_RootLOD( studiohdr_t *phdr )
 {
-	char	filename[260];
-	char	tmpFileName[260];
+	char	filename[MAX_PATH];
+	char	tmpFileName[MAX_PATH];
 	int		i;
 	const char						*vtxPrefixes[] = {".dx80.vtx", ".dx90.vtx", ".sw.vtx"};
 
@@ -4066,25 +4470,25 @@ bool Clamp_RootLOD( studiohdr_t *phdr )
 		return true;
 	}
 
-	strcpy( filename, gamedir );
-	strcat( filename, "models/" );	
-	strcat( filename, outname );
+	V_strcpy_safe( filename, gamedir );
+	V_strcat_safe( filename, "models/" );	
+	V_strcat_safe( filename, outname );
 	Q_StripExtension( filename, filename, sizeof( filename ) );
 
 	// shift the files so that g_minLod is the root LOD
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".mdl" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".mdl" );
 	Clamp_MDL_LODS( tmpFileName, rootLOD );
 
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".vvd" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".vvd" );
 	Clamp_VVD_LODS( tmpFileName, rootLOD );
 
 	for (i=0; i<ARRAYSIZE(vtxPrefixes); i++)
 	{
 		// fixup ???.vtx
-		strcpy( tmpFileName, filename );
-		strcat( tmpFileName, vtxPrefixes[i] );
+		V_strcpy_safe( tmpFileName, filename );
+		V_strcat_safe( tmpFileName, vtxPrefixes[i] );
 		Clamp_VTX_LODS( tmpFileName, rootLOD, phdr );
 	}
 
@@ -4115,6 +4519,7 @@ void WriteSwappedFile( char *srcname, char *outname, int(*pfnSwapFunc)(void*, co
 
 		if ( bytes != 0 )
 		{
+			CP4AutoEditAddFile autop4( outname, "binary" );
 			SaveFile( outname, pOutBase, bytes );
 		}
 

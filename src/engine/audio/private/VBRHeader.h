@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -28,45 +28,45 @@ public:
 		VBRIHeader
 	};
 
-	CVBRHeader( CMPAFile* pMPAFile, VBRHeaderType HeaderType, DWORD dwOffset );
+	CVBRHeader( CMPAFile* pMPAFile, VBRHeaderType HeaderType, uint32 dwOffset );
 	~CVBRHeader(void);
 
-	static bool IsVBRHeaderAvailable( CMPAFile* pMPAFile, VBRHeaderType& HeaderType, DWORD& dwOffset );
-	bool SeekPoint(float fPercent, DWORD& dwSeekPoint);
+	static bool IsVBRHeaderAvailable( CMPAFile* pMPAFile, VBRHeaderType& HeaderType, uint32& dwOffset );
+	bool SeekPoint(float fPercent, uint32& dwSeekPoint);
 
-	DWORD m_dwBytesPerSec;
-	DWORD m_dwBytes;		// total number of bytes
-	DWORD m_dwFrames;		// total number of frames
+	uint32 m_dwBytesPerSec;
+	uint32 m_dwBytes;		// total number of bytes
+	uint32 m_dwFrames;		// total number of frames
 
 private:
-	static DWORD m_dwXINGOffsets[2][2];
+	static uint32 m_dwXINGOffsets[2][2];
 
-	static bool CheckID( CMPAFile* pMPAFile, char ch0, char ch1, char ch2, char ch3, DWORD& dwOffset );
-	static bool CheckXING( CMPAFile* pMPAFile, DWORD& dwOffset );
-	static bool CheckVBRI( CMPAFile* pMPAFile, DWORD& dwOffset );
+	static bool CheckID( CMPAFile* pMPAFile, char ch0, char ch1, char ch2, char ch3, uint32& dwOffset );
+	static bool CheckXING( CMPAFile* pMPAFile, uint32& dwOffset );
+	static bool CheckVBRI( CMPAFile* pMPAFile, uint32& dwOffset );
 
-	bool ExtractLAMETag( DWORD dwOffset );
-	bool ExtractXINGHeader( DWORD dwOffset );	
-	bool ExtractVBRIHeader( DWORD dwOffset );
+	bool ExtractLAMETag( uint32 dwOffset );
+	bool ExtractXINGHeader( uint32 dwOffset );	
+	bool ExtractVBRIHeader( uint32 dwOffset );
 
-	DWORD SeekPointXING(float fPercent)const ;
-	DWORD SeekPointVBRI(float fPercent) const;
-	DWORD SeekPointByTimeVBRI(float fEntryTimeMS) const;
+	uint32 SeekPointXING(float fPercent)const ;
+	uint32 SeekPointVBRI(float fPercent) const;
+	uint32 SeekPointByTimeVBRI(float fEntryTimeMS) const;
 
 	CMPAFile* m_pMPAFile;
 public:	
 	VBRHeaderType m_HeaderType;
-	DWORD m_dwOffset;
-	DWORD m_dwQuality;	// quality (0..100)
+	uint32 m_dwOffset;
+	uint32 m_dwQuality;	// quality (0..100)
 	int* m_pnToc;				// TOC points for seeking (must be freed)
-	DWORD m_dwTableSize;	// size of table (number of entries)	
+	uint32 m_dwTableSize;	// size of table (number of entries)	
 
 	// only VBRI
 	float m_fDelay;	
-	DWORD m_dwTableScale;	// for seeking
-	DWORD m_dwBytesPerEntry;
-    DWORD m_dwFramesPerEntry;
-	DWORD m_dwVersion;
+	uint32 m_dwTableScale;	// for seeking
+	uint32 m_dwBytesPerEntry;
+    uint32 m_dwFramesPerEntry;
+	uint32 m_dwVersion;
 };
 
 #endif // VBRHEADER_H

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,6 +13,7 @@
 #else
 	#include "cs_player.h"
 	#include "ilagcompensationmanager.h"
+	#include "cs_gamestats.h"
 #endif
 
 
@@ -89,7 +90,7 @@ PRECACHE_WEAPON_REGISTER( weapon_knife );
 #ifndef CLIENT_DLL
 
 	BEGIN_DATADESC( CKnife )
-		DEFINE_FUNCTION( Smack )
+		DEFINE_THINKFUNC( Smack )
 	END_DATADESC()
 
 #endif
@@ -316,7 +317,17 @@ void CKnife::WeaponIdle()
 	SendWeaponAnim( ACT_VM_IDLE );
 }
 
+//=============================================================================
+// HPE_BEGIN:
+// [tj] Hacky cheat code to control knife damage
+//=============================================================================
+#ifndef CLIENT_DLL
+	ConVar KnifeDamageScale("knife_damage_scale", "100", FCVAR_DEVELOPMENTONLY);
+#endif
 
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 
 bool CKnife::SwingOrStab( bool bStab )
@@ -398,9 +409,9 @@ bool CKnife::SwingOrStab( bool bStab )
 		EmitSound( filter, entindex(), "Weapon_Knife.Slash" );
 	}
 
-	
 #ifndef CLIENT_DLL
 
+	float flDamage = 0.0f;
 	if ( bDidHit )
 	{
 		// play thwack, smack, or dong sound
@@ -412,7 +423,7 @@ bool CKnife::SwingOrStab( bool bStab )
 
 		ClearMultiDamage();
 		
-		float flDamage = 42.0f;
+		flDamage = 42.0f;
 
 		if ( bStab )
 		{
@@ -448,12 +459,26 @@ bool CKnife::SwingOrStab( bool bStab )
 			}
 		}
 
+        //=============================================================================
+        // HPE_BEGIN:
+        // [tj] Hacky cheat to lower knife damage for testing
+        //=============================================================================
+         
+        flDamage *= (KnifeDamageScale.GetInt() / 100.0f);
+         
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+        
+
 		CTakeDamageInfo info( pPlayer, pPlayer, flDamage, DMG_BULLET | DMG_NEVERGIB );
 
 		CalculateMeleeDamageForce( &info, vForward, tr.endpos, 1.0f/flDamage );
 		pEntity->DispatchTraceAttack( info, vForward, &tr ); 
 		ApplyMultiDamage();
 	}
+
+	CCS_GameStats.Event_KnifeUse( pPlayer, bStab, flDamage );
 
 #endif
 

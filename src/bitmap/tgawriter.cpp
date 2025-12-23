@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -296,7 +296,7 @@ bool WriteRectNoAlloc( unsigned char *pImageData, const char *fileName, int nXOr
 	g_pFullFileSystem->Read( &tgaHeader, sizeof(tgaHeader), fp );
 
 
-	int nBytesPerPixel, nImageType, nPixelSize;
+	int nBytesPerPixel, nPixelSize;
 
 	switch( srcFormat )
 	{
@@ -306,17 +306,14 @@ bool WriteRectNoAlloc( unsigned char *pImageData, const char *fileName, int nXOr
 #endif
 		nBytesPerPixel = 3; // 24/32 bit uncompressed TGA
 		nPixelSize = 24;
-		nImageType = 2;
 		break;
 	case IMAGE_FORMAT_BGRA8888:
 		nBytesPerPixel = 4; // 24/32 bit uncompressed TGA
 		nPixelSize = 32;
-		nImageType = 2;
 		break;
 	case IMAGE_FORMAT_I8:
 		nBytesPerPixel = 1; // 8 bit uncompressed TGA
 		nPixelSize = 8;
-		nImageType = 1;
 		break;
 	default:
 		return false;

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include <tier0/platform.h>
 #include <stdio.h>
 #include <string.h>

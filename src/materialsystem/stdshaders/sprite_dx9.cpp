@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -109,7 +109,8 @@ BEGIN_VS_SHADER( Sprite_DX9,
 
 	SHADER_INIT
 	{
-		LoadTexture( BASETEXTURE );
+		bool bSRGB = s_ppParams[NOSRGB]->GetIntValue() == 0;
+		LoadTexture( BASETEXTURE, bSRGB ? TEXTUREFLAGS_SRGB : 0 );
 	}
 
 #define SHADER_USE_VERTEX_COLOR		1
@@ -121,6 +122,9 @@ BEGIN_VS_SHADER( Sprite_DX9,
 		s_pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 		bool bSRGB = s_ppParams[NOSRGB]->GetIntValue() == 0;
 		pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, bSRGB );
+
+		// Only enabling this on OSX() - it causes GL mode's light glow sprites to be much darker vs. D3D9 under Linux/Win GL.
+		bool bSRGBOutputAdapter = ( IsOSX() && !g_pHardwareConfig->FakeSRGBWrite() ) && !bSRGB;
 
 		unsigned int flags = VERTEX_POSITION;
 		if( shaderFlags & SHADER_USE_VERTEX_COLOR )
@@ -135,13 +139,14 @@ BEGIN_VS_SHADER( Sprite_DX9,
 		SET_STATIC_VERTEX_SHADER_COMBO( SRGB,  bSRGB );
 		SET_STATIC_VERTEX_SHADER( sprite_vs20 );
 
-		if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+		if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // Always send GL down this path
 		{
 			DECLARE_STATIC_PIXEL_SHADER( sprite_ps20b );
 			SET_STATIC_PIXEL_SHADER_COMBO( VERTEXCOLOR,  ( shaderFlags &  SHADER_USE_VERTEX_COLOR ) ? true : false );
 			SET_STATIC_PIXEL_SHADER_COMBO( CONSTANTCOLOR,  ( shaderFlags & SHADER_USE_CONSTANT_COLOR ) ? true : false );
 			SET_STATIC_PIXEL_SHADER_COMBO( HDRTYPE,  g_pHardwareConfig->GetHDRType() );
 			SET_STATIC_PIXEL_SHADER_COMBO( SRGB, bSRGB );
+			SET_STATIC_PIXEL_SHADER_COMBO( SRGB_OUTPUT_ADAPTER, bSRGBOutputAdapter );
 			SET_STATIC_PIXEL_SHADER( sprite_ps20b );
 		}
 		else
@@ -154,7 +159,8 @@ BEGIN_VS_SHADER( Sprite_DX9,
 			SET_STATIC_PIXEL_SHADER( sprite_ps20 );
 		}
 
-		s_pShaderShadow->EnableSRGBWrite( bSRGB );
+		// OSX always has to sRGB write (don't do this on Linux/Win GL - it causes glow sprites to be way too dark)
+		s_pShaderShadow->EnableSRGBWrite( bSRGB || ( IsOSX() && !g_pHardwareConfig->FakeSRGBWrite() ) );
 	}
 
 	void SetSpriteCommonDynamicState( unsigned int shaderFlags )
@@ -170,7 +176,7 @@ BEGIN_VS_SHADER( Sprite_DX9,
 		SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG,  fogIndex );
 		SET_DYNAMIC_VERTEX_SHADER( sprite_vs20 );
 
-		if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+		if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // Always send GL down this path
 		{
 			DECLARE_DYNAMIC_PIXEL_SHADER( sprite_ps20b );
 			SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED, IsHDREnabled() );
@@ -378,7 +384,7 @@ BEGIN_VS_SHADER( Sprite_DX9,
 					SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG,  fogIndex );
 					SET_DYNAMIC_VERTEX_SHADER( sprite_vs20 );
 
-					if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+					if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // Always send GL down this path
 					{
 						DECLARE_DYNAMIC_PIXEL_SHADER( sprite_ps20b );
 						SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED,  IsHDREnabled() );
@@ -435,7 +441,7 @@ BEGIN_VS_SHADER( Sprite_DX9,
 					SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG,  fogIndex );
 					SET_DYNAMIC_VERTEX_SHADER( sprite_vs20 );
 
-					if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+					if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // Always send GL down this path
 					{
 						DECLARE_DYNAMIC_PIXEL_SHADER( sprite_ps20b );
 						SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED,  IsHDREnabled() );

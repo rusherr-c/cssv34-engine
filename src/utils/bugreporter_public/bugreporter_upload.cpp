@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,18 @@
 //
 //=============================================================================//
 #include "basetypes.h"
+#ifdef WIN32
 #include <winsock.h>
+#elif defined(POSIX)
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#define closesocket close
+#else
+#error
+#endif
 #include "netadr.h"
 #include "tier1/strtools.h"
 #include <stdio.h>
@@ -15,10 +26,11 @@
 #include "utlvector.h"
 #include "filesystem_tools.h"
 #include "cserserverprotocol_engine.h"
-#include "mathlib/icekey.h"
+#include "mathlib/IceKey.H"
 #include "bitbuf.h"
 #include "blockingudpsocket.h"
 #include "steamcommon.h"
+#include "steam/steamclientpublic.h"
 
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -267,12 +279,12 @@ void EncryptBuffer( IceKey& cipher, unsigned char *bufData, uint bufferSize)
 
 bool UploadBugReport(
 	const netadr_t& cserIP,
-	const TSteamGlobalUserID &userid,
+	const CSteamID &userid,
 	int build,
 	char const *title,
 	char const *body,
 	char const *exename,
-	char const *gamedir,
+	char const *pchGamedir,
 	char const *mapname,
 	char const *reporttype,
 	char const *email,
@@ -293,11 +305,11 @@ bool UploadBugReport(
 	Q_memset( &params, 0, sizeof( params ) );
 
 	params.m_ipCSERServer = cserIP;
-	params.m_userid = userid;
+	params.m_userid.m_SteamLocalUserID.As64bits = userid.ConvertToUint64();
 
 	params.m_uEngineBuildNumber		= build;
 	Q_strncpy( params.m_sExecutableName, exename, sizeof( params.m_sExecutableName ) );
-	Q_strncpy( params.m_sGameDirectory, gamedir, sizeof( params.m_sGameDirectory ) );
+	Q_strncpy( params.m_sGameDirectory, pchGamedir, sizeof( params.m_sGameDirectory ) );
 	Q_strncpy( params.m_sMapName, mapname, sizeof( params.m_sMapName ) );
 
 	params.m_uRAM = ram;
@@ -933,8 +945,11 @@ EBugReportUploadStatus Win32UploadBugReportBlocking
 			sockaddr_in adr;
 			adr.sin_family = AF_INET;
 			adr.sin_port = htons( harvester_port );
+#ifdef WIN32
 			adr.sin_addr.S_un.S_addr = harvester_ip;
-
+#else
+			adr.sin_addr.s_addr = harvester_ip;			
+#endif
 			netadr_t BugReportHarvesterFSMIPAddress;
 			BugReportHarvesterFSMIPAddress.SetFromSockadr( (struct sockaddr *)&adr );
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,7 +10,6 @@
 #pragma once
 #endif
 
-
 #include "cs_playeranimstate.h"
 #include "cs_weapon_parse.h"
 
@@ -19,12 +18,12 @@
 	#define CWeaponCSBase C_WeaponCSBase
 #endif
 
-extern int  ClassnameToWeaponID( const char *classname );
-extern int	AliasToWeaponID( const char *alias );
+extern CSWeaponID AliasToWeaponID( const char *alias );
 extern const char *WeaponIDToAlias( int id );
 extern const char *GetTranslatedWeaponAlias( const char *alias);
-extern bool	IsPrimaryWeapon( int id );
-extern bool IsSecondaryWeapon( int id );
+extern const char * GetWeaponAliasFromTranslated(const char *translatedAlias);
+extern bool	IsPrimaryWeapon( CSWeaponID id );
+extern bool IsSecondaryWeapon( CSWeaponID  id );
 extern int GetShellForAmmoType( const char *ammoname );
 
 #define SHIELD_VIEW_MODEL "models/weapons/v_shield.mdl"
@@ -55,11 +54,12 @@ class CCSPlayer;
 // MIKETODO: this should use indexing instead of searching and strcmp()'ing all the time.
 bool IsAmmoType( int iAmmoType, const char *pAmmoName );
 
-typedef enum
+enum CSWeaponMode
 {
 	Primary_Mode = 0,
 	Secondary_Mode,
-} CSWeaponMode;
+	WeaponMode_MAX
+};
 
 #if defined( CLIENT_DLL )
 
@@ -95,7 +95,19 @@ public:
 
 		virtual void	BulletWasFired( const Vector &vecStart, const Vector &vecEnd );
 		virtual bool	ShouldRemoveOnRoundRestart();
-		virtual bool	DefaultReload( int iClipSize1, int iClipSize2, int iActivity );
+
+        //=============================================================================
+        // HPE_BEGIN:
+        // [dwenger] Handle round restart processing for the weapon.
+        //=============================================================================
+
+        virtual void    OnRoundRestart();
+
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+
+        virtual bool	DefaultReload( int iClipSize1, int iClipSize2, int iActivity );
 
 		void SendReloadEvents();
 
@@ -116,8 +128,7 @@ public:
 	// Pistols reset m_iShotsFired to 0 when the attack button is released.
 	bool			IsPistol() const;
 
-	// Is this an awp?
-	virtual bool	IsAwp() const;
+	virtual bool IsFullAuto() const;
 
 	CCSPlayer* GetPlayerOwner() const;
 
@@ -140,6 +151,9 @@ public:
 
 	virtual void SetWeaponModelIndex( const char *pName );
 	virtual void OnPickedUp( CBaseCombatCharacter *pNewOwner );
+
+	virtual void OnJump( float fImpulse );
+	virtual void OnLand( float fVelocity );
 
 public:
 	#if defined( CLIENT_DLL )
@@ -187,15 +201,59 @@ public:
 	virtual void	Drop( const Vector &vecVelocity );
 	bool PlayEmptySound();
 	virtual void	ItemPostFrame();
-
+	virtual void	ItemBusyFrame();
 	virtual const char		*GetViewModel( int viewmodelindex = 0 ) const;
 
 
 	bool	m_bDelayFire;			// This variable is used to delay the time between subsequent button pressing.
 	float	m_flAccuracy;
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [pfreese] new accuracy model
+	//=============================================================================
+
+	CNetworkVar( CSWeaponMode, m_weaponMode);
+
+	virtual float GetInaccuracy() const;
+	virtual float GetSpread() const;
+
+	virtual void UpdateAccuracyPenalty();
+
+	CNetworkVar( float, m_fAccuracyPenalty );
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 	
 	void SetExtraAmmoCount( int count ) { m_iExtraPrimaryAmmo = count; }
 	int GetExtraAmmoCount( void ) { return m_iExtraPrimaryAmmo; }
+
+	//=============================================================================
+	// HPE_BEGIN:	
+	//=============================================================================
+
+    // [tj] Accessors for the previous owner of the gun
+	void SetPreviousOwner(CCSPlayer* player) { m_prevOwner = player; }
+	CCSPlayer* GetPreviousOwner() { return m_prevOwner; }
+
+    // [tj] Accessors for the donor system
+    void SetDonor(CCSPlayer* player) { m_donor = player; }
+    CCSPlayer* GetDonor() { return m_donor; }
+    void SetDonated(bool donated) { m_donated = true;}
+    bool GetDonated() { return m_donated; }
+
+    //[dwenger] Accessors for the prior owner list
+    void AddToPriorOwnerList(CCSPlayer* pPlayer);
+    bool IsAPriorOwner(CCSPlayer* pPlayer);
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
+protected:
+
+	float	CalculateNextAttackTime( float flCycleTime );
 
 private:
 
@@ -209,7 +267,23 @@ private:
 	CCSPlayer *m_prevOwner;
 
 	int m_iDefaultExtraAmmo;
+
+    //=============================================================================
+    // HPE_BEGIN:
+    //=============================================================================
+
+    // [dwenger] track all prior owners of this weapon
+    CUtlVector< CCSPlayer* >    m_PriorOwners;
+
+    // [tj] To keep track of people who drop weapons for teammates during the buy round
+    CHandle<CCSPlayer> m_donor;
+    bool m_donated;
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
 };
 
+extern ConVar weapon_accuracy_model;
 
 #endif // WEAPON_CSBASE_H

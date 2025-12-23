@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -40,12 +40,13 @@ public:
 	
 	void Open( void );  // opens logging file
 	void Close( void );	// closes logging file
+	void Flush( void ); // flushes the log file to disk
 
 	void Init( void );
 	void Reset( void );	// reset all logging streams
 	void Shutdown( void );
 	
-	void Printf( const char *fmt, ... );	// log a line to log file
+	void Printf( PRINTF_FORMAT_STRING const char *fmt, ... ) FMTFUNCTION( 2, 3 );	// log a line to log file
 	void Print( const char * text );
 	void PrintServerVars( void ); // prints server vars to log file
 
@@ -56,7 +57,8 @@ private:
 	bool m_bActive;		// true if we're currently logging
 
 	CUtlVector< netadr_t >	m_LogAddresses;		// Server frag log stream is sent to the address(es) in this list
-	FileHandle_t			m_hLogFile;        // File where frag log is put.
+	FileHandle_t			m_hLogFile;			// File where frag log is put.
+	CUtlString				m_LogFilename;		// Name of our logfile.
 	double					m_flLastLogFlush;
 	bool					m_bFlushLog;
 };

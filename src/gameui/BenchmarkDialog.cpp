@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "BasePanel.h"
 #include "tier1/KeyValues.h"
 #include "tier1/convar.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "vgui_controls/Button.h"
 #include "vgui_controls/CheckButton.h"
 
@@ -87,6 +87,18 @@ public:
 			Close();
 		}
 		kv->deleteThis();
+	}
+
+	void OnKeyCodePressed( KeyCode code )
+	{
+		if ( code == KEY_XBUTTON_B )
+		{
+			Close();
+		}
+		else
+		{
+			BaseClass::OnKeyCodePressed(code);
+		}
 	}
 
 private:

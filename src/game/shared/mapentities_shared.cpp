@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Controls the loading, parsing and creation of the entities from the BSP.
 //
@@ -107,7 +107,6 @@ const char *MapEntity_SkipToNextEntity( const char *pMapData, char *pWorkBuffer 
 //-----------------------------------------------------------------------------
 const char *MapEntity_ParseToken( const char *data, char *newToken )
 {
-	int             c;
 	int             len;
 		
 	len = 0;
@@ -125,11 +124,12 @@ const char *MapEntity_ParseToken( const char *data, char *newToken )
 
 		for ( const char *c = s_BraceChars; *c; c++ )
 		{
-			s_BraceCharacters[*c] = true;
+			s_BraceCharacters[(unsigned)*c] = true;
 		}
 	}
 		
-// skip whitespace
+	int             c;
+	// skip whitespace
 skipwhite:
 	while ( (c = *data) <= ' ')
 	{

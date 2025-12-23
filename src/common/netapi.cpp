@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,8 @@
 #include <stdlib.h>
 #ifdef _WIN32
 #include "winsock.h"
-#elif _LINUX
+typedef int socklen_t;
+#elif POSIX
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -210,7 +211,7 @@ void CNetAPI::GetSocketAddress( int socket, netadr_t *a )
 	StringToAdr(buff, a );
 		
 	namelen = sizeof(address);
-	if ( getsockname( socket, (struct sockaddr *)&address, (int *)&namelen) == 0 )
+	if ( getsockname( socket, (struct sockaddr *)&address, (socklen_t *)&namelen) == 0 )
 	{
 		a->port = address.sin_port;
 	}

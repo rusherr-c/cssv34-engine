@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implmentation of IEngineTool callback interface
 //  Tool .dlls can call back through this interface to talk to the engine
@@ -32,6 +32,7 @@
 #include "networkstringtableserver.h"
 #include "networkstringtable.h"
 #include "gl_rmain.h"
+#include "vprof_telemetry.h"
 
 #ifndef SWDS
 #include "vgui_baseui_interface.h"
@@ -51,9 +52,6 @@ void SV_ForceSend();
 
 extern ConVar host_framerate;
 
-void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, float flFrameRate, int jpeg_quality );
-void CL_EndMovie();
-bool CL_IsRecordingMovie();
 void VGui_SetGameDLLPanelsVisible( bool show );
 float AudioSource_GetSoundDuration( char const *pName );
 
@@ -194,7 +192,7 @@ public:
 	virtual void	StartMovieRecording( KeyValues *pMovieParams );
 	virtual void	EndMovieRecording();
 	virtual void	CancelMovieRecording();
-	virtual AVIHandle_t GetRecordingAVIHandle();
+	virtual IVideoRecorder *GetActiveVideoRecorder();
 
 	virtual void	StartRecordingVoiceToFile( const char *filename, const char *pPathID = 0 );
 	virtual void	StopRecordingVoiceToFile();
@@ -382,7 +380,7 @@ const char *CEngineTool::GetCurrentMap()
 		return "";
 	}
 
-	return cl.m_szLevelName;
+	return cl.m_szLevelFileName;
 }
 
 void CEngineTool::ChangeToMap( const char *mapname )
@@ -830,6 +828,8 @@ void CEngineTool::InstallQuitHandler( void *pvUserData, FnQuitHandler func )
 // precache methods
 bool CEngineTool::PrecacheSound( const char *pName, bool bPreload )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s(%s, %s)", __FUNCTION__, tmDynamicString( TELEMETRY_LEVEL0, pName ), bPreload ? "true" : "false" );
+
 	if ( pName && TestSoundChar( pName, CHAR_SENTENCE ) )
 		return true;
 
@@ -903,15 +903,18 @@ void CEngineTool::StartMovieRecording( KeyValues *pMovieParams )
 	int jpeg_quality = DEFAULT_JPEG_QUALITY;
 
 	int flags = 0;
+	VideoSystem_t videoSystem = VideoSystem::NONE;
 	if ( pMovieParams->GetInt( "outputavi", 0 ) )
 	{
+		Warning( "Got a request to record a movie using AVI, but AVI is deprecated. Using QuickTime/H264 instead.\n" );
+		videoSystem = VideoSystem::QUICKTIME;
 		if ( pMovieParams->GetInt( "avisoundonly", 0 ) )
 		{
-			flags |= MovieInfo_t::FMOVIE_AVISOUND;
+			flags |= MovieInfo_t::FMOVIE_VIDSOUND;
 		}
 		else
 		{
-			flags |= MovieInfo_t::FMOVIE_AVI | MovieInfo_t::FMOVIE_AVISOUND;
+			flags |= MovieInfo_t::FMOVIE_VID | MovieInfo_t::FMOVIE_VIDSOUND;
 		}
 	}
 	if  ( pMovieParams->GetInt( "outputtga", 0 ) )
@@ -935,12 +938,12 @@ void CEngineTool::StartMovieRecording( KeyValues *pMovieParams )
 		return;
 	}
 
-	int nWidth = pMovieParams->GetInt( "width", videomode->GetModeWidth() );
-	int nHeight = pMovieParams->GetInt( "height", videomode->GetModeHeight() );
-    float flFrameRate = pMovieParams->GetFloat( "framerate", 30.0f );
+	int nWidth = pMovieParams->GetInt( "width", videomode->GetModeStereoWidth() );
+	int nHeight = pMovieParams->GetInt( "height", videomode->GetModeStereoHeight() );
+	float flFrameRate = pMovieParams->GetFloat( "framerate", 30.0f );
 
 	m_bRecordingMovie = true;
-	CL_StartMovie( pFileName, flags, nWidth, nHeight, flFrameRate, jpeg_quality );
+	CL_StartMovie( pFileName, flags, nWidth, nHeight, flFrameRate, jpeg_quality, videoSystem );
 }
 
 void CEngineTool::EndMovieRecording()
@@ -957,11 +960,15 @@ void CEngineTool::CancelMovieRecording()
 	EndMovieRecording();
 }
 
-AVIHandle_t CEngineTool::GetRecordingAVIHandle()
+
+IVideoRecorder *CEngineTool::GetActiveVideoRecorder()
 {
-	if ( !CL_IsRecordingMovie() )
-		return AVIHANDLE_INVALID;
-	return g_hCurrentAVI;
+ 	if ( !CL_IsRecordingMovie() )
+ 	{
+ 		return NULL;
+ 	}
+ 	
+ 	return g_pVideoRecorder;
 }
 
 void Voice_ForceInit();

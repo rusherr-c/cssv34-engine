@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // DiffMemStats.cpp : processes two "memstats<n>.txt" memory dumps from the game into a 'diff' text file
 //                    which Excel will display in legible form (useful for tracking mem leaks)
 

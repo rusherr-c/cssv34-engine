@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -55,6 +55,7 @@ public:
 	virtual void					NotifyShouldTransmit( ShouldTransmitState_t state );
 	virtual void					PreDataUpdate( DataUpdateType_t updateType );
 	virtual void					PostDataUpdate( DataUpdateType_t updateType );
+	virtual void					OnDataUnchangedInPVS( void ) { }
 	virtual void					OnPreDataChanged( DataUpdateType_t updateType );
 	virtual void					OnDataChanged( DataUpdateType_t updateType );
 	virtual void					SetDormant( bool bDormant );
@@ -92,7 +93,7 @@ public:
 	}
 
 	// Should this object be able to have shadows cast onto it?
-	virtual bool	ShouldReceiveProjectedTextures( int flags ) { return true; }
+	virtual bool	ShouldReceiveProjectedTextures( int flags ) { return false; }
 
 // Static members
 public:

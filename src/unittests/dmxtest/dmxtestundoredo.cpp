@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Unit test program  for DMX testing
 //
@@ -790,7 +790,7 @@ void CDmeExternal::OnDestruction()
 {
 }
 
-USING_ELEMENT_FACTORY( CDmeExternal );
+USING_ELEMENT_FACTORY( DmeExternal );
 
 
 DEFINE_TESTCASE_NOSUITE( DmxExternalAttributeTest )

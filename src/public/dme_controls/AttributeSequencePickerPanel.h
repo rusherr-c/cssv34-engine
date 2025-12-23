@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #endif
 
 #include "dme_controls/AttributeBasePickerPanel.h"
-#include "vgui_controls/phandle.h"
+#include "vgui_controls/PHandle.h"
 
 
 //-----------------------------------------------------------------------------
@@ -36,7 +36,7 @@ public:
 	~CAttributeSequencePickerPanel();
 
 private:
-	MESSAGE_FUNC_PARAMS( OnMDLSelected, "MDLSelected", kv );
+	MESSAGE_FUNC_PARAMS( OnMDLSelected, "AssetSelected", kv );
 	MESSAGE_FUNC_PARAMS( OnSequenceSelected, "SequenceSelected", kv );
 	virtual void ShowPickerDialog();
 	void ShowSequencePickerDialog( const char *pMDLName );

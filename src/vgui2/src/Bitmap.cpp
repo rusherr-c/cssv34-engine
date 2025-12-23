@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #include "bitmap.h"
 #include "vgui_internal.h"
 #include "filesystem.h"
-#include "UtlBuffer.h"
+#include "tier1/utlbuffer.h"
 #include <tier0/dbg.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -48,6 +48,9 @@ Bitmap::Bitmap(const char *filename, bool hardwareFiltered)
 	_valid = true;
 	_wide = 0;
 	_tall = 0;
+	nFrameCache = 0;
+	_rotation = 0;
+
 	ForceUpload();
 }
 
@@ -56,6 +59,8 @@ Bitmap::Bitmap(const char *filename, bool hardwareFiltered)
 //-----------------------------------------------------------------------------
 Bitmap::~Bitmap()
 {
+	Evict();
+
 	if ( _filename )
 	{
 		free( _filename );
@@ -70,7 +75,7 @@ void Bitmap::GetSize(int &wide, int &tall)
 	wide = 0;
 	tall = 0;
 
-	if (!_valid)
+	if ( !_valid )
 		return;
 
 	// if a size has not been set, get it from the texture
@@ -155,7 +160,49 @@ void Bitmap::Paint()
 	{
 		GetSize( _wide, _tall);
 	}
-	g_pSurface->DrawTexturedRect(_pos[0], _pos[1], _pos[0] + _wide, _pos[1] + _tall);
+
+	if ( _rotation == ROTATED_UNROTATED )
+	{
+		g_pSurface->DrawTexturedRect(_pos[0], _pos[1], _pos[0] + _wide, _pos[1] + _tall);
+	}
+	else
+	{
+		vgui::Vertex_t verts[4];
+		verts[0].m_Position.Init( 0, 0 );
+		verts[1].m_Position.Init( _wide, 0 );
+		verts[2].m_Position.Init( _wide, _tall );
+		verts[3].m_Position.Init( 0, _tall );
+		
+		switch ( _rotation )
+		{
+		case ROTATED_CLOCKWISE_90:
+			verts[0].m_TexCoord.Init( 1, 0 );
+			verts[1].m_TexCoord.Init( 1, 1 );
+			verts[2].m_TexCoord.Init( 0, 1 );
+			verts[3].m_TexCoord.Init( 0, 0 );
+			break;
+
+		case ROTATED_ANTICLOCKWISE_90:
+			verts[0].m_TexCoord.Init( 0, 1 );
+			verts[1].m_TexCoord.Init( 0, 0 );
+			verts[2].m_TexCoord.Init( 1, 0 );
+			verts[3].m_TexCoord.Init( 1, 1 );
+			break;
+
+		case ROTATED_FLIPPED:
+			verts[0].m_TexCoord.Init( 1, 1 );
+			verts[1].m_TexCoord.Init( 0, 1 );	
+			verts[2].m_TexCoord.Init( 0, 0 );
+			verts[3].m_TexCoord.Init( 1, 0 );
+			break;
+
+		default:
+		case ROTATED_UNROTATED:
+			break;
+		}
+		
+		g_pSurface->DrawTexturedPolygon( 4, verts );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -177,7 +224,6 @@ void Bitmap::ForceUpload()
 	}
 
 	_uploaded = true;
-
 	_valid = g_pSurface->IsTextureIDValid( _id );
 }
 
@@ -189,7 +235,36 @@ HTexture Bitmap::GetID()
 	return _id;
 }
 
+bool Bitmap::Evict()
+{
+	if ( _id != 0 )
+	{
+		g_pSurface->DestroyTextureID( _id );
+		// purposely not resetting _valid to match existing silly logic
+		// either a Paint() or ForceUpload() will re-establish
+		_id = 0;
+		_uploaded = false;
+		return true;
+	}
+	return false;
+}
 
+int Bitmap::GetNumFrames()
+{
+	if ( !_valid )
+		return 0;
+
+	return g_pSurface->GetTextureNumFrames( _id );
+}
+
+void Bitmap::SetFrame( int nFrame )
+{
+	if ( !_valid )
+		return;
+
+	// the frame cache is critical to cheapen the cost of this call
+	g_pSurface->DrawSetTextureFrame( _id, nFrame, &nFrameCache );
+}
 
 
 

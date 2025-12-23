@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -494,7 +494,7 @@ void WeaponSet::GetCurrent( int& cost, WeaponSet& ws ) const
 						{
 							ws.m_primaryWeapon.SetAmmoAmount( ws.m_primaryWeapon.GetAmmoAmount() + 1 );
 							--clipsLeft;
-							ammo[info->iAmmoType] += min(maxRounds, ammoBuySize);
+							ammo[info->iAmmoType] += MIN(maxRounds, ammoBuySize);
 							cost += ammoCost;
 						}
 					}
@@ -523,7 +523,7 @@ void WeaponSet::GetCurrent( int& cost, WeaponSet& ws ) const
 						{
 							ws.m_secondaryWeapon.SetAmmoAmount( ws.m_secondaryWeapon.GetAmmoAmount() + 1 );
 							--clipsLeft;
-							ammo[info->iAmmoType] += min(maxRounds, ammoBuySize);
+							ammo[info->iAmmoType] += MIN(maxRounds, ammoBuySize);
 							cost += ammoCost;
 						}
 					}
@@ -869,9 +869,11 @@ static void ParseWeaponString( const char *str, BuyPresetWeaponList& weapons, bo
 
 	const int BufLen = 32;
 	char tmpBuf[BufLen];
+	tmpBuf[0] = '\0';
 	char weaponBuf[BufLen];
-	char clipModifier;
-	int numClips;
+	weaponBuf[0] = '\0';
+	char clipModifier = 0;
+	int numClips = 0;
 
 	while ( remainder )
 	{
@@ -894,7 +896,7 @@ static void ParseWeaponString( const char *str, BuyPresetWeaponList& weapons, bo
 		if ( sscanf( tmpBuf, "%s %d%c", weaponBuf, &numClips, &clipModifier ) != 3 )
 			return;
 
-		CSWeaponID weaponID = (CSWeaponID)AliasToWeaponID( weaponBuf );
+		CSWeaponID weaponID = AliasToWeaponID( weaponBuf );
 		if ( weaponID != WEAPON_NONE )
 		{
 			const CCSWeaponInfo *info = GetWeaponInfo( weaponID );
@@ -902,18 +904,18 @@ static void ParseWeaponString( const char *str, BuyPresetWeaponList& weapons, bo
 			{
 				int maxRounds = GetCSAmmoDef()->MaxCarry( info->iAmmoType );
 				int buySize = GetCSAmmoDef()->GetBuySize( info->iAmmoType );
-				numClips = min(ceil(maxRounds/(float)buySize), max(0, numClips));
+				numClips = MIN(ceil(maxRounds/(float)buySize), MAX(0, numClips));
 				if ( ((!isPrimary) ^ IsPrimaryWeapon( weaponID )) == 0 )
 					return;
 			}
 			else
 			{
-				numClips = min(NUM_CLIPS_FOR_CURRENT, max(0, numClips));
+				numClips = MIN(NUM_CLIPS_FOR_CURRENT, MAX(0, numClips));
 			}
 		}
 		else
 		{
-			numClips = min(NUM_CLIPS_FOR_CURRENT, max(0, numClips));
+			numClips = MIN(NUM_CLIPS_FOR_CURRENT, MAX(0, numClips));
 		}
 
 		BuyPresetWeapon weapon( weaponID );
@@ -1028,7 +1030,7 @@ void BuyPreset::Parse( KeyValues *data )
 			}
 			else if ( !strcmp( itemBuf, "flash" ) )
 			{
-				ws.m_flashbangs = min( 2, max( 0, intVal ) );
+				ws.m_flashbangs = MIN( 2, MAX( 0, intVal ) );
 			}
 
 			remainder = SharedParse( remainder );

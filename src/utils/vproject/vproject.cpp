@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 //	VPROJECT.CPP
 //
@@ -77,8 +77,10 @@ void SetVProject( const char *pProjectName )
 		pGamedir = "";
 	}
 
+	// Changed to CURRENT_USER to solve security issues in vista!
 	Sys_SetRegistryString( 
-		"HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Session Manager\\Environment\\VProject",
+		//"HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Session Manager\\Environment\\VProject",
+		"HKEY_CURRENT_USER\\Environment\\VProject"
 		pGamedir );
 
 	DWORD	result;

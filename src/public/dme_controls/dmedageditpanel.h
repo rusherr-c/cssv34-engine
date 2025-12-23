@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #endif
 
 #include "tier1/utlvector.h"
-#include "dme_controls/SimplePotteryWheelPanel.h"
+#include "vgui_controls/EditablePanel.h"
 #include "datamodel/dmehandle.h"
 
 
@@ -31,6 +31,7 @@ class CDmeCombinationOperator;
 class CDmeAnimationListPanel;
 class CBaseAnimationSetEditor;
 class CDmeAnimationSet;
+class CDmeDag;
 
 namespace vgui
 {

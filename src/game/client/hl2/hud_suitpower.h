@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -23,7 +23,6 @@ class CHudSuitPower : public CHudElement, public vgui::Panel
 
 public:
 	CHudSuitPower( const char *pElementName );
-	virtual ~CHudSuitPower() {}
 	virtual void	Init( void );
 	virtual void	Reset( void );
 	virtual void	OnThink( void );

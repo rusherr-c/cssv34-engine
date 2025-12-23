@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -59,11 +59,11 @@ public:
 	void OnModelPrecached(const char *relativePathFileName);
 	void OnSoundPrecached(const char *relativePathFileName);
 
-	void ForceExactFile( const char *relativePathFileName, ConsistencyType consistency );
 	void ForceModelBounds( const char *relativePathFileName, const Vector &mins, const Vector &maxs );
+	void ForceSimpleMaterial( const char *relativePathFileName );
 
 private:
-	void OnResourcePrecachedFullPath(char *fullPathFileName);
+	void OnResourcePrecachedFullPath(char *fullPathFileName, const char *relativeFileName );
 	char m_gameDir[256];
 	char m_mapName[64];
 	FileHandle_t m_hReslistFile;

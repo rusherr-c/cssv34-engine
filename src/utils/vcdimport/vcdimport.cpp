@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -24,6 +24,8 @@
 #include "datamodel/dmelement.h"
 #include "tier3/tier3.h"
 #include "movieobjects/importintovcd.h"
+#include "p4lib/ip4.h"
+#include "tier2/p4helpers.h"
 #include "interpolatortypes.h"
 #include "datacache/idatacache.h"
 #include "datacache/imdlcache.h"
@@ -83,6 +85,7 @@ bool CVcdImportApp::Create()
 
 	AppSystemInfo_t appSystems[] = 
 	{
+		{ "p4lib.dll",				P4_INTERFACE_VERSION },
 		{ "materialsystem.dll",		MATERIAL_SYSTEM_INTERFACE_VERSION },
 		{ "datacache.dll",			DATACACHE_INTERFACE_VERSION },
 		{ "datacache.dll",			MDLCACHE_INTERFACE_VERSION },
@@ -135,6 +138,14 @@ int CVcdImportApp::Main()
 
 	// This bit of hackery allows us to access files on the harddrive
 	g_pFullFileSystem->AddSearchPath( "", "LOCAL", PATH_ADD_TO_HEAD ); 
+
+	// Do Perforce Stuff
+	if ( CommandLine()->FindParm( "-nop4" ) )
+	{
+		g_p4factory->SetDummyMode( true );
+	}
+
+	g_p4factory->SetOpenFileChangeList( "Automatically Generated VCD files" );
 
 	ImportVCDInfo_t info;
 

@@ -1,24 +1,26 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //===========================================================================//
 
-
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include <windows.h>
 #include <imm.h>
+#define DO_IME
 #endif
+
 #include <string.h>
 
 #include "vgui_internal.h"
 #include "VPanel.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include <KeyValues.h>
 #include "tier0/vcrmode.h"
 
 #include <vgui/VGUI.h>
+#include <vgui/ISystem.h>
 #include <vgui/IClientPanel.h>
 #include <vgui/IInputInternal.h>
 #include <vgui/IPanel.h>
@@ -27,28 +29,54 @@
 #include <vgui/KeyCode.h>
 #include <vgui/MouseCode.h>
 #include "vgui/Cursor.h"
+#include <vgui/keyrepeat.h>
 
-#include "UtlLinkedList.h"
+#include "utllinkedlist.h"
 #include "tier0/icommandline.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
 #endif
 
+/* 
+> Subject: RE: l4d2 & motd 
+>  
+> From: Alfred Reynolds
+>   I'd go with the if it ain't broke don't touch it route, might as well 
+> leave win32 as is and just knobble the asserts where we know we won't implement it.
+> 
+>> From: Mike Sartain
+>>   Well now that's interesting. Is it ok to remove it for win32 then?
+>> 
+>>> From: Alfred Reynolds
+>>>   We never did the IME work, AFAIK it only ever worked on the game's 
+>>> console in game which isn't useful for users. So, no demand, hard 
+>>> (actually, really hard) to implement so it wasn't done.
+>>> 
+>>>> From: Mike Sartain
+>>>>   There are also a bunch of IME Language functions in 
+>>>> vgui2/src/inputwin32.cpp that are NYI on Linux as well - but it looks 
+>>>> like those haven't ever been implemented on OSX either. Alfred, what 
+>>>> is the story there?
+*/
+#if 0 // !defined( DO_IME ) && !defined( _X360 )
+#define ASSERT_IF_IME_NYI()	Assert( !"IME Support NYI" )
+#else
+#define ASSERT_IF_IME_NYI()
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
-
-SHORT System_GetKeyState( int virtualKeyCode ); // in System.cpp, a hack to only have g_pVCR in system.cpp
 
 bool IsDispatchingMessageQueue( void );
 
 using namespace vgui;
 
-class CInputWin32 : public IInputInternal
+class CInputSystem : public IInputInternal
 {
 public:
-	CInputWin32();
-	~CInputWin32();
+	CInputSystem();
+	~CInputSystem();
 
 	virtual void RunFrame();
 
@@ -67,7 +95,7 @@ public:
 	virtual void SetMouseCapture(VPANEL panel);
 
 	virtual VPANEL GetFocus();
-	virtual VPANEL GetCalculatedFocus();// to handle cases where the focus changes inside a frame.
+	virtual VPANEL GetCalculatedFocus();
 	virtual VPANEL GetMouseOver();
 
 	virtual bool WasMousePressed(MouseCode code);
@@ -195,6 +223,8 @@ public:
 	virtual bool	ShouldModalSubTreeReceiveMessages() const;
 
 	virtual VPANEL 	GetMouseCapture();
+
+	virtual VPANEL	GetMouseFocus();
 private:
 
 	VPanel			*GetMouseFocusIgnoringModalSubtree();
@@ -256,6 +286,8 @@ private:
 		VPanel	*m_pModalSubTree;
 		VPanel	*m_pUnhandledMouseClickListener;
 		bool	m_bRestrictMessagesToModalSubTree;
+
+		CKeyRepeatHandler m_keyRepeater;
 	};
 
 	void InitInputContext( InputContext_t *pContext );
@@ -264,14 +296,14 @@ private:
 
 	HCursor _cursorOverride;
 
-	char *_keyTrans[KEY_LAST];
+	const char *_keyTrans[KEY_LAST];
 
 	InputContext_t m_DefaultInputContext; 
 	HInputContext m_hContext; // current input context
 
 	CUtlLinkedList< InputContext_t, HInputContext > m_Contexts;
 
-#ifndef _X360	
+#ifdef DO_IME
 	void			*_imeWnd;
 	CANDIDATELIST	*_imeCandidates;
 #endif
@@ -279,9 +311,9 @@ private:
 	int		m_nDebugMessages;
 };
 
-CInputWin32 g_Input;
-EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CInputWin32, IInput, VGUI_INPUT_INTERFACE_VERSION, g_Input); // export IInput to everyone else, not IInputInternal!
-EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CInputWin32, IInputInternal, VGUI_INPUTINTERNAL_INTERFACE_VERSION, g_Input); // for use in external surfaces only! (like the engine surface)
+CInputSystem g_Input;
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CInputSystem, IInput, VGUI_INPUT_INTERFACE_VERSION, g_Input); // export IInput to everyone else, not IInputInternal!
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CInputSystem, IInputInternal, VGUI_INPUTINTERNAL_INTERFACE_VERSION, g_Input); // for use in external surfaces only! (like the engine surface)
 
 namespace vgui
 {
@@ -289,10 +321,10 @@ vgui::IInputInternal *g_pInput = &g_Input;
 }
 
 
-CInputWin32::CInputWin32()
+CInputSystem::CInputSystem()
 {
 	m_nDebugMessages = -1;
-#ifndef _X360
+#ifdef DO_IME
 	_imeWnd = null;
 	_imeCandidates = null;
 #endif
@@ -408,7 +440,7 @@ CInputWin32::CInputWin32()
 	_keyTrans[KEY_F12]			="\0\0KEY_F12";
 }
 
-CInputWin32::~CInputWin32()
+CInputSystem::~CInputSystem()
 {
 	DestroyCandidateList();
 }
@@ -416,7 +448,7 @@ CInputWin32::~CInputWin32()
 //-----------------------------------------------------------------------------
 // Resets an input context 
 //-----------------------------------------------------------------------------
-void CInputWin32::InitInputContext( InputContext_t *pContext )
+void CInputSystem::InitInputContext( InputContext_t *pContext )
 {
 	pContext->_rootPanel = NULL;
 	pContext->_keyFocus = NULL;
@@ -450,7 +482,7 @@ void CInputWin32::InitInputContext( InputContext_t *pContext )
 	pContext->m_bRestrictMessagesToModalSubTree = false;
 }
 
-void CInputWin32::ResetInputContext( HInputContext context )
+void CInputSystem::ResetInputContext( HInputContext context )
 {
 	// FIXME: Needs to release various keys, mouse buttons, etc...?
 	// At least needs to cause things to lose focus
@@ -462,14 +494,14 @@ void CInputWin32::ResetInputContext( HInputContext context )
 // Creates/ destroys "input" contexts, which contains information
 // about which controls have mouse + key focus, for example.
 //-----------------------------------------------------------------------------
-HInputContext CInputWin32::CreateInputContext()
+HInputContext CInputSystem::CreateInputContext()
 {
 	HInputContext i = m_Contexts.AddToTail();
 	InitInputContext( &m_Contexts[i] );
 	return i;
 }
 
-void CInputWin32::DestroyInputContext( HInputContext context )
+void CInputSystem::DestroyInputContext( HInputContext context )
 {
 	Assert( context != DEFAULT_INPUT_CONTEXT );
 	if ( m_hContext == context )
@@ -483,7 +515,7 @@ void CInputWin32::DestroyInputContext( HInputContext context )
 //-----------------------------------------------------------------------------
 // Returns the current input context
 //-----------------------------------------------------------------------------
-CInputWin32::InputContext_t *CInputWin32::GetInputContext( HInputContext context )
+CInputSystem::InputContext_t *CInputSystem::GetInputContext( HInputContext context )
 {
 	if (context == DEFAULT_INPUT_CONTEXT)
 		return &m_DefaultInputContext;
@@ -495,7 +527,7 @@ CInputWin32::InputContext_t *CInputWin32::GetInputContext( HInputContext context
 // Associates a particular panel with an input context
 // Associating NULL is valid; it disconnects the panel from the context
 //-----------------------------------------------------------------------------
-void CInputWin32::AssociatePanelWithInputContext( HInputContext context, VPANEL pRoot )
+void CInputSystem::AssociatePanelWithInputContext( HInputContext context, VPANEL pRoot )
 {
 	// Changing the root panel should invalidate keysettings, etc.
 	if (GetInputContext(context)->_rootPanel != pRoot)
@@ -510,7 +542,7 @@ void CInputWin32::AssociatePanelWithInputContext( HInputContext context, VPANEL 
 // Activates a particular input context, use DEFAULT_INPUT_CONTEXT
 // to get the one normally used by VGUI
 //-----------------------------------------------------------------------------
-void CInputWin32::ActivateInputContext( HInputContext context )
+void CInputSystem::ActivateInputContext( HInputContext context )
 {
 	Assert( (context == DEFAULT_INPUT_CONTEXT) || m_Contexts.IsValidIndex(context) );
 	m_hContext = context;
@@ -521,7 +553,7 @@ void CInputWin32::ActivateInputContext( HInputContext context )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CInputWin32::RunFrame()
+void CInputSystem::RunFrame()
 {
 	if ( m_nDebugMessages == -1 )
 	{
@@ -585,6 +617,7 @@ void CInputWin32::RunFrame()
 
 			// send a message to the window saying that it's losing focus
 			{
+				MEM_ALLOC_CREDIT();
 				KeyValues *pMessage = new KeyValues( "KillFocus" );
 				KeyValues::AutoDelete autodelete_pMessage( pMessage );
 				pMessage->SetPtr( "newPanel", wantedKeyFocus );
@@ -617,6 +650,7 @@ void CInputWin32::RunFrame()
 
 			// send a message to the window saying that it's gaining focus
 			{
+				MEM_ALLOC_CREDIT();
 				KeyValues *pMsg = new KeyValues("SetFocus");
 				KeyValues::AutoDelete autodelete_pMsg( pMsg );
 				wantedKeyFocus->SendMessage( pMsg, 0 );
@@ -649,13 +683,20 @@ void CInputWin32::RunFrame()
 			pContext->_keyFocus->MoveToFront();
 		}
 	}
+
+	// Pump any key repeats
+	KeyCode repeatCode = pContext->m_keyRepeater.KeyRepeated();
+	if (repeatCode)
+	{
+		InternalKeyCodePressed( repeatCode );
+	}
 }
 
 
 //-----------------------------------------------------------------------------
 // Purpose: Calculate the new key focus
 //-----------------------------------------------------------------------------
-VPanel *CInputWin32::CalculateNewKeyFocus()
+VPanel *CInputSystem::CalculateNewKeyFocus()
 {
 	InputContext_t *pContext = GetInputContext(m_hContext);
 
@@ -673,9 +714,9 @@ VPanel *CInputWin32::CalculateNewKeyFocus()
 		{			
 			top = (VPanel *)g_pSurface->GetPopup( --nIndex );
 
-			// traverse the heirachy and check if the popup really is visible
+			// traverse the hierarchy and check if the popup really is visible
 			if (top &&
-				top->IsPopup() && 
+				// top->IsPopup() &&  // These are right out of of the popups list!!!
 				top->IsVisible() && 
 				top->IsKeyBoardInputEnabled() && 
 				!g_pSurface->IsMinimized((VPANEL)top) &&
@@ -684,7 +725,7 @@ VPanel *CInputWin32::CalculateNewKeyFocus()
 			{
 				bool bIsVisible = top->IsVisible();
 				VPanel *p = top->GetParent();
-				// drill down the heirachy checking that everything is visible
+				// drill down the hierarchy checking that everything is visible
 				while(p && bIsVisible)
 				{
 					if( p->IsVisible()==false)
@@ -733,7 +774,7 @@ VPanel *CInputWin32::CalculateNewKeyFocus()
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CInputWin32::PanelDeleted(VPANEL vfocus, InputContext_t &context)
+void CInputSystem::PanelDeleted(VPANEL vfocus, InputContext_t &context)
 {
 	VPanel *focus = (VPanel *)vfocus;
 	if (context._keyFocus == focus)
@@ -792,7 +833,7 @@ void CInputWin32::PanelDeleted(VPANEL vfocus, InputContext_t &context)
 // Purpose: 
 // Input  : *focus - 
 //-----------------------------------------------------------------------------
-void CInputWin32::PanelDeleted(VPANEL focus)
+void CInputSystem::PanelDeleted(VPANEL focus)
 {
 	HInputContext i;
 	for (i = m_Contexts.Head(); i != m_Contexts.InvalidIndex(); i = m_Contexts.Next(i) )
@@ -810,7 +851,7 @@ void CInputWin32::PanelDeleted(VPANEL focus)
 //			won't override _mouseCapture settings
 // Input  : newMouseFocus - 
 //-----------------------------------------------------------------------------
-void CInputWin32::SetMouseFocus(VPANEL newMouseFocus)
+void CInputSystem::SetMouseFocus(VPANEL newMouseFocus)
 {
 	// check if we are in modal state, 
 	// and if we are make sure this panel is a child of us.
@@ -883,7 +924,7 @@ void CInputWin32::SetMouseFocus(VPANEL newMouseFocus)
 	}
 }
 
-VPanel *CInputWin32::GetMouseFocusIgnoringModalSubtree()
+VPanel *CInputSystem::GetMouseFocusIgnoringModalSubtree()
 {
 	// find the panel that has the focus
 	VPanel *focus = NULL; 
@@ -950,49 +991,58 @@ VPanel *CInputWin32::GetMouseFocusIgnoringModalSubtree()
 // Purpose: Calculates which panel the cursor is currently over and sets it up
 //			as the current mouse focus.
 //-----------------------------------------------------------------------------
-void CInputWin32::UpdateMouseFocus(int x, int y)
+void CInputSystem::UpdateMouseFocus(int x, int y)
 {
 	// find the panel that has the focus
 	VPanel *focus = NULL; 
 
 	InputContext_t *pContext = GetInputContext( m_hContext );
 
-	if (!pContext->_rootPanel)
+	if (g_pSurface->IsCursorVisible() && g_pSurface->IsWithin(x, y))
 	{
-		if (g_pSurface->IsCursorVisible() && g_pSurface->IsWithin(x, y))
+		// faster version of code below
+		// checks through each popup in order, top to bottom windows
+		int c = g_pSurface->GetPopupCount();
+		for (int i = c - 1; i >= 0; i--)
 		{
-			// faster version of code below
-			// checks through each popup in order, top to bottom windows
-			for (int i = g_pSurface->GetPopupCount() - 1; i >= 0; i--)
-			{
-				VPanel *popup = (VPanel *)g_pSurface->GetPopup(i);
-				VPanel *panel = popup;
-				bool wantsMouse = panel->IsMouseInputEnabled() && IsChildOfModalSubTree( (VPANEL)panel );
-				bool isVisible = !g_pSurface->IsMinimized((VPANEL)panel);
+			VPanel *popup = (VPanel *)g_pSurface->GetPopup(i);
+			VPanel *panel = popup;
 
-				while ( isVisible && panel && panel->GetParent() ) // only consider panels that want mouse input
-				{
-					isVisible = panel->IsVisible();
-					panel = panel->GetParent();
-				}
-				
-
-				if ( wantsMouse && isVisible ) 
-				{
-					focus = (VPanel *)popup->Client()->IsWithinTraverse(x, y, false);
-					if (focus)
-						break;
-				}
-			}
-			if (!focus)
+			if ( pContext->_rootPanel && !popup->HasParent((VPanel*)pContext->_rootPanel) )
 			{
-				focus = (VPanel *)((VPanel *)g_pSurface->GetEmbeddedPanel())->Client()->IsWithinTraverse(x, y, false);
+				// if we have a root panel, only consider popups that belong to it
+				continue;
 			}
+#if defined( _DEBUG )
+			char const *pchName = popup->GetName();
+			NOTE_UNUSED( pchName );
+#endif
+			bool wantsMouse = panel->IsMouseInputEnabled() && IsChildOfModalSubTree( (VPANEL)panel );
+			if ( !wantsMouse )
+				continue;
+
+			bool isVisible = !g_pSurface->IsMinimized((VPANEL)panel);
+			if ( !isVisible )
+				continue;
+
+			while ( isVisible && panel && panel->GetParent() ) // only consider panels that want mouse input
+			{
+				isVisible = panel->IsVisible();
+				panel = panel->GetParent();
+			}
+			
+
+			if ( !wantsMouse || !isVisible ) 
+				continue;
+
+			focus = (VPanel *)popup->Client()->IsWithinTraverse(x, y, false);
+			if (focus)
+				break;
 		}
-	}
-	else
-	{
-		focus = (VPanel *)((VPanel *)(pContext->_rootPanel))->Client()->IsWithinTraverse(x, y, true);
+		if (!focus)
+		{
+			focus = (VPanel *)((VPanel *)g_pSurface->GetEmbeddedPanel())->Client()->IsWithinTraverse(x, y, false);
+		}
 	}
 
 	// mouse focus debugging code
@@ -1024,7 +1074,7 @@ void CInputWin32::UpdateMouseFocus(int x, int y)
 }
 
 // Passes in a keycode which allows hitting other mouse buttons w/o cancelling capture mode
-void CInputWin32::SetMouseCaptureEx(VPANEL panel, MouseCode captureStartMouseCode )
+void CInputSystem::SetMouseCaptureEx(VPANEL panel, MouseCode captureStartMouseCode )
 {
 	// This sets m_MouseCaptureStartCode to -1, so we set the real value afterward
 	SetMouseCapture( panel );
@@ -1041,7 +1091,7 @@ void CInputWin32::SetMouseCaptureEx(VPANEL panel, MouseCode captureStartMouseCod
 	pContext->m_MouseCaptureStartCode = captureStartMouseCode;
 }
 
-VPANEL CInputWin32::GetMouseCapture() 
+VPANEL CInputSystem::GetMouseCapture() 
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	return (VPANEL)pContext->_mouseCapture;
@@ -1053,7 +1103,7 @@ VPANEL CInputWin32::GetMouseCapture()
 //			a NULL panel means that you want to clear the mouseCapture
 //			MouseCaptureLost is sent to the panel that loses the mouse capture
 //-----------------------------------------------------------------------------
-void CInputWin32::SetMouseCapture(VPANEL panel)
+void CInputSystem::SetMouseCapture(VPANEL panel)
 {
 	// check if we are in modal state, 
 	// and if we are make sure this panel is a child of us.
@@ -1090,7 +1140,7 @@ void CInputWin32::SetMouseCapture(VPANEL panel)
 
 // returns true if the specified panel is a child of the current modal panel
 // if no modal panel is set, then this always returns TRUE
-bool CInputWin32::IsChildOfModalSubTree(VPANEL panel)
+bool CInputSystem::IsChildOfModalSubTree(VPANEL panel)
 {
 	if ( !panel )
 		return true;
@@ -1118,7 +1168,7 @@ bool CInputWin32::IsChildOfModalSubTree(VPANEL panel)
 // Purpose: check if we are in modal state, 
 // and if we are make sure this panel has the modal panel as a parent
 //-----------------------------------------------------------------------------
-bool CInputWin32::IsChildOfModalPanel(VPANEL panel, bool checkModalSubTree /*= true*/ )
+bool CInputSystem::IsChildOfModalPanel(VPANEL panel, bool checkModalSubTree /*= true*/ )
 {
 	// NULL is ok.
 	if (!panel)
@@ -1146,60 +1196,68 @@ bool CInputWin32::IsChildOfModalPanel(VPANEL panel, bool checkModalSubTree /*= t
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-VPANEL CInputWin32::GetFocus()
+VPANEL CInputSystem::GetFocus()
 {
 	return (VPANEL)( GetInputContext( m_hContext )->_keyFocus );
-}
-
-VPANEL CInputWin32::GetCalculatedFocus()
-{
-	return NULL;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-VPANEL CInputWin32::GetMouseOver()
+VPANEL CInputSystem::GetCalculatedFocus()
+{
+	return (VPANEL) CalculateNewKeyFocus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+VPANEL CInputSystem::GetMouseOver()
 {
 	return (VPANEL)( GetInputContext( m_hContext )->_mouseOver );
 }
 
-bool CInputWin32::WasMousePressed( MouseCode code )
+VPANEL CInputSystem::GetMouseFocus()
+{
+	return (VPANEL)( GetInputContext( m_hContext )->_mouseFocus );
+}
+
+bool CInputSystem::WasMousePressed( MouseCode code )
 {
 	return GetInputContext( m_hContext )->_mousePressed[ code - MOUSE_FIRST ];
 }
 
-bool CInputWin32::WasMouseDoublePressed( MouseCode code )
+bool CInputSystem::WasMouseDoublePressed( MouseCode code )
 {
 	return GetInputContext( m_hContext )->_mouseDoublePressed[ code - MOUSE_FIRST ];
 }
 
-bool CInputWin32::IsMouseDown( MouseCode code )
+bool CInputSystem::IsMouseDown( MouseCode code )
 {
 	return GetInputContext( m_hContext )->_mouseDown[ code - MOUSE_FIRST ];
 }
 
-bool CInputWin32::WasMouseReleased( MouseCode code )
+bool CInputSystem::WasMouseReleased( MouseCode code )
 {
 	return GetInputContext( m_hContext )->_mouseReleased[ code - MOUSE_FIRST ];
 }
 
-bool CInputWin32::WasKeyPressed( KeyCode code )
+bool CInputSystem::WasKeyPressed( KeyCode code )
 {
 	return GetInputContext( m_hContext )->_keyPressed[ code - KEY_FIRST ];
 }
 
-bool CInputWin32::IsKeyDown( KeyCode code )
+bool CInputSystem::IsKeyDown( KeyCode code )
 {
 	return GetInputContext( m_hContext )->_keyDown[ code - KEY_FIRST ];
 }
 
-bool CInputWin32::WasKeyTyped( KeyCode code )
+bool CInputSystem::WasKeyTyped( KeyCode code )
 {
 	return GetInputContext( m_hContext )->_keyTyped[ code - KEY_FIRST ];
 }
 
-bool CInputWin32::WasKeyReleased( KeyCode code )
+bool CInputSystem::WasKeyReleased( KeyCode code )
 {
 	// changed from: only return true if the key was released and the passed in panel matches the keyFocus
 	return GetInputContext( m_hContext )->_keyReleased[ code - KEY_FIRST ];
@@ -1211,7 +1269,7 @@ bool CInputWin32::WasKeyReleased( KeyCode code )
 // We need to set it because client code may read this during Mouse Pressed
 // events, etc.
 //-----------------------------------------------------------------------------
-void CInputWin32::UpdateCursorPosInternal( int x, int y )
+void CInputSystem::UpdateCursorPosInternal( int x, int y )
 {
 	// Windows sends a CursorMoved message even when you haven't actually
 	// moved the cursor, this means we are going into this fxn just by clicking
@@ -1233,7 +1291,7 @@ void CInputWin32::UpdateCursorPosInternal( int x, int y )
 //-----------------------------------------------------------------------------
 // This is called by panels to teleport the cursor
 //-----------------------------------------------------------------------------
-void CInputWin32::SetCursorPos( int x, int y )
+void CInputSystem::SetCursorPos( int x, int y )
 {
 	if ( IsDispatchingMessageQueue() )
 	{
@@ -1249,7 +1307,7 @@ void CInputWin32::SetCursorPos( int x, int y )
 }
 
 
-void CInputWin32::GetCursorPos(int &x, int &y)
+void CInputSystem::GetCursorPos(int &x, int &y)
 {
 	if ( IsDispatchingMessageQueue() )
 	{
@@ -1263,7 +1321,7 @@ void CInputWin32::GetCursorPos(int &x, int &y)
 
 
 // Here for backward compat
-void CInputWin32::GetCursorPosition( int &x, int &y )
+void CInputSystem::GetCursorPosition( int &x, int &y )
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	x = pContext->m_nCursorX;
@@ -1273,7 +1331,7 @@ void CInputWin32::GetCursorPosition( int &x, int &y )
 //-----------------------------------------------------------------------------
 // Purpose: Converts a key code into a full key name
 //-----------------------------------------------------------------------------
-void CInputWin32::GetKeyCodeText(KeyCode code, char *buf, int buflen)
+void CInputSystem::GetKeyCodeText(KeyCode code, char *buf, int buflen)
 {
 	if (!buf)
 		return;
@@ -1294,7 +1352,7 @@ void CInputWin32::GetKeyCodeText(KeyCode code, char *buf, int buflen)
 //-----------------------------------------------------------------------------
 // Low-level cursor getting/setting functions 
 //-----------------------------------------------------------------------------
-void CInputWin32::SurfaceSetCursorPos(int x, int y)
+void CInputSystem::SurfaceSetCursorPos(int x, int y)
 {
 	if ( g_pSurface->HasCursorPosFunctions() ) // does the surface export cursor functions for us to use?
 	{
@@ -1308,11 +1366,20 @@ void CInputWin32::SurfaceSetCursorPos(int x, int y)
 		x += px;
 		y += py;
 		// set windows cursor pos
+#ifdef WIN32
 		::SetCursorPos(x, y);
+#else
+		// From Alfred on 8/15/2012.
+		//   For l4d2, the vguimatsurface/cursor.cpp functions fire in the engine, the vgui2 ones
+		// should be dormant (this isn't true for Steam however).
+		//
+		// If we ever do need to implement this, look at SDL_GetMouseState(), etc.
+		Assert( !"CInputSystem::SurfaceSetCursorPos NYI" );
+#endif
 	}
 }
 
-void CInputWin32::SurfaceGetCursorPos( int &x, int &y )
+void CInputSystem::SurfaceGetCursorPos( int &x, int &y )
 {
 #ifndef _X360 // X360TBD
 	if ( g_pSurface->HasCursorPosFunctions() ) // does the surface export cursor functions for us to use?
@@ -1321,6 +1388,7 @@ void CInputWin32::SurfaceGetCursorPos( int &x, int &y )
 	}
 	else
 	{
+#ifdef WIN32
 		// get mouse position in windows
 		POINT pnt;
 		VCRHook_GetCursorPos(&pnt);
@@ -1332,6 +1400,14 @@ void CInputWin32::SurfaceGetCursorPos( int &x, int &y )
 		g_pSurface->GetAbsoluteWindowBounds(px, py, pw, pt);
 		x -= px;
 		y -= py;
+#else
+		// From Alfred on 8/15/2012.
+		//   For l4d2, the vguimatsurface/cursor.cpp functions fire in the engine, the vgui2 ones
+		// should be dormant (this isn't true for Steam however).
+		Assert( !"CInputSystem::SurfaceGetCursorPos NYI" );
+		x = 0;
+		y = 0;
+#endif
 	}
 #else
 	x = 0;
@@ -1339,12 +1415,12 @@ void CInputWin32::SurfaceGetCursorPos( int &x, int &y )
 #endif
 }
 
-void CInputWin32::SetCursorOveride(HCursor cursor)
+void CInputSystem::SetCursorOveride(HCursor cursor)
 {
 	_cursorOverride = cursor;
 }
 
-HCursor CInputWin32::GetCursorOveride()
+HCursor CInputSystem::GetCursorOveride()
 {
 	return _cursorOverride;
 }
@@ -1353,9 +1429,9 @@ HCursor CInputWin32::GetCursorOveride()
 //-----------------------------------------------------------------------------
 // Called when we've detected cursor has moved via a windows message
 //-----------------------------------------------------------------------------
-bool CInputWin32::InternalCursorMoved( int x, int y )
+bool CInputSystem::InternalCursorMoved(int x, int y)
 {
-	g_pIVgui->PostMessage((VPANEL)-1, new KeyValues("SetCursorPosInternal", "xpos", x, "ypos", y), NULL);
+	g_pIVgui->PostMessage((VPANEL) MESSAGE_CURSOR_POS, new KeyValues("SetCursorPosInternal", "xpos", x, "ypos", y), NULL);
 	return true;
 }
 
@@ -1363,7 +1439,7 @@ bool CInputWin32::InternalCursorMoved( int x, int y )
 //-----------------------------------------------------------------------------
 // Makes sure the windows cursor is in the right place after processing input 
 //-----------------------------------------------------------------------------
-void CInputWin32::HandleExplicitSetCursor( )
+void CInputSystem::HandleExplicitSetCursor( )
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 
@@ -1381,11 +1457,11 @@ void CInputWin32::HandleExplicitSetCursor( )
 	}
 }
 
-	
+
 //-----------------------------------------------------------------------------
 // Called when we've detected cursor has moved via a windows message
 //-----------------------------------------------------------------------------
-void CInputWin32::PostCursorMessage( )
+void CInputSystem::PostCursorMessage( )
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 
@@ -1418,7 +1494,7 @@ void CInputWin32::PostCursorMessage( )
 	}
 }
 
-bool CInputWin32::InternalMousePressed(MouseCode code)
+bool CInputSystem::InternalMousePressed(MouseCode code)
 {
 	// True means we've processed the message and other code shouldn't see this message
 	bool bFilter = false;
@@ -1490,7 +1566,7 @@ bool CInputWin32::InternalMousePressed(MouseCode code)
 	return bFilter;
 }
 
-bool CInputWin32::InternalMouseDoublePressed(MouseCode code)
+bool CInputSystem::InternalMouseDoublePressed(MouseCode code)
 {
 	// True means we've processed the message and other code shouldn't see this message
 	bool bFilter = false;
@@ -1530,7 +1606,7 @@ bool CInputWin32::InternalMouseDoublePressed(MouseCode code)
 	return bFilter;
 }
 
-bool CInputWin32::InternalMouseReleased( MouseCode code )
+bool CInputSystem::InternalMouseReleased( MouseCode code )
 {
 	// True means we've processed the message and other code shouldn't see this message
 	bool bFilter = false;
@@ -1560,7 +1636,7 @@ bool CInputWin32::InternalMouseReleased( MouseCode code )
 	return bFilter;
 }
 
-bool CInputWin32::InternalMouseWheeled(int delta)
+bool CInputSystem::InternalMouseWheeled(int delta)
 {
 	// True means we've processed the message and other code shouldn't see this message
 	bool bFilter = false;
@@ -1578,7 +1654,7 @@ bool CInputWin32::InternalMouseWheeled(int delta)
 //-----------------------------------------------------------------------------
 // Updates the internal key/mouse state associated with the current input context without sending messages
 //-----------------------------------------------------------------------------
-void CInputWin32::SetMouseCodeState( MouseCode code, MouseCodeState_t state )
+void CInputSystem::SetMouseCodeState( MouseCode code, MouseCodeState_t state )
 {
 	if ( !IsMouseCode( code ) )
 		return;
@@ -1602,9 +1678,9 @@ void CInputWin32::SetMouseCodeState( MouseCode code, MouseCodeState_t state )
 	pContext->_mouseDown[ code - MOUSE_FIRST ] = ( state != BUTTON_RELEASED );
 }
 
-void CInputWin32::SetKeyCodeState( KeyCode code, bool bPressed )
+void CInputSystem::SetKeyCodeState( KeyCode code, bool bPressed )
 {
-	if ( !IsKeyCode( code ) /* && !IsJoystickCode( code ) */ )
+	if ( !IsKeyCode( code ) && !IsJoystickCode( code ) )
 		return;
 
 	InputContext_t *pContext = GetInputContext( m_hContext );
@@ -1621,7 +1697,7 @@ void CInputWin32::SetKeyCodeState( KeyCode code, bool bPressed )
 	pContext->_keyDown[ code - KEY_FIRST ] = bPressed;
 }
 
-void CInputWin32::UpdateButtonState( const InputEvent_t &event )
+void CInputSystem::UpdateButtonState( const InputEvent_t &event )
 {
 	switch( event.m_nType )
 	{
@@ -1656,17 +1732,24 @@ void CInputWin32::UpdateButtonState( const InputEvent_t &event )
 	}
 }
 
-bool CInputWin32::InternalKeyCodePressed( KeyCode code )
+bool CInputSystem::InternalKeyCodePressed( KeyCode code )
 {
+	InputContext_t *pContext = GetInputContext( m_hContext );
+
 	// mask out bogus keys
 	if ( !IsKeyCode( code ) && !IsJoystickCode( code ) )
 		return false;
 
 	bool bFilter = PostKeyMessage( new KeyValues("KeyCodePressed", "code", code ) );
+	if ( bFilter )
+	{
+		// Only notice the key down for repeating if we actually used the key
+		pContext->m_keyRepeater.KeyDown( code );
+	}
 	return bFilter;
 }
 
-void CInputWin32::InternalKeyCodeTyped( KeyCode code )
+void CInputSystem::InternalKeyCodeTyped( KeyCode code )
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	// mask out bogus keys
@@ -1680,7 +1763,7 @@ void CInputWin32::InternalKeyCodeTyped( KeyCode code )
 	PostKeyMessage(new KeyValues("KeyCodeTyped", "code", code));
 }
 
-void CInputWin32::InternalKeyTyped(wchar_t unichar)
+void CInputSystem::InternalKeyTyped(wchar_t unichar)
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	// set key state
@@ -1693,11 +1776,15 @@ void CInputWin32::InternalKeyTyped(wchar_t unichar)
 	PostKeyMessage(new KeyValues("KeyTyped", "unichar", unichar));
 }
 
-bool CInputWin32::InternalKeyCodeReleased( KeyCode code )
+bool CInputSystem::InternalKeyCodeReleased( KeyCode code )
 {	
+	InputContext_t *pContext = GetInputContext( m_hContext );
+
 	// mask out bogus keys
 	if ( !IsKeyCode( code ) && !IsJoystickCode( code ) )
 		return false;
+
+	pContext->m_keyRepeater.KeyUp( code );
 
 	return PostKeyMessage(new KeyValues("KeyCodeReleased", "code", code));
 }
@@ -1705,13 +1792,17 @@ bool CInputWin32::InternalKeyCodeReleased( KeyCode code )
 //-----------------------------------------------------------------------------
 // Purpose: posts a message to the key focus if it's valid
 //-----------------------------------------------------------------------------
-bool CInputWin32::PostKeyMessage(KeyValues *message)
+bool CInputSystem::PostKeyMessage(KeyValues *message)
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if( (pContext->_keyFocus!= NULL) && IsChildOfModalPanel((VPANEL)pContext->_keyFocus))
 	{
+#ifdef _X360
+		g_pIVgui->PostMessage((VPANEL) MESSAGE_CURRENT_KEYFOCUS, message, NULL );
+#else
 		//tell the current focused panel that a key was released
 		g_pIVgui->PostMessage((VPANEL)pContext->_keyFocus, message, NULL );
+#endif
 		return true;
 	}
 
@@ -1719,25 +1810,27 @@ bool CInputWin32::PostKeyMessage(KeyValues *message)
 	return false;
 }
 
-VPANEL CInputWin32::GetAppModalSurface()
+VPANEL CInputSystem::GetAppModalSurface()
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	return (VPANEL)pContext->_appModalPanel;
 }
 
-void CInputWin32::SetAppModalSurface(VPANEL panel)
+void CInputSystem::SetAppModalSurface(VPANEL panel)
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	pContext->_appModalPanel = (VPanel *)panel;
 }
 
 
-void CInputWin32::ReleaseAppModalSurface()
+void CInputSystem::ReleaseAppModalSurface()
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	pContext->_appModalPanel = NULL;
 }
 
+
+#ifdef DO_IME
 
 enum LANGFLAG
 {
@@ -1974,13 +2067,15 @@ static const wchar_t *GetLanguageName( unsigned short id )
 	return name;
 }
 
+#endif // DO_IME
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Input  : *hwnd - 
 //-----------------------------------------------------------------------------
-void CInputWin32::SetIMEWindow( void *hwnd )
+void CInputSystem::SetIMEWindow( void *hwnd )
 {
-#ifndef _X360
+#ifdef DO_IME
 	_imeWnd = hwnd;
 #endif
 }
@@ -1988,15 +2083,16 @@ void CInputWin32::SetIMEWindow( void *hwnd )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void *CInputWin32::GetIMEWindow()
+void *CInputSystem::GetIMEWindow()
 {
-#ifndef _X360
+#ifdef DO_IME
 	return _imeWnd;
 #else
 	return NULL;
 #endif
 }
 
+#ifdef DO_IME
 static void SpewIMEInfo( int langid )
 {
 	LanguageIds *info = GetLanguageInfo( langid );
@@ -2004,16 +2100,19 @@ static void SpewIMEInfo( int langid )
 	{
 		wchar_t const *name = info->shortcode ? info->shortcode : L"???";
 		wchar_t outstr[ 512 ];
-		_snwprintf( outstr, sizeof( outstr ) / sizeof( wchar_t ), L"IME language changed to:  %s", name );
+		V_swprintf_safe( outstr, L"IME language changed to:  %s", name );
 		OutputDebugStringW( outstr );
 		OutputDebugStringW( L"\n" );
 	}
 }
+#endif // DO_IME
 
 // Change keyboard layout type
-void CInputWin32::OnChangeIME( bool forward )
+void CInputSystem::OnChangeIME( bool forward )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	HKL currentKb = GetKeyboardLayout( 0 );
 
 	UINT numKBs = GetKeyboardLayoutList( 0, NULL );
@@ -2060,9 +2159,11 @@ void CInputWin32::OnChangeIME( bool forward )
 #endif
 }
 
-int CInputWin32::GetCurrentIMEHandle()
+int CInputSystem::GetCurrentIMEHandle()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	HKL hkl = (HKL)GetKeyboardLayout( 0 );
 	return (int)hkl;
 #else
@@ -2070,9 +2171,9 @@ int CInputWin32::GetCurrentIMEHandle()
 #endif
 }
 
-int CInputWin32::GetEnglishIMEHandle()
+int CInputSystem::GetEnglishIMEHandle()
 {
-#ifndef _X360
+#ifdef DO_IME
 	HKL hkl = (HKL)0x04090409;
 	return (int)hkl;
 #else
@@ -2080,9 +2181,11 @@ int CInputWin32::GetEnglishIMEHandle()
 #endif
 }
 
-void CInputWin32::OnChangeIMEByHandle( int handleValue )
+void CInputSystem::OnChangeIMEByHandle( int handleValue )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	HKL hkl = (HKL)handleValue;
 
 	ActivateKeyboardLayout( hkl, 0 );
@@ -2094,9 +2197,11 @@ void CInputWin32::OnChangeIMEByHandle( int handleValue )
 }
 
 	// Returns the Language Bar label (Chinese, Korean, Japanese, Russion, Thai, etc.)
-void CInputWin32::GetIMELanguageName( wchar_t *buf, int unicodeBufferSizeInBytes )
+void CInputSystem::GetIMELanguageName( wchar_t *buf, int unicodeBufferSizeInBytes )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	wchar_t const *name = GetLanguageName( LOWORD( GetKeyboardLayout( 0 ) ) );
 	wcsncpy( buf, name, unicodeBufferSizeInBytes / sizeof( wchar_t ) - 1 );
 	buf[ unicodeBufferSizeInBytes / sizeof( wchar_t ) - 1 ] = L'\0';
@@ -2105,9 +2210,9 @@ void CInputWin32::GetIMELanguageName( wchar_t *buf, int unicodeBufferSizeInBytes
 #endif
 }
 	// Returns the short code for the language (EN, CH, KO, JP, RU, TH, etc. ).
-void CInputWin32::GetIMELanguageShortCode( wchar_t *buf, int unicodeBufferSizeInBytes )
+void CInputSystem::GetIMELanguageShortCode( wchar_t *buf, int unicodeBufferSizeInBytes )
 {
-#ifndef _X360
+#ifdef DO_IME
 	LanguageIds *info = GetLanguageInfo( LOWORD( GetKeyboardLayout( 0 ) ) );
 	if ( !info )
 	{
@@ -2124,9 +2229,11 @@ void CInputWin32::GetIMELanguageShortCode( wchar_t *buf, int unicodeBufferSizeIn
 }
 
 // Call with NULL dest to get item count
-int CInputWin32::GetIMELanguageList( LanguageItem *dest, int destcount )
+int CInputSystem::GetIMELanguageList( LanguageItem *dest, int destcount )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	int iret = 0;
 
 	UINT numKBs = GetKeyboardLayoutList( 0, NULL );
@@ -2224,7 +2331,7 @@ DWORD dwSentModeMsg[6] = {
 //	UNKNOWN,
 */
 
-#ifndef _X360
+#ifdef DO_IME
 
 struct IMESettingsTransform
 {
@@ -2361,11 +2468,13 @@ static IMESettingsTransform g_ConversionMode_JP_HalfwidthAlphanumeric(
 	0,
 	0 );
 
-#endif // _X360
+#endif // DO_IME
 
-int CInputWin32::GetIMEConversionModes( ConversionModeItem *dest, int destcount )
+int CInputSystem::GetIMEConversionModes( ConversionModeItem *dest, int destcount )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( dest )
 	{
 		memset( dest, 0, destcount * sizeof( ConversionModeItem ) );
@@ -2477,10 +2586,11 @@ int CInputWin32::GetIMEConversionModes( ConversionModeItem *dest, int destcount 
 		return 2;
 	}
 #endif
+
 	return 0;
 }
 
-#ifndef _X360
+#ifdef DO_IME
 
 static IMESettingsTransform g_SentenceMode_JP_None( 
 	0,
@@ -2511,9 +2621,11 @@ static IMESettingsTransform g_SentenceMode_JP_BiasSpeech(
 
 #endif // _X360
 
-int CInputWin32::GetIMESentenceModes( SentenceModeItem *dest, int destcount )
+int CInputSystem::GetIMESentenceModes( SentenceModeItem *dest, int destcount )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( dest )
 	{
 		memset( dest, 0, destcount * sizeof( SentenceModeItem ) );
@@ -2565,32 +2677,36 @@ int CInputWin32::GetIMESentenceModes( SentenceModeItem *dest, int destcount )
 		return 4;
 	}
 #endif
+
 	return 0;
 }
 
-void CInputWin32::OnChangeIMEConversionModeByHandle( int handleValue )
+void CInputSystem::OnChangeIMEConversionModeByHandle( int handleValue )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( handleValue == 0 )
 		return;
-	
+
 	IMESettingsTransform *txform = ( IMESettingsTransform * )handleValue;
 	txform->Apply( (HWND)GetIMEWindow() );
 #endif
 }
 
-void CInputWin32::OnChangeIMESentenceModeByHandle( int handleValue )
+void CInputSystem::OnChangeIMESentenceModeByHandle( int handleValue )
 {
 }
 
-void CInputWin32::OnInputLanguageChanged()
+void CInputSystem::OnInputLanguageChanged()
 {
 }
 
-void CInputWin32::OnIMEStartComposition()
+void CInputSystem::OnIMEStartComposition()
 {
 }
 
+#ifdef DO_IME
 void DescribeIMEFlag( char const *string, bool value )
 {
 	if ( value )
@@ -2600,10 +2716,13 @@ void DescribeIMEFlag( char const *string, bool value )
 }
 
 #define IMEDesc( x )	DescribeIMEFlag( #x, flags & x );
+#endif // DO_IME
 
-void CInputWin32::OnIMEComposition( int flags )
+void CInputSystem::OnIMEComposition( int flags )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	/*
 	Msg( "OnIMEComposition\n" );
 
@@ -2664,7 +2783,7 @@ void CInputWin32::OnIMEComposition( int flags )
 #endif
 }
 
-void CInputWin32::OnIMEEndComposition()
+void CInputSystem::OnIMEEndComposition()
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if ( pContext )
@@ -2674,9 +2793,9 @@ void CInputWin32::OnIMEEndComposition()
 	}
 }
 
-void CInputWin32::DestroyCandidateList()
+void CInputSystem::DestroyCandidateList()
 {
-#ifndef _X360
+#ifdef DO_IME
 	if ( _imeCandidates )
 	{
 		delete[] (char *)_imeCandidates;
@@ -2685,9 +2804,11 @@ void CInputWin32::DestroyCandidateList()
 #endif
 }
 
-void CInputWin32::OnIMEShowCandidates() 
+void CInputSystem::OnIMEShowCandidates() 
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	DestroyCandidateList();
 	CreateNewCandidateList();
 
@@ -2695,17 +2816,21 @@ void CInputWin32::OnIMEShowCandidates()
 #endif
 }
 
-void CInputWin32::OnIMECloseCandidates() 
+void CInputSystem::OnIMECloseCandidates() 
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	InternalHideCandidateWindow();
 	DestroyCandidateList();
 #endif
 }
 
-void CInputWin32::OnIMEChangeCandidates() 
+void CInputSystem::OnIMEChangeCandidates() 
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	DestroyCandidateList();
 	CreateNewCandidateList();
 
@@ -2713,9 +2838,11 @@ void CInputWin32::OnIMEChangeCandidates()
 #endif
 }
 
-void CInputWin32::CreateNewCandidateList()
+void CInputSystem::CreateNewCandidateList()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	Assert( !_imeCandidates );
 
 	HIMC hImc = ImmGetContext( ( HWND )GetIMEWindow() );
@@ -2747,9 +2874,11 @@ void CInputWin32::CreateNewCandidateList()
 #endif
 }
 
-int CInputWin32::GetCandidateListCount()
+int  CInputSystem::GetCandidateListCount()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( !_imeCandidates )
 		return 0;
 
@@ -2759,10 +2888,12 @@ int CInputWin32::GetCandidateListCount()
 #endif
 }
 
-void CInputWin32::GetCandidate( int num, wchar_t *dest, int destSizeBytes )
+void CInputSystem::GetCandidate( int num, wchar_t *dest, int destSizeBytes )
 {
+	ASSERT_IF_IME_NYI();
+
 	dest[ 0 ] = L'\0';
-#ifndef _X360
+#ifdef DO_IME
 	if ( num < 0 || num >= (int)_imeCandidates->dwCount )
 	{
 		return;
@@ -2776,9 +2907,11 @@ void CInputWin32::GetCandidate( int num, wchar_t *dest, int destSizeBytes )
 #endif
 }
 
-int CInputWin32::GetCandidateListSelectedItem()
+int CInputSystem::GetCandidateListSelectedItem()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( !_imeCandidates )
 		return 0;
 
@@ -2788,9 +2921,11 @@ int CInputWin32::GetCandidateListSelectedItem()
 #endif
 }
 
-int CInputWin32::GetCandidateListPageSize()
+int  CInputSystem::GetCandidateListPageSize()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( !_imeCandidates )
 		return 0;
 	return (int)_imeCandidates->dwPageSize;
@@ -2799,9 +2934,11 @@ int CInputWin32::GetCandidateListPageSize()
 #endif
 }
 
-int CInputWin32::GetCandidateListPageStart()
+int CInputSystem::GetCandidateListPageStart()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	if ( !_imeCandidates )
 		return 0;
 	return (int)_imeCandidates->dwPageStart;
@@ -2810,9 +2947,11 @@ int CInputWin32::GetCandidateListPageStart()
 #endif
 }
 
-void CInputWin32::SetCandidateListPageStart( int start )
+void CInputSystem::SetCandidateListPageStart( int start )
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	HIMC hImc = ImmGetContext( ( HWND )GetIMEWindow() );
 	if ( hImc )
 	{
@@ -2822,7 +2961,7 @@ void CInputWin32::SetCandidateListPageStart( int start )
 #endif
 }
 
-void CInputWin32::OnIMERecomputeModes()
+void CInputSystem::OnIMERecomputeModes()
 {
 }
 
@@ -2830,9 +2969,11 @@ void CInputWin32::OnIMERecomputeModes()
 // Purpose: 
 // Output : Returns true on success, false on failure.
 //-----------------------------------------------------------------------------
-bool CInputWin32::CandidateListStartsAtOne()
+bool CInputSystem::CandidateListStartsAtOne()
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
 	DWORD prop = ImmGetProperty( GetKeyboardLayout( 0 ), IGP_PROPERTY );
 	if ( prop &	IME_PROP_CANDLIST_START_FROM_1 )
 	{
@@ -2842,9 +2983,11 @@ bool CInputWin32::CandidateListStartsAtOne()
 	return false;
 }
 
-void CInputWin32::SetCandidateWindowPos( int x, int y ) 
+void CInputSystem::SetCandidateWindowPos( int x, int y ) 
 {
-#ifndef _X360
+	ASSERT_IF_IME_NYI();
+
+#ifdef DO_IME
     POINT		point;
     CANDIDATEFORM Candidate;
 
@@ -2866,7 +3009,7 @@ void CInputWin32::SetCandidateWindowPos( int x, int y )
 #endif
 }
 
-void CInputWin32::InternalSetCompositionString( const wchar_t *compstr )
+void CInputSystem::InternalSetCompositionString( const wchar_t *compstr )
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if ( pContext )
@@ -2876,7 +3019,7 @@ void CInputWin32::InternalSetCompositionString( const wchar_t *compstr )
 	}
 }
 
-void CInputWin32::InternalShowCandidateWindow()
+void CInputSystem::InternalShowCandidateWindow()
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if ( pContext )
@@ -2885,7 +3028,7 @@ void CInputWin32::InternalShowCandidateWindow()
 	}
 }
 
-void CInputWin32::InternalHideCandidateWindow()
+void CInputSystem::InternalHideCandidateWindow()
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if ( pContext )
@@ -2894,7 +3037,7 @@ void CInputWin32::InternalHideCandidateWindow()
 	}
 }
 
-void CInputWin32::InternalUpdateCandidateWindow()
+void CInputSystem::InternalUpdateCandidateWindow()
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if ( pContext )
@@ -2903,9 +3046,9 @@ void CInputWin32::InternalUpdateCandidateWindow()
 	}
 }
 
-bool CInputWin32::GetShouldInvertCompositionString()
+bool CInputSystem::GetShouldInvertCompositionString()
 {
-#ifndef _X360
+#ifdef DO_IME
 	LanguageIds *info = GetLanguageInfo( LOWORD( GetKeyboardLayout( 0 ) ) );
 	if ( !info )
 		return false;
@@ -2917,7 +3060,7 @@ bool CInputWin32::GetShouldInvertCompositionString()
 #endif
 }
 
-void CInputWin32::RegisterKeyCodeUnhandledListener( VPANEL panel )
+void CInputSystem::RegisterKeyCodeUnhandledListener( VPANEL panel )
 {
 	if ( !panel )
 		return;
@@ -2934,7 +3077,7 @@ void CInputWin32::RegisterKeyCodeUnhandledListener( VPANEL panel )
 	}
 }
 
-void CInputWin32::UnregisterKeyCodeUnhandledListener( VPANEL panel )
+void CInputSystem::UnregisterKeyCodeUnhandledListener( VPANEL panel )
 {
 	if ( !panel )
 		return;
@@ -2950,7 +3093,7 @@ void CInputWin32::UnregisterKeyCodeUnhandledListener( VPANEL panel )
 
 
 // Posts unhandled message to all interested panels
-void CInputWin32::OnKeyCodeUnhandled( int keyCode )
+void CInputSystem::OnKeyCodeUnhandled( int keyCode )
 {
 	InputContext_t *pContext = GetInputContext(m_hContext);
 	if ( !pContext )
@@ -2964,7 +3107,7 @@ void CInputWin32::OnKeyCodeUnhandled( int keyCode )
 	}
 }
 
-void CInputWin32::PostModalSubTreeMessage( VPanel *subTree, bool state )
+void CInputSystem::PostModalSubTreeMessage( VPanel *subTree, bool state )
 {
 	InputContext_t *pContext = GetInputContext( m_hContext );
 	if( pContext->m_pModalSubTree == NULL )
@@ -2982,7 +3125,7 @@ void CInputWin32::PostModalSubTreeMessage( VPanel *subTree, bool state )
 //  if restrictMessagesToSubTree is false, then mouse and kb messages are routed as normal except that they are not routed down into the subtree
 //   however, if a mouse click occurs outside of the subtree, and "UnhandleMouseClick" message is sent to unhandledMouseClickListener panel
 //   if it's set
-void CInputWin32::SetModalSubTree( VPANEL subTree, VPANEL unhandledMouseClickListener, bool restrictMessagesToSubTree /*= true*/ )
+void CInputSystem::SetModalSubTree( VPANEL subTree, VPANEL unhandledMouseClickListener, bool restrictMessagesToSubTree /*= true*/ )
 {
 	InputContext_t *pContext = GetInputContext(m_hContext);
 	if ( !pContext )
@@ -3004,7 +3147,7 @@ void CInputWin32::SetModalSubTree( VPANEL subTree, VPANEL unhandledMouseClickLis
 	PostModalSubTreeMessage( pContext->m_pModalSubTree, true );
 }
 
-void CInputWin32::ReleaseModalSubTree()
+void CInputSystem::ReleaseModalSubTree()
 {
 	InputContext_t *pContext = GetInputContext(m_hContext);
 	if ( !pContext )
@@ -3021,7 +3164,7 @@ void CInputWin32::ReleaseModalSubTree()
 
 }
 
-VPANEL CInputWin32::GetModalSubTree()
+VPANEL CInputSystem::GetModalSubTree()
 {
 	InputContext_t *pContext = GetInputContext(m_hContext);
 	if ( !pContext )
@@ -3031,7 +3174,7 @@ VPANEL CInputWin32::GetModalSubTree()
 }
 
 // These toggle whether the modal subtree is exclusively receiving messages or conversely whether it's being excluded from receiving messages
-void CInputWin32::SetModalSubTreeReceiveMessages( bool state )
+void CInputSystem::SetModalSubTreeReceiveMessages( bool state )
 {
 	InputContext_t *pContext = GetInputContext(m_hContext);
 	if ( !pContext )
@@ -3045,9 +3188,9 @@ void CInputWin32::SetModalSubTreeReceiveMessages( bool state )
 	
 }
 
-bool CInputWin32::ShouldModalSubTreeReceiveMessages() const
+bool CInputSystem::ShouldModalSubTreeReceiveMessages() const
 {
-	InputContext_t *pContext = const_cast< CInputWin32 * >( this )->GetInputContext(m_hContext);
+	InputContext_t *pContext = const_cast< CInputSystem * >( this )->GetInputContext(m_hContext);
 	if ( !pContext )
 		return true;
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -50,6 +50,8 @@ extern MatSysWindow *g_MatSysWindow;
 extern IMaterial *g_materialBackground;
 extern IMaterial *g_materialWireframe;
 extern IMaterial *g_materialWireframeVertexColor;
+extern IMaterial *g_materialWireframeVertexColorNoCull;
+extern IMaterial *g_materialDebugCopyBaseTexture;
 extern IMaterial *g_materialFlatshaded;
 extern IMaterial *g_materialSmoothshaded;
 extern IMaterial *g_materialBones;
@@ -99,7 +101,7 @@ public:
 	bool			FindParameter(const char *s);
 	const char*		FindParameterArg(const char *s);
 
-	void			SetTitleText(const char *fmt, ...);
+	void			SetTitleText(PRINTF_FORMAT_STRING const char *fmt, ...);
 
 
 private:
@@ -156,10 +158,10 @@ public:
 // ---------------------------------------------------------------------------------------- //
 
 // Show an error dialog and quit.
-bool Sys_Error(const char *pMsg, ...);
+bool Sys_Error(PRINTF_FORMAT_STRING const char *pMsg, ...);
 
 // Print to the trace window.
-void con_Printf(const char *pMsg, ...);
+void con_Printf(PRINTF_FORMAT_STRING const char *pMsg, ...);
 
 // Returns true if the key is down.
 bool IsKeyDown(char key);

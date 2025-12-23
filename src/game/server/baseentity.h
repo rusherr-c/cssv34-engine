@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,8 +19,10 @@
 #include "collisionproperty.h"
 #include "ServerNetworkProperty.h"
 #include "shareddefs.h"
+#include "engine/ivmodelinfo.h"
 
 class CDamageModifier;
+class CDmgAccumulator;
 
 struct CSoundParameters;
 
@@ -28,6 +30,7 @@ class AI_CriteriaSet;
 class IResponseSystem;
 class IEntitySaveUtils;
 class CRecipientFilter;
+class CStudioHdr;
 
 // Matching the high level concept is significantly better than other criteria
 // FIXME:  Could do this in the script file by making it required and bumping up weighting there instead...
@@ -79,6 +82,8 @@ typedef struct KeyValueData_s KeyValueData;
 class CUserCmd;
 class CSkyCamera;
 class CEntityMapData;
+class INextBot;
+class IHasAttributes;
 
 typedef CUtlVector< CBaseEntity* > EntityList_t;
 
@@ -94,14 +99,14 @@ enum Class_T
 	CLASS_ANTLION,
 	CLASS_BARNACLE,
 	CLASS_BULLSEYE,
-	CLASS_BULLSQUID,	
+	//CLASS_BULLSQUID,	
 	CLASS_CITIZEN_PASSIVE,	
 	CLASS_CITIZEN_REBEL,
 	CLASS_COMBINE,
 	CLASS_COMBINE_GUNSHIP,
 	CLASS_CONSCRIPT,
 	CLASS_HEADCRAB,
-	CLASS_HOUNDEYE,
+	//CLASS_HOUNDEYE,
 	CLASS_MANHACK,
 	CLASS_METROPOLICE,		
 	CLASS_MILITARY,		
@@ -151,14 +156,14 @@ enum Class_T
 	CLASS_ANTLION,
 	CLASS_BARNACLE,
 	CLASS_BULLSEYE,
-	CLASS_BULLSQUID,	
+	//CLASS_BULLSQUID,	
 	CLASS_CITIZEN_PASSIVE,	
 	CLASS_CITIZEN_REBEL,
 	CLASS_COMBINE,
 	CLASS_COMBINE_GUNSHIP,
 	CLASS_CONSCRIPT,
 	CLASS_HEADCRAB,
-	CLASS_HOUNDEYE,
+	//CLASS_HOUNDEYE,
 	CLASS_MANHACK,
 	CLASS_METROPOLICE,		
 	CLASS_MILITARY,		
@@ -400,6 +405,9 @@ public:
 	virtual int				GetModelIndex( void ) const;
  	virtual string_t		GetModelName( void ) const;
 
+	void					ClearModelIndexOverrides( void );
+	virtual void			SetModelIndexOverride( int index, int nValue );
+
 public:
 	// virtual methods for derived classes to override
 	virtual bool			TestCollision( const Ray_t& ray, unsigned int mask, trace_t& trace );
@@ -474,6 +482,9 @@ public:
 	void					DestroyDataObject( int type );
 	void					DestroyAllDataObjects( void );
 
+public:
+	void SetScaledPhysics( IPhysicsObject *pNewObject );
+
 	// virtual methods; you can override these
 public:
 	// Owner entity.
@@ -539,6 +550,12 @@ public:
 
 	virtual void SetModel( const char *szModelName );
 
+protected:
+	// Notification on model load. May be called multiple times for dynamic models.
+	// Implementations must call BaseClass::OnNewModel and pass return value through.
+	virtual CStudioHdr *OnNewModel();
+
+public:
 	virtual void PostConstructor( const char *szClassname );
 	virtual void PostClientActive( void );
 	virtual void ParseMapData( CEntityMapData *mapData );
@@ -552,11 +569,6 @@ public:
 
 	// Activate - called for each entity after each load game and level load
 	virtual void Activate( void );
-
-	// Called once per frame after the server frame loop has finished and after all messages being
-	//  sent to clients have been sent.
-	// NOTE: This will not be called unless the entity requests it via gEntList.AddPostClientMessageEntity
-	void PostClientMessagesSent( void );
 
 	// Hierarchy traversal
 	CBaseEntity *GetMoveParent( void );
@@ -778,6 +790,11 @@ public:
 	// was pev->rendermode
 	CNetworkVar( unsigned char, m_nRenderMode );
 	CNetworkVar( short, m_nModelIndex );
+	
+#ifdef TF_DLL
+	CNetworkArray( int, m_nModelIndexOverrides, MAX_VISION_MODES ); // used to override the base model index on the client if necessary
+#endif
+
 	// was pev->rendercolor
 	CNetworkColor32( m_clrRender );
 	const color32 GetRenderColor() const;
@@ -792,6 +809,10 @@ public:
 	float		m_flPrevAnimTime;
 	CNetworkVar( float, m_flAnimTime );  // this is the point in time that the client will interpolate to position,angle,frame,etc.
 	CNetworkVar( float, m_flSimulationTime );
+
+	void IncrementInterpolationFrame(); // Call this to cause a discontinuity (teleport)
+
+	CNetworkVar( int, m_ubInterpolationFrame );
 
 	int				m_nLastThinkTick;
 
@@ -868,12 +889,12 @@ public:
 	virtual ITraceFilter*	GetBeamTraceFilter( void );
 
 	// Call this to do a TraceAttack on an entity, performs filtering. Don't call TraceAttack() directly except when chaining up to base class
-	void			DispatchTraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr );
+	void			DispatchTraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr, CDmgAccumulator *pAccumulator = NULL );
 	virtual bool	PassesDamageFilter( const CTakeDamageInfo &info );
 
 
 protected:
-	virtual void	TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr );
+	virtual void	TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr, CDmgAccumulator *pAccumulator = NULL );
 
 public:
 
@@ -883,7 +904,8 @@ public:
 	virtual int		OnTakeDamage( const CTakeDamageInfo &info );
 
 	// This is what you should call to apply damage to an entity.
-	void TakeDamage( const CTakeDamageInfo &info );
+	int TakeDamage( const CTakeDamageInfo &info );
+	virtual void AdjustDamageDirection( const CTakeDamageInfo &info, Vector &dir, CBaseEntity *pEnt ) {}
 
 	virtual int		TakeHealth( float flHealth, int bitsDamageType );
 
@@ -904,12 +926,13 @@ public:
 	virtual bool			IsNPC( void ) const { return false; }
 	CAI_BaseNPC				*MyNPCPointer( void ); 
 	virtual CBaseCombatCharacter *MyCombatCharacterPointer( void ) { return NULL; }
+	virtual INextBot		*MyNextBotPointer( void ) { return NULL; }
 	virtual float			GetDelay( void ) { return 0; }
 	virtual bool			IsMoving( void );
 	bool					IsWorld() { return entindex() == 0; }
 	virtual char const		*DamageDecal( int bitsDamageType, int gameMaterial );
 	virtual void			DecalTrace( trace_t *pTrace, char const *decalName );
-	virtual void			ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomImpactName = NULL );
+	virtual void			ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCustomImpactName = NULL );
 
 	void			AddPoints( int score, bool bAllowNegativeScore );
 	void			AddPointsToTeam( int score, bool bAllowNegativeScore );
@@ -921,8 +944,15 @@ public:
 	virtual bool	IsNetClient( void ) const { return false; }
 	virtual bool	IsTemplate( void ) { return false; }
 	virtual bool	IsBaseObject( void ) const { return false; }
+	virtual bool	IsBaseTrain( void ) const { return false; }
 	bool			IsBSPModel() const;
+	bool			IsCombatCharacter() { return MyCombatCharacterPointer() == NULL ? false : true; }
 	bool			IsInWorld( void ) const;
+	virtual bool	IsCombatItem( void ) const { return false; }
+
+	virtual bool	IsBaseCombatWeapon( void ) const { return false; }
+	virtual bool	IsWearable( void ) const { return false; }
+	virtual CBaseCombatWeapon *MyCombatWeaponPointer( void ) { return NULL; }
 
 	// If this is a vehicle, returns the vehicle interface
 	virtual IServerVehicle*			GetServerVehicle() { return NULL; }
@@ -935,7 +965,7 @@ public:
 	int				GetTeamNumber( void ) const;		// Get the Team number of the team this entity is on
 	virtual void	ChangeTeam( int iTeamNum );			// Assign this entity to a team.
 	bool			IsInTeam( CTeam *pTeam ) const;		// Returns true if this entity's in the specified team
-	bool			InSameTeam( CBaseEntity *pEntity ) const;	// Returns true if the specified entity is on the same team as this one
+	bool			InSameTeam( const CBaseEntity *pEntity ) const;	// Returns true if the specified entity is on the same team as this one
 	bool			IsInAnyTeam( void ) const;			// Returns true if this entity is in any team
 	const char		*TeamID( void ) const;				// Returns the name of the team this entity is on.
 
@@ -1039,6 +1069,7 @@ public:
 		const Vector &vecSpread, float flDistance, int iAmmoType, int iTracerFreq = 4, 
 		int firingEntID = -1, int attachmentID = -1, int iDamage = 0, 
 		CBaseEntity *pAttacker = NULL, bool bFirstShotAccurate = false, bool bPrimaryAttack = true );
+	virtual void ModifyFireBulletsDamage( CTakeDamageInfo* dmgInfo ) {}
 
 	virtual CBaseEntity *Respawn( void ) { return NULL; }
 
@@ -1050,43 +1081,63 @@ public:
 	virtual bool IsLockedByMaster( void ) { return false; }
 
 	// Health accessors.
-	int		GetMaxHealth()  const	{ return m_iMaxHealth; }
+	virtual int		GetMaxHealth()  const	{ return m_iMaxHealth; }
 	void	SetMaxHealth( int amt )	{ m_iMaxHealth = amt; }
 
 	int		GetHealth() const		{ return m_iHealth; }
 	void	SetHealth( int amt )	{ m_iHealth = amt; }
 
+	float HealthFraction() const;
+
 	// Ugly code to lookup all functions to make sure they are in the table when set.
 #ifdef _DEBUG
-	void FunctionCheck( void *pFunction, const char *name );
 
+#ifdef GNUC
+#define ENTITYFUNCPTR_SIZE	8
+#else
+#define ENTITYFUNCPTR_SIZE	4
+#endif
+
+	void FunctionCheck( void *pFunction, const char *name );
 	ENTITYFUNCPTR TouchSet( ENTITYFUNCPTR func, char *name ) 
 	{ 
-		COMPILE_TIME_ASSERT( sizeof(func) == 4 );
+		COMPILE_TIME_ASSERT( sizeof(func) == ENTITYFUNCPTR_SIZE );
 		m_pfnTouch = func; 
 		FunctionCheck( *(reinterpret_cast<void **>(&m_pfnTouch)), name ); 
 		return func;
 	}
 	USEPTR	UseSet( USEPTR func, char *name ) 
 	{ 
-		COMPILE_TIME_ASSERT( sizeof(func) == 4 );
+		COMPILE_TIME_ASSERT( sizeof(func) == ENTITYFUNCPTR_SIZE );
 		m_pfnUse = func; 
 		FunctionCheck( *(reinterpret_cast<void **>(&m_pfnUse)), name ); 
 		return func;
 	}
 	ENTITYFUNCPTR	BlockedSet( ENTITYFUNCPTR func, char *name ) 
 	{ 
-		COMPILE_TIME_ASSERT( sizeof(func) == 4 );
+		COMPILE_TIME_ASSERT( sizeof(func) == ENTITYFUNCPTR_SIZE );
 		m_pfnBlocked = func; 
 		FunctionCheck( *(reinterpret_cast<void **>(&m_pfnBlocked)), name ); 
 		return func;
 	}
 
-#endif
+#endif // _DEBUG
+
 	virtual void	ModifyOrAppendCriteria( AI_CriteriaSet& set );
 	void			AppendContextToCriteria( AI_CriteriaSet& set, const char *prefix = "" );
 	void			DumpResponseCriteria( void );
-	
+
+	// Return the IHasAttributes interface for this base entity. Removes the need for:
+	//	dynamic_cast< IHasAttributes * >( pEntity );
+	// Which is remarkably slow.
+	// GetAttribInterface( CBaseEntity *pEntity ) in attribute_manager.h uses
+	//  this function, tests for NULL, and Asserts m_pAttributes == dynamic_cast.
+	inline IHasAttributes *GetHasAttributesInterfacePtr() const { return m_pAttributes; }
+
+protected:
+	// NOTE: m_pAttributes needs to be set in the leaf class constructor.
+	IHasAttributes *m_pAttributes;
+
 private:
 	friend class CAI_Senses;
 	CBaseEntity	*m_pLink;// used for temporary link-list operations. 
@@ -1138,9 +1189,8 @@ public:
 	virtual Vector	HeadTarget( const Vector &posSrc );
 	virtual void	GetVectors(Vector* forward, Vector* right, Vector* up) const;
 
-	virtual const Vector &GetViewOffset() { return m_vecViewOffset.Get(); }
-	const Vector &GetViewOffset() const { return const_cast<CBaseEntity *>(this)->GetViewOffset(); }
-	void			SetViewOffset( const Vector &vecOffset );
+	virtual const Vector &GetViewOffset() const;
+	virtual void SetViewOffset( const Vector &v );
 
 	// NOTE: Setting the abs velocity in either space will cause a recomputation
 	// in the other space, so setting the abs velocity will also set the local vel
@@ -1286,6 +1336,7 @@ public:
 	void					StopSound( const char *soundname, HSOUNDSCRIPTHANDLE& handle );
 	void					GenderExpandString( char const *in, char *out, int maxlen );
 
+	virtual void ModifyEmitSoundParams( EmitSound_t &params );
 
 	static float GetSoundDuration( const char *soundname, char const *actormodel );
 
@@ -1323,6 +1374,9 @@ public:
 	static bool m_bAllowPrecache;
 
 	static bool IsSimulatingOnAlternateTicks();
+
+	virtual bool IsDeflectable() { return false; }
+	virtual void Deflected( CBaseEntity *pDeflectedBy, Vector &vecDir ) {}
 
 //	void Relink() {}
 
@@ -1475,9 +1529,15 @@ private:
 	void					CheckStepSimulationChanged();
 	// Run regular think and latch off angle/origin changes so we can interpolate them on the server to fake simulation
 	void					StepSimulationThink( float dt );
+
 	// Compute network origin
-	bool					ComputeStepSimulationNetworkOrigin( StepSimulationData *step );
-	bool					ComputeStepSimulationNetworkAngles( StepSimulationData *step );
+private:
+	void					ComputeStepSimulationNetwork( StepSimulationData *step );
+
+public:
+	bool					UseStepSimulationNetworkOrigin( const Vector **out_v );
+	bool					UseStepSimulationNetworkAngles( const QAngle **out_a );
+
 public:
 	// Add a discontinuity to a step
 	bool					AddStepDiscontinuity( float flTime, const Vector &vecOrigin, const QAngle &vecAngles );
@@ -1492,10 +1552,6 @@ private:
 	void					CheckHasGamePhysicsSimulation();
 	bool					WillThink();
 	bool					WillSimulateGamePhysics();
-
-
-	friend void SendProxy_Origin( const SendProp *pProp, const void *pStruct, const void *pData, DVariant *pOut, int iElement, int objectID );
-	friend void SendProxy_Angles( const SendProp *pProp, const void *pStruct, const void *pData, DVariant *pOut, int iElement, int objectID );
 
 	friend class CPushBlockerEnum;
 
@@ -1652,6 +1708,21 @@ private:
 	// was pev->view_ofs ( FIXME:  Move somewhere up the hierarch, CBaseAnimating, etc. )
 	CNetworkVectorForDerived( m_vecViewOffset );
 
+private:
+	// dynamic model state tracking
+	bool m_bDynamicModelAllowed;
+	bool m_bDynamicModelPending;
+	bool m_bDynamicModelSetBounds;
+	void OnModelLoadComplete( const model_t* model );
+	friend class CBaseEntityModelLoadProxy;
+
+protected:
+	void EnableDynamicModels() { m_bDynamicModelAllowed = true; }
+
+public:
+	bool IsDynamicModelLoading() const { return m_bDynamicModelPending; } 
+	void SetCollisionBoundsFromModel();
+
 #if !defined( NO_ENTITY_PREDICTION )
 	CNetworkVar( bool, m_bIsPlayerSimulated );
 	// Player who is driving my simulation
@@ -1666,7 +1737,7 @@ private:
 // Methods shared by client and server
 public:
 	void							SetSize( const Vector &vecMin, const Vector &vecMax ); // UTIL_SetSize( this, mins, maxs );
-	static int						PrecacheModel( const char *name ); 
+	static int						PrecacheModel( const char *name, bool bPreload = true ); 
 	static bool						PrecacheSound( const char *name );
 	static void						PrefetchSound( const char *name );
 	void							Remove( ); // UTIL_Remove( this );
@@ -1677,6 +1748,7 @@ private:
 	//  randon number generators to spit out the same random numbers on both sides for a particular
 	//  usercmd input.
 	static int						m_nPredictionRandomSeed;
+	static int						m_nPredictionRandomSeedServer;
 	static CBasePlayer				*m_pPredictionPlayer;
 
 	// FIXME: Make hierarchy a member of CBaseEntity
@@ -1690,7 +1762,7 @@ private:
 	
 public:
 	// Accessors for above
-	static int						GetPredictionRandomSeed( void );
+	static int						GetPredictionRandomSeed( bool bUseUnSyncedServerPlatTime = false );
 	static void						SetPredictionRandomSeed( const CUserCmd *cmd );
 	static CBasePlayer				*GetPredictionPlayer( void );
 	static void						SetPredictionPlayer( CBasePlayer *player );
@@ -1728,6 +1800,18 @@ public:
 	{
 		return s_bAbsQueriesValid;
 	}
+
+	virtual bool ShouldBlockNav() const { return true; }
+
+	virtual bool ShouldForceTransmitsForTeam( int iTeam ) { return false; }
+
+	void 			SetTruceValidForEnt( bool bTruceValidForEnt ) { m_bTruceValidForEnt = bTruceValidForEnt; }
+	virtual bool	IsTruceValidForEnt( void ) const { return m_bTruceValidForEnt; }
+
+private:
+	CThreadFastMutex m_CalcAbsolutePositionMutex;
+
+	bool	m_bTruceValidForEnt;
 };
 
 // Send tables exposed in this module.
@@ -2390,12 +2474,6 @@ inline string_t CBaseEntity::GetModelName( void ) const
 	return m_ModelName;
 }
 
-inline void CBaseEntity::SetModelIndex( int index )
-{
-	m_nModelIndex = index;
-	DispatchUpdateTransmitState();
-}
-
 inline int CBaseEntity::GetModelIndex( void ) const
 {
 	return m_nModelIndex;
@@ -2532,7 +2610,7 @@ inline void CBaseEntity::FireBullets( int cShots, const Vector &vecSrc,
 	info.m_flDistance = flDistance;
 	info.m_iAmmoType = iAmmoType;
 	info.m_iTracerFreq = iTracerFreq;
-	info.m_iDamage = iDamage;
+	info.m_flDamage = iDamage;
 	info.m_pAttacker = pAttacker;
 	info.m_nFlags = bFirstShotAccurate ? FIRE_BULLETS_FIRST_SHOT_ACCURATE : 0;
 	info.m_bPrimaryAttack = bPrimaryAttack;
@@ -2603,6 +2681,13 @@ class CLogicalEntity : public CServerOnlyEntity
 public:
 	virtual bool KeyValue( const char *szKeyName, const char *szValue );
 };
+
+
+// Network proxy functions
+
+void SendProxy_Origin( const SendProp *pProp, const void *pStruct, const void *pData, DVariant *pOut, int iElement, int objectID );
+void SendProxy_OriginXY( const SendProp *pProp, const void *pStruct, const void *pData, DVariant *pOut, int iElement, int objectID );
+void SendProxy_OriginZ( const SendProp *pProp, const void *pStruct, const void *pData, DVariant *pOut, int iElement, int objectID );
 
 
 #endif // BASEENTITY_H

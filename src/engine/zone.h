@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,6 +8,8 @@
 #ifndef ZONE_H
 #define ZONE_H
 #pragma once
+
+#include "tier0/dbg.h"
 
 void Memory_Init (void);
 void Memory_Shutdown( void );

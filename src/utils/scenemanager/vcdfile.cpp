@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -156,8 +156,7 @@ char const *CVCDFile::GetComments()
 void CVCDFile::SetComments( char const *comments )
 {
 	delete[] m_pszComments;
-	m_pszComments = new char[ Q_strlen( comments ) + 1 ];
-	Q_strcpy( m_pszComments, comments );
+	m_pszComments = V_strdup( comments );
 
 	if ( GetOwnerScene() )
 	{

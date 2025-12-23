@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,21 +16,20 @@
 // Includes
 //--------------------------------------------------------------------------------------------------------------
 
-#ifdef _WIN32
 
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include "winlite.h"
 #include <WinInet.h>
 #endif
 #include <assert.h>
 #include <sys/stat.h>
-#ifndef _LINUX
-#undef fopen
-#endif
 #include <stdio.h>
 
+#include "tier0/platform.h"
+#include "tier0/dbg.h"
 #include "download_internal.h"
 #include "tier1/strtools.h"
+#include "tier0/threadtools.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
@@ -39,6 +38,29 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+//--------------------------------------------------------------------------------------------------------------
+
+void WriteFileFromRequestContext( const RequestContext_t &rc )
+{
+	struct stat buf;
+	int rt = stat(rc.absLocalPath, &buf);
+	if ( rt == -1 && !rc.bSuppressFileWrite )
+	{
+		FILE *fp = fopen( rc.absLocalPath, "wb" );
+		if ( fp )
+		{
+			if ( rc.data )
+			{
+				fwrite( rc.data, rc.nBytesTotal, 1, fp );
+			}
+			fclose( fp );
+		}
+	}
+}
+
+//--------------------------------------------------------------------------------------------------------------
+
+#ifdef _WIN32
 //--------------------------------------------------------------------------------------------------------------
 /**
  * Formats a string to spit out via OutputDebugString (only in debug).  OutputDebugString
@@ -110,7 +132,7 @@ static const char *StateString( DWORD dwStatus )
  */
 void __stdcall DownloadStatusCallback( HINTERNET hOpenResource, DWORD dwContext, DWORD dwStatus, LPVOID pStatusInfo, DWORD dwStatusInfoLength )
 {
-	RequestContext *rc = (RequestContext*)pStatusInfo;
+	RequestContext_t *rc = (RequestContext_t*)pStatusInfo;
 
 	switch (dwStatus)
 	{
@@ -129,7 +151,7 @@ void __stdcall DownloadStatusCallback( HINTERNET hOpenResource, DWORD dwContext,
 			}
 			else
 			{
-				//Thread_DPrintf( "** No RequestContext **\n" );
+				//Thread_DPrintf( "** No RequestContext_t **\n" );
 			}
 			//Thread_DPrintf( "DownloadStatusCallback %s\n", StateString(dwStatus) );
 			break;
@@ -140,7 +162,7 @@ void __stdcall DownloadStatusCallback( HINTERNET hOpenResource, DWORD dwContext,
 /**
  * Reads data from a handle opened by InternetOpenUrl().
  */
-void ReadData( RequestContext& rc )
+void ReadData( RequestContext_t& rc )
 {
 	const int BufferSize = 2048;
 	unsigned char data[BufferSize];
@@ -159,7 +181,7 @@ void ReadData( RequestContext& rc )
 	{
 		// InternetReadFile() will block until there is data, or the socket gets closed.  This means the
 		// main thread could request an abort while we're blocked here.  This is okay, because the main
-		// thread will not wait for this thread to finish, but will clean up the RequestContext at some
+		// thread will not wait for this thread to finish, but will clean up the RequestContext_t at some
 		// later point when InternetReadFile() has returned and this thread has finished.
 		if ( !InternetReadFile( rc.hDataResource, (LPVOID)data, BufferSize, &dwSize ) )
 		{
@@ -173,19 +195,7 @@ void ReadData( RequestContext& rc )
 			// if InternetReadFile() succeeded, but we read 0 bytes, we're at the end of the file.
 
 			// if the file doesn't exist, write it out
-			char path[_MAX_PATH];
-			Q_snprintf( path, sizeof(path), "%s\\%s", rc.basePath, rc.gamePath );
-			struct stat buf;
-			int rt = stat(path, &buf);
-			if ( rt == -1 )
-			{
-				FILE *fp = fopen( path, "wb" );
-				if ( fp )
-				{
-					fwrite( rc.data, rc.nBytesTotal, 1, fp );
-					fclose( fp );
-				}
-			}
+			WriteFileFromRequestContext( rc );
 
 			// Let the main thread know we finished reading data, and wait for it to let us exit.
 			rc.status = HTTP_DONE;
@@ -244,7 +254,7 @@ const char *ErrorString[] =
  * Closes all open handles, and waits until the main thread has given the OK
  * to quit.
  */
-void CleanUpDownload( RequestContext& rc, HTTPStatus status, HTTPError error = HTTP_ERROR_NONE )
+void CleanUpDownload( RequestContext_t& rc, HTTPStatus_t status, HTTPError_t error = HTTP_ERROR_NONE )
 {
 	if ( status != HTTP_DONE || error != HTTP_ERROR_NONE )
 	{
@@ -285,7 +295,7 @@ void CleanUpDownload( RequestContext& rc, HTTPStatus status, HTTPError error = H
 }
 
 //--------------------------------------------------------------------------------------------------------------
-static void DumpHeaders( RequestContext& rc )
+static void DumpHeaders( RequestContext_t& rc )
 {
 #ifdef _DEBUG
 	DWORD dwSize;
@@ -313,7 +323,7 @@ static void DumpHeaders( RequestContext& rc )
  */
 DWORD __stdcall DownloadThread( void *voidPtr )
 {
-	RequestContext& rc = *(RequestContext *)voidPtr;
+	RequestContext_t& rc = *(RequestContext_t *)voidPtr;
 
 	URL_COMPONENTS url;
 	char urlBuf[6][BufferSize];
@@ -335,14 +345,7 @@ DWORD __stdcall DownloadThread( void *voidPtr )
 
 	char fullURL[BufferSize*2];
 	DWORD fullURLLength = BufferSize*2;
-	Q_snprintf( fullURL, fullURLLength, "%s%s", rc.baseURL, rc.gamePath, fullURL );
-	/*
-	if ( !InternetCombineUrl( rc.baseURL, rc.gamePath, fullURL, &fullURLLength, 0 ) )
-	{
-		CleanUpDownload( rc, HTTP_ERROR, HTTP_ERROR_INVALID_URL );
-		return rc.status;
-	}
-	*/
+	Q_snprintf( fullURL, fullURLLength, "%s%s", rc.baseURL, rc.urlPath );
 
 	if ( !InternetCrackUrl( fullURL, fullURLLength, 0, &url ) )
 	{
@@ -480,7 +483,15 @@ DWORD __stdcall DownloadThread( void *voidPtr )
 		rc.nBytesTotal = code + rc.nBytesCached;
 		if ( code > 0 )
 		{
-			rc.data = new unsigned char[rc.nBytesTotal];
+			rc.data = new unsigned char[rc.nBytesTotal + 1];	// Extra byte for NULL terminator
+			if ( !rc.data )
+			{
+				// We're seeing crazy large numbers being returned in code (0x48e1e22), the new fails, and we crash.
+				// This should probably be a different error?
+				CleanUpDownload( rc, HTTP_ERROR, HTTP_ERROR_ZERO_LENGTH_FILE );
+				return rc.status;
+			}
+			rc.data[ rc.nBytesTotal ] = 0;
 		}
 	}
 	else
@@ -511,4 +522,419 @@ DWORD __stdcall DownloadThread( void *voidPtr )
 }
 
 
-#endif // _WIN32
+#elif defined( POSIX )
+
+#include "curl/curl.h"
+
+// curl callback functions
+
+static size_t curlWriteFn( void *ptr, size_t size, size_t nmemb, void *stream)
+{
+	RequestContext_t *pRC = (RequestContext_t *) stream;
+	if ( pRC->nBytesTotal && pRC->nBytesCurrent + ( size * nmemb ) <= pRC->nBytesTotal )
+	{
+		Q_memcpy( pRC->data + pRC->nBytesCurrent, ptr, ( size * nmemb ) );
+		pRC->nBytesCurrent += size * nmemb;
+	}
+	return size * nmemb;
+}
+
+
+int Q_StrTrim( char *pStr )
+{
+	char *pSource = pStr;
+	char *pDest = pStr;
+	
+	// skip white space at the beginning
+	while ( *pSource != 0 && isspace( *pSource ) )
+	{
+		pSource++;
+	}
+	
+	// copy everything else
+	char *pLastWhiteBlock = NULL;
+	char *pStart = pDest;
+	while ( *pSource != 0 )
+	{
+		*pDest = *pSource++;
+		if ( isspace( *pDest ) )
+		{
+			if ( pLastWhiteBlock == NULL )
+				pLastWhiteBlock = pDest;
+		}
+		else
+		{
+			pLastWhiteBlock = NULL;
+		}
+		pDest++;
+	}
+	*pDest = 0;
+	
+	// did we end in a whitespace block?
+	if ( pLastWhiteBlock != NULL )
+	{
+		// yep; shorten the string
+		pDest = pLastWhiteBlock;
+		*pLastWhiteBlock = 0;
+	}
+	
+	return pDest - pStart;
+}
+
+static size_t curlHeaderFn( void *ptr, size_t size, size_t nmemb, void *stream)
+{
+	char *pszHeader = (char*)ptr;
+	char *pszValue = NULL;
+	RequestContext_t *pRC = (RequestContext_t *) stream;
+	
+	pszHeader[ ( size * nmemb - 1 ) ] = NULL;
+	pszValue = Q_strstr( pszHeader, ":" );
+	if ( pszValue )
+	{
+		// null terminate the header name, and point pszValue at it's value
+		*pszValue = NULL;
+		pszValue++;
+		Q_StrTrim( pszValue );
+	}
+	if ( 0 == Q_stricmp( pszHeader, "Content-Length" ) )
+	{
+		size_t len = atol( pszValue );
+		if ( pRC && len )
+		{
+			pRC->nBytesTotal = len;
+			pRC->data = (byte*)malloc( len );
+		}
+	}
+	
+	return size * nmemb;
+}
+
+
+// we're going to abuse this by using it for proxy pac fetching
+// the cacheData field will hold the URL of the PAC, and the data
+// field the contents of the pac
+RequestContext_t g_pacRequestCtx;
+
+// system specific headers for proxy configuration
+#if defined(OSX)
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreServices/CoreServices.h>
+#include <SystemConfiguration/SystemConfiguration.h>
+#endif
+
+
+void SetProxiesForURL( CURL *hMasterCURL, const char *pszURL )
+{
+	uint32 uProxyPort = 0;
+	char rgchProxyHost[1024]; 
+	char *pszProxyExceptionList = NULL;
+	rgchProxyHost[0] = '\0';
+	
+#if defined(OSX)
+	
+	// create an urlref around the raw URL
+	CFURLRef url = CFURLCreateWithBytes( NULL, ( const UInt8 * ) pszURL, strlen( pszURL ), kCFStringEncodingASCII, NULL );
+	// copy the proxies dictionary 
+	CFDictionaryRef proxyDict = SCDynamicStoreCopyProxies(NULL);
+	// and ask the system what proxies it thinks I should consider for the given URL
+	CFArrayRef proxies = CFNetworkCopyProxiesForURL( url, proxyDict );
+	
+	CFIndex iProxy;
+	// walk through the returned set, looking for any types we (and lib curl) can handle
+	// the list is returned in "preference order", but we can only handle http, and pac urls
+	for( iProxy = 0; iProxy < CFArrayGetCount( proxies ); iProxy++ )
+	{
+		CFDictionaryRef proxy =	(CFDictionaryRef) CFArrayGetValueAtIndex( proxies, iProxy );
+		
+		if ( proxy == NULL )
+			break;
+		
+		// what type of proxy is this one?
+		CFStringRef proxyType = (CFStringRef) CFDictionaryGetValue( proxy, kCFProxyTypeKey );
+		
+		if ( CFEqual( proxyType, kCFProxyTypeNone ) )
+		{
+			// no proxy should be used - we're done.
+			break;
+		}
+		else if ( CFEqual( proxyType, kCFProxyTypeHTTP ) )
+		{
+			// manually configured HTTP proxy settings.
+			const void *val = NULL;
+			
+			// grab the proxy port
+			val = CFDictionaryGetValue( proxy, kCFProxyPortNumberKey );
+			if ( val == NULL || !CFNumberGetValue( (CFNumberRef) val, kCFNumberIntType, &uProxyPort ) )
+				// either we failed, or the port was invalid
+				continue;
+			
+			// no port specified - use the default http port
+			if ( uProxyPort == 0 )
+				uProxyPort = 80;
+			
+			int cbOffset = 0;
+			// see if they've specified authentication (username/password)
+			val = CFDictionaryGetValue( proxy, kCFProxyUsernameKey );
+			if ( val != NULL && CFStringGetCString( (CFStringRef) val, rgchProxyHost + cbOffset, sizeof(rgchProxyHost) - cbOffset, kCFStringEncodingASCII ) && rgchProxyHost[cbOffset] != '\0' )
+			{
+				// we've got "username" in rgchProxyHost
+				cbOffset = Q_strlen( rgchProxyHost );
+				val = CFDictionaryGetValue( proxy, kCFProxyPasswordKey );
+				if ( val != NULL && CFStringGetLength( (CFStringRef) val ) ) 
+				{
+					// and there's a non-null password value - put a colon after username
+					rgchProxyHost[cbOffset++] = ':';
+					CFStringGetCString( (CFStringRef) val, rgchProxyHost + cbOffset, sizeof(rgchProxyHost) - cbOffset, kCFStringEncodingASCII );
+					// now we've got user:password in rgchProxyHost
+					cbOffset = Q_strlen( rgchProxyHost );
+				}
+				// since we've got at least a username, we need an @
+				rgchProxyHost[cbOffset++] = '@';
+			}
+			
+			val = CFDictionaryGetValue( proxy, kCFProxyHostNameKey );
+			if ( val == NULL || !CFStringGetCString( (CFStringRef) val, rgchProxyHost + cbOffset, sizeof(rgchProxyHost) - cbOffset, kCFStringEncodingASCII ) || rgchProxyHost[cbOffset] == '\0' )
+				continue;
+			
+			break;
+		} 
+		else if ( CFEqual( proxyType, kCFProxyTypeAutoConfigurationURL ) )
+		{
+			// a proxy autoconfig URL has been provided
+			char rgchPacURL[1024];
+			// get the url (as an urlref) and turn it into a string
+			CFURLRef cfUrl = (CFURLRef) CFDictionaryGetValue( proxy, kCFProxyAutoConfigurationURLKey );
+			CFStringGetCString( (CFStringRef) CFStringCreateWithFormat( NULL, NULL, CFSTR("%@"), cfUrl ),
+							   rgchPacURL, sizeof( rgchPacURL ), kCFStringEncodingASCII );
+			
+			CURLcode res = CURLE_OK;
+			// see if we've not yet fetched this pac file
+			if ( !g_pacRequestCtx.cacheData || Q_strcmp( (const char *)g_pacRequestCtx.cacheData, rgchPacURL ) )
+			{			
+				if ( g_pacRequestCtx.cacheData )
+				{
+					free( g_pacRequestCtx.cacheData ); 
+					g_pacRequestCtx.cacheData = NULL;
+				}				
+				if ( g_pacRequestCtx.data )
+				{
+					free( g_pacRequestCtx.data ); 
+					g_pacRequestCtx.data = NULL;
+				}
+				
+				// grab the data, using the same request context structure (and callbacks) we use for real downloads
+				CURL *hCURL = curl_easy_init();
+				if ( !hCURL )
+				{
+					AssertMsg( hCURL, "failed to initialize curl handle" );
+					break;
+				}
+				curl_easy_setopt( hCURL, CURLOPT_NOPROGRESS, 1 );
+				curl_easy_setopt( hCURL, CURLOPT_NOSIGNAL, 1 );
+				curl_easy_setopt( hCURL, CURLOPT_CONNECTTIMEOUT, 30 );
+				curl_easy_setopt( hCURL, CURLOPT_FOLLOWLOCATION, 1 ); // follow 30x redirections from the web server
+				
+				// and setup the callback fns
+				curl_easy_setopt( hCURL, CURLOPT_HEADERFUNCTION, &curlHeaderFn );
+				curl_easy_setopt( hCURL, CURLOPT_WRITEFUNCTION, &curlWriteFn );
+				
+				// setup callback stream pointers
+				curl_easy_setopt( hCURL, CURLOPT_WRITEHEADER, &g_pacRequestCtx );
+				curl_easy_setopt( hCURL, CURLOPT_WRITEDATA, &g_pacRequestCtx );
+				
+				curl_easy_setopt( hCURL, CURLOPT_URL, rgchPacURL );
+				
+				res = curl_easy_perform( hCURL );
+				curl_easy_cleanup( hCURL );
+			}
+			if ( res == CURLE_OK )
+			{
+				// copy the URL into the "pac cache", if necessary
+				if ( !g_pacRequestCtx.cacheData )
+				{
+					g_pacRequestCtx.cacheData = (unsigned char*) malloc( Q_strlen( rgchPacURL ) + 1 );
+					Q_memcpy( g_pacRequestCtx.cacheData, rgchPacURL, Q_strlen( rgchPacURL ) );
+				}
+				
+				if ( !g_pacRequestCtx.data ) // no data in the proxy.pac they have, so just ignore it
+					return;
+				
+				// wrap the data (the pac contents) into a cfstring
+				CFStringRef cfPacStr = CFStringCreateWithCString( kCFAllocatorDefault, (const char *)g_pacRequestCtx.data, kCFStringEncodingASCII );
+				
+				// and ask the system, given this proxy pac, what (list of) proxies should I consider for this URL?
+				CFErrorRef err;
+				CFArrayRef proxiesForUrl = CFNetworkCopyProxiesForAutoConfigurationScript( cfPacStr, cfUrl, &err );
+				if ( proxiesForUrl )
+				{
+					// we're re-assigning the value that the loop is iterating over, the postincrement will fire after we do this,
+					// hence the -1 (rather than 0) assignment to iProxy
+					proxies = proxiesForUrl;
+					iProxy = -1;					
+				}
+				continue;
+			}
+			else
+			{
+				if ( g_pacRequestCtx.cacheData )
+				{
+					free( g_pacRequestCtx.cacheData );
+					g_pacRequestCtx.cacheData = NULL;
+				}
+			}
+		}
+		else
+		{
+			Msg( "unsupported proxy type\n" );
+			break;
+		}		
+	}
+#else
+#warning "CHTTPDownloadThread doesn't know how to set proxy config"
+#endif
+	
+	if ( rgchProxyHost[0] == '\0' || uProxyPort <= 0 )
+	{
+		if ( pszProxyExceptionList )
+			free( pszProxyExceptionList );
+		return;
+	}
+	
+	curl_easy_setopt( hMasterCURL, CURLOPT_PROXY, rgchProxyHost );
+	curl_easy_setopt( hMasterCURL, CURLOPT_PROXYPORT, uProxyPort );
+	if ( pszProxyExceptionList )
+	{
+		curl_easy_setopt( hMasterCURL, (CURLoption) (CURLOPTTYPE_OBJECTPOINT + 177) /*CURLOPT_NOPROXY*/ , pszProxyExceptionList );
+		free( pszProxyExceptionList );
+	}
+	
+}
+
+
+void DownloadThread( void *voidPtr )
+{
+	static bool bDoneInit = false;
+	if ( !bDoneInit )
+	{
+		bDoneInit = true;
+		curl_global_init( CURL_GLOBAL_SSL );
+	}
+	
+	RequestContext_t& rc = *(RequestContext_t *)voidPtr;
+	
+	rc.status = HTTP_FETCH;
+
+	CURL *hCURL = curl_easy_init();
+	if ( !hCURL )
+	{
+		rc.error = HTTP_ERROR_INVALID_URL;
+		rc.status = HTTP_ERROR;
+		rc.threadDone = true;
+		return;
+	}
+	
+	curl_easy_setopt( hCURL, CURLOPT_NOPROGRESS, 1 );
+	curl_easy_setopt( hCURL, CURLOPT_NOSIGNAL, 1 );
+	curl_easy_setopt( hCURL, CURLOPT_CONNECTTIMEOUT, 30 );
+	curl_easy_setopt( hCURL, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 );
+
+	// turn off certificate verification similar to how we set INTERNET_FLAG_IGNORE_CERT_CN_INVALID and INTERNET_FLAG_IGNORE_CERT_DATE_INVALID on Windows
+	curl_easy_setopt( hCURL, CURLOPT_SSL_VERIFYHOST, 0 );
+	curl_easy_setopt( hCURL, CURLOPT_SSL_VERIFYPEER, 0 );
+	
+	// and now the callback fns
+	curl_easy_setopt( hCURL, CURLOPT_HEADERFUNCTION, &curlHeaderFn );
+	curl_easy_setopt( hCURL, CURLOPT_WRITEFUNCTION, &curlWriteFn );
+
+	
+	uint32 cubURL = Q_strlen( rc.baseURL ) + Q_strlen( rc.urlPath )  + 2 /*one for the /, one for the null*/;
+	char *pchURL = (char *) malloc( cubURL );
+	Q_snprintf( pchURL, cubURL, "%s%s", rc.baseURL, rc.urlPath );
+
+	uint32 cubReferer = 0;
+	char *pchReferer = NULL;
+	if ( *rc.serverURL )
+	{
+		cubReferer = Q_strlen( rc.serverURL ) + 8;
+		pchReferer = (char *) malloc( cubReferer );
+		Q_snprintf( pchReferer, cubURL, "hl2://%s", rc.serverURL );
+	}
+
+	// setup proxies
+	SetProxiesForURL( hCURL, pchURL );
+	
+	// set the url
+	curl_easy_setopt( hCURL, CURLOPT_URL, pchURL );
+	
+	// setup callback stream pointers
+	curl_easy_setopt( hCURL, CURLOPT_WRITEHEADER, &rc );
+	curl_easy_setopt( hCURL, CURLOPT_WRITEDATA, &rc );
+	
+	curl_easy_setopt( hCURL, CURLOPT_FOLLOWLOCATION, 1 );
+	curl_easy_setopt( hCURL, CURLOPT_MAXREDIRS, 1 );
+	curl_easy_setopt( hCURL, CURLOPT_UNRESTRICTED_AUTH, 1 );
+	curl_easy_setopt( hCURL, CURLOPT_USERAGENT, "Half-Life 2" );
+	if ( pchReferer )
+	{
+		curl_easy_setopt( hCURL, CURLOPT_REFERER, pchReferer );
+	}
+
+
+	// g0g0g0
+	CURLcode res = curl_easy_perform( hCURL );
+
+	free( pchURL );
+	if ( pchReferer )
+	{
+		free( pchReferer );
+	}
+	
+	if ( res == CURLE_OK )
+	{
+		curl_easy_getinfo( hCURL , CURLINFO_RESPONSE_CODE , &rc.status );
+		if ( rc.status == HTTPStatus_t(200) || rc.status == HTTPStatus_t(206) )
+		{
+			// write the file before we change the status to DONE, so that the write
+			// will finish before the main thread goes on and starts messing with the file
+			WriteFileFromRequestContext( rc );
+	
+			rc.status = HTTP_DONE;
+			rc.error = HTTP_ERROR_NONE;
+		}
+		else
+		{
+			rc.status = HTTP_ERROR;
+			rc.error = HTTP_ERROR_FILE_NONEXISTENT;
+		}
+	}
+	else 
+	{
+		rc.status = HTTP_ERROR;
+	}
+
+	// wait until the main thread says we can go away (so it can look at rc.data).
+	while ( !rc.shouldStop )
+	{
+		ThreadSleep( 100 );
+	}
+
+	// Delete rc.data, which was allocated in this thread
+	if ( rc.data != NULL )
+	{
+		delete[] rc.data;
+		rc.data = NULL;
+	}
+	
+	
+	curl_easy_cleanup( hCURL );
+	
+	rc.threadDone = true;	
+}
+#else
+void DownloadThread( void *voidPtr )
+{
+#warning "DownloadThread Not Implemented"
+	Assert( !"Implement me" );
+}
+#endif
+

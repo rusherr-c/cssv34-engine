@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -60,7 +60,7 @@ public:
 	float GetSkill( void ) const						{ return m_skill; }
 	float GetTeamwork( void ) const						{ return m_teamwork; }
 
-	int GetWeaponPreference( int i ) const				{ return m_weaponPreference[ i ]; }
+	CSWeaponID GetWeaponPreference( int i ) const		{ return m_weaponPreference[ i ]; }
 	const char *GetWeaponPreferenceAsString( int i ) const;
 	int GetWeaponPreferenceCount( void ) const			{ return m_weaponPreferenceCount; }
 	bool HasPrimaryPreference( void ) const;			///< return true if this profile has a primary weapon preference
@@ -91,7 +91,7 @@ private:
 	float m_teamwork;									///< percentage: 0 = rogue, 1 = complete obeyance to team, lots of comm
 
 	enum { MAX_WEAPON_PREFS = 16 };
-	int m_weaponPreference[ MAX_WEAPON_PREFS ];			///< which weapons this bot likes to use, in order of priority
+	CSWeaponID m_weaponPreference[ MAX_WEAPON_PREFS ];	///< which weapons this bot likes to use, in order of priority
 	int m_weaponPreferenceCount;
 
 	int m_cost;											///< reputation point cost for career mode

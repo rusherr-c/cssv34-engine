@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -228,7 +228,7 @@ void CNPCSimpleTalker::RunTask( const Task_t *pTask )
 	case TASK_TALKER_CLIENT_STARE:
 	case TASK_TALKER_LOOK_AT_CLIENT:
 
-		if ( pTask->iTask == TASK_TALKER_CLIENT_STARE )
+		if ( pTask->iTask == TASK_TALKER_CLIENT_STARE && AI_IsSinglePlayer() )
 		{
 			// Get edict for one player
 			CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
@@ -822,9 +822,10 @@ int CNPCSimpleTalker::SelectNonCombatSpeechSchedule()
 	}
 	
 	// failed to speak, so look at the player if he's around
-	if ( GetExpresser()->CanSpeak() && HasCondition ( COND_SEE_PLAYER ) && random->RandomInt( 0, 6 ) == 0 )
+	if ( AI_IsSinglePlayer() && GetExpresser()->CanSpeak() && HasCondition ( COND_SEE_PLAYER ) && random->RandomInt( 0, 6 ) == 0 )
 	{
-		CBasePlayer *pPlayer = UTIL_GetNearestVisiblePlayer(this);
+		CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+		Assert( pPlayer );
 
 		if ( pPlayer )
 		{

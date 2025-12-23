@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: vcd_sound_check.cpp : Defines the entry point for the console application.
 //
@@ -97,7 +97,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )

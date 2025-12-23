@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2006, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Serialize and Unserialize Wavefront OBJ <-> DME Data
 //
@@ -337,7 +337,7 @@ CDmElement *CDmObjSerializer::ReadOBJ(
 	Q_strncpy( filename, pFilename, sizeof( filename ) );
 	Q_FixSlashes( filename );
 
-	CUtlBuffer utlBuf;
+	CUtlBuffer utlBuf( 0, 0, CUtlBuffer::TEXT_BUFFER );
 	if ( !g_pFullFileSystem->ReadFile( filename, NULL, utlBuf ) )
 		return NULL;
 
@@ -346,7 +346,9 @@ CDmElement *CDmObjSerializer::ReadOBJ(
 
 	CDmeMesh *pMesh( NULL );
 
-	CDmElement *pRoot = ReadOBJ( utlBuf, DMFILEID_INVALID, baseFile, filename, NULL, &pMesh, bAbsolute );
+	DmFileId_t nFileId = g_pDataModel->FindOrCreateFileId( pFilename );
+
+	CDmElement *pRoot = ReadOBJ( utlBuf, nFileId, baseFile, filename, NULL, &pMesh, bAbsolute );
 	if ( pRoot && pMesh )
 	{
 		if ( ppCreatedMesh )
@@ -540,7 +542,7 @@ CDmElement *CDmObjSerializer::ReadOBJ( CUtlBuffer &buf,
 				char mtlLibPath[ MAX_PATH ];
 
 				Q_ComposeFileName( tmpBuf0, tmpBuf1, mtlLibPath, sizeof( mtlLibPath ) );
-				CUtlBuffer utlBuf;
+				CUtlBuffer utlBuf( 0, 0, CUtlBuffer::TEXT_BUFFER );
 
 				if ( g_pFullFileSystem->ReadFile( mtlLibPath, NULL, utlBuf ) )
 				{
@@ -734,8 +736,8 @@ void CDmObjSerializer::MeshToObj(
 	if ( !pBase )
 		return;
 
-	const FieldIndex_t pIndex( pBase->FindFieldIndex( CDmeVertexData::FIELD_POSITION ) );
-	if ( pIndex < 0 )
+	const FieldIndex_t nPosIndex( pBase->FindFieldIndex( CDmeVertexData::FIELD_POSITION ) );
+	if ( nPosIndex < 0 )
 		return;
 
 	int nPositionCount = 0;
@@ -744,8 +746,8 @@ void CDmObjSerializer::MeshToObj(
 
 	b << "g " << pMesh->GetName() << "\n";
 
-	CDmrArrayConst< Vector > pArray( pBase->GetVertexData( pIndex ) );
-	const CUtlVector< int > *ppIndices( &pBase->GetVertexIndexData( pIndex ) );
+	CDmrArrayConst< Vector > pArray( pBase->GetVertexData( nPosIndex ) );
+	const CUtlVector< int > *ppIndices( &pBase->GetVertexIndexData( nPosIndex ) );
 	const CUtlVector< Vector > &pConstData( pArray.Get() );
 
 	if ( nCompList )
@@ -868,7 +870,7 @@ void CDmObjSerializer::MeshToObj(
 	const int nCount( pnIndices ? pnIndices->Count() : 0 );
 
 	const int nFaceSets( pMesh->FaceSetCount() );
-	for ( int i( 0 ); i < nFaceSets; ++i )
+	for ( int i= 0 ; i < nFaceSets; ++i )
 	{
 		CDmeFaceSet *pFaceSet( pMesh->GetFaceSet( i ) );
 		CDmeMaterial *pMaterial( pFaceSet->GetMaterial() );
@@ -878,8 +880,8 @@ void CDmObjSerializer::MeshToObj(
 		}
 
 		const int nIndices( pFaceSet->NumIndices() );
-		const int *pIndex( pFaceSet->GetIndices() );
-		const int *const pEnd( pIndex + nIndices );
+		const int *pnFaceSetIndex( pFaceSet->GetIndices() );
+		const int *const pEnd( pnFaceSetIndex + nIndices );
 		int fIndex;
 
 		const char *const pFaceStart( "f " );
@@ -890,11 +892,11 @@ void CDmObjSerializer::MeshToObj(
 		{
 			const CUtlVector< int > &pIndices( *ppIndices );
 			const CUtlVector< int > &uvIndices( *puvIndices );
-			const CUtlVector< int > &nIndices( *pnIndices );
+			const CUtlVector< int > &nvIndices( *pnIndices );
 
-			while ( pIndex < pEnd )
+			while ( pnFaceSetIndex < pEnd )
 			{
-				fIndex = *pIndex++;
+				fIndex = *pnFaceSetIndex++;
 				if ( fIndex < 0 )
 				{
 					b << "\n";
@@ -902,7 +904,7 @@ void CDmObjSerializer::MeshToObj(
 					continue;
 				}
 
-				b << pFaceSep << ( pIndices[ fIndex ] + m_nPositionOffset ) << '/' << ( uvIndices[ fIndex ] + m_nTextureOffset ) << '/' << ( nIndices[ fIndex ] + m_nNormalOffset );
+				b << pFaceSep << ( pIndices[ fIndex ] + m_nPositionOffset ) << '/' << ( uvIndices[ fIndex ] + m_nTextureOffset ) << '/' << ( nvIndices[ fIndex ] + m_nNormalOffset );
 				pFaceSep = pFaceNext;
 			}
 		}
@@ -911,9 +913,9 @@ void CDmObjSerializer::MeshToObj(
 			const CUtlVector< int > &pIndices( *ppIndices );
 			const CUtlVector< int > &uvIndices( *puvIndices );
 
-			while ( pIndex < pEnd )
+			while ( pnFaceSetIndex < pEnd )
 			{
-				fIndex = *pIndex++;
+				fIndex = *pnFaceSetIndex++;
 				if ( fIndex < 0 )
 				{
 					b << "\n";
@@ -928,11 +930,11 @@ void CDmObjSerializer::MeshToObj(
 		else if ( pCount == nCount )
 		{
 			const CUtlVector< int > &pIndices( *ppIndices );
-			const CUtlVector< int > &nIndices( *pnIndices );
+			const CUtlVector< int > &nvIndices( *pnIndices );
 
-			while ( pIndex < pEnd )
+			while ( pnFaceSetIndex < pEnd )
 			{
-				fIndex = *pIndex++;
+				fIndex = *pnFaceSetIndex++;
 				if ( fIndex < 0 )
 				{
 					b << "\n";
@@ -940,7 +942,7 @@ void CDmObjSerializer::MeshToObj(
 					continue;
 				}
 
-				b << pFaceSep << ( pIndices[ fIndex ] + m_nPositionOffset ) << "//" << ( nIndices[ fIndex ] + m_nNormalOffset );
+				b << pFaceSep << ( pIndices[ fIndex ] + m_nPositionOffset ) << "//" << ( nvIndices[ fIndex ] + m_nNormalOffset );
 				pFaceSep = pFaceNext;
 			}
 		}
@@ -948,9 +950,9 @@ void CDmObjSerializer::MeshToObj(
 		{
 			const CUtlVector< int > &pIndices( *ppIndices );
 
-			while ( pIndex < pEnd )
+			while ( pnFaceSetIndex < pEnd )
 			{
-				fIndex = *pIndex++;
+				fIndex = *pnFaceSetIndex++;
 				if ( fIndex < 0 )
 				{
 					b << "\n";
@@ -1155,7 +1157,7 @@ void CDmObjSerializer::ParseMtlLib( CUtlBuffer &buf )
 
 				nCurrentMtl = m_mtlLib.AddToTail( );
 				m_mtlLib[nCurrentMtl].m_MtlName = mtlName;
-				m_mtlLib[nCurrentMtl].m_TgaName = "debugempty";
+				m_mtlLib[nCurrentMtl].m_TgaName = mtlName;
 			}
 			continue;
 		}

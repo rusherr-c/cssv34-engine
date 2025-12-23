@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Memory allocation!
 //
@@ -77,6 +77,11 @@ public:
 
 	virtual void CompactHeap(); 
 	virtual MemAllocFailHandler_t SetAllocFailHandler( MemAllocFailHandler_t pfnMemAllocFailHandler );
+
+	virtual uint32 GetDebugInfoSize() { return 0; }
+	virtual void SaveDebugInfo( void *pvDebugInfo ) { }
+	virtual void RestoreDebugInfo( const void *pvDebugInfo ) {}	
+	virtual void InitDebugInfo( void *pvDebugInfo, const char *pchRootFileName, int nLine ) {}
 
 private:
 	struct HeapPrefix_t
@@ -441,8 +446,10 @@ int CValidateAlloc::heapchk()
 
 #ifdef _WIN32
 	return bOk ? _HEAPOK : 0;
-#elif _LINUX
+#elif POSIX
 	return bOk;
+#else
+#error
 #endif
 }
 

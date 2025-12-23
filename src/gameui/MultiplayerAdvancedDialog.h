@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,8 +12,10 @@
 #endif
 
 #include <vgui_controls/Frame.h>
-#include "ScriptObject.h"
+#include "scriptobject.h"
 #include <vgui/KeyCode.h>
+
+class CPanelListPanel;
 
 //-----------------------------------------------------------------------------
 // Purpose: Displays a game-specific list of options

@@ -27,7 +27,10 @@ struct VS_OUTPUT
 	float4 directionalLightColor : COLOR0;
 
 	float4 fogFactorW	: COLOR1;
+
+#if !defined( _X360 )    
 	float  fog		: FOG;
+#endif
 };
 
 
@@ -37,11 +40,16 @@ VS_OUTPUT main( const VS_INPUT v )
 
 	float3 worldPos;
 	worldPos = mul( v.vPos, cModel[0] );
-	o.vProjPos = mul( float4( worldPos, 1 ), cViewProj );
-	o.worldPos_projPosZ = float4( worldPos.xyz, o.vProjPos.z );
+	float4 vProjPos = mul( float4( worldPos, 1 ), cViewProj );
+	o.vProjPos = vProjPos;
+	vProjPos.z = dot( float4( worldPos, 1 ), cViewProjZ );
 
-	o.fogFactorW = CalcFog( worldPos, o.vProjPos, g_FogType );
+	o.worldPos_projPosZ = float4( worldPos.xyz, vProjPos.z );
+
+	o.fogFactorW = CalcFog( worldPos, vProjPos, g_FogType );
+#if !defined( _X360 )
 	o.fog = o.fogFactorW;
+#endif
 
 	//------------------------------------------------------------------------------
 	// Setup the tangent space

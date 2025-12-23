@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,9 +30,9 @@ const Vector *GetRandomSpotAtPlace( Place place )
 {
 	int count = 0;
 
-	FOR_EACH_LL( TheNavAreaList, it )
+	FOR_EACH_VEC( TheNavAreas, it )
 	{
-		CNavArea *area = TheNavAreaList[ it ];
+		CNavArea *area = TheNavAreas[ it ];
 
 		if (area->GetPlace() == place)
 			++count;
@@ -43,9 +43,9 @@ const Vector *GetRandomSpotAtPlace( Place place )
 
 	int which = RandomInt( 0, count-1 );
 
-	FOR_EACH_LL( TheNavAreaList, rit )
+	FOR_EACH_VEC( TheNavAreas, rit )
 	{
-		CNavArea *area = TheNavAreaList[ rit ];
+		CNavArea *area = TheNavAreas[ rit ];
 
 		if (area->GetPlace() == place && which == 0)
 			return &area->GetCenter();
@@ -396,7 +396,7 @@ char *BotPhrase::GetSpeakable( int bankIndex, float *duration ) const
 			// check count criteria
 			// if this speakable has a count criteria, it must match to be used
 			// if this speakable does not have a count criteria, we dont care what the count is set to
-			if (speak->m_count == UNDEFINED_COUNT || speak->m_count == min( m_countCriteria, COUNT_MANY ))
+			if (speak->m_count == UNDEFINED_COUNT || speak->m_count == MIN( m_countCriteria, COUNT_MANY ))
 			{
 				if (duration)
 					*duration = speak->m_duration;
@@ -755,7 +755,7 @@ bool BotPhraseManager::Initialize( const char *filename, int bankIndex )
 				}
 				speak->m_place = placeCriteria;
 				speak->m_count = countCriteria;
-#ifdef _LINUX
+#ifdef POSIX
 				Q_FixSlashes( speak->m_phrase );
 				Q_strlower( speak->m_phrase );
 #endif

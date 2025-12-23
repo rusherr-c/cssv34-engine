@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Xbox 360 support for TrueType Fonts. The only cuurent solution is to use XUI
 // to mount the TTF, and rasterize glyph into a render target. XUI does not support
@@ -24,6 +24,22 @@
 #include "tier0/memdbgon.h"
 
 bool s_bSupportsUnicode = true;
+
+//-----------------------------------------------------------------------------
+// Determine possible style from parameters.
+//-----------------------------------------------------------------------------
+int GetStyleFromParameters( int iFlags, int iWeight )
+{
+	// Available xbox TTF styles are very restricted.
+	int style = XUI_FONT_STYLE_NORMAL;
+	if ( iFlags & vgui::ISurface::FONTFLAG_ITALIC )
+		style |= XUI_FONT_STYLE_ITALIC;
+	if ( iFlags & vgui::ISurface::FONTFLAG_UNDERLINE )
+		style |= XUI_FONT_STYLE_UNDERLINE;
+	if ( iWeight > 400 )
+		style |= XUI_FONT_STYLE_BOLD;
+	return style;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -75,13 +91,7 @@ bool CWin32Font::Create( const char *windowsFontName, int tall, int weight, int 
 	m_bRotary = (flags & vgui::ISurface::FONTFLAG_ROTARY) ? 1 : 0;
 	m_bAdditive = (flags & vgui::ISurface::FONTFLAG_ADDITIVE) ? 1 : 0;
 
-	int style = XUI_FONT_STYLE_NORMAL;
-	if ( flags & vgui::ISurface::FONTFLAG_ITALIC )
-		style |= XUI_FONT_STYLE_ITALIC;
-	if ( flags & vgui::ISurface::FONTFLAG_UNDERLINE )
-		style |= XUI_FONT_STYLE_UNDERLINE;
-	if ( weight > 400 )
-		style |= XUI_FONT_STYLE_BOLD;
+	int style = GetStyleFromParameters( flags, weight );
 
 	// must support > 128, there are characters in this range in the custom fonts
 	COMPILE_TIME_ASSERT( ABCWIDTHS_CACHE_SIZE == 256 );
@@ -125,13 +135,14 @@ bool CWin32Font::Create( const char *windowsFontName, int tall, int weight, int 
 	{
 		int a,b,c;
 
-		// X360TBD: determine real a,b,c mapping from badly doc'd metrics
-		a = 0; 
-		b = charMetrics[i].fAdvance;
-		c = 0;
+		// Determine real a,b,c mapping from XUI Character Metrics
+		a = charMetrics[i].fMinX - 1; // Add one column of padding to make up for font rendering blurring into left column (and adjust in b)
+		b = charMetrics[i].fMaxX - charMetrics[i].fMinX + 1;
+		c = charMetrics[i].fAdvance - charMetrics[i].fMaxX; // NOTE: We probably should add a column here, but it's rarely needed in our current fonts so we're opting to save memory instead
 
+		// Widen for blur, outline, and shadow. Need to widen b and reduce a and c.
 		m_ABCWidthsCache[i].a = a - m_iBlur - m_iOutlineSize;
-		m_ABCWidthsCache[i].b = b + ((m_iBlur + m_iOutlineSize) * 2) + m_iDropShadowOffset;
+		m_ABCWidthsCache[i].b = b + ( ( m_iBlur + m_iOutlineSize ) * 2 ) + m_iDropShadowOffset;
 		m_ABCWidthsCache[i].c = c - m_iBlur - m_iDropShadowOffset - m_iOutlineSize;
 	}
 
@@ -147,13 +158,7 @@ void CWin32Font::GetCharsRGBA( newChar_t *newChars, int numNewChars, unsigned ch
 	if ( !m_hFont )
 	{
 		// demand request for font glyph, re-create font
-		int style = XUI_FONT_STYLE_NORMAL;
-		if ( m_iFlags & vgui::ISurface::FONTFLAG_ITALIC )
-			style |= XUI_FONT_STYLE_ITALIC;
-		if ( m_iFlags & vgui::ISurface::FONTFLAG_UNDERLINE )
-			style |= XUI_FONT_STYLE_UNDERLINE;
-		if ( m_iWeight > 400 )
-			style |= XUI_FONT_STYLE_BOLD;
+		int style = GetStyleFromParameters( m_iFlags, m_iWeight );
 		m_hFont = FontManager().MaterialSystem()->OpenTrueTypeFont( GetName(), m_iTall, style );
 	}
 
@@ -210,12 +215,28 @@ void CWin32Font::GetCharRGBA( wchar_t ch, int rgbaWide, int rgbaTall, unsigned c
 //-----------------------------------------------------------------------------
 bool CWin32Font::IsEqualTo(const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags)
 {
-	if ( !stricmp( windowsFontName, m_szName.String() ) 
-		&& m_iTall == tall
-		&& m_iWeight == weight
-		&& m_iBlur == blur
-		&& m_iFlags == flags)
-		return true;
+	// do an true comparison that accounts for non-supported behaviors that gets remapped
+	// avoids creating fonts that are graphically equivalent, though specified differently
+	if ( !stricmp( windowsFontName, m_szName.String() ) &&
+		m_iTall == tall && 
+		m_iBlur == blur &&
+		m_iScanLines == scanlines )
+	{
+		// only these flags affect the font glyphs
+		int validFlags = vgui::ISurface::FONTFLAG_DROPSHADOW | 
+						vgui::ISurface::FONTFLAG_OUTLINE | 
+						vgui::ISurface::FONTFLAG_ROTARY |
+						vgui::ISurface::FONTFLAG_ITALIC |
+						vgui::ISurface::FONTFLAG_UNDERLINE;
+		if ( ( m_iFlags & validFlags ) == ( flags & validFlags ) )
+		{
+			if ( GetStyleFromParameters( m_iFlags, m_iWeight ) == GetStyleFromParameters( flags, weight ) )
+			{
+				// the font is equivalent
+				return true;
+			}
+		}
+	}
 
 	return false;
 }
@@ -311,4 +332,15 @@ void CWin32Font::CloseResource()
 	// save memory and don't hold font open, re-open if glyph actually requested used during draw
 	FontManager().MaterialSystem()->CloseTrueTypeFont( m_hFont );
 	m_hFont = NULL;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Get the kerned size of a char, for win32 just pass thru for now
+//-----------------------------------------------------------------------------
+void CWin32Font::GetKernedCharWidth( wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &abcA )
+{
+	int a,b,c;
+	GetCharABCWidths(ch, a, b, c );
+	wide = ( a + b + c);
+	abcA = a;
 }

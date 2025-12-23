@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "cstrikebuysubmenu.h"
 #include "cstrikebuymenu.h"
 #include "cs_shareddefs.h"
-#include "BackgroundPanel.h"
+#include "backgroundpanel.h"
 #include "buy_presets/buy_presets.h"
 #include "cstrike/bot/shared_util.h"
 #include <vgui/ISurface.h>
@@ -20,6 +20,8 @@
 #include "vgui_controls/RichText.h"
 #include "cs_weapon_parse.h"
 #include "c_cs_player.h"
+#include "cs_ammodef.h"
+
 
 using namespace vgui;
 
@@ -141,7 +143,7 @@ void BuyPresetButton::PerformLayout( void )
 					scaleY = (float)tall / (float)imageTall;
 				}
 
-				float scale = min( scaleX, scaleY );
+				float scale = MIN( scaleX, scaleY );
 				if ( scale < 1.0f )
 				{
 					imageWide *= scale;
@@ -193,13 +195,26 @@ CCSBaseBuyMenu::CCSBaseBuyMenu(IViewPort *pViewPort, const char *subPanelName) :
 	SetProportional( true );
 
 	m_pMainMenu = new CCSBuySubMenu( this, subPanelName );
+	m_pMainMenu->SetSize( 10, 10 ); // Quiet "parent not sized yet" spew
 #if USE_BUY_PRESETS
 	for ( int i=0; i<NUM_BUY_PRESET_BUTTONS; ++i )
 	{
 		m_pBuyPresetButtons[i] = new BuyPresetButton( m_pMainMenu, VarArgs( "BuyPresetButton%c", 'A' + i ), "" );
 	}
-	m_pMoney = new Label( m_pMainMenu, "money", "" );
-	m_pMainBackground = new Panel( m_pMainMenu, "mainBackground" );
+ 	m_pMoney = new Label( m_pMainMenu, "money", "" );
+	//=============================================================================
+	// HPE_BEGIN:
+	// [pfreese] mainBackground was the little orange box outside that buy window
+	// that shouldn't have been there. Maybe this was left over from some
+	// copied code.
+	//=============================================================================
+	
+	m_pMainBackground = NULL;
+//	m_pMainBackground = new Panel( m_pMainMenu, "mainBackground" );
+	
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 	m_pLoadout = new BuyPresetEditPanel( m_pMainMenu, "loadoutPanel", "Resource/UI/Loadout.res", 0, false );
 #else
 	for ( int i=0; i<NUM_BUY_PRESET_BUTTONS; ++i )
@@ -209,7 +224,7 @@ CCSBaseBuyMenu::CCSBaseBuyMenu(IViewPort *pViewPort, const char *subPanelName) :
 	m_pMoney = NULL;
 	m_pMainBackground = NULL;
 #endif // USE_BUY_PRESETS
-	m_lastMoney = -1;
+ 	m_lastMoney = -1;
 
 	m_pBlackMarket = new EditablePanel( m_pMainMenu, "BlackMarket_Bargains" );
 	m_pBlackMarket->LoadControlSettings( "Resource/UI/BlackMarket_Bargains.res" );
@@ -277,7 +292,7 @@ void CCSBaseBuyMenu::Paint()
 
 		const int BufLen = 128;
 		wchar_t wbuf[BufLen] = L"";
-		wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_Current_Money");
+		const wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_Current_Money");
 		if ( !formatStr )
 			formatStr = L"%s1";
 		g_pVGuiLocalize->ConstructString( wbuf, sizeof(wbuf), formatStr, 1, NumAsWString( m_lastMoney ) );
@@ -302,7 +317,7 @@ void CCSBaseBuyMenu::UpdateBuyPresets( bool showDefaultPanel )
 
 	int i;
 	// show buy preset buttons
-	int numPresets = min( TheBuyPresets->GetNumPresets(), NUM_BUY_PRESET_BUTTONS );
+	int numPresets = MIN( TheBuyPresets->GetNumPresets(), NUM_BUY_PRESET_BUTTONS );
 	for ( i=0; i<numPresets; ++i )
 	{
 		if ( !m_pBuyPresetButtons[i] )
@@ -505,7 +520,7 @@ void CCSBaseBuyMenu::HandleBlackMarket( void )
 				const int BufLen = 2048;
 				
 				wchar_t wbuf[BufLen] = L"";
-				wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketHeadline");
+				const wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketHeadline");
 	
 				if ( !formatStr )
 					formatStr = L"%s1";
@@ -520,7 +535,7 @@ void CCSBaseBuyMenu::HandleBlackMarket( void )
 			{
 				const int BufLen = 2048;
 				wchar_t wbuf[BufLen] = L"";
-				wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketBargain");
+				const wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketBargain");
 				
 				if ( !formatStr )
 					formatStr = L"%s1";
@@ -671,6 +686,34 @@ static bool IsWeaponInvalid( CSWeaponID weaponID )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+void CCSBuySubMenu::OnThink()
+{
+	UpdateVestHelmPrice();
+	BaseClass::OnThink();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: When buying vest+helmet, if you already have a vest with no damage
+// then the price is reduced to just the helmet.  Because this can change during
+// the game, we need to update the enable/disable state of the menu item dynamically.
+//-----------------------------------------------------------------------------
+void CCSBuySubMenu::UpdateVestHelmPrice()
+{
+	C_CSPlayer *pPlayer = C_CSPlayer::GetLocalCSPlayer();
+	if ( pPlayer == NULL )
+		return;
+
+	BuyMouseOverPanelButton *pButton = dynamic_cast< BuyMouseOverPanelButton * > ( FindChildByName( "kevlar_helmet", false ) );
+	if ( pButton )
+	{
+		// Set its price to the current value from the player.
+		pButton->SetCurrentPrice( pPlayer->GetCurrentAssaultSuitPrice() );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
 void CCSBuySubMenu::OnCommand( const char *command )
 {
 #if USE_BUY_PRESETS
@@ -785,16 +828,13 @@ void CCSBuySubMenu::HandleBlackMarket( void )
 		
 		pButton->SetBargainButton( false );
 
-		char szClassname[32];
 		const char *pWeaponName = Q_stristr( pButton->GetBuyCommand(), " " );
 
 		if ( pWeaponName )
 		{
 			pWeaponName++;
 
-			Q_snprintf( szClassname, 32, "weapon_%s", GetTranslatedWeaponAlias( pWeaponName ) );
-
-			int iWeaponID = ClassnameToWeaponID( szClassname );
+			int iWeaponID = AliasToWeaponID(GetTranslatedWeaponAlias(pWeaponName));
 
 			if ( iWeaponID == 0 )
 				continue;
@@ -806,7 +846,16 @@ void CCSBuySubMenu::HandleBlackMarket( void )
 
 			if ( CSGameRules()->IsBlackMarket() == false )
 			{
-				pButton->SetCurrentPrice( info->GetDefaultPrice() );
+                //=============================================================================
+                // HPE_BEGIN:
+                // [dwenger] Removed to avoid clearing of default price when not in black market mode
+                //=============================================================================
+
+                // pButton->SetCurrentPrice( info->GetDefaultPrice() );
+
+                //=============================================================================
+                // HPE_END
+                //=============================================================================
 			}
 			else
 			{

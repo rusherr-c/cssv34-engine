@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #include "vgui/ISurface.h"
 #include "vgui/IVGui.h"
 #include <vgui/ILocalize.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include "vgui_controls/Button.h"
 #include "vgui_controls/ComboBox.h"
@@ -25,7 +25,7 @@
 #include "TGAImagePanel.h"
 #include "MouseMessageForwardingPanel.h"
 
-#include "basepanel.h"
+#include "BasePanel.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -106,7 +106,7 @@ public:
 				// use default folder icon
 				if( !g_pFullFileSystem->FileExists( szImageFileName, "MOD" ) )
 				{
-					Q_strcpy( szImageFileName, "bonusmaps/icon_bonus_map_folder" );
+					V_strcpy_safe( szImageFileName, "bonusmaps/icon_bonus_map_folder" );
 					bIsTGA = false;
 				}
 			}
@@ -128,7 +128,7 @@ public:
 				// if it doesn't exist use default bonus map icon
 				if( !g_pFullFileSystem->FileExists( szImageFileName, "MOD" ) )
 				{
-					Q_strcpy( szImageFileName, "bonusmaps/icon_bonus_map_default" );
+					V_strcpy_safe( szImageFileName, "bonusmaps/icon_bonus_map_default" );
 					bIsTGA = false;
 				}
 			}
@@ -275,7 +275,7 @@ CBonusMapsDialog::~CBonusMapsDialog()
 bool CBonusMapsDialog::ImportZippedBonusMaps( const char *pchZippedFileName )
 {
 	// Get the zip file's name with dir info
-	char *pchShortFileName = Q_strrchr( pchZippedFileName, '\\' );
+	char *pchShortFileName = Q_strrchr( pchZippedFileName, CORRECT_PATH_SEPARATOR );
 
 	if ( !pchShortFileName )
 		return false;
@@ -465,13 +465,14 @@ void CBonusMapsDialog::RefreshDialog( BonusMapDescription_t *pMap )
 
 void CBonusMapsDialog::RefreshMedalDisplay( BonusMapDescription_t *pMap )
 {
-	int iFirstChildIndex = FindChildIndexByName( "ChallengeMedalOverview00" );
-	for ( int iMedal = 0; iMedal < 5; ++iMedal )
 	{
-		Panel *pMedalImage = GetChild( iFirstChildIndex + iMedal );
-		pMedalImage->SetVisible( false );
+		int iFirstChildIndex = FindChildIndexByName( "ChallengeMedalOverview00" );
+		for ( int iMedal = 0; iMedal < 5; ++iMedal )
+		{
+			Panel *pMedalImage = GetChild( iFirstChildIndex + iMedal );
+			pMedalImage->SetVisible( false );
+		}
 	}
-
 	if ( !pMap || !pMap->m_pChallenges )
 	{
 		SetControlVisible( "ChallengeCommentLabel", false );
@@ -782,14 +783,153 @@ void CBonusMapsDialog::OnCommand( const char *command )
 	}
 }
 
+void CBonusMapsDialog::OnKeyCodeTyped( vgui::KeyCode code )
+{
+	if ( code == KEY_ESCAPE )
+	{
+		OnCommand( "Close" );
+		return;
+	}
+
+	BaseClass::OnKeyCodeTyped( code );
+}
+
+void CBonusMapsDialog::OnKeyCodePressed( vgui::KeyCode code )
+{
+	if ( code == KEY_XBUTTON_B )
+	{
+		OnCommand( "Close" );
+		return;
+	}
+	else if ( code == KEY_XSTICK1_RIGHT || 
+			  code == KEY_XSTICK2_RIGHT || 
+			  code == KEY_XBUTTON_RIGHT || 
+			  code == KEY_RIGHT )
+	{
+		if ( m_pGameList->GetItemCount() )
+		{
+			Panel *pSelectedPanel = m_pGameList->GetSelectedPanel();
+			if ( !pSelectedPanel )
+			{
+				m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( m_pGameList->FirstItem() ) );
+				m_pGameList->ScrollToItem( m_pGameList->FirstItem() );
+				return;
+			}
+			else
+			{
+				int nNextPanelID = m_pGameList->FirstItem();
+				while ( nNextPanelID != m_pGameList->InvalidItemID() )
+				{
+					if ( m_pGameList->GetItemPanel( nNextPanelID ) == pSelectedPanel )
+					{
+						nNextPanelID = m_pGameList->NextItem( nNextPanelID );
+						if ( nNextPanelID != m_pGameList->InvalidItemID() )
+						{
+							m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( nNextPanelID ) );
+							m_pGameList->ScrollToItem( nNextPanelID );
+							return;
+						}
+
+						break;
+					}
+
+					nNextPanelID = m_pGameList->NextItem( nNextPanelID );
+				}
+			}
+		}
+	}
+	else if ( code == KEY_XSTICK1_LEFT || 
+			  code == KEY_XSTICK2_LEFT || 
+			  code == KEY_XBUTTON_LEFT || 
+			  code == KEY_LEFT )
+	{
+		if ( m_pGameList->GetItemCount() )
+		{
+			Panel *pSelectedPanel = m_pGameList->GetSelectedPanel();
+			if ( !pSelectedPanel )
+			{
+				m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( m_pGameList->FirstItem() ) );
+				m_pGameList->ScrollToItem( m_pGameList->FirstItem() );
+				return;
+			}
+			else
+			{
+				int nNextPanelID = m_pGameList->FirstItem();
+				if ( m_pGameList->GetItemPanel( nNextPanelID ) != pSelectedPanel )
+				{
+					while ( nNextPanelID != m_pGameList->InvalidItemID() )
+					{
+						int nOldPanelID = nNextPanelID;
+						nNextPanelID = m_pGameList->NextItem( nNextPanelID );
+
+						if ( nNextPanelID != m_pGameList->InvalidItemID() )
+						{
+							if ( m_pGameList->GetItemPanel( nNextPanelID ) == pSelectedPanel )
+							{
+								m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( nOldPanelID ) );
+								m_pGameList->ScrollToItem( nOldPanelID  );
+								return;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	else if ( code == KEY_XSTICK1_DOWN || 
+			  code == KEY_XSTICK2_DOWN || 
+			  code == KEY_XBUTTON_DOWN || 
+			  code == KEY_DOWN )
+	{
+		int nOldActiveItem = m_pChallengeSelection->GetActiveItem();
+		int nActiveItem = min( nOldActiveItem + 1, m_pChallengeSelection->GetItemCount() - 1 );
+
+		if ( nOldActiveItem != nActiveItem )
+		{
+			m_pChallengeSelection->ActivateItem( nActiveItem );
+			return;
+		}
+	}
+	else if ( code == KEY_XSTICK1_UP || 
+			  code == KEY_XSTICK2_UP || 
+			  code == KEY_XBUTTON_UP || 
+			  code == KEY_UP )
+	{
+		int nOldActiveItem = m_pChallengeSelection->GetActiveItem();
+		int nActiveItem = max( nOldActiveItem - 1, 0 );
+
+		if ( nOldActiveItem != nActiveItem )
+		{
+			m_pChallengeSelection->ActivateItem( nActiveItem );
+			return;
+		}
+	}
+	else if ( code == KEY_ENTER || code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+	{
+		Panel *pSelectedPanel = m_pGameList->GetSelectedPanel();
+		if ( pSelectedPanel )
+		{
+			OnCommand( "loadbonusmap" );
+			return;
+		}
+	}
+
+	BaseClass::OnKeyCodePressed( code );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: One item has been selected
 //-----------------------------------------------------------------------------
 void CBonusMapsDialog::OnPanelSelected()
 {
 	CBonusMapPanel *pSelectedBonusMapPanel = (CBonusMapPanel *)m_pGameList->GetSelectedPanel();
+	if ( !pSelectedBonusMapPanel )
+		return;
+	
 	BonusMapDescription_t *pMap = BonusMapsDatabase()->GetBonusData( pSelectedBonusMapPanel->GetBonusMapListItemID() );
-
+	if ( !pMap )
+		return;
+	
 	SetControlString( "CommentLabel", pMap->szComment );
 
 	// Handle challenge selection box
@@ -842,8 +982,11 @@ void CBonusMapsDialog::OnPanelSelected()
 void CBonusMapsDialog::OnControlModified()
 {
 	CBonusMapPanel *pSelectedBonusMapPanel = (CBonusMapPanel *)m_pGameList->GetSelectedPanel();
+	if ( !pSelectedBonusMapPanel )
+		return;
 	BonusMapDescription_t *pMap = BonusMapsDatabase()->GetBonusData( pSelectedBonusMapPanel->GetBonusMapListItemID() );
-
+	if ( !pMap )
+		return;
 	RefreshDialog( pMap );
 }
 

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -115,8 +115,19 @@ void CCommentaryDialog::OnCommand( const char *command )
 void CCommentaryDialog::OnKeyCodePressed(KeyCode code)
 {
 	// Ignore escape key
-	if (code == KEY_ESCAPE)
+	if ( code == KEY_ESCAPE )
 		return;
+
+	if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+	{
+		OnCommand( "TurnOn" );
+		return;
+	}
+	else if ( code == KEY_XBUTTON_B || code == STEAMCONTROLLER_B )
+	{
+		OnCommand( "TurnOff" );
+		return;
+	}
 
 	BaseClass::OnKeyCodePressed(code);
 }
@@ -142,7 +153,9 @@ void OpenCommentaryDialog( void )
 ConVar commentary_firstrun("commentary_firstrun", "0", FCVAR_ARCHIVE );
 void CC_CommentaryTestFirstRun( void )
 {
-	if ( !commentary_firstrun.GetBool() )
+	// The enable/disable commentary box in the sound options got lost in time;
+	// always prompt the user for commentary mode instead on new game.
+	//if ( !commentary_firstrun.GetBool() )
 	{
 		commentary_firstrun.SetValue(1);
 		OpenCommentaryDialog();
@@ -209,12 +222,27 @@ void CPostCommentaryDialog::OnFinishedClose( void )
 	}
 }
 
+void CPostCommentaryDialog::OnKeyCodeTyped(KeyCode code)
+{
+	if ( code == KEY_ESCAPE )
+	{
+		Close();
+		vgui::surface()->RestrictPaintToSinglePanel(NULL);
+		m_bResetPaintRestrict = true;
+	}
+	else
+	{
+		BaseClass::OnKeyCodeTyped(code);
+	}
+}
+
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 void CPostCommentaryDialog::OnKeyCodePressed(KeyCode code)
 {
-   	if (code == KEY_ESCAPE)
+   	if ( code == KEY_XBUTTON_A || code == KEY_XBUTTON_B || code == STEAMCONTROLLER_B )
 	{
 		Close();
 		vgui::surface()->RestrictPaintToSinglePanel(NULL);

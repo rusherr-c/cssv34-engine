@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@
 #include "sv_uploaddata.h"
 #include "FindSteamServers.h"
 #include "vstdlib/random.h"
-#include "steam/steam_api.h"
+#include "cl_steamauth.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -125,14 +125,14 @@ void CBenchmarkResults::SetResultsFilename( const char *pFilename )
 //-----------------------------------------------------------------------------
 void CBenchmarkResults::Upload()
 {
-#ifndef NO_STEAM
-	if ( !m_szFilename[0] || !SteamUtils() )
+#ifndef SWDS
+	if ( !m_szFilename[0] || !Steam3Client().SteamUtils() )
 		return;
 	uint32 cserIP = 0;
 	uint16 cserPort = 0;
 	while ( cserIP == 0 )
 	{
-		SteamUtils()->GetCSERIPPort( &cserIP, &cserPort );
+		Steam3Client().SteamUtils()->GetCSERIPPort( &cserIP, &cserPort );
 		if ( !cserIP )
 			Sys_Sleep( 10 );
 	}

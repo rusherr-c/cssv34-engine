@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Places "detail" objects which are client-only renderable things
 //
@@ -8,7 +8,7 @@
 
 #include "vbsp.h"
 #include "bsplib.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "bspfile.h"
 #include "gamebspfile.h"
 #include "VPhysics_Interface.h"
@@ -19,9 +19,9 @@
 #include <float.h>
 #include "CModel.h"
 #include "PhysDll.h"
-#include "UtlSymbol.h"
+#include "utlsymbol.h"
 #include "tier1/strtools.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 
 static void SetCurrentModel( studiohdr_t *pStudioHdr );
 static void FreeCurrentModelVertexes();
@@ -52,12 +52,10 @@ struct StaticPropBuild_t
 	float	m_FadeMaxDist;
 	bool	m_FadesOut;
 	float	m_flForcedFadeScale;
-	unsigned char	m_nMinCPULevel;
-	unsigned char	m_nMaxCPULevel;
-	unsigned char	m_nMinGPULevel;
-	unsigned char	m_nMaxGPULevel;
-	color32			m_DiffuseModulation;
-	bool			m_bDisableX360;
+	unsigned short	m_nMinDXLevel;
+	unsigned short	m_nMaxDXLevel;
+	int		m_LightmapResolutionX;
+	int		m_LightmapResolutionY;
 };
  
 
@@ -509,13 +507,9 @@ static void AddStaticPropToLump( StaticPropBuild_t const& build )
 	propLump.m_FadeMinDist = build.m_FadeMinDist;
 	propLump.m_FadeMaxDist = build.m_FadeMaxDist;
 	propLump.m_flForcedFadeScale = build.m_flForcedFadeScale;
-	propLump.m_nMinCPULevel = build.m_nMinCPULevel;
-	propLump.m_nMaxCPULevel = build.m_nMaxCPULevel;
-	propLump.m_nMinGPULevel = build.m_nMinGPULevel;
-	propLump.m_nMaxGPULevel = build.m_nMaxGPULevel;
-	propLump.m_DiffuseModulation = build.m_DiffuseModulation;
-	propLump.m_bDisableX360 = build.m_bDisableX360;
-
+	propLump.m_nMinDXLevel = build.m_nMinDXLevel;
+	propLump.m_nMaxDXLevel = build.m_nMaxDXLevel;
+	
 	if (build.m_pLightingOrigin && *build.m_pLightingOrigin)
 	{
 		if (ComputeLightingOrigin( build, propLump.m_LightingOrigin ))
@@ -524,6 +518,9 @@ static void AddStaticPropToLump( StaticPropBuild_t const& build )
 		}
 	}
 
+	propLump.m_nLightmapResolutionX = build.m_LightmapResolutionX;
+	propLump.m_nLightmapResolutionY = build.m_LightmapResolutionY;
+
 	// Add the leaves to the leaf lump
 	for (int j = 0; j < leafList.Size(); ++j)
 	{
@@ -531,6 +528,7 @@ static void AddStaticPropToLump( StaticPropBuild_t const& build )
 		insert.m_Leaf = leafList[j];
 		s_StaticPropLeafLump.AddToTail( insert );
 	}
+
 }
 
 
@@ -627,6 +625,18 @@ void EmitStaticProps()
 				build.m_Flags |= STATIC_PROP_SCREEN_SPACE_FADE;
 			}
 
+			if (IntForKey( &entities[i], "generatelightmaps") == 0)
+			{
+				build.m_Flags |= STATIC_PROP_NO_PER_TEXEL_LIGHTING;			
+				build.m_LightmapResolutionX = 0;
+				build.m_LightmapResolutionY = 0;
+			}
+			else
+			{
+				build.m_LightmapResolutionX = IntForKey( &entities[i], "lightmapresolutionx" );
+				build.m_LightmapResolutionY = IntForKey( &entities[i], "lightmapresolutiony" );
+			}
+
 			const char *pKey = ValueForKey( &entities[i], "fadescale" );
 			if ( pKey && pKey[0] )
 			{
@@ -650,14 +660,8 @@ void EmitStaticProps()
 			{
 				build.m_FadeMinDist = 0;
 			}
-			build.m_nMinCPULevel = ( unsigned short )IntForKey( &entities[i], "mincpulevel" );
-			build.m_nMaxCPULevel = ( unsigned short )IntForKey( &entities[i], "maxcpulevel" );
-			build.m_nMinGPULevel = ( unsigned short )IntForKey( &entities[i], "mingpulevel" );
-			build.m_nMaxGPULevel = ( unsigned short )IntForKey( &entities[i], "maxgpulevel" );
-			build.m_DiffuseModulation.r = 255;
-			build.m_DiffuseModulation.g = 255;
-			build.m_DiffuseModulation.b = 255;
-			build.m_bDisableX360 = ( bool )IntForKey( &entities[i], "disableX360" );
+			build.m_nMinDXLevel = (unsigned short)IntForKey( &entities[i], "mindxlevel" );
+			build.m_nMaxDXLevel = (unsigned short)IntForKey( &entities[i], "maxdxlevel" );
 			AddStaticPropToLump( build );
 
 			// strip this ent from the .bsp file

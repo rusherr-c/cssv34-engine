@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implementation of a material
 //
@@ -33,6 +33,10 @@
 #include "tier1/callqueue.h"
 #include "cmaterial_queuefriendly.h"
 #include "ifilelist.h"
+#include "tier0/icommandline.h"
+#include "tier0/minidump.h"
+
+// #define PROXY_TRACK_NAMES
 
 //-----------------------------------------------------------------------------
 // Material implementation
@@ -108,6 +112,8 @@ public:
 
 	void	SetUseFixedFunctionBakedLighting( bool bEnable );
 
+	virtual bool IsPrecached( ) const;
+
 public:
 	// stuff that is visible only from within the material system
 
@@ -121,23 +127,23 @@ public:
 	void		Precache();
 	void		ReloadTextures( void );
 	// If provided, pKeyValues and pPatchKeyValues should come from LoadVMTFile()
-	bool		PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL );
+	bool		PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL, int nFindContext = MATERIAL_FINDCONTEXT_NONE );
 	void		SetMinLightmapPageID( int pageID );
 	void		SetMaxLightmapPageID( int pageID );
 	int			GetMinLightmapPageID( ) const;
 	int			GetMaxLightmapPageID( ) const;
 	void		SetNeedsWhiteLightmap( bool val );
 	bool		GetNeedsWhiteLightmap( ) const;
-	bool		IsPrecached( ) const;
 	bool		IsPrecachedVars( ) const;
 	IShader *	GetShader() const;
 	const char *GetShaderName() const;
 	
 	virtual void			DeleteIfUnreferenced();
 
-	void		SetEnumerationID( int id );
-	void		CallBindProxy( void *proxyData );
-	bool		HasProxy( void ) const;
+	void					SetEnumerationID( int id );
+	void					CallBindProxy( void *proxyData );
+	virtual IMaterial		*CheckProxyReplacement( void *proxyData );
+	bool					HasProxy( void ) const;
 
 	// Sets the shader associated with the material
 	void SetShader( const char *pShaderName );
@@ -231,14 +237,14 @@ private:
 
 	// Computes the material vars for the shader
 	int ParseMaterialVars( IShader* pShader, KeyValues& keyValues, 
-		KeyValues* pOverride, bool modelDefault, IMaterialVar** ppVars );
+		KeyValues* pOverride, bool modelDefault, IMaterialVar** ppVars, int nFindContext = MATERIAL_FINDCONTEXT_NONE );
 
 	// Figures out the preview image for worldcraft
 	char const*	GetPreviewImageName( );
 	char const* GetPreviewImageFileName( void ) const;
 
 	// Hooks up the shader, returns keyvalues of fallback that was used
-	KeyValues* InitializeShader( KeyValues &keyValues, KeyValues &patchKeyValues );
+	KeyValues* InitializeShader( KeyValues &keyValues, KeyValues &patchKeyValues, int nFindContext = MATERIAL_FINDCONTEXT_NONE );
 
 	// Finds the flag associated with a particular flag name
 	int FindMaterialVarFlag( char const* pFlagName ) const;
@@ -250,6 +256,7 @@ private:
 	// Initializes, cleans up the material proxy
 	void InitializeMaterialProxy( KeyValues* pFallbackKeyValues );
 	void CleanUpMaterialProxy();
+	void DetermineProxyReplacements( KeyValues *pFallbackKeyValues );
 
 	// Creates, destroys snapshots
 	RenderPassList_t *CreateRenderPassList();
@@ -314,10 +321,16 @@ private:
 	unsigned short		m_Flags;
 
 	unsigned char		m_VarCount;
-	unsigned char		m_ProxyCount;
+
+	CUtlVector< IMaterialProxy * > m_ProxyInfo;
+
+#ifdef PROXY_TRACK_NAMES
+	// Array to track names of above material proxies. Useful for tracking down issues with proxies.
+	CUtlVector< CUtlString > m_ProxyInfoNames;
+#endif
 
 	IMaterialVar**		m_pShaderParams;
-	IMaterialProxy**	m_ppProxies;
+	IMaterialProxy		*m_pReplacementProxy;
 	ShaderRenderState_t m_ShaderRenderState;
 
 	// This remembers filenames of VMTs that we included so we can sv_pure/flush ourselves if any of them need to be reloaded.
@@ -331,7 +344,7 @@ private:
 	// Used only by procedural materials; it essentially is an in-memory .VMT file
 	KeyValues			*m_pVMTKeyValues;
 
-#ifdef _DEBUG
+#if defined( _DEBUG )
 	// Makes it easier to see what's going on
 	char				*m_pDebugName;
 #endif
@@ -345,6 +358,10 @@ protected:
 // Has to exist *after* fixed size allocator declaration
 #include "tier0/memdbgon.h"
 
+// Forward decls of helper functions for dealing with patch vmts.
+static void ApplyPatchKeyValues( KeyValues &keyValues, KeyValues &patchKeyValues );
+static bool AccumulateRecursiveVmtPatches( KeyValues &patchKeyValuesOut, KeyValues **ppBaseKeyValuesOut,
+										   const KeyValues& keyValues, const char *pPathID, CUtlVector<FileNameHandle_t> *pIncludes );
 
 //-----------------------------------------------------------------------------
 // Parser utilities
@@ -422,7 +439,12 @@ void IMaterialInternal::DestroyMaterial( IMaterialInternal* pMaterial )
 	{
 		Assert( pMaterial->IsRealTimeVersion() );
 		CMaterial* pMatImp = static_cast<CMaterial*>(pMaterial);
-		delete pMatImp;
+		// Deletion of the error material is deferred until after all other materials have been deleted.
+		// See CMaterialSystem::CleanUpErrorMaterial() in cmaterialsystem.cpp.
+		if ( !pMatImp->IsErrorMaterial() )
+		{
+			delete pMatImp;
+		}
 	}
 	MaterialSystem()->Unlock( hMaterialLock );
 }
@@ -449,7 +471,7 @@ CMaterial::CMaterial( char const* materialName, const char *pTextureGroupName, K
 	// Convert it to a symbol
 	m_Name = pTemp;
 
-#ifdef _DEBUG
+#if defined( _DEBUG )
 	m_pDebugName = new char[strlen(pTemp) + 1];
 	Q_strncpy( m_pDebugName, pTemp, strlen(pTemp) + 1 );
 #endif
@@ -460,8 +482,7 @@ CMaterial::CMaterial( char const* materialName, const char *pTextureGroupName, K
 	m_pShaderParams = NULL;
 	m_RefCount = 0;
 	m_representativeTexture = NULL;
-	m_ppProxies = NULL;
-	m_ProxyCount = 0;
+	m_pReplacementProxy = NULL;
 	m_VarCount = 0;
 	m_MappingWidth = m_MappingHeight = 0;
 	m_iEnumerationID = 0;
@@ -496,7 +517,7 @@ CMaterial::~CMaterial()
 
 	if ( m_RefCount != 0 )
 	{
-	    Warning( "Reference Count for Material %s (%d) != 0\n", GetName(), (int) m_RefCount );
+		DevWarning( 2, "Reference Count for Material %s (%d) != 0\n", GetName(), (int) m_RefCount );
 	}
 
 	if ( m_pVMTKeyValues )
@@ -509,9 +530,13 @@ CMaterial::~CMaterial()
 
 	m_representativeTexture = NULL;
 
-#ifdef _DEBUG
-	delete[] m_pDebugName;
+#if defined( _DEBUG )
+	delete [] m_pDebugName;
 #endif
+
+	// Deliberately stomp our VTable so that we can detect cases where code tries to access freed materials.
+	int *p = (int *)this;
+	*p = 0xc0dedbad;
 }
 
 
@@ -548,6 +573,43 @@ void CMaterial::SetShaderAndParams( KeyValues *pKeyValues )
 	{
 		m_Flags |= MATERIAL_IS_MANUALLY_CREATED; 
 	}
+
+	// Apply patches
+	const char *pMaterialName = GetName();
+	char pFileName[MAX_PATH];
+	const char *pPathID = "GAME";
+	if ( !UsesUNCFileName() )
+	{
+		Q_snprintf( pFileName, sizeof( pFileName ), "materials/%s.vmt", pMaterialName );
+	}
+	else
+	{
+		Q_snprintf( pFileName, sizeof( pFileName ), "%s.vmt", pMaterialName );
+		if ( pMaterialName[0] == '/' && pMaterialName[1] == '/' && pMaterialName[2] != '/' )
+		{
+			// UNC, do full search
+			pPathID = NULL;
+		}
+	}
+
+	KeyValues *pLoadedKeyValues = new KeyValues( "vmt" );
+	if ( pLoadedKeyValues->LoadFromFile( g_pFullFileSystem, pFileName, pPathID ) )
+	{
+		// Load succeeded, check if it's a patch file
+		if ( V_stricmp( pLoadedKeyValues->GetName(), "patch" ) == 0 )
+		{
+			// it's a patch file, recursively build up patch keyvalues
+			KeyValues *pPatchKeyValues = new KeyValues( "vmt_patch" );
+			bool bSuccess = AccumulateRecursiveVmtPatches( *pPatchKeyValues, NULL, *pLoadedKeyValues, pPathID, NULL );
+			if ( bSuccess )
+			{
+				// Apply accumulated patches to final vmt
+				ApplyPatchKeyValues( *m_pVMTKeyValues, *pPatchKeyValues );
+			}
+			pPatchKeyValues->deleteThis();
+		}
+	}
+	pLoadedKeyValues->deleteThis();
 
 	if ( g_pShaderDevice->IsUsingGraphics() )
 	{
@@ -681,52 +743,46 @@ void CMaterial::InitializeMaterialProxy( KeyValues* pFallbackKeyValues )
 	if( !pMaterialProxyFactory )
 		return;
 
+	DetermineProxyReplacements( pFallbackKeyValues );
+
+	if ( m_pReplacementProxy )
+	{
+		m_ProxyInfo.AddToTail( m_pReplacementProxy );
+#ifdef PROXY_TRACK_NAMES
+		m_ProxyInfoNames.AddToTail( "__replacementproxy" );
+#endif
+	}
+
 	// See if we've got a proxy section; obey fallbacks
 	KeyValues* pProxySection = pFallbackKeyValues->FindKey("Proxies");
-	if (!pProxySection)
-		return;
-
-	// Iterate through the section + create all of the proxies
-	int proxyCount = 0;
-	IMaterialProxy* ppProxies[256];
-	KeyValues* pProxyKey = pProxySection->GetFirstSubKey();
-	for ( ; pProxyKey; pProxyKey = pProxyKey->GetNextKey() )
+	if ( pProxySection )
 	{
-		// Each of the proxies should themselves be databases
-		IMaterialProxy* pProxy = pMaterialProxyFactory->CreateProxy( pProxyKey->GetName() );
-		if (!pProxy)
-		{
-			Warning( "Error: Material \"%s\" : proxy \"%s\" not found!\n", GetName(), pProxyKey->GetName() );
-			continue;
-		}
+		// Iterate through the section + create all of the proxies
+		KeyValues* pProxyKey = pProxySection->GetFirstSubKey();
 
-		if (!pProxy->Init( this->GetQueueFriendlyVersion(), pProxyKey ))
+		for ( ; pProxyKey; pProxyKey = pProxyKey->GetNextKey() )
 		{
-			pMaterialProxyFactory->DeleteProxy( pProxy );
-			Warning( "Error: Material \"%s\" : proxy \"%s\" unable to initialize!\n", GetName(), pProxyKey->GetName() );
-		}
-		else
-		{
-			ppProxies[proxyCount] = pProxy;
-			++proxyCount;
-			if ( proxyCount >= ARRAYSIZE( ppProxies ) )
+			// Each of the proxies should themselves be databases
+			IMaterialProxy* pProxy = pMaterialProxyFactory->CreateProxy( pProxyKey->GetName() );
+			if (!pProxy)
 			{
-				Warning( "Error: Material \"%s\" has more than %d proxies!\n", GetName(), ARRAYSIZE( ppProxies ) );
-				break;
+				Warning( "Error: Material \"%s\" : proxy \"%s\" not found!\n", GetName(), pProxyKey->GetName() );
+				continue;
+			}
+
+			if (!pProxy->Init( this->GetQueueFriendlyVersion(), pProxyKey ))
+			{
+				pMaterialProxyFactory->DeleteProxy( pProxy );
+				Warning( "Error: Material \"%s\" : proxy \"%s\" unable to initialize!\n", GetName(), pProxyKey->GetName() );
+			}
+			else
+			{
+				m_ProxyInfo.AddToTail( pProxy );
+#ifdef PROXY_TRACK_NAMES
+				m_ProxyInfoNames.AddToTail( pProxyKey->GetName() );
+#endif
 			}
 		}
-	}
-
-	// Allocate space for the number of proxies we successfully made...
-	m_ProxyCount = proxyCount;
-	if (proxyCount)
-	{
-		m_ppProxies = (IMaterialProxy**)malloc( proxyCount * sizeof(IMaterialProxy*) );
-		memcpy( m_ppProxies, ppProxies, proxyCount * sizeof(IMaterialProxy*) );
-	}
-	else
-	{
-		m_ppProxies = 0;
 	}
 }
 
@@ -736,23 +792,32 @@ void CMaterial::InitializeMaterialProxy( KeyValues* pFallbackKeyValues )
 //-----------------------------------------------------------------------------
 void CMaterial::CleanUpMaterialProxy()
 {
-	if ( !m_ProxyCount )
+	if ( !m_ProxyInfo.Count() )
 		return;
 
 	IMaterialProxyFactory *pMaterialProxyFactory;
-	pMaterialProxyFactory = MaterialSystem()->GetMaterialProxyFactory();	
+	pMaterialProxyFactory = MaterialSystem()->GetMaterialProxyFactory();
 	if ( !pMaterialProxyFactory )
 		return;
 
 	// Clean up material proxies
-	for ( int i = m_ProxyCount; --i >= 0; )
+	for ( int i = m_ProxyInfo.Count() - 1; i >= 0; i-- )
 	{
-		pMaterialProxyFactory->DeleteProxy( m_ppProxies[i] );
-	}
-	free( m_ppProxies );
+		IMaterialProxy *pProxy = m_ProxyInfo[ i ];
 
-	m_ppProxies = NULL;
-	m_ProxyCount = 0;
+		pMaterialProxyFactory->DeleteProxy( pProxy );
+	}
+	
+	m_ProxyInfo.RemoveAll();
+#ifdef PROXY_TRACK_NAMES
+	m_ProxyInfoNames.RemoveAll();
+#endif
+}
+
+
+void CMaterial::DetermineProxyReplacements( KeyValues *pFallbackKeyValues )
+{
+	m_pReplacementProxy = MaterialSystem()->DetermineProxyReplacements( this, pFallbackKeyValues );
 }
 
 
@@ -771,6 +836,9 @@ static char const *GetVarName( KeyValues *pVar )
 //-----------------------------------------------------------------------------
 static int FindMaterialVar( IShader* pShader, char const* pVarName )
 {
+	if ( !pShader )
+		return -1;
+
 	// Strip preceeding spaces
 	pVarName += strspn( pVarName, " \t" );
 
@@ -1077,6 +1145,7 @@ bool CMaterial::ParseMaterialFlag( KeyValues* pParseValue, IMaterialVar* pFlagVa
 }
 
 
+ConVar mat_reduceparticles( "mat_reduceparticles",  "0", FCVAR_ALLOWED_IN_COMPETITIVE );
 
 bool CMaterial::ShouldSkipVar( KeyValues *pVar, bool *pWasConditional )
 {
@@ -1102,7 +1171,11 @@ bool CMaterial::ShouldSkipVar( KeyValues *pVar, bool *pWasConditional )
 			bToggle = true;
 		}
 
-		if ( ! stricmp( pCond, "hdr" ) )
+		if ( ! stricmp( pCond, "lowfill" ) )
+		{
+			bShouldSkip = !mat_reduceparticles.GetBool();
+		}
+		else if ( ! stricmp( pCond, "hdr" ) )
 		{
 			bShouldSkip = ( HardwareConfig()->GetHDRType() == HDR_TYPE_NONE );
 		}
@@ -1119,7 +1192,9 @@ bool CMaterial::ShouldSkipVar( KeyValues *pVar, bool *pWasConditional )
 			bShouldSkip = !IsX360();
 		}
 		else
+		{
 			Warning( "unrecognized conditional test %s in %s\n", pVarName, GetName() );
+		}
 
 		return bShouldSkip ^ bToggle;
 	}
@@ -1130,11 +1205,8 @@ bool CMaterial::ShouldSkipVar( KeyValues *pVar, bool *pWasConditional )
 // Computes the material vars for the shader
 //-----------------------------------------------------------------------------
 int CMaterial::ParseMaterialVars( IShader* pShader, KeyValues& keyValues, 
-			KeyValues* pOverrideKeyValues, bool modelDefault, IMaterialVar** ppVars )
+			KeyValues* pOverrideKeyValues, bool modelDefault, IMaterialVar** ppVars, int nFindContext )
 {
-	if ( !pShader ) 
-		return 0;
-
 	IMaterialVar* pNewVar;
 	bool pOverride[256];
 	bool bWasConditional[256];
@@ -1153,17 +1225,33 @@ int CMaterial::ParseMaterialVars( IShader* pShader, KeyValues& keyValues,
 	ppVars[FLAGS2] = IMaterialVar::Create( this, "$flags2", 0 );
 	ppVars[FLAGS_DEFINED2] = IMaterialVar::Create( this, "$flags_defined2", 0 );
 
-	int numParams = pShader->GetNumParams();
+	int numParams = pShader ? pShader->GetNumParams() : 0;
 	int varCount = numParams;
 
 	bool parsingOverrides = (pOverrideKeyValues != 0);
 	KeyValues* pVar = pOverrideKeyValues ? pOverrideKeyValues->GetFirstSubKey() : keyValues.GetFirstSubKey();
+
+	const char *pszMatName = pVar ? pVar->GetString() : "Unknown";
+
 	while( pVar )
 	{
 		bool bProcessThisOne = true;
 
 		bool bIsConditionalVar;
 		
+		const char *pszVarName = GetVarName( pVar );
+
+		if ( (nFindContext == MATERIAL_FINDCONTEXT_ISONAMODEL) && pszVarName && pszVarName[0] )
+		{
+			// Prevent ignorez models
+			// Should we do 'nofog' too? For now, decided not to.
+			if ( Q_stristr(pszVarName,"$ignorez") )
+			{
+				Warning("Ignoring material flag '%s' on material '%s'.\n", pszVarName, pszMatName );
+				goto nextVar;
+			}
+		}
+
 		// See if the var is a flag...
 		if ( 
 			ShouldSkipVar( pVar, &bIsConditionalVar ) ||	// should skip?
@@ -1176,7 +1264,7 @@ int CMaterial::ParseMaterialVars( IShader* pShader, KeyValues& keyValues,
 		if ( bProcessThisOne )
 		{
 			// See if the var is one of the shader params
-			int varIdx = FindMaterialVar( pShader, GetVarName( pVar ) );
+			int varIdx = FindMaterialVar( pShader, pszVarName );
 			
 			// Check for multiply defined or overridden
 			if (varIdx >= 0)
@@ -1342,10 +1430,15 @@ static KeyValues *FindBuiltinFallbackBlock( char const *pShaderName, KeyValues *
 	return NULL;
 }
 
+inline const char *MissingShaderName()
+{
+	return (IsWindows() && !IsEmulatingGL()) ? "Wireframe_DX8" : "Wireframe_DX9";
+}
+
 //-----------------------------------------------------------------------------
 // Hooks up the shader
 //-----------------------------------------------------------------------------
-KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKeyValues )
+KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKeyValues, int nFindContext )
 {
 	MaterialLock_t hMaterialLock = MaterialSystem()->Lock();
 
@@ -1359,7 +1452,7 @@ KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKe
 		// I'm not quite sure how this can happen, but we'll see... 
 		Warning( "Shader not specified in material %s\nUsing wireframe instead...\n", GetName() );
 		Assert( 0 );
-		pShaderName = IsPC() ? "Wireframe_DX6" : "Wireframe_DX9";
+		pShaderName = MissingShaderName();
 	}
 	else
 	{
@@ -1387,19 +1480,34 @@ KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKe
 			if ( g_pShaderDevice->IsUsingGraphics() )
 			{
 				Warning( "Error: Material \"%s\" uses unknown shader \"%s\"\n", GetName(), pShaderName );
-				Assert( 0 );
+				//hushed Assert( 0 );
 			}
 
-			pShaderName = IsPC() ? "Wireframe_DX6" : "Wireframe_DX9";
+			pShaderName = MissingShaderName();
 			pShader = ShaderSystem()->FindShader( pShaderName );
-			Assert( pShader );
-		}
-		if ( !pShader ) 
-		{
-			MaterialSystem()->Unlock( hMaterialLock );
-			return NULL;
-		}
 
+			if ( !HushAsserts() )
+			{
+				AssertMsg( pShader, "pShader==NULL. Shader: %s", GetName() );
+			}
+
+#ifndef DEDICATED
+			if ( !pShader ) 
+	 		{
+#ifdef LINUX
+				// Exit out here. We're running into issues where this material is returned in a horribly broken
+				//  state and you wind up crashing in LockMesh() because the vertex and index buffer pointers
+				//  are NULL. You can repro this by not dying here and showing the intro movie. This happens on
+				//  Linux when you run from a symlink'd SteamApps directory.
+				Error( "Shader '%s' for material '%s' not found.\n",
+					   pCurrentFallback->GetName() ? pCurrentFallback->GetName() : pShaderName, GetName() );
+#endif
+	 			MaterialSystem()->Unlock( hMaterialLock );
+	 			return NULL;
+	 		}
+#endif
+
+		}
 
 		bool bHasBuiltinFallbackBlock = false;
 		if ( !pFallbackSection )
@@ -1415,7 +1523,10 @@ KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKe
 
 		// Here we must set up all flags + material vars that the shader needs
 		// because it may look at them when choosing shader fallback.
-		varCount = ParseMaterialVars( pShader, keyValues, pFallbackSection, modelDefault, ppVars );
+		varCount = ParseMaterialVars( pShader, keyValues, pFallbackSection, modelDefault, ppVars, nFindContext );
+
+		if ( !pShader )
+			break;
 
 		// Make sure we set default values before the fallback is looked for
 		ShaderSystem()->InitShaderParameters( pShader, ppVars, GetName() );
@@ -1471,12 +1582,21 @@ KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKe
 		const char *pFallbackMaterial = pCurrentFallback->GetString( "$fallbackmaterial" );
 		if ( pFallbackMaterial[0] )
 		{
-			// Gotta copy it off; clearing the keyvalues will blow the string away
-			Q_strncpy( pFallbackMaterialNameBuf, pFallbackMaterial, 256 );
-			keyValues.Clear();
-			if( !LoadVMTFile( keyValues, patchKeyValues, pFallbackMaterialNameBuf, UsesUNCFileName(), NULL ) )
+			// Don't fallback to ourselves
+			if ( Q_stricmp( GetName(), pFallbackMaterial ) )
 			{
-				Warning( "CMaterial::PrecacheVars: error loading vmt file %s for %s\n", pFallbackMaterialNameBuf, GetName() );
+				// Gotta copy it off; clearing the keyvalues will blow the string away
+				Q_strncpy( pFallbackMaterialNameBuf, pFallbackMaterial, 256 );
+				keyValues.Clear();
+				if( !LoadVMTFile( keyValues, patchKeyValues, pFallbackMaterialNameBuf, UsesUNCFileName(), NULL ) )
+				{
+					Warning( "CMaterial::PrecacheVars: error loading vmt file %s for %s\n", pFallbackMaterialNameBuf, GetName() );
+					keyValues = *(((CMaterial *)g_pErrorMaterial)->m_pVMTKeyValues);
+				}
+			}
+			else
+			{
+				Warning( "CMaterial::PrecacheVars: fallback material for vmt file %s is itself!\n", GetName() );
 				keyValues = *(((CMaterial *)g_pErrorMaterial)->m_pVMTKeyValues);
 			}
 			pCurrentFallback = &keyValues;
@@ -1487,7 +1607,7 @@ KeyValues* CMaterial::InitializeShader( KeyValues &keyValues, KeyValues &patchKe
 			if (!pShaderName)
 			{
 				Warning("Shader not specified in material %s (fallback %s)\nUsing wireframe instead...\n", GetName(), pFallbackMaterialNameBuf );
-				pShaderName = IsPC() ? "Wireframe_DX6" : "Wireframe_DX9";
+				pShaderName = MissingShaderName();
 			}
 		}
 	}
@@ -1550,9 +1670,12 @@ bool CMaterial::InitializeStateSnapshots()
 		CleanUpStateSnapshots();
 
 		if ( m_pShader && !ShaderSystem()->InitRenderState( m_pShader, m_VarCount, m_pShaderParams, &m_ShaderRenderState, GetName() ))
+		{
+			m_Flags &= ~MATERIAL_VALID_RENDERSTATE;
 			return false;
+		}
 
-		m_Flags |= MATERIAL_VALID_RENDERSTATE; 
+		m_Flags |= MATERIAL_VALID_RENDERSTATE;
 	}
 
 	return true;
@@ -1563,7 +1686,10 @@ void CMaterial::CleanUpStateSnapshots()
 	if (IsValidRenderState())
 	{
 		ShaderSystem()->CleanupRenderState(&m_ShaderRenderState);
-		m_Flags &= ~MATERIAL_VALID_RENDERSTATE;
+		// -- THIS CANNOT BE HERE: m_Flags &= ~MATERIAL_VALID_RENDERSTATE;
+		// -- because it will cause a crash when main thread asks for material
+		// -- sort group it can temporarily see material in invalid render state
+		// -- and crash in DecalSurfaceAdd(msurface2_t*, int)
 	}
 }
 
@@ -1585,7 +1711,7 @@ void CMaterial::SetupErrorShader()
 
 	// We had a failure; replace it with a valid shader...
 
-	m_pShader = ShaderSystem()->FindShader( IsPC() ? "Wireframe_DX6" : "Wireframe_DX9" );
+	m_pShader = ShaderSystem()->FindShader( MissingShaderName() );
 	Assert( m_pShader );
 
 	// Create undefined vars for all the actual material vars
@@ -1606,7 +1732,7 @@ void CMaterial::SetupErrorShader()
 	// Invokes the SHADER_INIT block in the various shaders,
 	ShaderSystem()->InitShaderInstance( m_pShader, m_pShaderParams, "Error", GetTextureGroupName() );
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	bool ok = 
 #endif
 		InitializeStateSnapshots();
@@ -1665,19 +1791,28 @@ inline int CMaterial::GetMaterialVarFlags() const
 
 inline void CMaterial::SetMaterialVarFlags( int flags, bool on )
 {
+	if ( !m_pShaderParams )
+	{
+		Assert( 0 );	// are we hanging onto a material that has been cleaned up or isn't ready?
+		return;
+	}
+
 	if (on)
+	{
 		m_pShaderParams[FLAGS]->SetIntValue( GetMaterialVarFlags() | flags );
+	}
 	else
+	{
 		m_pShaderParams[FLAGS]->SetIntValue( GetMaterialVarFlags() & (~flags) );
+	}
 
 	// Mark it as being defined...
-	m_pShaderParams[FLAGS_DEFINED]->SetIntValue( 
-		m_pShaderParams[FLAGS_DEFINED]->GetIntValueFast() | flags );
+	m_pShaderParams[FLAGS_DEFINED]->SetIntValue( m_pShaderParams[FLAGS_DEFINED]->GetIntValueFast() | flags );
 }
 
 inline int CMaterial::GetMaterialVarFlags2() const
 {
-	if ( m_pShaderParams && m_pShaderParams[FLAGS2] )
+	if ( m_pShaderParams && m_VarCount > FLAGS2 && m_pShaderParams[FLAGS2] )
 	{
 		return m_pShaderParams[FLAGS2]->GetIntValueFast();
 	}
@@ -1689,7 +1824,7 @@ inline int CMaterial::GetMaterialVarFlags2() const
 
 inline void CMaterial::SetMaterialVarFlags2( int flags, bool on )
 {
-	if ( m_pShaderParams && m_pShaderParams[FLAGS2] )
+	if ( m_pShaderParams && m_VarCount > FLAGS2 && m_pShaderParams[FLAGS2] )
 	{
 		if (on)
 			m_pShaderParams[FLAGS2]->SetIntValue( GetMaterialVarFlags2() | flags );
@@ -1697,7 +1832,7 @@ inline void CMaterial::SetMaterialVarFlags2( int flags, bool on )
 			m_pShaderParams[FLAGS2]->SetIntValue( GetMaterialVarFlags2() & (~flags) );
 	}
 
-	if ( m_pShaderParams && m_pShaderParams[FLAGS_DEFINED2] )
+	if ( m_pShaderParams && m_VarCount > FLAGS_DEFINED2 && m_pShaderParams[FLAGS_DEFINED2] )
 	{
 		// Mark it as being defined...
 		m_pShaderParams[FLAGS_DEFINED2]->SetIntValue( 
@@ -1813,11 +1948,16 @@ bool CMaterial::GetMaterialVarFlag( MaterialVarFlags_t flag ) const
 bool CMaterial::UsesEnvCubemap( void )
 {
 	Precache();
-	Assert( m_pShader );
+
 	if( !m_pShader )
 	{
+		if ( !HushAsserts() )
+		{
+			AssertMsg( m_pShader, "m_pShader==NULL. Shader: %s", GetName() );
+		}
 		return false;
 	}
+
 	Assert( m_pShaderParams );
 	return IsFlag2Set( m_pShaderParams, MATERIAL_VAR2_USES_ENV_CUBEMAP );
 }
@@ -1829,35 +1969,48 @@ bool CMaterial::UsesEnvCubemap( void )
 bool CMaterial::NeedsTangentSpace( void )
 {
 	Precache();
-	Assert( m_pShader );
+
 	if( !m_pShader )
 	{
+		if ( !HushAsserts() )
+		{
+			AssertMsg( m_pShader, "m_pShader==NULL. Shader: %s", GetName() );
+		}
 		return false;
 	}
+
 	Assert( m_pShaderParams );
 	return IsFlag2Set( m_pShaderParams, MATERIAL_VAR2_NEEDS_TANGENT_SPACES );
 }
 
 bool CMaterial::NeedsPowerOfTwoFrameBufferTexture( bool bCheckSpecificToThisFrame )
 {
-	Precache();
-	Assert( m_pShader );
+	PrecacheVars();
 	if( !m_pShader )
 	{
+		if ( !HushAsserts() )
+		{
+			AssertMsg( m_pShader, "m_pShader==NULL. Shader: %s", GetName() );
+		}
 		return false;
 	}
+
 	Assert( m_pShaderParams );
 	return m_pShader->NeedsPowerOfTwoFrameBufferTexture( m_pShaderParams, bCheckSpecificToThisFrame );
 }
 
 bool CMaterial::NeedsFullFrameBufferTexture( bool bCheckSpecificToThisFrame )
 {
-	Precache();
-	Assert( m_pShader );
+	PrecacheVars();
 	if( !m_pShader )
 	{
+		if ( !HushAsserts() )
+		{
+			AssertMsg( m_pShader, "m_pShader==NULL. Shader: %s", GetName() );
+		}
 		return false;
 	}
+
 	Assert( m_pShaderParams );
 	return m_pShader->NeedsFullFrameBufferTexture( m_pShaderParams, bCheckSpecificToThisFrame );
 }
@@ -1880,6 +2033,7 @@ bool CMaterial::NeedsSoftwareSkinning( void )
 	{
 		return false;
 	}
+
 	Assert( m_pShaderParams );
 	return IsFlagSet( m_pShaderParams, MATERIAL_VAR_NEEDS_SOFTWARE_SKINNING );
 }
@@ -1906,27 +2060,32 @@ bool CMaterial::NeedsSoftwareLighting( void )
 void CMaterial::AlphaModulate( float alpha )
 {
 	Precache();
-	m_pShaderParams[ALPHA]->SetFloatValue(alpha);
+	if ( m_VarCount > ALPHA )
+		m_pShaderParams[ALPHA]->SetFloatValue(alpha);
 }
 
 void CMaterial::ColorModulate( float r, float g, float b )
 {
 	Precache();
-	m_pShaderParams[COLOR]->SetVecValue( r, g, b );
+	if ( m_VarCount > COLOR )
+		m_pShaderParams[COLOR]->SetVecValue( r, g, b );
 }
 
 float CMaterial::GetAlphaModulation()
 {
 	Precache();
-	return m_pShaderParams[ALPHA]->GetFloatValue();
+	if ( m_VarCount > ALPHA )
+		return m_pShaderParams[ALPHA]->GetFloatValue();
+	return 0.0f;
 }
 
 void CMaterial::GetColorModulation( float *r, float *g, float *b )
 {
 	Precache();
 
-	float pColor[3];
-	m_pShaderParams[COLOR]->GetVecValue( pColor, 3 );
+	float pColor[3] = { 0.0f, 0.0f, 0.0f };
+	if ( m_VarCount > COLOR )
+		m_pShaderParams[COLOR]->GetVecValue( pColor, 3 );
 	*r = pColor[0];
 	*g = pColor[1];
 	*b = pColor[2];
@@ -1992,9 +2151,11 @@ void CMaterial::DecideShouldReloadFromWhitelist( IFileList *pFilesToReload )
 		for ( int i=0; i < m_VMTIncludes.Count(); i++ )
 		{
 			g_pFullFileSystem->String( m_VMTIncludes[i], vmtFilename, sizeof( vmtFilename ) );
-			bShouldReload = pFilesToReload->IsFileInList( vmtFilename );
-			if ( bShouldReload )
+			if ( pFilesToReload->IsFileInList( vmtFilename ) )
+			{
+				bShouldReload = true;
 				break;
+			}
 		}
 	}
 
@@ -2006,6 +2167,15 @@ void CMaterial::ReloadFromWhitelistIfMarked()
 	if ( !m_bShouldReloadFromWhitelist )
 		return;
 
+	#ifdef PURE_SERVER_DEBUG_SPEW
+	{
+		char vmtFilename[MAX_PATH];
+		V_ComposeFileName( "materials", GetName(), vmtFilename, sizeof( vmtFilename ) );
+		V_strncat( vmtFilename, ".vmt", sizeof( vmtFilename ) );
+		Msg( "Reloading %s due to pure server whitelist change\n", GetName() );
+	}
+	#endif
+
 	Uncache();
 	Precache();
 	if ( !GetShader() )
@@ -2014,6 +2184,13 @@ void CMaterial::ReloadFromWhitelistIfMarked()
 		// says to get it out of Steam but it's not in Steam. So just setup a wireframe thingy
 		// to draw the material with.
 		m_Flags |= MATERIAL_IS_PRECACHED | MATERIAL_VARS_IS_PRECACHED;
+		#if DEBUG
+		if (IsOSX())
+		{
+			printf("\n ##### CMaterial::ReloadFromWhitelistIfMarked: GetShader failed on %s, calling SetupErrorShader", m_pDebugName );
+		}
+		#endif
+		
 		SetupErrorShader();
 	}
 }
@@ -2026,7 +2203,7 @@ bool CMaterial::WasReloadedFromWhitelist()
 //-----------------------------------------------------------------------------
 // Loads the material vars
 //-----------------------------------------------------------------------------
-bool CMaterial::PrecacheVars( KeyValues *pVMTKeyValues, KeyValues *pPatchKeyValues, CUtlVector<FileNameHandle_t> *pIncludes )
+bool CMaterial::PrecacheVars( KeyValues *pVMTKeyValues, KeyValues *pPatchKeyValues, CUtlVector<FileNameHandle_t> *pIncludes, int nFindContext )
 {
 	// We should get both parameters or neither
 	Assert( ( pVMTKeyValues == NULL ) ? ( pPatchKeyValues == NULL ) : ( pPatchKeyValues != NULL ) );
@@ -2081,7 +2258,7 @@ bool CMaterial::PrecacheVars( KeyValues *pVMTKeyValues, KeyValues *pPatchKeyValu
 		m_Flags |= MATERIAL_VARS_IS_PRECACHED;
 
 		// Create shader and the material vars...
-		KeyValues *pFallbackKeyValues = InitializeShader( *vmtKeyValues, *patchKeyValues );
+		KeyValues *pFallbackKeyValues = InitializeShader( *vmtKeyValues, *patchKeyValues, nFindContext );
 		if ( pFallbackKeyValues )
 		{
 			// Gotta initialize the proxies too, using the fallback proxies
@@ -2155,10 +2332,10 @@ void CMaterial::Uncache( bool bPreserveVars )
 
 	// Don't bother if we're not cached
 	if ( IsPrecached() )
-	{		
+	{
 		// Clean up the state snapshots
 		CleanUpStateSnapshots();
-
+		m_Flags &= ~MATERIAL_VALID_RENDERSTATE;
 		m_Flags &= ~MATERIAL_IS_PRECACHED;
 	}
 
@@ -2178,6 +2355,16 @@ void CMaterial::Uncache( bool bPreserveVars )
 	}
 
 	MaterialSystem()->Unlock( hMaterialLock );
+
+	// Whether we just now did it, or we were already unloaded,
+	// notify the pure system that the material is unloaded,
+	// so it doesn't caue us to fail sv_pure checks
+	if ( ( m_Flags & ( MATERIAL_VARS_IS_PRECACHED | MATERIAL_IS_MANUALLY_CREATED | MATERIAL_USES_UNC_FILENAME ) ) == 0 )
+	{
+		char szName[ MAX_PATH ];
+		V_sprintf_safe( szName, "materials/%s.vmt", GetName() );
+		g_pFullFileSystem->NotifyFileUnloaded( szName, "GAME" );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -2272,7 +2459,7 @@ int CMaterial::GetNumAnimationFrames( )
 	}
 	else
 	{
-#ifndef _LINUX
+#ifndef POSIX
 		Warning( "CMaterial::GetNumAnimationFrames:\nno representative texture for material %s\n", GetName() );
 #endif
 		return 1;
@@ -2342,7 +2529,7 @@ void CMaterial::SetShader( const char *pShaderName )
 		{
 			// Couldn't find the shader we wanted to use; it's not defined...
 			Warning( "SetShader: Couldn't find shader %s for material %s!\n", pShaderName, GetName() );
-			pShaderName = IsPC() ? "Wireframe_DX6" : "Wireframe_DX9";
+			pShaderName = MissingShaderName();
 			pShader = ShaderSystem()->FindShader( pShaderName );
 			Assert( pShader );
 		}
@@ -2397,7 +2584,8 @@ void CMaterial::SetShader( const char *pShaderName )
 
 const char *CMaterial::GetShaderName() const
 {
-	return m_pShader->GetName();
+	const_cast< CMaterial* >( this )->PrecacheVars();
+	return m_pShader ? m_pShader->GetName() : "shader_error";
 }
 
 
@@ -2495,7 +2683,7 @@ PreviewImageRetVal_t CMaterial::GetPreviewImageProperties( int *width, int *heig
 	CUtlBuffer buf( pMem, nHeaderSize );
 	if( !g_pFullFileSystem->ReadFile( pFileName, NULL, buf, nHeaderSize ) )
 	{
-		Warning( "\"%s\": cached version doesn't exist\n", pFileName );
+		Warning( "\"%s\" - \"%s\": cached version doesn't exist\n", GetName(), pFileName );
 		return MATERIAL_PREVIEW_IMAGE_BAD;
 	}
 	
@@ -2557,6 +2745,12 @@ PreviewImageRetVal_t CMaterial::GetPreviewImage( unsigned char *pData, int width
 		
 	// Determine where in the file to start reading (frame 0, face 0, mip 0)
 	pVTFTexture->ImageFileInfo( 0, 0, 0, &nImageOffset, &nImageSize );
+
+	if ( nImageSize == 0 )
+	{
+		Warning( "Couldn't determine offset and size of material \"%s\"\n", pFileName );
+		goto fail;
+	}
 		
 	// Prep the utlbuffer for reading
 	buf.EnsureCapacity( nImageSize );
@@ -2675,6 +2869,7 @@ void CMaterial::GetReflectivity( Vector& reflect )
 	reflect = m_Reflectivity;
 }
 
+
 bool CMaterial::GetPropertyFlag( MaterialPropertyTypes_t type )
 {
 	Precache();
@@ -2711,7 +2906,9 @@ bool CMaterial::IsTwoSided()
 bool CMaterial::IsTranslucent()
 {
 	Precache();
-	return IsTranslucentInternal( m_pShaderParams? m_pShaderParams[ALPHA]->GetFloatValue() : 0.0  );
+	if ( m_VarCount > ALPHA )
+		return IsTranslucentInternal( m_pShaderParams? m_pShaderParams[ALPHA]->GetFloatValue() : 0.0  );
+	return false;
 }
 
 
@@ -2785,15 +2982,15 @@ void CMaterial::CallBindProxy( void *proxyData )
 		{
 			// Make sure we call the proxies in the order in which they show up
 			// in the .vmt file
-			if ( m_ProxyCount )
+			if ( m_ProxyInfo.Count() )
 			{
 				if ( bIsThreaded )
 				{
 					EnableThreadedMaterialVarAccess( true, m_pShaderParams, m_VarCount );
 				}
-				for( int i = 0; i < m_ProxyCount; ++i )
+				for( int i = 0; i < m_ProxyInfo.Count(); ++i )
 				{
-					m_ppProxies[i]->OnBind( proxyData );
+					m_ProxyInfo[i]->OnBind( proxyData );
 				}
 				if ( bIsThreaded )
 				{
@@ -2821,9 +3018,27 @@ void CMaterial::CallBindProxy( void *proxyData )
 	}
 }
 
+
+IMaterial *CMaterial::CheckProxyReplacement( void *proxyData )
+{
+	if ( m_pReplacementProxy != NULL )
+	{
+		IMaterial	*pReplaceMaterial = m_pReplacementProxy->GetMaterial();
+
+		if ( pReplaceMaterial )
+		{
+			return pReplaceMaterial;
+		}
+	}
+
+	return this;
+}
+
+
 bool CMaterial::HasProxy( )	const
 {
-	return (m_ProxyCount > 0);
+	const_cast< CMaterial* >( this )->PrecacheVars();
+	return m_ProxyInfo.Count() > 0;
 }
 
 
@@ -3051,7 +3266,7 @@ int CMaterial::ShaderParamCount() const
 //-----------------------------------------------------------------------------
 // VMT parser
 //-----------------------------------------------------------------------------
-void InsertKeyValues( KeyValues& dst, KeyValues& src, bool bCheckForExistence )
+void InsertKeyValues( KeyValues& dst, KeyValues& src, bool bCheckForExistence, bool bRecursive )
 {
 	KeyValues *pSrcVar = src.GetFirstSubKey();
 	while( pSrcVar )
@@ -3072,9 +3287,23 @@ void InsertKeyValues( KeyValues& dst, KeyValues& src, bool bCheckForExistence )
 			case KeyValues::TYPE_PTR:
 				dst.SetPtr( pSrcVar->GetName(), pSrcVar->GetPtr() );
 				break;
+			case KeyValues::TYPE_NONE:
+				{
+					// Subkey. Recurse.
+					KeyValues *pNewDest = dst.FindKey( pSrcVar->GetName(), true );
+					Assert( pNewDest );
+					InsertKeyValues( *pNewDest, *pSrcVar, bCheckForExistence, true );
+				}
+				break;
 			}
 		}
 		pSrcVar = pSrcVar->GetNextKey();
+	}
+	
+	if ( bRecursive && !dst.GetFirstSubKey() )
+	{
+		// Insert a dummy key to an empty subkey to make sure it doesn't get removed
+		dst.SetInt( "__vmtpatchdummy", 1 );
 	}
 
 	if( bCheckForExistence )
@@ -3099,12 +3328,8 @@ void WriteKeyValuesToFile( const char *pFileName, KeyValues& keyValues )
 
 void ApplyPatchKeyValues( KeyValues &keyValues, KeyValues &patchKeyValues )
 {
-// DONOTCHECKIN: add comment that again, this is broked (and the assert on insert/replace is invalid too - but whatever!)
-
 	KeyValues *pInsertSection = patchKeyValues.FindKey( "insert" );
 	KeyValues *pReplaceSection = patchKeyValues.FindKey( "replace" );
-	// We expect patch files to do one or the other, not both:
-	Assert( ( pInsertSection == NULL ) || ( pReplaceSection == NULL ) );
 
 	if ( pInsertSection )
 	{
@@ -3119,60 +3344,178 @@ void ApplyPatchKeyValues( KeyValues &keyValues, KeyValues &patchKeyValues )
 	// Could add other commands here, like "delete", "rename", etc.
 }
 
-void ExpandPatchFile( KeyValues& keyValues, KeyValues &patchKeyValues, const char *pPathID, CUtlVector<FileNameHandle_t> *pIncludes  )
+//-----------------------------------------------------------------------------
+// Adds keys from srcKeys to destKeys, overwriting any keys that are already
+// there.
+//-----------------------------------------------------------------------------
+void MergeKeyValues( KeyValues &srcKeys, KeyValues &destKeys )
+{
+	for( KeyValues *pKV = srcKeys.GetFirstValue(); pKV; pKV = pKV->GetNextValue() )
+	{
+		switch( pKV->GetDataType() )
+		{
+		case KeyValues::TYPE_STRING:
+			destKeys.SetString( pKV->GetName(), pKV->GetString() );
+			break;
+		case KeyValues::TYPE_INT:
+			destKeys.SetInt( pKV->GetName(), pKV->GetInt() );
+			break;
+		case KeyValues::TYPE_FLOAT:
+			destKeys.SetFloat( pKV->GetName(), pKV->GetFloat() );
+			break;
+		case KeyValues::TYPE_PTR:
+			destKeys.SetPtr( pKV->GetName(), pKV->GetPtr() );
+			break;
+		}
+	}
+	for( KeyValues *pKV = srcKeys.GetFirstTrueSubKey(); pKV; pKV = pKV->GetNextTrueSubKey() )
+	{
+		KeyValues *pDestKV = destKeys.FindKey( pKV->GetName(), true );
+		MergeKeyValues( *pKV, *pDestKV );
+	}
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+void AccumulatePatchKeyValues( KeyValues &srcKeyValues, KeyValues &patchKeyValues )
+{
+	KeyValues *pDestInsertSection = patchKeyValues.FindKey( "insert" );
+	if ( pDestInsertSection == NULL )
+	{
+		pDestInsertSection = new KeyValues( "insert" );
+		patchKeyValues.AddSubKey( pDestInsertSection );
+	}
+
+	KeyValues *pDestReplaceSection = patchKeyValues.FindKey( "replace" );
+	if ( pDestReplaceSection == NULL )
+	{
+		pDestReplaceSection = new KeyValues( "replace" );
+		patchKeyValues.AddSubKey( pDestReplaceSection );
+	}
+
+	KeyValues *pSrcInsertSection = srcKeyValues.FindKey( "insert" );
+	if ( pSrcInsertSection )
+	{
+		MergeKeyValues( *pSrcInsertSection, *pDestInsertSection );
+	}
+
+	KeyValues *pSrcReplaceSection = srcKeyValues.FindKey( "replace" );
+	if ( pSrcReplaceSection )
+	{
+		MergeKeyValues( *pSrcReplaceSection, *pDestReplaceSection );
+	}
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+bool AccumulateRecursiveVmtPatches( KeyValues &patchKeyValuesOut, KeyValues **ppBaseKeyValuesOut, const KeyValues& keyValues, const char *pPathID, CUtlVector<FileNameHandle_t> *pIncludes )
 {
 	if ( pIncludes )
+	{
 		pIncludes->Purge();
+	}
+
+	patchKeyValuesOut.Clear();
+
+	if ( V_stricmp( keyValues.GetName(), "patch" ) != 0 )
+	{
+		// Not a patch file, nothing to do
+		if ( ppBaseKeyValuesOut )
+		{
+			// flag to the caller that the passed in keyValues are in fact final non-patch values
+			*ppBaseKeyValuesOut = NULL;
+		}
+		return true;
+	}
+
+	KeyValues *pCurrentKeyValues = keyValues.MakeCopy();
 
 	// Recurse down through all patch files:
-	int count = 0;
-	while( count < 10 && stricmp( keyValues.GetName(), "patch" ) == 0 )
+	int nCount = 0;
+	while( ( nCount < 10 ) && ( V_stricmp( pCurrentKeyValues->GetName(), "patch" ) == 0 ) )
 	{
-//		WriteKeyValuesToFile( "patch.txt", keyValues );
-
 		// Accumulate the new patch keys from this file
-		ApplyPatchKeyValues( keyValues, patchKeyValues );
-		patchKeyValues = keyValues;
-
+		AccumulatePatchKeyValues( *pCurrentKeyValues, patchKeyValuesOut );
+		
 		// Load the included file
-		const char *pIncludeFileName = keyValues.GetString( "include" );
-		if ( pIncludeFileName )
+		const char *pIncludeFileName = pCurrentKeyValues->GetString( "include" );
+
+		if ( pIncludeFileName == NULL )
 		{
-			KeyValues * includeKeyValues = new KeyValues( "vmt" );
-			bool success = includeKeyValues->LoadFromFile( g_pFullFileSystem, pIncludeFileName, pPathID );
-			if( success )
-			{
-				// Remember that we included this file for the pure server stuff.
-				if ( pIncludes )
-					pIncludes->AddToTail( g_pFullFileSystem->FindOrAddFileName( pIncludeFileName ) );
-			}
-			else
-			{
-				includeKeyValues->deleteThis();
-				Warning( "Failed to load $include VMT file (%s)\n", pIncludeFileName );
-				Assert( success );
-				return;
-			}
-			keyValues = *includeKeyValues;
-			includeKeyValues->deleteThis();
-		}
-		else
-		{
-			// A patch file without an $include key? Not good...
-			Warning( "VMT patch file has no $include key - invalid!\n" );
+			// A patch file without an include key? Not good...
+			Warning( "VMT patch file has no include key - invalid!\n" );
 			Assert( pIncludeFileName );
 			break;
 		}
 
-		count++;
+		CUtlString includeFileName( pIncludeFileName ); // copy off the string before we clear the keyvalues it lives in
+		pCurrentKeyValues->Clear();
+		bool bSuccess = pCurrentKeyValues->LoadFromFile( g_pFullFileSystem, includeFileName, pPathID );
+		if( bSuccess )
+		{
+			if ( pIncludes )
+			{
+				// Remember that we included this file for the pure server stuff.
+				pIncludes->AddToTail( g_pFullFileSystem->FindOrAddFileName( includeFileName ) );
+			}
+		}
+		else
+		{
+			pCurrentKeyValues->deleteThis();
+#ifndef DEDICATED
+			Warning( "Failed to load $include VMT file (%s)\n", includeFileName.String() );
+#endif
+			if ( !HushAsserts() )
+			{
+				AssertMsg( false, "Failed to load $include VMT file (%s)", includeFileName.String() );
+			}
+			return false;
+		}
+
+		nCount++;
 	}
-	if( count >= 10 )
+
+	if ( ppBaseKeyValuesOut )
+	{
+		*ppBaseKeyValuesOut = pCurrentKeyValues;
+	}
+	else
+	{
+		pCurrentKeyValues->deleteThis();
+	}
+
+	if( nCount >= 10 )
 	{
 		Warning( "Infinite recursion in patch file?\n" );
 	}
+	return true;
+}
 
-	// KeyValues is now a real (non-patch) VMT, so apply the patches and return
-	ApplyPatchKeyValues( keyValues, patchKeyValues );
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+void ExpandPatchFile( KeyValues& keyValues, KeyValues &patchKeyValues, const char *pPathID, CUtlVector<FileNameHandle_t> *pIncludes )
+{
+	KeyValues *pNonPatchKeyValues = NULL;
+	if ( !patchKeyValues.IsEmpty() )
+	{
+		pNonPatchKeyValues = keyValues.MakeCopy();
+	}
+	else
+	{
+		bool bSuccess = AccumulateRecursiveVmtPatches( patchKeyValues, &pNonPatchKeyValues, keyValues, pPathID, pIncludes );
+		if ( !bSuccess )
+		{
+			return;
+		}
+	}
+
+	if ( pNonPatchKeyValues != NULL )
+	{
+		// We're dealing with a patch file. Apply accumulated patches to final vmt
+		ApplyPatchKeyValues( *pNonPatchKeyValues, patchKeyValues );
+		keyValues = *pNonPatchKeyValues;
+		pNonPatchKeyValues->deleteThis();
+	}
 }
 
 bool LoadVMTFile( KeyValues &vmtKeyValues, KeyValues &patchKeyValues, const char *pMaterialName, bool bAbsolutePath, CUtlVector<FileNameHandle_t> *pIncludes )
@@ -3251,6 +3594,6 @@ void CMaterial::DeleteIfUnreferenced()
 	if ( m_RefCount > 0 )
 		return;
 	IMaterialVar::DeleteUnreferencedTextures( true );
-	MaterialSystem()->RemoveMaterial( this );
+	IMaterialInternal::DestroyMaterial( this );
 	IMaterialVar::DeleteUnreferencedTextures( false );
 }

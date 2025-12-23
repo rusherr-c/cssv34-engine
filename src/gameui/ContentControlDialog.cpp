@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 
 #include <stdio.h>
 #include <memory.h>
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include <windows.h>
 #endif
 
@@ -99,6 +99,7 @@ void CContentControlDialog::Activate()
 void CContentControlDialog::ResetPassword()
 {
 	// Set initial value
+#ifdef WIN32
 #ifndef _XBOX
 	HKEY key;
 	if ( ERROR_SUCCESS == VCRHook_RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Valve\\Half-Life\\Settings", 0, KEY_READ, &key))
@@ -114,6 +115,9 @@ void CContentControlDialog::ResetPassword()
     {
         m_szGorePW[ 0 ] = 0;
     }
+#else
+	vgui::system()->SetRegistryString( "Software\\Valve\\Half-Life\\Settings\\User Token 2", m_szGorePW );
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -208,6 +212,7 @@ void CContentControlDialog::OnClose()
 void CContentControlDialog::WriteToken( const char *str )
 {
 	// Set initial value
+#ifdef WIN32
 #ifndef _XBOX
 	HKEY key;
 	if ( ERROR_SUCCESS == VCRHook_RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Valve\\Half-Life\\Settings", 0, KEY_WRITE, &key))
@@ -219,6 +224,9 @@ void CContentControlDialog::WriteToken( const char *str )
 
 		VCRHook_RegCloseKey( key );
 	}
+#endif
+#else
+	vgui::system()->SetRegistryString( "Software\\Valve\\Half-Life\\Settings\\User Token 2", m_szGorePW );
 #endif
 	Q_strncpy( m_szGorePW, str, sizeof( m_szGorePW ) );
 
@@ -235,7 +243,7 @@ void CContentControlDialog::HashPassword(const char *newPW, char *hashBuffer, in
 	MD5Context_t ctx;
 
 	MD5Init( &ctx );
-	MD5Update( &ctx, (unsigned char const *)(LPCSTR)newPW, strlen( newPW ) );
+	MD5Update( &ctx, (unsigned char const *)newPW, strlen( newPW ) );
 	MD5Final( md5_hash, &ctx );
 
 	char hex[ 128 ];

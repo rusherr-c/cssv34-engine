@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,6 +17,7 @@
 class IVModelRender;
 class IClientLeafSystemEngine;
 class ClientClass;
+class IClientReplay;
 
 bool ClientDLL_Load( void );
 void ClientDLL_Unload ( void );
@@ -44,5 +45,6 @@ extern IClientLeafSystemEngine* clientleafsystem;
 extern bool g_bClientLeafSystemV1;
 extern ClientClass *g_pClientClasses;
 extern bool scr_drawloading;
+extern IClientReplay *g_pClientReplay;
 
 #endif // CDLL_ENGINE_INT_H

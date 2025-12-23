@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Helper methods + classes for file access
 //
@@ -62,7 +62,7 @@ bool AutoAddGestureKeys( CChoreoEvent *e, CStudioHdr *pStudioHdr, float *pPosePa
 		return false;
 
 	KeyValues *pSeqKeyValues = new KeyValues( "" );
-	if ( !pSeqKeyValues->LoadFromBuffer( pStudioHdr->name(), Studio_GetKeyValueText( pStudioHdr, iSequence ) ) )
+	if ( !pSeqKeyValues->LoadFromBuffer( pStudioHdr->pszName(), Studio_GetKeyValueText( pStudioHdr, iSequence ) ) )
 	{
 		pSeqKeyValues->deleteThis();
 		return false;
@@ -342,6 +342,6 @@ const char *GetSoundForEvent( CChoreoEvent *pEvent, CStudioHdr *pStudioHdr )
 	if ( Q_stristr( pSoundName, ".wav" ) )
 		return PSkipSoundChars( pSoundName );
 
-	const char *pFileName = g_pSoundEmitterSystem->GetWavFileForSound( pSoundName, ( pStudioHdr && pStudioHdr->IsValid() ) ? pStudioHdr->name() : NULL );
+	const char *pFileName = g_pSoundEmitterSystem->GetWavFileForSound( pSoundName, ( pStudioHdr && pStudioHdr->IsValid() ) ? pStudioHdr->pszName() : NULL );
 	return PSkipSoundChars( pFileName );
 }

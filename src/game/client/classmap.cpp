@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -99,7 +99,7 @@ C_BaseEntity *CClassMap::CreateEntity( const char *mapname )
 		if ( !lookup )
 			continue;
 
-		if ( Q_strcmp( lookup->GetMapName(), mapname ) )
+		if ( Q_stricmp( lookup->GetMapName(), mapname ) )
 			continue;
 
 		if ( !lookup->factory )

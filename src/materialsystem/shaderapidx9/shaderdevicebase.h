@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,7 @@
 #endif
 
 
+#include "togl/rendermechanism.h"
 #include "shaderapi/IShaderDevice.h"
 #include "IHardwareConfigInternal.h"
 #include "bitmap/imageformat.h"
@@ -38,6 +39,10 @@ class KeyValues;
 //-----------------------------------------------------------------------------
 //#define USE_REFERENCE_RASTERIZER 1
 
+//-----------------------------------------------------------------------------
+// Uncomment to check for -nulldevice on command line and use D3DDEVTYPE_NULLREF.
+//-----------------------------------------------------------------------------
+#define ENABLE_NULLREF_DEVICE_SUPPORT
 
 //-----------------------------------------------------------------------------
 // The Base implementation of the shader device
@@ -161,6 +166,9 @@ protected:
 	// IPC communication for multiple shaderapi apps
 	void InstallWindowHook( void *hWnd );
 	void RemoveWindowHook( void *hWnd );
+	void SetCurrentThreadAsOwner();
+	void RemoveThreadOwner();
+	bool ThreadOwnsDevice();
 
 	// Finds a child window
 	int  FindView( void* hWnd ) const;
@@ -176,6 +184,7 @@ protected:
 
 	int	m_nWindowWidth;
 	int m_nWindowHeight;
+	uint32 m_dwThreadId;
 };
 
 

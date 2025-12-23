@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,16 +30,15 @@ public:
 	CWeaponTMP();
 
 	virtual void PrimaryAttack();
-
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_TMP; }
-
 	virtual bool IsSilenced( void ) const				{ return true; }
+
+ 	virtual float GetInaccuracy() const;
 
 private:
 
 	CWeaponTMP( const CWeaponTMP & );
 
-	void TMPFire( float flSpread );
 	void DoFireEffects( void );
 };
 
@@ -55,11 +54,27 @@ LINK_ENTITY_TO_CLASS( weapon_tmp, CWeaponTMP );
 PRECACHE_WEAPON_REGISTER( weapon_tmp );
 
 
-
 CWeaponTMP::CWeaponTMP()
 {
 }
 
+
+float CWeaponTMP::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.25f * m_flAccuracy;
+		else
+			return 0.03f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
 
 void CWeaponTMP::PrimaryAttack( void )
 {
@@ -67,20 +82,11 @@ void CWeaponTMP::PrimaryAttack( void )
 	if ( !pPlayer )
 		return;
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		TMPFire( 0.25f * m_flAccuracy );
-	else
-		TMPFire( 0.03f * m_flAccuracy );
-}
-
-void CWeaponTMP::TMPFire( float flSpread )
-{
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
-
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
@@ -98,4 +104,3 @@ void CWeaponTMP::DoFireEffects( void )
 {
 	// TMP is silenced, so do nothing
 }
-

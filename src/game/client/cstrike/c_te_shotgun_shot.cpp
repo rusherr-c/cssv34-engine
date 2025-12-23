@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,7 +26,8 @@ public:
 	int		m_iWeaponID;
 	int		m_iMode;
 	int		m_iSeed;
-	float	m_flSpread;
+	float	m_fInaccuracy;
+	float	m_fSpread;
 };
 
 
@@ -43,7 +44,9 @@ void C_TEFireBullets::PostDataUpdate( DataUpdateType_t updateType )
 		m_iWeaponID,
 		m_iMode,
 		m_iSeed,
-		m_flSpread );
+		m_fInaccuracy,
+		m_fSpread
+		);
 }
 
 
@@ -58,7 +61,8 @@ BEGIN_RECV_TABLE_NOBASE(C_TEFireBullets, DT_TEFireBullets)
 	RecvPropInt( RECVINFO( m_iMode ) ), 
 	RecvPropInt( RECVINFO( m_iSeed ) ),
 	RecvPropInt( RECVINFO( m_iPlayer ) ),
-	RecvPropFloat( RECVINFO( m_flSpread ) ),
+	RecvPropFloat( RECVINFO( m_fInaccuracy ) ),
+	RecvPropFloat( RECVINFO( m_fSpread ) ),
 END_RECV_TABLE()
 
 
@@ -73,13 +77,14 @@ public:
 public:
 	int		m_iPlayer;
 	Vector	m_vecOrigin;
+	PlantBombOption_t	m_option;
 };
 
 
 void C_TEPlantBomb::PostDataUpdate( DataUpdateType_t updateType )
 {
 	// Create the effect.
-	FX_PlantBomb( m_iPlayer+1, m_vecOrigin );
+	FX_PlantBomb( m_iPlayer+1, m_vecOrigin, m_option );
 }
 
 
@@ -89,6 +94,7 @@ IMPLEMENT_CLIENTCLASS_EVENT( C_TEPlantBomb, DT_TEPlantBomb, CTEPlantBomb );
 BEGIN_RECV_TABLE_NOBASE(C_TEPlantBomb, DT_TEPlantBomb)
 	RecvPropVector( RECVINFO( m_vecOrigin ) ),
 	RecvPropInt( RECVINFO( m_iPlayer ) ),
+	RecvPropInt( RECVINFO( m_option ) ),
 END_RECV_TABLE()
 
 

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -199,7 +199,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTable, ( const LightDe
 
 	// FIXME: lighting effects for normal and position are independent!
 	// FIXME: these can be pre-calculated per normal
-	if( LightType1 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType1 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[0].falloff * CWorldLightAngleWrapper<LightType1>::WorldLightAngle( &pLightDesc[0], pLightDesc[0].m_Direction, normal, light[0].delta );
 		if (ratio > 0)
@@ -211,7 +211,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTable, ( const LightDe
 		}
 	}
 
-	if( LightType2 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType2 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[1].falloff * CWorldLightAngleWrapper<LightType2>::WorldLightAngle( &pLightDesc[1], pLightDesc[1].m_Direction, normal, light[1].delta );
 		if (ratio > 0)
@@ -223,7 +223,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTable, ( const LightDe
 		}
 	}
 
-	if( LightType3 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType3 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[2].falloff * CWorldLightAngleWrapper<LightType3>::WorldLightAngle( &pLightDesc[2], pLightDesc[2].m_Direction, normal, light[2].delta );
 		if (ratio > 0)
@@ -235,7 +235,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTable, ( const LightDe
 		}
 	}
 
-	if( LightType4 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType4 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[3].falloff * CWorldLightAngleWrapper<LightType4>::WorldLightAngle( &pLightDesc[3], pLightDesc[3].m_Direction, normal, light[3].delta );
 		if (ratio > 0)
@@ -266,7 +266,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTableConstDirectional,
 
 	// FIXME: lighting effects for normal and position are independent!
 	// FIXME: these can be pre-calculated per normal
-	if( LightType1 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType1 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[0].falloff *
 			CWorldLightAngleWrapperConstDirectional<LightType1>::WorldLightAngle( &pLightDesc[0],
@@ -280,7 +280,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTableConstDirectional,
 		}
 	}
 
-	if( LightType2 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType2 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[1].falloff *
 			CWorldLightAngleWrapperConstDirectional<LightType2>::WorldLightAngle( &pLightDesc[1],
@@ -295,7 +295,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTableConstDirectional,
 		}
 	}
 
-	if( LightType3 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType3 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[2].falloff *
 			CWorldLightAngleWrapperConstDirectional<LightType3>::WorldLightAngle( &pLightDesc[2],
@@ -310,7 +310,7 @@ TEMPLATE_FUNCTION_TABLE( void, R_LightEffectsWorldFunctionTableConstDirectional,
 		}
 	}
 
-	if( LightType4 != MATERIAL_LIGHT_DISABLE )
+	if( (LightType_t)LightType4 != MATERIAL_LIGHT_DISABLE )
 	{
 		float ratio = light[3].falloff *
 			CWorldLightAngleWrapperConstDirectional<LightType4>::WorldLightAngle( &pLightDesc[3],
@@ -399,7 +399,7 @@ TEMPLATE_FUNCTION_TABLE( float, R_WorldLightDistanceFalloffFunctionTable, ( cons
 float FASTCALL R_WorldLightDistanceFalloff( const LightDesc_t *wl, const Vector& delta )
 {
 	// Ensure no invalid flags are set
-	Assert( ! ( wl->m_Flags & ~(LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION0|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION1|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION2) ) );
+	Assert( ! ( wl->m_Flags & ~(LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION0|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION1|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION2|LIGHTTYPE_OPTIMIZATIONFLAGS_DERIVED_VALUES_CALCED) ) );
 
 	// calculate falloff
 	int flags = wl->m_Flags & (LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION0|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION1|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION2);
@@ -412,7 +412,7 @@ fltx4 FASTCALL R_WorldLightDistanceFalloff( const LightDesc_t *wl, const FourVec
 	// !!speed!!: lights could store m_Attenuation2,m_Attenuation1, and m_Range^2 copies in replicated SSE format.
 
 	// Ensure no invalid flags are set
-	Assert( ! ( wl->m_Flags & ~(LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION0|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION1|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION2) ) );
+	Assert( ! ( wl->m_Flags & ~(LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION0|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION1|LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION2|LIGHTTYPE_OPTIMIZATIONFLAGS_DERIVED_VALUES_CALCED) ) );
 
 	fltx4 dist2 = delta*delta;
 

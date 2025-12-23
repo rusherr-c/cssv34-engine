@@ -2,27 +2,6 @@
 class showz_ps20b_Static_Index
 {
 private:
-	int m_nFLASHLIGHTDEPTHFILTERMODE;
-#ifdef _DEBUG
-	bool m_bFLASHLIGHTDEPTHFILTERMODE;
-#endif
-public:
-	void SetFLASHLIGHTDEPTHFILTERMODE( int i )
-	{
-		Assert( i >= 0 && i <= 2 );
-		m_nFLASHLIGHTDEPTHFILTERMODE = i;
-#ifdef _DEBUG
-		m_bFLASHLIGHTDEPTHFILTERMODE = true;
-#endif
-	}
-	void SetFLASHLIGHTDEPTHFILTERMODE( bool i )
-	{
-		m_nFLASHLIGHTDEPTHFILTERMODE = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bFLASHLIGHTDEPTHFILTERMODE = true;
-#endif
-	}
-private:
 	int m_nDEPTH_IN_ALPHA;
 #ifdef _DEBUG
 	bool m_bDEPTH_IN_ALPHA;
@@ -68,10 +47,6 @@ public:
 	showz_ps20b_Static_Index( )
 	{
 #ifdef _DEBUG
-		m_bFLASHLIGHTDEPTHFILTERMODE = false;
-#endif // _DEBUG
-		m_nFLASHLIGHTDEPTHFILTERMODE = 0;
-#ifdef _DEBUG
 		m_bDEPTH_IN_ALPHA = false;
 #endif // _DEBUG
 		m_nDEPTH_IN_ALPHA = 0;
@@ -85,13 +60,13 @@ public:
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bFLASHLIGHTDEPTHFILTERMODE && m_bDEPTH_IN_ALPHA && m_bCONVERT_TO_SRGB;
+		bool bAllStaticVarsDefined = m_bDEPTH_IN_ALPHA && m_bCONVERT_TO_SRGB;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 1 * m_nFLASHLIGHTDEPTHFILTERMODE ) + ( 3 * m_nDEPTH_IN_ALPHA ) + ( 6 * m_nCONVERT_TO_SRGB ) + 0;
+		return ( 1 * m_nDEPTH_IN_ALPHA ) + ( 2 * m_nCONVERT_TO_SRGB ) + 0;
 	}
 };
-#define shaderStaticTest_showz_ps20b psh_forgot_to_set_static_FLASHLIGHTDEPTHFILTERMODE + psh_forgot_to_set_static_DEPTH_IN_ALPHA + 0
+#define shaderStaticTest_showz_ps20b psh_forgot_to_set_static_DEPTH_IN_ALPHA + 0
 class showz_ps20b_Dynamic_Index
 {
 public:

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Local header for CVTFTexture class declaration - allows platform-specific
 //			implementation to be placed in separate cpp files.
@@ -154,7 +154,10 @@ public:
 	// When unserializing, we can skip a certain number of mip levels,
 	// and we also can just load everything but the image data
 	virtual bool Unserialize( CUtlBuffer &buf, bool bBufferHeaderOnly = false, int nSkipMipLevels = 0 );
+	virtual bool UnserializeEx( CUtlBuffer &buf, bool bHeaderOnly = false, int nForceFlags = 0, int nSkipMipLevels = 0 );
 	virtual bool Serialize( CUtlBuffer &buf );
+
+	virtual void GetMipmapRange( int* pOutFinest, int* pOutCoarsest );
 
 	// Attributes...
 	virtual int Width() const;
@@ -306,8 +309,8 @@ private:
 	void BuildCubeMapMatchLists( CEdgeMatch edgeMatches[NUM_EDGE_MATCHES], CCornerMatch cornerMatches[NUM_CORNER_MATCHES], bool bSkybox );
 
 	// Allocate image data blocks with an eye toward re-using memory
-	void AllocateImageData( int nMemorySize );
-	void AllocateLowResImageData( int nMemorySize );
+	bool AllocateImageData( int nMemorySize );
+	bool AllocateLowResImageData( int nMemorySize );
 
 	// Compute the mip count based on the size + flags
 	int ComputeMipCount( ) const;
@@ -404,6 +407,9 @@ private:
 
 	CByteswap		m_Swap;
 
+	int				m_nFinestMipmapLevel;
+	int				m_nCoarsestMipmapLevel;
+
 #if defined( _X360 )
 	int				m_iPreloadDataSize;
 	int				m_iCompressedSize;
@@ -422,7 +428,7 @@ private:
 		int				m_nDataLength;
 		unsigned char	*m_pData;
 
-		void AllocateData( int nMemorySize );
+		bool AllocateData( int nMemorySize );
 		bool LoadData( CUtlBuffer &buf, CByteswap &byteSwap );
 		bool WriteData( CUtlBuffer &buf ) const;
 	};

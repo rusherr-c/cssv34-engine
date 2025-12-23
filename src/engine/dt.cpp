@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -53,134 +53,6 @@ public:
 
 	unsigned char m_nPropProxies;
 };
-
-
-// ------------------------------------------------------------------------------------ //
-// CDeltaBitsWriter.
-// ------------------------------------------------------------------------------------ //
-
-// OLD.. THIS CAN BE REMOVED ANYTIME.
-// #define TRACK_PROP_DELTA_BITS
-#if defined( TRACK_PROP_DELTA_BITS )
-	bool g_bTrackProps = false;
-
-	int g_nProps = 0;
-	int g_TotalPropDiff = 0;
-	int g_MaxPropDiff = 0;
-	int g_MinPropDiff = 10000;
-
-	int g_nTotalDeltaBits = 0;
-
-	class CChecker
-	{
-	public:
-		~CChecker()
-		{
-			float avgDiff = (float)g_TotalPropDiff / g_nProps;
-			float avgBits = (float)g_nTotalDeltaBits / g_nProps;
-		}
-	} asdf;
-#endif
-
-
-CDeltaBitsWriter::CDeltaBitsWriter( bf_write *pBuf )
-{
-	m_pBuf = pBuf;
-	m_iLastProp = -1;
-}
-
-
-CDeltaBitsWriter::~CDeltaBitsWriter()
-{
-	// Write a final zero bit, signifying that there are no more properties in the buffer.
-	m_pBuf->WriteOneBit( 0 );
-}
-
-
-
-void CDeltaBitsWriter::WritePropIndex( int iProp )
-{
-	int diff = iProp - m_iLastProp;
-	m_iLastProp = iProp;
-
-	Assert( iProp < MAX_DATATABLE_PROPS );
-	Assert( diff > 0 && diff < MAX_DATATABLE_PROPS );
-	--diff; // It's always at least 1 so subtract 1.
-
-#if defined( TRACK_PROP_DELTA_BITS )
-	int startbit = m_pBuf->GetNumBitsWritten();
-#endif
-
-	m_pBuf->WriteOneBit( 1 );
-
-	m_pBuf->WriteUBitVar( diff );
-
-#if defined( TRACK_PROP_DELTA_BITS )
-	int nBitsToEncode = m_pBuf->GetNumBitsWritten() - startbit;
-
-	if ( g_bTrackProps )
-	{
-		g_TotalPropDiff += diff;
-		++g_nProps;
-	
-		if ( diff > g_MaxPropDiff )
-			g_MaxPropDiff = diff;
-		
-		if ( diff < g_MinPropDiff )
-			g_MinPropDiff = diff;
-	}
-	g_nTotalDeltaBits += nBitsToEncode;
-#endif
-}
-
-
-// ------------------------------------------------------------------------------------ //
-// CDeltaBitsReader.
-// ------------------------------------------------------------------------------------ //
-
-CDeltaBitsReader::CDeltaBitsReader( bf_read *pBuf )
-{
-	m_pBuf = pBuf;
-	m_bFinished = false;
-	m_iLastProp = -1;
-}
-
-
-CDeltaBitsReader::~CDeltaBitsReader()
-{
-	// Make sure they read to the end unless they specifically said they don't care.
-	if ( m_pBuf )
-	{
-		Assert( m_bFinished );
-	}
-}
-
-
-int CDeltaBitsReader::ReadNextPropIndex()
-{
-	Assert( !m_bFinished );
-
-	if ( !m_pBuf->ReadOneBit() )
-	{
-		m_bFinished = true;
-		return -1;
-	}
-
-	int prop = 1 + m_pBuf->ReadUBitVar();
-	prop += m_iLastProp;
-	m_iLastProp = prop;
-
-	Assert( m_iLastProp < MAX_DATATABLE_PROPS );
-
-	return prop;
-}
-
-
-void CDeltaBitsReader::ForceFinished()
-{
-	m_bFinished = true;
-	m_pBuf = NULL;
-}
 
 
 // ----------------------------------------------------------------------------- //
@@ -585,23 +457,22 @@ bool AreBitArraysEqual(
 	void const *pvBits2,
 	int nBits ) 
 {
-	int i, nBytes, bit1, bit2;
+	unsigned int const *pBits1 = (unsigned int const *)pvBits1;
+	unsigned int const *pBits2 = (unsigned int const *)pvBits2;
 
-	unsigned char const *pBits1 = (unsigned char*)pvBits1;
-	unsigned char const *pBits2 = (unsigned char*)pvBits2;
-
-	// Compare bytes.
-	nBytes = nBits >> 3;
-	if( memcmp( pBits1, pBits2, nBytes ) != 0 )
-		return false;
-
-	// Compare remaining bits.
-	for(i=nBytes << 3; i < nBits; i++)
+	// Compare words.
+	int nWords = nBits >> 5;
+	for ( int i = 0 ; i < nWords; ++i )
 	{
-		bit1 = pBits1[i >> 3] & (1 << (i & 7));
-		bit2 = pBits2[i >> 3] & (1 << (i & 7));
-		if(bit1 != bit2)
+		if ( pBits1[i] != pBits2[i] )
 			return false;
+	}
+
+	if ( nBits & 31 )
+	{
+		// Compare remaining bits.
+		unsigned int mask = (1 << (nBits & 31)) - 1;
+		return ((pBits1[nWords] ^ pBits2[nWords]) & mask) == 0;
 	}
 
 	return true;

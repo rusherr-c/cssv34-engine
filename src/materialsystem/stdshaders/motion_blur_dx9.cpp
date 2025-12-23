@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -40,7 +40,7 @@ BEGIN_VS_SHADER_FLAGS( MotionBlur_dx9, "Motion Blur", SHADER_NOT_EDITABLE )
 	{
 		if ( params[BASETEXTURE]->IsDefined() )
 		{
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, IsOSX() && g_pHardwareConfig->CanDoSRGBReadFromRTs() ? TEXTUREFLAGS_SRGB : 0 );
 		}
 	}
 
@@ -50,10 +50,13 @@ BEGIN_VS_SHADER_FLAGS( MotionBlur_dx9, "Motion Blur", SHADER_NOT_EDITABLE )
 		{
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, 0, 0 );
 
+			// On OpenGL OSX, we must do sRGB reads and writes since these render targets are tagged as such
+			bool bForceSRGBReadsAndWrites = IsOSX() && g_pHardwareConfig->CanDoSRGBReadFromRTs();
+			
 			// NOTE: sRGB is disabled because of the NV8800 brokenness
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
-			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, false );
-			pShaderShadow->EnableSRGBWrite( false );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, bForceSRGBReadsAndWrites );
+			pShaderShadow->EnableSRGBWrite( bForceSRGBReadsAndWrites );
 
 			DECLARE_STATIC_VERTEX_SHADER( motion_blur_vs20 );
 			SET_STATIC_VERTEX_SHADER( motion_blur_vs20 );

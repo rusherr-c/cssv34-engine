@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -404,7 +404,7 @@ int CAudioMixerWaveADPCM::GetOutputData( void **pData, int sampleCount, char cop
 			return 0;
 	}
 
-	if ( m_samplePosition < m_sampleCount )
+	if ( m_pSamples && m_samplePosition < m_sampleCount )
 	{
 		*pData = (void *)(m_pSamples + m_samplePosition * NumChannels());
 		int available = m_sampleCount - m_samplePosition;

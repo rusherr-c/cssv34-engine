@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,7 +10,7 @@
 #include "sky_ps20.inc"
 #include "sky_ps20b.inc"
 
-#include "ConVar.h"
+#include "convar.h"
 
 BEGIN_VS_SHADER( Sky_DX9, "Help for Sky_DX9 shader" )
 
@@ -37,7 +37,8 @@ BEGIN_VS_SHADER( Sky_DX9, "Help for Sky_DX9 shader" )
 	{
 		if (params[BASETEXTURE]->IsDefined())
 		{
-			LoadTexture( BASETEXTURE );
+			ImageFormat fmt = params[BASETEXTURE]->GetTextureValue()->GetImageFormat();
+			LoadTexture( BASETEXTURE, (fmt==IMAGE_FORMAT_RGBA16161616F) || (fmt==IMAGE_FORMAT_RGBA16161616) ? 0 : TEXTUREFLAGS_SRGB );
 		}
 	}
 	SHADER_DRAW

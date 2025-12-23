@@ -1,9 +1,10 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: VProf engine integration
 //
 //===========================================================================//
 
+#include "tier0/platform.h"
 #include "sys.h"
 #include "vprof_engine.h"
 #include "sv_main.h"
@@ -26,6 +27,7 @@
 #include "filesystem_engine.h"
 #include "tier1/utlstring.h"
 #include "tier1/utlvector.h"
+#include "tier0/etwprof.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -43,6 +45,9 @@ static ConVar vprof_dump_spikes( "vprof_dump_spikes","0", 0, "Framerate at which
 static ConVar vprof_dump_spikes_node( "vprof_dump_spikes_node","", 0, "Node to start report from when doing a dump spikes" );
 static ConVar vprof_dump_spikes_budget_group( "vprof_dump_spikes_budget_group","", 0, "Budget gtNode to start report from when doing a dump spikes" );
 static ConVar vprof_dump_oninterval( "vprof_dump_oninterval", "0", 0, "Interval (in seconds) at which vprof will batch up data and dump it to the console." );
+// vprof_report_oninterval gives more detail. If both vprof_report_oninterval and vprof_dump_oninterval
+// are set then vprof_report_oninterval wins.
+static ConVar vprof_report_oninterval( "vprof_report_oninterval", "0", 0, "Interval (in seconds) at which vprof will batch up a full report to the console -- more detailed than vprof_dump_oninterval." );
 
 static void (*g_pfnDeferredOp)();
 
@@ -59,13 +64,14 @@ const double MAX_SPIKE_REPORT = 1.0;
 const int MAX_SPIKE_REPORT_FRAMES = 10;
 static double LastSpikeTime = 0;
 static int LastSpikeFrame = 0;
-bool g_VProfSignalSpike; // used by xbox
+//bool g_VProfSignalSpike; // used by xbox
 static ConVar vprof_counters( "vprof_counters", "0" );
 
 extern bool con_debuglog;
 extern ConVar con_logfile;
 static bool g_fVprofOnByUI;
 static bool g_bVProfNoVSyncOff = false;
+static bool g_fVprofToVTrace = false;
 
 class ConsoleLogger
 {
@@ -125,24 +131,41 @@ void PreUpdateProfile( float filteredtime )
 	VProfRecord_StartOrStop();
 
 	// Check to see if it is time to dump the data and restart collection.
-	if ( g_VProfCurrentProfile.IsEnabled() && ( vprof_dump_oninterval.GetFloat() != 0.0f ) )
+	if ( g_VProfCurrentProfile.IsEnabled() )
 	{
 		float flCurrentTime = eng->GetCurTime();
 		float flIntervalTime = vprof_dump_oninterval.GetFloat();
+		// vprof_report_oninterval trumps vprof_dump_oninterval
+		if ( vprof_report_oninterval.GetFloat() != 0.0f )
+			flIntervalTime = vprof_report_oninterval.GetFloat();
 
 		g_VProfCurrentProfile.MarkFrame();
 
 		if ( ( s_flIntervalStartTime + flIntervalTime ) < flCurrentTime )
 		{
-			// Dump the current profile.
-			g_VProfCurrentProfile.OutputReport( VPRT_SUMMARY | VPRT_LIST_BY_TIME | VPRT_LIST_BY_AVG_TIME | VPRT_LIST_BY_TIME_LESS_CHILDREN | VPRT_LIST_TOP_ITEMS_ONLY );
+			if ( vprof_report_oninterval.GetFloat() != 0.0f )
+			{
+				// Detailed report.
+				g_VProfCurrentProfile.Pause();
+				ConsoleLogger consoleLog;
+				// Just do one report in order to avoid excessive overhead when this is
+				// called on a timer. Each report can take about 1.5 ms on a fast machine.
+				g_VProfCurrentProfile.OutputReport( VPRT_LIST_BY_TIME, NULL );
+				g_VProfCurrentProfile.Resume();
+			}
+			else if ( vprof_dump_oninterval.GetFloat() != 0.0f )
+			{
+				// Dump the current profile.
+				g_VProfCurrentProfile.OutputReport( VPRT_SUMMARY | VPRT_LIST_BY_TIME | VPRT_LIST_BY_AVG_TIME | VPRT_LIST_BY_TIME_LESS_CHILDREN | VPRT_LIST_TOP_ITEMS_ONLY );
 
-			// Stop the current profile.
-			g_VProfCurrentProfile.Stop();
+				// Stop the current profile.
+				g_VProfCurrentProfile.Stop();
 
-			// Reset and restart the current profile.
-			g_VProfCurrentProfile.Reset();
-			g_VProfCurrentProfile.Start();
+				// Reset and restart the current profile.
+				g_VProfCurrentProfile.Reset();
+				g_VProfCurrentProfile.Start();
+			}
+
 			s_flIntervalStartTime = flCurrentTime;
 		}
 	}
@@ -157,7 +180,10 @@ void PreUpdateProfile( float filteredtime )
 			if( g_VProfSignalSpike || ( Sys_FloatTime() - LastSpikeTime > MAX_SPIKE_REPORT && g_ServerGlobalVariables.framecount > LastSpikeFrame + MAX_SPIKE_REPORT_FRAMES ) )
 			{
 				ConsoleLogger consoleLog;
-				g_VProfCurrentProfile.OutputReport( VPRT_SUMMARY | VPRT_LIST_BY_TIME | VPRT_LIST_BY_AVG_TIME | VPRT_LIST_BY_TIME_LESS_CHILDREN | VPRT_LIST_TOP_ITEMS_ONLY,
+				// Print a message so that spikes can be seen even when going to VTrace.
+				if ( g_fVprofToVTrace )
+					Msg( "%1.3f ms spike detected.\n", eng->GetFrameTime() * 1000.0f );
+				g_VProfCurrentProfile.OutputReport( VPRT_SUMMARY | VPRT_LIST_BY_TIME | VPRT_LIST_BY_TIME_LESS_CHILDREN | VPRT_LIST_TOP_ITEMS_ONLY,
 													( vprof_dump_spikes_node.GetString()[0] ) ? vprof_dump_spikes_node.GetString() : NULL,
 													( vprof_dump_spikes_budget_group.GetString()[0] ) ? g_VProfCurrentProfile.BudgetGroupNameToBudgetGroupID( vprof_dump_spikes_budget_group.GetString() ) : -1 );
 #ifdef _XBOX // X360TBD
@@ -249,15 +275,24 @@ void UpdateVXConsoleProfile()
 #endif
 
 static bool g_fVprofCacheMissOnByUI = false;
-static char g_szDefferedArg1[128];
 
-#define DEFERRED_CON_COMMAND( cmd, help )									\
-	static void cmd##_Impl();												\
-	CON_COMMAND(cmd, help)													\
-	{																		\
-		g_pfnDeferredOp = cmd##_Impl;										\
-		Q_strncpy( g_szDefferedArg1, args[1], sizeof(g_szDefferedArg1) );	\
-	}																		\
+// When a DEFERRED_CON_COMMAND is called these will contain the first and
+// second arguments, or zero-length strings if these arguments don't exist.
+static char g_szDefferedArg1[128];
+static char g_szDefferedArg2[128];
+
+// Con commands that are defined with DEFERRED_CON_COMMAND are called by PreUpdateProfile()
+// which calls ExecuteDeferredOp(). This ensures that vprof operations are done at the appropriate
+// time in the frame loop. Note that only one deferred command can be set at a time, so only one
+// deferred command can be on the command line.
+#define DEFERRED_CON_COMMAND( cmd, help )				\
+	static void cmd##_Impl();							\
+	CON_COMMAND(cmd, help)								\
+	{													\
+		g_pfnDeferredOp = cmd##_Impl;					\
+		V_strcpy_safe( g_szDefferedArg1, args[1] );		\
+		V_strcpy_safe( g_szDefferedArg2, args[2] );		\
+	}													\
 	static void cmd##_Impl()
 
 CON_COMMAND_F( spike,"generates a fake spike", FCVAR_CHEAT )
@@ -344,6 +379,23 @@ DEFERRED_CON_COMMAND( vprof, "Toggle VProf profiler" )
 		g_fVprofOnByUI = false;
 	}
 }
+
+#ifdef	ETW_MARKS_ENABLED
+CON_COMMAND( vprof_vtrace, "Toggle whether vprof data is sent to VTrace" )
+{
+	if ( g_fVprofToVTrace )
+	{
+		Msg("Vprof data now returns to the console.\n");
+		g_VProfCurrentProfile.SetOutputStream( NULL );
+	}
+	else
+	{
+		Msg("VProf data is now being sent to vtrace.\n");
+		g_VProfCurrentProfile.SetOutputStream( ETWMarkPrintf );
+	}
+	g_fVprofToVTrace = !g_fVprofToVTrace;
+}
+#endif
 
 #ifdef _X360
 
@@ -519,7 +571,9 @@ DEFERRED_CON_COMMAND(vprof_generate_report, "Generate a report to the console.")
 {
 	g_VProfCurrentProfile.Pause();
 	ConsoleLogger consoleLog;
-	g_VProfCurrentProfile.OutputReport( VPRT_FULL & ~VPRT_HIERARCHY, (g_szDefferedArg1[0]) ? g_szDefferedArg1 : NULL );
+	// This used to generate six different reports, which is expensive and hard to read. Default to
+	// two to save time and space.
+	g_VProfCurrentProfile.OutputReport( VPRT_LIST_BY_TIME | VPRT_LIST_BY_TIME_LESS_CHILDREN, (g_szDefferedArg1[0]) ? g_szDefferedArg1 : NULL );
 	g_VProfCurrentProfile.Resume();
 }
 
@@ -816,7 +870,7 @@ public:
 	virtual void GetBudgetGroupTimes( float times[IVProfExport::MAX_BUDGETGROUP_TIMES] )
 	{
 		int nTotalGroups = min( m_Times.Count(), GetActiveVProfile()->GetNumBudgetGroups() );
-		int nGroups = min( nTotalGroups, IVProfExport::MAX_BUDGETGROUP_TIMES );
+		int nGroups = min( nTotalGroups, (int)IVProfExport::MAX_BUDGETGROUP_TIMES );
 		memset( times, 0, sizeof( times[0] ) * nGroups );
 
 		int iOut = 0;
@@ -886,7 +940,7 @@ public:
 
 		int groupID = pTestNode->GetBudgetGroupID();
 		double nodeTime = pNode->GetPrevTimeLessChildren();
-		if ( groupID >= 0 && groupID < min( m_Times.Count(), IVProfExport::MAX_BUDGETGROUP_TIMES ) )
+		if ( groupID >= 0 && groupID < min( m_Times.Count(), (int)IVProfExport::MAX_BUDGETGROUP_TIMES ) )
 		{
 			m_Times[groupID] += nodeTime;
 		}

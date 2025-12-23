@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A simple application demonstrating the HL2 demo file format ( subject to change!!! )
 //
@@ -6,7 +6,7 @@
 //=============================================================================//
 #include <windows.h>
 #include "tier0/dbg.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "FileSystem_Tools.h"
 #include "cmdlib.h"
 #include "tooldemofile.h"
@@ -49,7 +49,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )

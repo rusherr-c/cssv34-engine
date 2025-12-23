@@ -41,7 +41,7 @@ const float4 g_vFlashlightMatrixRow4  :  register( SHADER_SPECIFIC_CONST_9 );
 const float3 cMorphTargetTextureDim		: register( SHADER_SPECIFIC_CONST_10 );
 const float4 cMorphSubrect				: register( SHADER_SPECIFIC_CONST_11 );
 
-sampler2D morphSampler					: register( s0 );
+sampler2D morphSampler					: register( D3DVERTEXTEXTURESAMPLER0, s0 );
 #endif
 
 struct VS_INPUT
@@ -110,13 +110,16 @@ VS_OUTPUT main( const VS_INPUT v )
 
 	// Transform into projection space
 	//vWorldPosition -= ( vWorldPosition - g_cEyeOrigin ) * 0.9; //Debug to visualize eye origin
-	o.projPos = mul( float4( vWorldPosition, 1.0f ), cViewProj );
+	float4 vProjPos = mul( float4( vWorldPosition, 1.0f ), cViewProj );
+	o.projPos = vProjPos;
+	vProjPos.z = dot( float4( vWorldPosition, 1.0f ), cViewProjZ );
+
 	
-	o.vWorldPosition_ProjPosZ.w = o.projPos.z;
+	o.vWorldPosition_ProjPosZ.w = vProjPos.z;
 
 #if !defined( _X360 )
 	// Set fixed-function fog factor
-	o.fog = CalcFog( vWorldPosition, o.projPos, g_iFogType );
+	o.fog = CalcFog( vWorldPosition, vProjPos, g_iFogType );
 #endif
 
 	// Normal = (Pos - Eye origin)
@@ -166,6 +169,9 @@ VS_OUTPUT main( const VS_INPUT v )
 			o.cVertexLight.rgb = float3( 0.0f, 0.0f, 0.0f );
 		}
 	}
+
+// NOTE: it appears that o.vLightFalloffCosine01 and o.vLightFalloffCosine23 are filled in even if
+// we don't have enough lights, meaning we pass garbage to the pixel shader which then throws it away
 
 	// Light falloff for first two local lights
 	o.vLightFalloffCosine01.x = VertexAttenInternal( vWorldPosition.xyz, 0 );

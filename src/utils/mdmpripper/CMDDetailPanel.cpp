@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "vgui_controls/HTML.h"
 #include "CMDDetailPanel.h"
 

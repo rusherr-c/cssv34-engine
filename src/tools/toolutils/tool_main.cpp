@@ -1,10 +1,10 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================
 
-#include "tier1/UtlVector.h"
+#include "tier1/utlvector.h"
 #include "tier1/convar.h"
 #include "icvar.h"
 #include "toolframework/itoolsystem.h"
@@ -18,6 +18,7 @@
 #include "iregistry.h"
 #include "datamodel/idatamodel.h"
 #include "filesystem.h"
+#include "p4lib/ip4.h"
 #include "engine/ivdebugoverlay.h"
 #include "tier3/tier3dm.h"
 #include "datamodel/dmelementfactoryhelper.h"
@@ -133,7 +134,7 @@ bool CToolDictionary::Connect( CreateInterfaceFn factory )
 	enginetools = ( IEngineTool * )factory( VENGINETOOL_INTERFACE_VERSION, NULL );
 	debugoverlay = ( IVDebugOverlay * )factory( VDEBUG_OVERLAY_INTERFACE_VERSION, NULL );
 
-	if ( !enginevgui || !debugoverlay || !g_pCVar || !enginetools || !g_pFileSystem )
+	if ( !enginevgui || !debugoverlay || !g_pCVar || !enginetools || !g_pFileSystem  )
 		return false;
 
 	if ( !VGui_Startup( factory ) )

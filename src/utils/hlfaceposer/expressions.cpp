@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,9 +12,9 @@
 #include "expclass.h"
 #include "mxExpressionTab.h"
 #include "mxExpressionTray.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "faceposer_models.h"
-#include "UtlDict.h"
+#include "utldict.h"
 #include "scriplib.h"
 #include "checksum_crc.h"
 
@@ -88,7 +88,7 @@ int GetGlobalFlexControllerCount( void )
 // Input  : *szName - 
 // Output : int
 //-----------------------------------------------------------------------------
-int AddGlobalFlexController( StudioModel *model, char *szName )
+int AddGlobalFlexController( StudioModel *model, const char *szName )
 {
 	int idx = g_GlobalFlexControllerLookup.Find( szName );
 	if ( idx != g_GlobalFlexControllerLookup.InvalidIndex() )
@@ -448,6 +448,8 @@ void CExpressionManager::LoadClass( const char *inpath )
 	bool bHasWeighting = false;
 	bool bNormalized = false;
 
+	EnableStickySnapshotMode( );
+
 	while (1)
 	{
 		GetToken (true);
@@ -567,6 +569,8 @@ void CExpressionManager::LoadClass( const char *inpath )
 
 	active->CheckBitmapConsistency();
 
+	DisableStickySnapshotMode( );
+
 	PopulateClassCB( active );
 
 	active->DeselectExpression();
@@ -639,7 +643,7 @@ bool CExpressionManager::CloseClass( CExpClass *cl )
 
 	// The memory can be freed here, so be more careful
 	char temp[ 256 ];
-	strcpy( temp, cl->GetName() );
+	V_strcpy_safe( temp, cl->GetName() );
 
 	RemoveCExpClass( cl );
 

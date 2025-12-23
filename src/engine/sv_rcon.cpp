@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  implementation of the rcon server 
 //
@@ -12,7 +12,7 @@
 #undef SetPort // winsock screws with the SetPort string... *sigh*
 #define socklen_t int
 #define MSG_NOSIGNAL 0
-#elif _LINUX
+#elif POSIX
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -22,6 +22,9 @@
 #define closesocket close
 #define WSAGetLastError() errno
 #define ioctlsocket ioctl
+#ifdef OSX
+#define MSG_NOSIGNAL 0
+#endif
 #endif
 #include <tier0/dbg.h>
 #include "utlbuffer.h"
@@ -30,6 +33,7 @@
 #include "proto_oob.h" // PORT_RCON define
 #include "sv_remoteaccess.h"
 #include "cl_rcon.h"
+#include "sv_filter.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
@@ -38,7 +42,7 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-
+#ifdef ENABLE_RPT
 class CRPTServer : public CRConServer
 {
 	typedef CRConServer BaseClass;
@@ -60,17 +64,17 @@ public:
 };
 
 
+static CRPTServer g_RPTServer;
+CRConServer & RPTServer()
+{
+	return g_RPTServer;
+}
+#endif // ENABLE_RPT
 
 static CRConServer g_RCONServer;
 CRConServer & RCONServer()
 {
 	return g_RCONServer;
-}
-
-static CRPTServer g_RPTServer;
-CRConServer & RPTServer()
-{
-	return g_RPTServer;
 }
 
 static void RconPasswordChanged_f( IConVar *pConVar, const char *pOldString, float flOldValue )
@@ -84,6 +88,15 @@ static void RconPasswordChanged_f( IConVar *pConVar, const char *pOldString, flo
 
 }
 ConVar  rcon_password	( "rcon_password", "", FCVAR_SERVER_CANNOT_QUERY|FCVAR_DONTRECORD, "remote console password.", RconPasswordChanged_f );
+
+ConVar sv_rcon_banpenalty( "sv_rcon_banpenalty", "0", 0, "Number of minutes to ban users who fail rcon authentication", true, 0, false, 0 );
+ConVar sv_rcon_maxfailures( "sv_rcon_maxfailures", "10", 0, "Max number of times a user can fail rcon authentication before being banned", true, 1, true, 20 );
+ConVar sv_rcon_minfailures( "sv_rcon_minfailures", "5", 0, "Number of times a user can fail rcon authentication in sv_rcon_minfailuretime before being banned", true, 1, true, 20 );
+ConVar sv_rcon_minfailuretime( "sv_rcon_minfailuretime", "30", 0, "Number of seconds to track failed rcon authentications", true, 1, false, 0 );
+ConVar sv_rcon_whitelist_address( "sv_rcon_whitelist_address", "", 0, "When set, rcon failed authentications will never ban this address, e.g. '127.0.0.1'" );
+
+ConVar sv_rcon_maxpacketsize( "sv_rcon_maxpacketsize", "1024", 0, "The maximum number of bytes to allow in a command packet", true, 0, false, 0 );
+ConVar sv_rcon_maxpacketbans( "sv_rcon_maxpacketbans", "1", 0, "Ban IPs for sending RCON packets exceeding the value specified in sv_rcon_maxpacketsize", true, 0, true, 1 );
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -177,7 +190,7 @@ bool CRConServer::CreateSocket()
 //-----------------------------------------------------------------------------
 bool CRConServer::ShouldAcceptSocket( SocketHandle_t hSocket, const netadr_t & netAdr )
 {
-	return true;
+	return !Filter_ShouldDiscard( netAdr );
 }
 
 void CRConServer::OnSocketAccepted( SocketHandle_t hSocket, const netadr_t &netAdr, void** ppData )
@@ -191,6 +204,7 @@ void CRConServer::OnSocketAccepted( SocketHandle_t hSocket, const netadr_t &netA
 
 void CRConServer::OnSocketClosed( SocketHandle_t hSocket, const netadr_t &netAdr, void* pData )
 {
+	m_bSocketDeleted = true;
 	ConnectedRConSocket_t *pOldSocket = (ConnectedRConSocket_t*)( pData );
 	delete pOldSocket;
 }
@@ -203,6 +217,7 @@ void CRConServer::OnSocketClosed( SocketHandle_t hSocket, const netadr_t &netAdr
 void CRConServer::RunFrame()
 {
 	m_Socket.RunFrame();
+	m_bSocketDeleted = false;
 
 	// handle incoming data
 	// NOTE: Have to iterate in reverse since we may be killing sockets
@@ -243,7 +258,7 @@ void CRConServer::RunFrame()
 			SendRCONResponse( i, pBuf, sendLen + sizeof(int) );
 			if ( bAllocate )
 			{
-				delete pBuf;
+				delete [] pBuf;
 			}
 		}
 
@@ -274,11 +289,11 @@ void CRConServer::RunFrame()
 		{
 			CUtlBuffer & response = pData->packetbuffer;
 			response.EnsureCapacity( response.TellPut() + readLen );
-			char *recvBuf = (char *)_alloca( min( 1024, readLen ) ); // a buffer used for recv()
+			char *recvBuf = (char *)_alloca( min( 1024ul, readLen ) ); // a buffer used for recv()
 			unsigned int len = 0;
 			while ( len < readLen )
 			{
-				int recvLen = recv( hSocket, recvBuf , min(1024, readLen - len) , 0 );
+				int recvLen = recv( hSocket, recvBuf , min(1024ul, readLen - len) , 0 );
 				if ( recvLen == 0 ) // socket was closed
 				{
 					m_Socket.CloseAcceptedSocket( i );
@@ -298,11 +313,25 @@ void CRConServer::RunFrame()
 			response.SeekGet( CUtlBuffer::SEEK_HEAD, 0 );
 
 			int size = response.GetInt();
+		
+			if ( sv_rcon_maxpacketsize.GetInt() > 0 && size > sv_rcon_maxpacketsize.GetInt() )
+			{
+				if ( sv_rcon_maxpacketbans.GetBool() )
+				{
+					HandleFailedRconAuth( socketAdr );
+				}
+
+				m_Socket.CloseAcceptedSocket( i );
+				continue;
+			}
+			
 			while ( size > 0 && size <= response.TellPut() - response.TellGet() )
 			{
 				SV_RedirectStart( RD_SOCKET, &socketAdr );
 				g_ServerRemoteAccess.WriteDataRequest( this, pData->listenerID, response.PeekGet(), size );
 				SV_RedirectEnd();
+				if ( m_bSocketDeleted )
+					return;
 				response.SeekGet( CUtlBuffer::SEEK_CURRENT, size ); // eat up the buffer we just sent
 
 				if ( response.TellPut() - response.TellGet() >= sizeof(int) )
@@ -314,18 +343,31 @@ void CRConServer::RunFrame()
 					size = 0; // finished the packet
 				}
 			}
+
+			// Check and see if socket was closed as a result of processing - this can happen if the user has entered too many passwords
+			int nNewCount = m_Socket.GetAcceptedSocketCount();
+			if ( 0 == nNewCount || i > nNewCount || pData != GetSocketData( i )  ) 
+			{
+				response.Purge();
+				break;
+			}
+
 			if ( size > 0 || (response.TellPut() - response.TellGet() > 0))
 			{
+				// trim the bytes that were just processed
 				CUtlBuffer tmpBuf;
 				if ( response.TellPut() - response.TellGet() > 0 )
 				{
 					tmpBuf.Put( response.PeekGet(), response.TellPut() - response.TellGet() );
 				}
+
 				response.Purge();
+
 				if ( size > 0 )
 				{
 					response.Put( &size, sizeof(size));
 				}
+
 				if ( tmpBuf.TellPut() > 0 )
 				{
 					response.Put( tmpBuf.Base(), tmpBuf.TellPut() );
@@ -457,11 +499,6 @@ bool CRConServer::SendRCONResponse( int nIndex, const void *data, int len, bool 
 	return true;
 }
 
-ConVar sv_rcon_banpenalty( "sv_rcon_banpenalty", "0", 0, "Number of minutes to ban users who fail rcon authentication", true, 0, false, 0 );
-ConVar sv_rcon_maxfailures( "sv_rcon_maxfailures", "10", 0, "Max number of times a user can fail rcon authentication before being banned", true, 1, true, 20 );
-ConVar sv_rcon_minfailures( "sv_rcon_minfailures", "5", 0, "Number of times a user can fail rcon authentication in sv_rcon_minfailuretime before being banned", true, 1, true, 20 );
-ConVar sv_rcon_minfailuretime( "sv_rcon_minfailuretime", "30", 0, "Number of seconds to track failed rcon authentications", true, 1, false, 0 );
-
 //-----------------------------------------------------------------------------
 // Purpose: compares failed rcons based on most recent failure time
 //-----------------------------------------------------------------------------
@@ -482,8 +519,17 @@ bool CRConServer::FailedRCon_t::operator<(const struct CRConServer::FailedRCon_t
 //-----------------------------------------------------------------------------
 // Purpose: tracks failed rcon attempts and bans repeat offenders
 //-----------------------------------------------------------------------------
-void CRConServer::HandleFailedRconAuth( const netadr_t & adr )
+bool CRConServer::HandleFailedRconAuth( const netadr_t & adr )
 {
+	if ( sv_rcon_whitelist_address.GetString()[0] )
+	{
+		if ( !V_strcmp( adr.ToString( true ), sv_rcon_whitelist_address.GetString() ) )
+		{
+			ConMsg( "Rcon auth failed from rcon whitelist address %s\n", adr.ToString() );
+			return false;
+		}
+	}
+
 	int i;
 	FailedRCon_t *failedRcon = NULL;
 	int nCount = m_failedRcons.Count();
@@ -551,7 +597,7 @@ void CRConServer::HandleFailedRconAuth( const netadr_t & adr )
 		ConMsg( "Banning %s for rcon hacking attempts\n", failedRcon->adr.ToString( true ) );
 		Cbuf_AddText( va( "addip %i %s\n", sv_rcon_banpenalty.GetInt(), failedRcon->adr.ToString( true ) ) );
 		Cbuf_Execute();
-		return;
+		return true;
 	}
 
 	// check if the user should be banned based on recent failed attempts
@@ -568,6 +614,23 @@ void CRConServer::HandleFailedRconAuth( const netadr_t & adr )
 		ConMsg( "Banning %s for rcon hacking attempts\n", failedRcon->adr.ToString( true ) );
 		Cbuf_AddText( va( "addip %i %s\n", sv_rcon_banpenalty.GetInt(), failedRcon->adr.ToString( true ) ) );
 		Cbuf_Execute();
-		return;
+		return true;
 	}
+
+	return false;
+}
+
+bool CRConServer::BCloseAcceptedSocket( ra_listener_id listener )
+{
+	int nCount = m_Socket.GetAcceptedSocketCount();
+	for ( int i = 0; i < nCount; i++ )
+	{
+		ConnectedRConSocket_t *pSocketData = GetSocketData( i );
+		if ( pSocketData->listenerID == listener )
+		{
+			m_Socket.CloseAcceptedSocket( i );
+			return true;
+		}
+	}
+	return false;
 }

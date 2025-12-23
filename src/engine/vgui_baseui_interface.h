@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defines the interface that the GameUI dll exports
 //
@@ -132,10 +132,14 @@ public:
 	//		otherwise returns false and will set the variable pointed by pStorageDeviceValidated to 1
 	//				  once the storage device is selected by user.
 	virtual bool ValidateStorageDevice( int *pStorageDeviceValidated ) = 0;
+
+	virtual void ConfirmQuit( void ) = 0;
 };
 
 // Purpose: singleton accessor
 extern IEngineVGuiInternal *EngineVGui();
 
+// Purpose: Play a sound
+void VGui_PlaySound(const char *pFileName);
 
 #endif // VGUI_BASEUI_INTERFACE_H

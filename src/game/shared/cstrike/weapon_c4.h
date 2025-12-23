@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -51,6 +51,21 @@
 		void SetBombSiteIndex( int iIndex ){ m_iBombSiteIndex = iIndex;	}
 
 		inline bool IsBombActive( void ) { return m_bBombTicking; }
+
+        //=============================================================================
+        // HPE_BEGIN:
+        // [tj] Accessors related to planting of the bomb
+        //=============================================================================
+ 
+        CCSPlayer*  GetPlanter() { return m_pPlanter; }
+        void        SetPlanter(CCSPlayer* player) { m_pPlanter = player; }
+        
+        void SetPlantedAfterPickup (bool plantedAfterPickup) { m_bPlantedAfterPickup = plantedAfterPickup; }
+ 
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+
 		
 	public:
 
@@ -89,6 +104,21 @@
 		CUtlVector<ScreenHandle_t>	m_hScreens;
 
 		int m_iProgressBarTime;
+
+        //=============================================================================
+        // HPE_BEGIN:        
+        //=============================================================================
+         
+        // [tj] We need to store who planted the bomb so we can track who deserves credits for the kills
+        CHandle<CCSPlayer>  m_pPlanter;
+
+        // [tj] We need to know if this was planted by a player who recovered the bomb
+        bool m_bPlantedAfterPickup;
+         
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+        
 	};
 
 	extern CUtlVector< CPlantedC4* > g_PlantedC4s;
@@ -115,6 +145,9 @@ public:
 	virtual void PrimaryAttack();
 	virtual void WeaponIdle();
 	virtual void UpdateShieldState( void );
+	virtual float GetMaxSpeed() const;
+
+// 	virtual float GetSpread() const;
 
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_C4; }
 
@@ -132,8 +165,22 @@ public:
 
 		virtual bool Holster( CBaseCombatWeapon *pSwitchingTo );
 		virtual bool ShouldRemoveOnRoundRestart();
+
+        //=============================================================================
+        // HPE_BEGIN:
+        // [tj] Simple Setter
+        //=============================================================================
+         
+        void SetDroppedFromDeath(bool droppedFromDeath) { m_bDroppedFromDeath = droppedFromDeath; }
+         
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+        
 	
 	#endif
+
+	void AbortBombPlant();
 
 	void PlayArmingBeeps( void );
 	virtual void	OnPickedUp( CBaseCombatCharacter *pNewOwner );
@@ -148,6 +195,18 @@ public:
 private:	
 	bool m_bPlayedArmingBeeps[NUM_BEEPS];
 	bool m_bBombPlanted;
+    
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj] we want to store if this bomb was dropped because the original owner was killed
+    //=============================================================================
+     
+    bool m_bDroppedFromDeath;
+     
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+    
 
 private:
 	

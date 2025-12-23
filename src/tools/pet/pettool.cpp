@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -15,7 +15,7 @@
 #include "dme_controls/elementpropertiestree.h"
 #include "tier0/icommandline.h"
 #include "materialsystem/imaterialsystem.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "petdoc.h"
 #include "particlesystemdefinitionbrowser.h"
 #include "particlesystempropertiescontainer.h"
@@ -118,6 +118,16 @@ void CPetTool::Shutdown()
 
 	BaseClass::Shutdown();
 }
+
+
+//-----------------------------------------------------------------------------
+// returns the document
+//-----------------------------------------------------------------------------
+CPetDoc *CPetTool::GetDocument()
+{
+	return m_pDoc;
+}
+
 	
 //-----------------------------------------------------------------------------
 // Tool activation/deactivation
@@ -686,7 +696,7 @@ void CPetTool::OnNew()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_SAVE_QUERY,
+		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY,
 			new KeyValues( "OnNew" ) );
 		return;
 	}
@@ -704,7 +714,7 @@ void CPetTool::OnOpen( )
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetFileName();
 	}
 
@@ -728,7 +738,7 @@ void CPetTool::Save()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, NULL );
+		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -736,7 +746,7 @@ void CPetTool::OnSaveAs()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( NULL, PET_FILE_FORMAT, NULL );
+		SaveFile( NULL, PET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -750,7 +760,7 @@ void CPetTool::SaveAndTest()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, NULL, 
+		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS, 
 			new KeyValues( "RestartLevel" ) );
 	}
 	else
@@ -777,7 +787,7 @@ void CPetTool::OnClose()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnClose" ) );
 		return;
 	}
@@ -829,7 +839,7 @@ void CPetTool::OpenSpecificFile( const char *pFileName )
 
 		if ( m_pDoc->IsDirty() )
 		{
-			nFlags = FOSM_SHOW_SAVE_QUERY;
+			nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 			pSaveFileName = m_pDoc->GetFileName();
 		}
 		else
@@ -921,7 +931,7 @@ bool CPetTool::CanQuit()
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
 		// Show Save changes Yes/No/Cancel and re-quit if hit yes/no
-		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetFileName(), PET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnQuit" ) );
 		return false;
 	}

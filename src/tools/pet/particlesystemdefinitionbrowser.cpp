@@ -1,11 +1,11 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Singleton dialog that generates and presents the entity report.
 //
 //===========================================================================//
 
 #include "particlesystemdefinitionbrowser.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "iregistry.h"
 #include "vgui/ivgui.h"
@@ -18,9 +18,13 @@
 #include "vgui/keycode.h"
 #include "dme_controls/dmecontrols_utils.h"
 #include "dme_controls/particlesystempanel.h"
+#include "filesystem.h"
+#include "vgui_controls/FileOpenDialog.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
+
+
 
 using namespace vgui;
 
@@ -128,7 +132,163 @@ void CParticleSystemDefinitionBrowser::DeleteParticleSystems()
 	}
 }
 
+//-----------------------------------------------------------------------------
+void CParticleSystemDefinitionBrowser::LoadKVSection( CDmeParticleSystemDefinition *pNew, KeyValues *pOverridesKv, ParticleFunctionType_t eType )
+{
+	// Operator KV
+	KeyValues *pOperator = pOverridesKv->FindKey( GetParticleFunctionTypeName(eType), NULL );
+	if ( !pOperator )
+		return;
 
+	// Function
+	FOR_EACH_TRUE_SUBKEY( pOperator, pFunctionBlock )
+	{
+		int iFunction = pNew->FindFunction( eType, pFunctionBlock->GetName() );
+		if ( iFunction >= 0 )
+		{
+			CDmeParticleFunction *pDmeFunction = pNew->GetParticleFunction( eType, iFunction );
+			// Elements
+			FOR_EACH_SUBKEY( pFunctionBlock, pAttributeItem )
+			{
+				CDmAttribute *pAttribute = pDmeFunction->GetAttribute( pAttributeItem->GetName() );
+				if ( !pAttribute )
+				{
+					Warning( "Unable to Find Attribute [%s] in Function [%s] in Operator [%s] for Definition [%s]\n", pAttributeItem->GetName(), pFunctionBlock->GetName(), GetParticleFunctionTypeName(eType), pNew->GetName() );
+				}
+				else
+				{
+					pAttribute->SetValueFromString( pAttributeItem->GetString() );
+				}
+			}
+		}
+		else
+		{
+			Warning( "Function [%s] not found under Operator [%s] for Definition [%s]\n", pFunctionBlock->GetName(), GetParticleFunctionTypeName(eType), pNew->GetName() );
+		}
+	}
+
+}
+
+//-----------------------------------------------------------------------------
+// Given a KV, create, add and return an effect
+//-----------------------------------------------------------------------------
+CDmeParticleSystemDefinition* CParticleSystemDefinitionBrowser::CreateParticleFromKV( KeyValues *pKeyValue )
+{
+	CDmeParticleSystemDefinition* pBaseParticleDef = NULL;
+
+	// Get the Base Particle Effect Def
+	const char* pBaseParticleName = pKeyValue->GetString( "base_effect", "" );
+	for ( int i = 0; i < m_pParticleSystemsDefinitions->GetItemCount(); ++i )
+	{
+		KeyValues *kv = m_pParticleSystemsDefinitions->GetItem( i );
+		if ( !V_strcmp( kv->GetString( "name", "" ), pBaseParticleName ) )
+		{
+			// 
+			pBaseParticleDef = GetElementKeyValue< CDmeParticleSystemDefinition >( kv, "particleSystem" );
+			break;
+		}
+	}
+
+	// Base Particle could not be found, end;
+	if ( !pBaseParticleDef )
+	{
+		Warning( "Unable to to find base particle system [%s]", pBaseParticleName );
+		return NULL;
+	}
+
+	// Create a Copy of the Base Effect
+	const char *pszNewParticleName = pKeyValue->GetName();
+	//CAppUndoScopeGuard guard( NOTIFY_SETDIRTYFLAG, "Copy Particle System", "Copy Particle System" );
+	CDmeParticleSystemDefinition *pNew = CastElement<CDmeParticleSystemDefinition>( pBaseParticleDef->Copy() );
+	pNew->SetName( pszNewParticleName );
+
+	// Overrides
+	// 
+	//"properties"
+	KeyValues *pProperties = pKeyValue->FindKey( "Properties", NULL );
+	if ( pProperties )
+	{
+		FOR_EACH_SUBKEY( pProperties, pProperty )
+		{
+			CDmAttribute *pAttribute = pNew->GetAttribute( pProperty->GetName() );
+			if ( !pAttribute )
+			{
+				Warning( "Unable to Find Attribute [%s] in Function [%s]\n", pProperty->GetName(), "Properties" );
+			}
+			else
+			{
+				pAttribute->SetValueFromString( pProperty->GetString() );
+			}
+		}
+	}
+
+	LoadKVSection( pNew, pKeyValue, FUNCTION_RENDERER );
+	LoadKVSection( pNew, pKeyValue, FUNCTION_OPERATOR );
+	LoadKVSection( pNew, pKeyValue, FUNCTION_INITIALIZER );
+	LoadKVSection( pNew, pKeyValue, FUNCTION_EMITTER );
+	LoadKVSection( pNew, pKeyValue, FUNCTION_FORCEGENERATOR );
+	LoadKVSection( pNew, pKeyValue, FUNCTION_CONSTRAINT );
+
+	// Remove copied children
+	int iChildrenCount = pNew->GetParticleFunctionCount( FUNCTION_CHILDREN );
+	for ( int i = iChildrenCount - 1; i >= 0; i-- )
+	{
+		pNew->RemoveFunction( FUNCTION_CHILDREN, i );
+	}
+
+	// Search Children
+	KeyValues *pChildren = pKeyValue->FindKey( "Children", NULL );
+	if ( pChildren )
+	{
+		FOR_EACH_TRUE_SUBKEY( pChildren, pChild )
+		{
+			// each Child is its own effect so we need to add it and return it
+			CDmeParticleSystemDefinition* pChildEffect = CreateParticleFromKV( pChild );
+			if ( pChildEffect )
+			{
+				pNew->AddChild( pChildEffect );
+			}
+		}
+	}
+
+	m_pDoc->ReplaceParticleSystemDefinition( pNew );
+	m_pDoc->UpdateAllParticleSystems();
+	return pNew;
+}
+//-----------------------------------------------------------------------------
+// Create from KV
+void CParticleSystemDefinitionBrowser::CreateParticleSystemsFromKV( const char *pFileName )
+{
+	// 
+	//const char * pFileName = "particles\\_weapon_prefab_override_kv.txt";
+
+	CUtlBuffer bufRawData;
+	bool bReadFileOK = g_pFullFileSystem->ReadFile( pFileName, "MOD", bufRawData );
+	if ( !bReadFileOK )
+	{
+		Warning( "Unable to Open KV file [%s]\n", pFileName );
+		return;
+	}
+
+	// Wrap it with a text buffer reader
+	CUtlBuffer bufText( bufRawData.Base(), bufRawData.TellPut(), CUtlBuffer::READ_ONLY | CUtlBuffer::TEXT_BUFFER );
+
+	KeyValues *pBaseKeyValue = NULL;
+	pBaseKeyValue = new KeyValues( "CCreateParticlesFromKV" );
+	
+	if ( !pBaseKeyValue->LoadFromBuffer( NULL, bufText ) )
+	{
+		Warning( "Unable to Read KV file [%s]\n", pFileName );
+		pBaseKeyValue->deleteThis();
+		return;
+	}
+
+	FOR_EACH_TRUE_SUBKEY( pBaseKeyValue, pKVOver )
+	{
+		CreateParticleFromKV( pKVOver );
+	}
+
+}
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
@@ -144,7 +304,11 @@ void CParticleSystemDefinitionBrowser::OnKeyCodeTyped( vgui::KeyCode code )
 	}
 }
 
-
+//-----------------------------------------------------------------------------
+void CParticleSystemDefinitionBrowser::OnFileSelected(const char *fullpath)
+{
+	CreateParticleSystemsFromKV( fullpath );
+}
 //-----------------------------------------------------------------------------
 // Called when the selection changes
 //-----------------------------------------------------------------------------
@@ -215,21 +379,20 @@ void CParticleSystemDefinitionBrowser::OnInputCompleted( KeyValues *pKeyValues )
 		CDmeParticleSystemDefinition *pParticleSystem = m_pDoc->AddNewParticleSystemDefinition( pText );
 		g_pPetTool->SetCurrentParticleSystem( pParticleSystem );
 	}
-	else
-		if ( pKeyValues->FindKey( "copy" ) )
+	else if ( pKeyValues->FindKey( "copy" ) )
+	{
+		int nCount = m_pParticleSystemsDefinitions->GetSelectedItemsCount();
+		if ( nCount )
 		{
-			int nCount = m_pParticleSystemsDefinitions->GetSelectedItemsCount();
-			if ( nCount )
-			{
-				CDmeParticleSystemDefinition *pParticleSystem = GetSelectedParticleSystem( 0 );
-				CAppUndoScopeGuard guard( NOTIFY_SETDIRTYFLAG, "Copy Particle System",
-										  "Copy Particle System" );
-				CDmeParticleSystemDefinition * pNew =
-					CastElement<CDmeParticleSystemDefinition>( pParticleSystem->Copy( ) );
-				pNew->SetName( pText );
-				m_pDoc->AddNewParticleSystemDefinition( pNew, guard );
-			}
+			CDmeParticleSystemDefinition *pParticleSystem = GetSelectedParticleSystem( 0 );
+			CAppUndoScopeGuard guard( NOTIFY_SETDIRTYFLAG, "Copy Particle System",
+										"Copy Particle System" );
+			CDmeParticleSystemDefinition * pNew =
+				CastElement<CDmeParticleSystemDefinition>( pParticleSystem->Copy( ) );
+			pNew->SetName( pText );
+			m_pDoc->AddNewParticleSystemDefinition( pNew, guard );
 		}
+	}
 }
 
 
@@ -299,7 +462,7 @@ void CParticleSystemDefinitionBrowser::PasteFromClipboard( )
 		CUtlBuffer buf( pData, nLen, CUtlBuffer::TEXT_BUFFER | CUtlBuffer::READ_ONLY );
 
 		DmElementHandle_t hRoot;
-		if ( !g_pDataModel->Unserialize( buf, "keyvalues2", "pcf", NULL, "paste", CR_DELETE_OLD, hRoot ) )
+		if ( !g_pDataModel->Unserialize( buf, "keyvalues2", "pcf", NULL, "paste", CR_FORCE_COPY, hRoot ) )
 			continue;
 
 		CDmeParticleSystemDefinition *pDef = GetElement<CDmeParticleSystemDefinition>( hRoot );
@@ -340,6 +503,19 @@ void CParticleSystemDefinitionBrowser::OnCommand( const char *pCommand )
 		pInputDialog->SetMultiline( false );
 		pInputDialog->AddActionSignalTarget( this );
 		pInputDialog->DoModal( new KeyValues("copy") );
+		return;
+	}
+	if ( !Q_stricmp( pCommand, "Create From KeyValue" ) )
+	{
+		vgui::FileOpenDialog *pDialog = new vgui::FileOpenDialog( g_pPetTool->GetRootPanel(), "Select KV File", vgui::FOD_OPEN );
+		pDialog->SetTitle( "Choose KeyValue File", true );
+		pDialog->AddFilter( "*.txt", "KeyValue File (*.txt)", true );
+		pDialog->AddActionSignalTarget( this );
+
+		char szParticlesDir[MAX_PATH];
+		pDialog->SetStartDirectory( g_pFullFileSystem->RelativePathToFullPath( "particles", "MOD", szParticlesDir, sizeof(szParticlesDir) ) );
+		pDialog->DoModal( new KeyValues( "Create From KeyValue" ) );
+
 		return;
 	}
 

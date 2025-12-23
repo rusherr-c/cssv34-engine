@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "isys.h"
-#include "conproc.h"
+#include "console/conproc.h"
 #include "dedicated.h"
 #include "engine_hlds_api.h"
 #include "checksum_md5.h"
@@ -24,25 +24,26 @@
 #include "tier2/tier2.h"
 #include "dedicated.h"
 #include "vstdlib/cvar.h"
+#include "inputsystem/iinputsystem.h"
 
 #ifdef _WIN32
 #include <windows.h> 
 #include <direct.h>
 #include "KeyValues.h"
-// filesystem_steam.cpp implements this useful function - mount all the caches for a given app ID.
-extern void MountDependencies( int iAppId, CUtlVector<unsigned int> &depList );
 #else
 #define _chdir chdir
+#include <unistd.h>
 #endif
 
 void* FileSystemFactory( const char *pName, int *pReturnCode );
 bool InitInstance( );
-void ProcessConsoleInput( void );
-const char *UTIL_GetExecutableDir( );
+int ProcessConsoleInput( void );
 bool NET_Init( void );
 void NET_Shutdown( void );
 const char *UTIL_GetBaseDir( void );
+#ifdef _WIN32
 bool g_bVGui = false;
+#endif
 
 #if defined ( _WIN32 )
 #include "console/TextConsoleWin32.h"
@@ -52,20 +53,15 @@ CTextConsoleWin32 console;
 CTextConsoleUnix console;
 #endif
 
+#ifdef _WIN32
 extern char *gpszCvars;
-
-IDedicatedServerAPI *engine = NULL;
-
-#ifdef _LINUX
-extern char g_szEXEName[ 256 ];
 #endif
 
-#pragma warning(disable:4800)
+IDedicatedServerAPI *engine = NULL;
 
 //-----------------------------------------------------------------------------
 // Implementation of IVCRHelpers.
 //-----------------------------------------------------------------------------
-
 class CVCRHelpers : public IVCRHelpers
 {
 public:
@@ -81,8 +77,62 @@ public:
 };
 CVCRHelpers g_VCRHelpers;
 
-
 SpewRetval_t DedicatedSpewOutputFunc( SpewType_t spewType, char const *pMsg ); // in sys_common.cpp
+
+//-----------------------------------------------------------------------------
+// Run a single VGUI frame. if bFinished is true, run VGUIFinishedConfig() first.
+//-----------------------------------------------------------------------------
+static bool DoRunVGUIFrame( bool bFinished = false )
+{
+#ifdef _WIN32
+	if ( g_bVGui )
+	{
+		if ( bFinished )
+			VGUIFinishedConfig();
+		RunVGUIFrame();
+		return true;
+	}
+#endif
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Handle the VCRHook PeekMessage loop.
+//   Return true if WM_QUIT received.
+//-----------------------------------------------------------------------------
+static bool HandleVCRHook()
+{
+#if defined ( _WIN32 )
+	MSG msg;
+
+	bool bDone = false;
+	while( VCRHook_PeekMessage( &msg, NULL, 0, 0, PM_REMOVE ) )
+	{
+		//if (!GetMessage( &msg, NULL, 0, 0))
+		if ( msg.message == WM_QUIT )
+		{
+			bDone = true;
+			break;
+		}
+
+		TranslateMessage( &msg );
+		DispatchMessage( &msg );
+	}
+
+	if ( IsPC() )
+	{
+		// NOTE: Under some implementations of Win9x, 
+		// dispatching messages can cause the FPU control word to change
+		SetupFPUControlWord();
+	}
+
+	if ( bDone /*|| gbAppHasBeenTerminated*/ )
+		return true;
+#endif // _WIN32
+
+	return false;
+}
 
 //-----------------------------------------------------------------------------
 //
@@ -98,96 +148,32 @@ void RunServer( void )
 	}
 #endif
 
-	int bDone = 0;
-
-	// run 2 engine frames first to get the engine to load its resources
-	if (g_bVGui)
+	// Run 2 engine frames first to get the engine to load its resources.
+	for ( int i = 0; i < 2; i++ )
 	{
-#ifdef _WIN32
-		RunVGUIFrame();
-#endif
-	}
-	if ( !engine->RunFrame() )
-	{
-		return;
-	}
-	if (g_bVGui)
-	{
-#ifdef _WIN32
-		RunVGUIFrame();
-#endif
+		DoRunVGUIFrame();
+		if ( !engine->RunFrame() )
+			return;
 	}
 
-	if ( !engine->RunFrame() )
-	{
-		return;
-	}
+	// Run final VGUI frame.
+	DoRunVGUIFrame( true );
 
-	if (g_bVGui)
+	int bDone = false;
+	while ( !bDone )
 	{
-#ifdef _WIN32
-		VGUIFinishedConfig();
-		RunVGUIFrame();
-#endif
-	}
-	
-	while ( 1 )
-	{
-		if ( bDone )
+		// Check on VCRHook_PeekMessage...
+		if ( HandleVCRHook() )
 			break;
 
-		// Running really fast, yield some time to other apps
-		if ( VCRGetMode() != VCR_Playback )
-		{
-			sys->Sleep( 1 );
-		}
-		
-#if defined ( _WIN32 )
-		MSG msg;
-
-		while( VCRHook_PeekMessage( &msg, NULL, 0, 0, PM_REMOVE ) )
-		{
-			//if (!GetMessage( &msg, NULL, 0, 0))
-			if ( msg.message == WM_QUIT )
-			{
-				bDone = true;
-				break;
-			}
-
-			TranslateMessage( &msg );
-			DispatchMessage( &msg );
-		}
-
-		if  ( IsPC() )
-		{
-			// NOTE: Under some implementations of Win9x, 
-			// dispatching messages can cause the FPU control word to change
-			SetupFPUControlWord();
-		}
-
-		if ( bDone /*|| gbAppHasBeenTerminated*/ )
-			break;
-#endif // _WIN32
-
-		if ( g_bVGui )
-		{
-#ifdef _WIN32
-			RunVGUIFrame();
-#endif
-		}
-		else
-		{
+		if ( !DoRunVGUIFrame() )
 			ProcessConsoleInput();
-		}
 
 		if ( !engine->RunFrame() )
-		{
 			bDone = true;
-		}
 
-		sys->UpdateStatus( 0  /* don't force */ );
+		sys->UpdateStatus( 0 /* don't force */ );
 	}
-
 }
 
 //-----------------------------------------------------------------------------
@@ -195,32 +181,31 @@ void RunServer( void )
 // initialize the console or wait for vgui to start the server
 //
 //-----------------------------------------------------------------------------
-bool ConsoleStartup( CreateInterfaceFn dedicatedFactory )
+static bool ConsoleStartup( )
 {
 #ifdef _WIN32
 	if ( g_bVGui )
 	{
-		StartVGUI( dedicatedFactory );
 		RunVGUIFrame();
+
 		// Run the config screen
 		while (VGUIIsInConfig()	&& VGUIIsRunning())
-		{
 			RunVGUIFrame();
-		}
 
 		if ( VGUIIsStopping() )
-		{
 			return false;
-		}
+
+		return true;
 	}
 	else
-#endif // _WIN32
 	{
 		if ( !console.Init() )
 		{
 			return false;	 
 		}
 	}
+#endif // _WIN32
+
 	return true;
 }
 
@@ -230,6 +215,11 @@ bool ConsoleStartup( CreateInterfaceFn dedicatedFactory )
 //-----------------------------------------------------------------------------
 bool CDedicatedAppSystemGroup::Create( )
 {
+#ifndef _WIN32
+	if ( !console.Init() )
+		return false;
+#endif		
+
 	// Hook the debug output stuff (override the spew func in the appframework)
 	SpewOutputFunc( DedicatedSpewOutputFunc );
 
@@ -239,7 +229,23 @@ bool CDedicatedAppSystemGroup::Create( )
 	if ( !pSystem )
 		return false;
 
-	return sys->LoadModules( this );
+	if ( sys->LoadModules( this ) )
+	{
+		// Find the input system and tell it to skip Steam Controller initialization (we have to set this flag before Init gets called on the
+		// input system). Dedicated server should skip controller initialization to avoid initializing Steam, because we don't want the user to be
+		// flagged as "playing" the game.
+		auto inputsystem = ( IInputSystem* )FindSystem( INPUTSYSTEM_INTERFACE_VERSION );
+		if ( inputsystem )
+		{
+			inputsystem->SetSkipControllerInitialization( true );
+		}
+
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 bool CDedicatedAppSystemGroup::PreInit( )
@@ -272,20 +278,23 @@ bool CDedicatedAppSystemGroup::PreInit( )
 		return false;
 
 #ifdef _WIN32
-	if ( CommandLine()->CheckParm( "-console" ) )
-	{
-		g_bVGui = false;
-	}
-	else
-	{
-		g_bVGui = true;
-	}
-#else
-	// no VGUI under linux
-	g_bVGui = false; 
+	g_bVGui = !CommandLine()->CheckParm( "-console" );
 #endif
 
-	if ( !g_bVGui )
+	CreateInterfaceFn factory = GetFactory();
+	IInputSystem *inputsystem = (IInputSystem *)factory( INPUTSYSTEM_INTERFACE_VERSION, NULL );
+	if ( inputsystem )
+	{
+		inputsystem->SetConsoleTextMode( true );
+	}
+
+#ifdef _WIN32
+	if ( g_bVGui )
+	{
+		StartVGUI( GetFactory() );
+	}
+	else
+#endif
 	{
 		if ( !sys->CreateConsoleWindow() )
 			return false;
@@ -296,46 +305,12 @@ bool CDedicatedAppSystemGroup::PreInit( )
 
 int CDedicatedAppSystemGroup::Main( )
 {
-	if ( !ConsoleStartup( GetFactory() ) )
+	if ( !ConsoleStartup() )
 		return -1;
 
 #ifdef _WIN32
 	if ( g_bVGui )
-	{
 		RunVGUIFrame();
-	}
-	else
-	{
-		// mount the caches
-		if (CommandLine()->CheckParm("-steam"))
-		{
-			// Add a search path for the base dir
-			char fullLocationPath[MAX_PATH];
-			if ( _getcwd( fullLocationPath, MAX_PATH ) )
-			{
-				g_pFullFileSystem->AddSearchPath( fullLocationPath, "MAIN" );
-			}
-
-			// Find the gameinfo.txt for our mod and mount it's caches
-			char gameInfoFilename[MAX_PATH];
-			Q_snprintf( gameInfoFilename, sizeof(gameInfoFilename) - 1, "%s\\gameinfo.txt", CommandLine()->ParmValue( "-game", "hl2" ) );
-			KeyValues *gameData = new KeyValues( "GameInfo" );
-			if ( gameData->LoadFromFile( g_pFullFileSystem, gameInfoFilename ) )
-			{
-				KeyValues *pFileSystem = gameData->FindKey( "FileSystem" );
-				int iAppId = pFileSystem->GetInt( "SteamAppId" );
-				if ( iAppId )
-				{
-					CUtlVector<unsigned int> depList;
-					MountDependencies( iAppId, depList );
-				}
-			}
-			gameData->deleteThis();
-
-			// remove our base search path
-			g_pFullFileSystem->RemoveSearchPaths( "MAIN" );
-		}
-	}
 #endif
 
 	// Set up mod information
@@ -355,21 +330,26 @@ int CDedicatedAppSystemGroup::Main( )
 	return 0;
 }
 
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 void CDedicatedAppSystemGroup::PostShutdown()
 {
 #ifdef _WIN32
 	if ( g_bVGui )
-	{
 		StopVGUI();
-	}
 #endif
+
 	sys->DestroyConsoleWindow();
 	console.ShutDown();
 	NET_Shutdown();
 	BaseClass::PostShutdown();
 }
 
-void CDedicatedAppSystemGroup::Destroy() 
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDedicatedAppSystemGroup::Destroy()
 {
 }
 
@@ -381,11 +361,9 @@ bool GetExecutableName( char *out, int nMaxLen )
 {
 #ifdef _WIN32
 	if ( !::GetModuleFileName( ( HINSTANCE )GetModuleHandle( NULL ), out, nMaxLen ) )
-	{
 		return false;
-	}
 	return true;
-#elif _LINUX
+#elif POSIX
 	Q_strncpy( out, g_szEXEName, nMaxLen );
 	return true;
 #endif
@@ -490,10 +468,9 @@ bool CDedicatedSteamApplication::Create( )
 // Main entry point for dedicated server, shared between win32 and linux
 //
 //-----------------------------------------------------------------------------
-
 int main(int argc, char **argv)
 {
-#ifndef _LINUX
+#ifndef POSIX
 	_asm
 	{
 		fninit
@@ -502,10 +479,10 @@ int main(int argc, char **argv)
 
 	SetupFPUControlWord();
 
-#ifdef _LINUX
-	strcpy(g_szEXEName, *argv);
+#ifdef POSIX
+	Q_strncpy( g_szEXEName, *argv, ARRAYSIZE( g_szEXEName ) );
 	// Store off command line for argument searching
-	BuildCmdLine(argc, argv);
+	BuildCmdLine( argc, argv );
 #endif
 
 	MathLib_Init( 2.2f, 2.2f, 0.0f, 1.0f );

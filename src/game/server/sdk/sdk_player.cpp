@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		Player for HL1.
 //
@@ -14,6 +14,8 @@
 #include "viewport_panel_names.h"
 
 extern int gEvilImpulse101;
+
+ConVar sv_motd_unload_on_dismissal( "sv_motd_unload_on_dismissal", "0", 0, "If enabled, the MOTD contents will be unloaded when the player closes the MOTD." );
 
 #define SDK_PLAYER_MODEL "models/player/terror.mdl"
 
@@ -60,6 +62,9 @@ void TE_PlayerAnimEvent( CBasePlayer *pPlayer, PlayerAnimEvent_t event, int nDat
 // -------------------------------------------------------------------------------- //
 // Tables.
 // -------------------------------------------------------------------------------- //
+BEGIN_DATADESC( CSDKPlayer )
+DEFINE_THINKFUNC( SDKPushawayThink ),
+END_DATADESC()
 
 LINK_ENTITY_TO_CLASS( player, CSDKPlayer );
 PRECACHE_REGISTER(player);
@@ -234,7 +239,8 @@ void CSDKPlayer::InitialSpawn( void )
 	data->SetString( "title", title );		// info panel title
 	data->SetString( "type", "1" );			// show userdata from stringtable entry
 	data->SetString( "msg",	"motd" );		// use this stringtable entry
-	data->SetString( "cmd", "impulse 101" );// exec this command if panel closed
+	data->SetInt( "cmd", TEXTWINDOW_CMD_IMPULSE101 );// exec this command if panel closed
+	data->SetBool( "unload", sv_motd_unload_on_dismissal.GetBool() );
 
 	ShowViewPortPanel( PANEL_INFO, true, data );
 

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -137,7 +137,7 @@ CPropFadeUIPanel::CPropFadeUIPanel( vgui::Panel *parent ) : BaseClass( parent, "
 {
 	m_pVisualization = new ComboBox(this, "VisualizeMode", VISUALIZE_TYPE_COUNT, false);
 	int i;
-	for ( i = 0; i < PERF_TOOL_COUNT; i++ )
+	for ( i = 0; i < ARRAYSIZE(s_pFadeVisualizeLabel); i++ )
 	{
 		m_pVisualization->AddItem( s_pFadeVisualizeLabel[i], NULL );
 	}
@@ -497,8 +497,8 @@ CPerfUIPanel::CPerfUIPanel( vgui::Panel *parent ) : BaseClass( parent, "PerfUIPa
 	int w = 250;
 	int h = 400;
 
-	int x = videomode->GetModeWidth() - w - 10;
-	int y = ( videomode->GetModeHeight() - h ) / 2 + videomode->GetModeHeight() * 0.2;
+	int x = videomode->GetModeStereoWidth() - w - 10;
+	int y = ( videomode->GetModeStereoHeight() - h ) / 2 + videomode->GetModeStereoHeight() * 0.2;
 	SetBounds( x, y, w, h );
 
 	// Create the child tool panels

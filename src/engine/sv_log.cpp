@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,6 +18,7 @@
 #include <proto_oob.h>
 #include "GameEventManager.h"
 #include "netadr.h"
+#include "zlib/zlib.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -28,6 +29,10 @@ static ConVar sv_logflush( "sv_logflush", "0", FCVAR_ARCHIVE, "Flush the log fil
 static ConVar sv_logecho( "sv_logecho", "1", FCVAR_ARCHIVE, "Echo log information to the console." );
 static ConVar sv_log_onefile( "sv_log_onefile", "0", FCVAR_ARCHIVE, "Log server information to only one file." );
 static ConVar sv_logbans( "sv_logbans", "0", FCVAR_ARCHIVE, "Log server bans in the server logs." ); // should sv_banid() calls be logged in the server logs?
+static ConVar sv_logsecret( "sv_logsecret", "0", 0, "If set then include this secret when doing UDP logging (will use 0x53 as packet type, not usual 0x52)" ); 
+
+static ConVar sv_logfilename_format( "sv_logfilename_format", "", FCVAR_ARCHIVE, "Log filename format. See strftime for formatting codes." );
+static ConVar sv_logfilecompress( "sv_logfilecompress", "0", FCVAR_ARCHIVE, "Gzip compress logfile and rename to logfilename.log.gz on close." );
 
 CLog g_Log;	// global Log object
 
@@ -267,7 +272,10 @@ CLog::~CLog()
 void CLog::Reset( void )	// reset all logging streams
 {
 	m_LogAddresses.RemoveAll();
+
 	m_hLogFile = FILESYSTEM_INVALID_HANDLE;
+	m_LogFilename = NULL;
+
 	m_bActive = false;
 	m_flLastLogFlush = realtime;
 	m_bFlushLog = false;
@@ -469,23 +477,22 @@ void CLog::Printf( const char *fmt, ... )
 
 void CLog::Print( const char * text )
 {
-	static char	string[1100];
-
 	if ( !IsActive() || !text || !text[0] )
 	{
-		return;
-	}
-
-	if ( Q_strlen( text ) > 1024 )
-	{
-		DevMsg( 1, "CLog::Print: string too long (>1024 bytes)." );
 		return;
 	}
 
 	tm today;
 	VCRHook_LocalTime( &today );
 
-	Q_snprintf( string, sizeof( string ), "L %02i/%02i/%04i - %02i:%02i:%02i: %s",
+	if ( Q_strlen( text ) > 1024 )
+	{
+		// Spew a warning, but continue and print the truncated stuff we have.
+		DevMsg( 1, "CLog::Print: string too long (>1024 bytes)." );
+	}
+
+	static char	string[1100];
+	V_sprintf_safe( string, "L %02i/%02i/%04i - %02i:%02i:%02i: %s",
 		today.tm_mon+1, today.tm_mday, 1900 + today.tm_year,
 		today.tm_hour, today.tm_min, today.tm_sec, text );
 
@@ -511,7 +518,11 @@ void CLog::Print( const char * text )
 		// out of band sending
 		for ( int i = 0 ; i < m_LogAddresses.Count() ; i++ )
 		{
-			NET_OutOfBandPrintf(NS_SERVER, m_LogAddresses.Element(i), "%c%s", S2A_LOGSTRING, string );
+			if ( sv_logsecret.GetInt() != 0 )
+				NET_OutOfBandPrintf(NS_SERVER, m_LogAddresses.Element(i), "%c%s%s", S2A_LOGSTRING2, sv_logsecret.GetString(), string );
+			else
+				NET_OutOfBandPrintf(NS_SERVER, m_LogAddresses.Element(i), "%c%s", S2A_LOGSTRING, string );
+			
 		}
 	}
 }
@@ -519,22 +530,17 @@ void CLog::Print( const char * text )
 void CLog::FireGameEvent( IGameEvent *event )
 {
 	if ( !IsActive() )
-	{
 		return;
-	}
 
 	// log server events
 
 	const char * name = event->GetName();
-
 	if ( !name || !name[0])
-	{
 		return;
-	}
 
 	if ( Q_strcmp(name, "server_spawn") == 0 )
 	{
-		Printf( "Started map \"%s\" (CRC \"%i\")\n", sv.GetMapName(), ( int ) sv.worldmapCRC );
+		Printf( "Started map \"%s\" (CRC \"%s\")\n", sv.GetMapName(), MD5_Print( sv.worldmapMD5.bits, MD5_DIGEST_LENGTH ) );
 	}
 
 	else if ( Q_strcmp(name, "server_shutdown") == 0 )
@@ -638,6 +644,144 @@ void CLog::FireGameEvent( IGameEvent *event )
 	}
 }
 
+struct TempFilename_t
+{
+	bool IsGzip;
+	CUtlString Filename;
+	union
+	{
+		FileHandle_t file;
+		gzFile gzfile;
+	} fh;
+};
+
+// Given a base filename and an extension, try to find a file that doesn't exist which we can use. This is
+//  accomplished by appending 000, 001, etc. Set IsGzip to use gzopen instead of filesystem open.
+static bool CreateTempFilename( TempFilename_t &info, const char *filenameBase, const char *ext, bool IsGzip )
+{
+	// Check if a logfilename format has been specified - if it has, kick in new behavior.
+	const char *logfilename_format = sv_logfilename_format.GetString();
+	bool bHaveLogfilenameFormat = logfilename_format && logfilename_format[ 0 ];
+
+	info.fh.file = NULL;
+	info.fh.gzfile = 0;
+	info.IsGzip = IsGzip;
+
+	CUtlString fname = CUtlString( filenameBase ).StripExtension();
+
+	for ( int i = 0; i < 1000; i++ )
+	{
+		if ( bHaveLogfilenameFormat )
+		{
+			// For the first pass, let's try not adding the index.
+			if ( i == 0 )
+				info.Filename.Format( "%s.%s", fname.Get(), ext );
+			else
+				info.Filename.Format( "%s_%03i.%s", fname.Get(), i - 1, ext );
+		}
+		else
+		{
+			info.Filename.Format( "%s%03i.%s", fname.Get(), i, ext );
+		}
+
+		// Make sure the path exists.
+		info.Filename.FixSlashes();
+		COM_CreatePath( info.Filename );
+
+		if ( !g_pFileSystem->FileExists( info.Filename, "LOGDIR" ) )
+		{
+			// If the path doesn't exist, try opening the file. If that succeeded, return our filehandle and filename.
+			if ( !IsGzip )
+			{
+				info.fh.file = g_pFileSystem->Open( info.Filename, "wt", "LOGDIR" );
+				if ( info.fh.file )
+					return true;
+			}
+			else
+			{
+				info.fh.gzfile = gzopen( info.Filename, "wb6" );
+				if ( info.fh.gzfile )
+					return true;
+			}
+		}
+	}
+
+	info.Filename = NULL;
+	return false;
+}
+
+// Gzip Filename to Filename.gz.
+static bool gzip_file_compress( const CUtlString &Filename )
+{
+	bool bRet = false;
+
+	// Try to find a unique temp filename.
+	TempFilename_t info;
+	bRet = CreateTempFilename( info, Filename, "log.gz", true );
+	if ( !bRet )
+		return false;
+
+	Msg( "Compressing %s to %s...\n", Filename.Get(), info.Filename.Get() );
+
+	FILE *in = fopen( Filename, "rb" );
+	if ( in )
+	{
+		for (;;)
+		{
+			char buf[ 16384 ];
+			size_t len = fread( buf, 1, sizeof( buf ), in );
+			if ( ferror( in ) )
+			{
+				Msg( "%s: fread failed.\n", __FUNCTION__ );
+				break;
+			}
+			if (len == 0)
+			{
+				bRet = true;
+				break;
+			}
+
+			if ( (size_t)gzwrite( info.fh.gzfile, buf, len ) != len )
+			{
+				Msg( "%s: gzwrite failed.\n", __FUNCTION__ );
+				break;
+			}
+		}
+
+		if ( gzclose( info.fh.gzfile ) != Z_OK )
+		{
+			Msg( "%s: gzclose failed.\n", __FUNCTION__ );
+			bRet = false;
+		}
+
+		fclose( in );
+	}
+
+	return bRet;
+}
+
+static void FixupInvalidPathChars( char *filename )
+{
+	if ( !filename )
+		return;
+
+	for ( ; filename[ 0 ]; filename++ )
+	{
+		switch ( filename[ 0 ] )
+		{
+		case ':':
+		case '\n':
+		case '\r':
+		case '\t':
+		case '.':
+		case '\\':
+		case '/':
+			filename[ 0 ] = '_';
+			break;
+		}
+	}
+}
+
 /*
 ====================
 Log_Close
@@ -649,11 +793,37 @@ void CLog::Close( void )
 {
 	if ( m_hLogFile != FILESYSTEM_INVALID_HANDLE )
 	{
-		Printf( "Log file closed\n" );
+		Printf( "Log file closed.\n" );
 		g_pFileSystem->Close( m_hLogFile );
+
+		if ( sv_logfilecompress.GetBool() )
+		{
+			// Try to compress m_LogFilename to m_LogFilename.gz.
+			if ( gzip_file_compress( m_LogFilename ) )
+			{
+				Msg( "  Success. Removing %s.\n", m_LogFilename.Get() );
+				g_pFileSystem->RemoveFile( m_LogFilename, "LOGDIR" );
+			}
+		}
 	}
 
 	m_hLogFile = FILESYSTEM_INVALID_HANDLE;
+	m_LogFilename = NULL;
+}
+
+/*
+====================
+Log_Flush
+
+Flushes the log file to disk
+====================
+*/
+void CLog::Flush( void )
+{
+	if ( m_hLogFile != FILESYSTEM_INVALID_HANDLE )
+	{
+		g_pFileSystem->Flush( m_hLogFile );
+	}
 }
 
 /*
@@ -665,74 +835,63 @@ Open logging file
 */
 void CLog::Open( void )
 {
-	char szFileBase[ MAX_OSPATH ];
-	char szTestFile[ MAX_OSPATH ];
-	int i;
-	FileHandle_t fp = 0;
-
-	if ( !m_bActive || !sv_logfile.GetInt() )
-	{
+	if ( !m_bActive || !sv_logfile.GetBool() )
 		return;
-	}
 
-	// do we already have a log file (and we only want one)?
-	if ( m_hLogFile && sv_log_onefile.GetInt() )
-	{
-		return;		
-	}
+	// Do we already have a log file (and we only want one)?
+	if ( m_hLogFile && sv_log_onefile.GetBool() )
+		return;
 
 	Close();
 
-	// Find a new log file slot
+	// Find a new log file slot.
 	tm today;
 	VCRHook_LocalTime( &today );
-	const char *pszLogsDir = sv_logsdir.GetString();
 
 	// safety check for invalid paths
+	const char *pszLogsDir = sv_logsdir.GetString();
 	if ( !COM_IsValidPath( pszLogsDir ) )
-	{
 		pszLogsDir = "logs";
-	}
-		
-	Q_snprintf( szFileBase, sizeof( szFileBase ), "%s/L%02i%02i", pszLogsDir, today.tm_mon + 1, today.tm_mday );
 
-	for ( i = 0; i < 1000; i++ )
+	// Get the logfilename format string.
+	char szLogFilename[ MAX_OSPATH ];
+	szLogFilename[ 0 ] = 0;
+
+	const char *logfilename_format = sv_logfilename_format.GetString();
+	if ( logfilename_format && logfilename_format[ 0 ] )
 	{
-		Q_snprintf( szTestFile, sizeof( szTestFile ), "%s%03i.log", szFileBase, i );
+		// Call strftime with the logfilename format.
+		strftime( szLogFilename, sizeof( szLogFilename ), logfilename_format, &today );
 
-		Q_FixSlashes( szTestFile );
-		COM_CreatePath( szTestFile );
+		// Make sure it's nil terminated.
+		szLogFilename[ sizeof( szLogFilename ) - 1 ] = 0;
 
-		fp = g_pFileSystem->Open( szTestFile, "r", "LOGDIR" );
-		if ( !fp )
-		{
-			COM_CreatePath( szTestFile );
-
-			fp = g_pFileSystem->Open( szTestFile, "wt", "LOGDIR" );
-			if ( !fp )
-			{
-				i = 1000;
-			}
-			else
-			{
-				ConMsg( "Server logging data to file %s\n", szTestFile );
-			}
-			break;
-		}
-		g_pFileSystem->Close( fp );
+		// Trim any leading and trailing whitespace.
+		Q_AggressiveStripPrecedingAndTrailingWhitespace( szLogFilename );
+	}
+	if ( !szLogFilename[ 0 ] )
+	{
+		// If we got nothing, default to old month / day of month behavior.
+		V_sprintf_safe( szLogFilename, "L%02i%02i", today.tm_mon + 1, today.tm_mday );
 	}
 
-	if ( i == 1000 )
+	// Replace any screwy characters with underscores.
+	FixupInvalidPathChars( szLogFilename );
+
+	char szFileBase[ MAX_OSPATH ];
+	V_sprintf_safe( szFileBase, "%s/%s", pszLogsDir, szLogFilename );
+
+	// Try to get a free file.
+	TempFilename_t info;
+	if ( !CreateTempFilename( info, szFileBase, "log", false ) )
 	{
 		ConMsg( "Unable to open logfiles under %s\nLogging disabled\n", szFileBase );
 		return;
 	}
 
-	if ( fp )
-	{
-		m_hLogFile = fp;
-	}
-	Printf( "Log file started (file \"%s\") (game \"%s\") (version \"%i\")\n", szTestFile, com_gamedir, build_number() );
+	m_hLogFile = info.fh.file;
+	m_LogFilename = info.Filename;
+
+	ConMsg( "Server logging data to file %s\n", m_LogFilename.Get() );
+	Printf( "Log file started (file \"%s\") (game \"%s\") (version \"%i\")\n", m_LogFilename.Get(), com_gamedir, build_number() );
 }
-
-

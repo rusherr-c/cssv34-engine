@@ -70,7 +70,7 @@
 #include "QuickListPanel.h"
 #include "vgui_controls/PanelListPanel.h"
 
-//#include "replay/ienginereplay.h"
+#include "replay/ienginereplay.h"
 
 extern bool GameSupportsReplay();
 extern bool IsReplayServer( gameserveritem_t &server );

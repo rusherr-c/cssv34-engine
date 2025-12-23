@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@ int main( int argc, char **argv )
 	if ( !pModule )
 	{
 		printf( "Can't load %s.", pModuleName );
-		return false;
+		return 1;
 	}
 
 	CreateInterfaceFn fn = Sys_GetFactory( pModule );
@@ -26,7 +26,7 @@ int main( int argc, char **argv )
 	{
 		printf( "Can't get factory from %s.", pModuleName );
 		Sys_UnloadModule( pModule );
-		return false;
+		return 1;
 	}
 
 	ILaunchableDLL *pInterface = (ILaunchableDLL*)fn( LAUNCHABLE_DLL_INTERFACE_VERSION, NULL );
@@ -34,7 +34,7 @@ int main( int argc, char **argv )
 	{
 		printf( "Can't get '%s' interface from %s.", LAUNCHABLE_DLL_INTERFACE_VERSION, pModuleName );
 		Sys_UnloadModule( pModule );
-		return false;
+		return 1;
 	}
 
 	int iRet = pInterface->main( argc, argv );

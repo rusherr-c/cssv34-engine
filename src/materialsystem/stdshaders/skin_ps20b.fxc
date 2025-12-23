@@ -10,16 +10,25 @@
 // STATIC: "DETAIL_BLEND_MODE"          "0..6"
 // STATIC: "DETAILTEXTURE"				"0..1"
 // STATIC: "RIMLIGHT"					"0..1"
-// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps20b]
-// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps30]
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps20b] [PC]
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps30]  [PC]
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..0"	[ps20b] [XBOX]
+// STATIC: "FASTPATH_NOBUMP"            "0..1"
+// STATIC: "BLENDTINTBYBASEALPHA"       "0..1"
 
 // DYNAMIC: "WRITEWATERFOGTODESTALPHA"  "0..1"
 // DYNAMIC: "PIXELFOGTYPE"				"0..1"
 // DYNAMIC: "NUM_LIGHTS"				"0..4"
-// DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA"	"0..1"	[ps20b]
+// DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA"	"0..1"	[ps20b] [PC]
+// DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA"	"0..0"	[ps20b] [XBOX]
 // DYNAMIC: "WRITE_DEPTH_TO_DESTALPHA"	"0..1"	[ps30]
 // DYNAMIC: "FLASHLIGHTSHADOWS"			"0..1"	[ps20b]
 // DYNAMIC: "FLASHLIGHTSHADOWS"			"0..1"	[ps30]
+// DYNAMIC: "PHONG_USE_EXPONENT_FACTOR"	"0..0"	[ps20]
+// DYNAMIC: "PHONG_USE_EXPONENT_FACTOR"	"0..1"	[ps20b] [ps30]  [PC]
+
+
+// SKIP: ($PIXELFOGTYPE == 0) && ($WRITEWATERFOGTODESTALPHA != 0)
 
 // blend mode doesn't matter if we only have one texture
 // SKIP: (! $DETAILTEXTURE) && ( $DETAIL_BLEND_MODE != 0 )
@@ -27,10 +36,32 @@
 // We don't care about flashlight depth unless the flashlight is on
 // SKIP: ( $FLASHLIGHT == 0 ) && ( $FLASHLIGHTSHADOWS == 1 )
 
+// Flashlight shadow filter mode is irrelevant if there is no flashlight
+// SKIP: ( $FLASHLIGHT == 0 ) && ( $FLASHLIGHTDEPTHFILTERMODE != 0 ) [ps20b]
+// SKIP: ( $FLASHLIGHT == 0 ) && ( $FLASHLIGHTDEPTHFILTERMODE != 0 ) [ps30]
+
 // Only need self illum fresnel when self illum enabled
 // SKIP: ( $SELFILLUM == 0 ) && ( $SELFILLUMFRESNEL == 1 )
 // SKIP: ( $FLASHLIGHT == 1 ) && ( $SELFILLUMFRESNEL == 1 )
 // SKIP: ( $FLASHLIGHT == 1 ) && ( $SELFILLUM == 1 )
+
+// BlendTintByBaseAlpha and self illum and are opposing meanings for alpha channel
+// SKIP: ( $BLENDTINTBYBASEALPHA ) && ( $SELFILLUM )
+
+// fastpath means:
+// no bumpmap
+// basealphaenvmapmask (not inverted)
+// no spec expmap
+// no spectint
+// no specwarp
+// no rimlight
+// no selfillum
+// no detail
+// no BlendTintByBaseAlpha
+
+// SKIP: $FASTPATH_NOBUMP && ( $RIMLIGHT || $DETAILTEXTURE || $PHONGWARPTEXTURE || $SELFILLUM || $BLENDTINTBYBASEALPHA )
+
+
 
 #include "common_flashlight_fxc.h"
 #include "shader_constant_register_map.h"
@@ -47,13 +78,15 @@ const float4 g_EyePos_SpecExponent					: register( PSREG_EYEPOS_SPEC_EXPONENT );
 const float4 g_FogParams							: register( PSREG_FOG_PARAMS );
 const float4 g_FlashlightAttenuationFactors_RimMask	: register( PSREG_FLASHLIGHT_ATTENUATION );			// On non-flashlight pass, x has rim mask control
 const float4 g_FlashlightPos_RimBoost				: register( PSREG_FLASHLIGHT_POSITION_RIM_BOOST );
-const float4x4 g_FlashlightWorldToTexture			: register( PSREG_FLASHLIGHT_TO_WORLD_TEXTURE );
+#if FLASHLIGHT
+	const float4x4 g_FlashlightWorldToTexture		: register( PSREG_FLASHLIGHT_TO_WORLD_TEXTURE );
+#endif
 const float4 g_FresnelSpecParams					: register( PSREG_FRESNEL_SPEC_PARAMS );			// xyz are fresnel, w is specular boost
 const float4 g_SpecularRimParams					: register( PSREG_SPEC_RIM_PARAMS );				// xyz are specular tint color, w is rim power
 PixelShaderLightInfo cLightInfo[3]					: register( PSREG_LIGHT_INFO_ARRAY );				// 2 registers each - 6 registers total (4th light spread across w's)
 
 // TODO: give this a better name.  For now, I don't want to touch shader_constant_register_map.h since I don't want to trigger a recompile of everything...
-const float4 g_ShaderControls						: register( PSREG_CONSTANT_27 );					// xyz are free, w controls "INVERTPHONGMASK"
+const float4 g_ShaderControls						: register( PSREG_CONSTANT_27 );					// x is basemap alpgha phong mask, y is 1 - blendtintbybasealpha, z is tint overlay amount, w controls "INVERTPHONGMASK"
 #define g_FlashlightPos					g_FlashlightPos_RimBoost.xyz
 #define	g_fRimBoost						g_FlashlightPos_RimBoost.w
 #define g_FresnelRanges					g_FresnelSpecParams.xyz
@@ -64,7 +97,9 @@ const float4 g_ShaderControls						: register( PSREG_CONSTANT_27 );					// xyz a
 #define g_RimMaskControl				g_FlashlightAttenuationFactors_RimMask.x
 #define g_SelfIllumMaskControl			g_EnvMapFresnel.w
 #define g_fBaseMapAlphaPhongMask		g_ShaderControls.x
+#define g_fTintReplacementControl		g_ShaderControls.z
 #define g_fInvertPhongMask				g_ShaderControls.w
+
 
 sampler BaseTextureSampler		: register( s0 );	// Base map, selfillum in alpha
 sampler SpecularWarpSampler		: register( s1 );	// Specular warp sampler (for iridescence etc)
@@ -88,7 +123,6 @@ sampler DetailSampler			: register( s13 );	// detail texture
 #endif
 
 sampler SelfIllumMaskSampler	: register( s14 );	// selfillummask
-
 
 struct PS_INPUT
 {
@@ -114,6 +148,7 @@ float4 main( PS_INPUT i ) : COLOR
 	bool bSelfIllum = SELFILLUM ? true : false;
 	bool bDoRimLighting = RIMLIGHT ? true : false;
 	bool bCubemap = CUBEMAP ? true : false;
+	bool bBlendTintByBaseAlpha = BLENDTINTBYBASEALPHA ? true : false;
 	int nNumLights = NUM_LIGHTS;
 
 	// Unpacking for convenience
@@ -145,7 +180,12 @@ float4 main( PS_INPUT i ) : COLOR
 	baseColor = TextureCombine( baseColor, detailColor, DETAIL_BLEND_MODE, g_SelfIllumTint_and_DetailBlendFactor.w );
 #endif
 
-	float3 worldSpaceNormal, tangentSpaceNormal = float3(0, 0, 1);
+	float fogFactor = CalcPixelFogFactor( PIXELFOGTYPE, g_FogParams, g_EyePos_SpecExponent.z, vWorldPos.z, vProjPos.z );
+
+	float3 vEyeDir = normalize(i.worldVertToEyeVectorXYZ_tangentSpaceVertToEyeVectorZ.xyz);
+	float3 vRimAmbientCubeColor = PixelShaderAmbientLight(vEyeDir, cAmbientCube);
+
+	float3 worldSpaceNormal, tangentSpaceNormal;
 	float fSpecMask = 1.0f;
 	float4 normalTexel = tex2D( NormalMapSampler, i.baseTexCoordDetailTexCoord.xy );
 
@@ -155,15 +195,22 @@ float4 main( PS_INPUT i ) : COLOR
 	normalTexel = flTextureAmount * normalTexel + flWrinkleAmount * wrinkleNormal + flStretchAmount * stretchNormal;
 #endif
 
+#if (FASTPATH_NOBUMP == 0 )
 	tangentSpaceNormal = lerp( 2.0f * normalTexel.xyz - 1.0f, float3(0, 0, 1), g_fBaseMapAlphaPhongMask );
 	fSpecMask = lerp( normalTexel.a, baseColor.a, g_fBaseMapAlphaPhongMask );
+#else
+	tangentSpaceNormal = float3(0, 0, 1);
+	fSpecMask = baseColor.a;
+#endif
 
 	// We need a normal if we're doing any lighting
 	worldSpaceNormal = normalize( mul( i.tangentSpaceTranspose, tangentSpaceNormal ) );
 
-	float3 vEyeDir = normalize(i.worldVertToEyeVectorXYZ_tangentSpaceVertToEyeVectorZ.xyz);
-
 	float fFresnelRanges = Fresnel( worldSpaceNormal, vEyeDir, g_FresnelRanges );
+	float fRimFresnel = Fresnel4( worldSpaceNormal, vEyeDir );
+
+	// Break down reflect so that we can share dot(worldSpaceNormal,vEyeDir) with fresnel terms
+	float3 vReflect = 2 * worldSpaceNormal * dot(worldSpaceNormal, vEyeDir) - vEyeDir;
 
 	float3 diffuseLighting = float3( 1.0f, 1.0f, 1.0f );
 	float3 envMapColor = float3( 0.0f, 0.0f, 0.0f );
@@ -180,12 +227,6 @@ float4 main( PS_INPUT i ) : COLOR
 
 		if( bCubemap )
 		{
-			float3 vReflect = CalcReflectionVectorUnnormalized( worldSpaceNormal, vEyeDir );
-			envMapColor = ENV_MAP_SCALE * texCUBE( EnvmapSampler, vReflect ) * g_EnvmapTint_ShadowTweaks.xyz;
-
-			// Optionally apply Fresnel to envmap
-			envMapColor = lerp( envMapColor, fFresnelRanges * envMapColor, g_EnvMapFresnel.x );
-
 			// Mask is either normal map alpha or base map alpha
 #if ( SELFILLUMFRESNEL == 1 ) // This is to match the 2.0 version of vertexlitgeneric
 			float fEnvMapMask = lerp( baseColor.a, g_fInvertPhongMask, g_EnvmapTint_ShadowTweaks.w );
@@ -193,17 +234,23 @@ float4 main( PS_INPUT i ) : COLOR
 			float fEnvMapMask = lerp( baseColor.a, fSpecMask, g_EnvmapTint_ShadowTweaks.w );
 #endif
 
-			envMapColor *= lerp( fEnvMapMask, 1-fEnvMapMask, g_fInvertPhongMask );
+			envMapColor = (ENV_MAP_SCALE *
+							lerp(1, fFresnelRanges, g_EnvMapFresnel.x) *
+							lerp(fEnvMapMask, 1-fEnvMapMask, g_fInvertPhongMask)) *
+							texCUBE( EnvmapSampler, vReflect ) *
+							g_EnvmapTint_ShadowTweaks.xyz;
 		}
 	}
 	
 	float3 specularLighting = float3( 0.0f, 0.0f, 0.0f );
 	float3 rimLighting = float3( 0.0f, 0.0f, 0.0f );
-	float fSpecExp = g_EyePos_SpecExponent.w;
 
+	float3 vSpecularTint = 1;
+	float fRimMask = 0;
+	float fSpecExp = 1;
+
+#if ( FASTPATH_NOBUMP == 0 )
 	float4 vSpecExpMap = tex2D( SpecExponentSampler, i.baseTexCoordDetailTexCoord.xy );
-	float fSpecExpMap = vSpecExpMap.r;
-	float fRimMask = 0.0f;
 	
 	if ( !bFlashlight )
 	{
@@ -211,18 +258,26 @@ float4 main( PS_INPUT i ) : COLOR
 	}
 
 	// If the exponent passed in as a constant is zero, use the value from the map as the exponent
-	if ( fSpecExp == 0 )
-		fSpecExp = 1.0f - fSpecExpMap + 150.0f * fSpecExpMap;
+#if defined( _X360 )
+	[flatten]
+#endif
+	
+#if ( PHONG_USE_EXPONENT_FACTOR )
+	fSpecExp = ( 1.0f + g_EyePos_SpecExponent.w * vSpecExpMap.r );
+#else
+	fSpecExp = (g_EyePos_SpecExponent.w >= 0.0) ? g_EyePos_SpecExponent.w : (1.0f + 149.0f * vSpecExpMap.r);
+#endif
 
-	float3 vSpecularTint;
 	// If constant tint is negative, tint with albedo, based upon scalar tint map
-	if ( g_SpecularTint.r < 0 )
-		vSpecularTint = lerp( float3(1.0f, 1.0f, 1.0f), baseColor.rgb, vSpecExpMap.g );
-	else
-		vSpecularTint = g_SpecularTint.rgb;
-
-	if ( bDoSpecularWarp )
-		fFresnelRanges = Fresnel( worldSpaceNormal, vEyeDir, g_FresnelRanges );
+#if defined( _X360 )
+	[flatten]
+#endif
+	vSpecularTint = lerp( float3(1.0f, 1.0f, 1.0f), baseColor.rgb, vSpecExpMap.g );
+	vSpecularTint = (g_SpecularTint.r >= 0.0) ? g_SpecularTint.rgb : vSpecularTint;
+		
+#else
+	fSpecExp = max(g_EyePos_SpecExponent.w, 0);
+#endif
 
 	float3 albedo = baseColor.rgb;
 
@@ -239,27 +294,37 @@ float4 main( PS_INPUT i ) : COLOR
 	}
 	else
 	{
-		worldSpaceNormal = mul( i.tangentSpaceTranspose, tangentSpaceNormal );
+		#if FLASHLIGHT
+			float4 flashlightSpacePosition = mul( float4( vWorldPos, 1.0f ), g_FlashlightWorldToTexture );
 
-		float4 flashlightSpacePosition = mul( float4( vWorldPos, 1.0f ), g_FlashlightWorldToTexture );
+			DoSpecularFlashlight( g_FlashlightPos, vWorldPos, flashlightSpacePosition, worldSpaceNormal, 
+				g_FlashlightAttenuationFactors.xyz, g_FlashlightAttenuationFactors.w,
+				FlashlightSampler, ShadowDepthSampler, NormalizeRandRotSampler, FLASHLIGHTDEPTHFILTERMODE, FLASHLIGHTSHADOWS, true, vProjPos.xy / vProjPos.z,
+				fSpecExp, vEyeDir, bDoSpecularWarp, SpecularWarpSampler, fFresnelRanges, g_EnvmapTint_ShadowTweaks,
 
-		DoSpecularFlashlight( g_FlashlightPos, vWorldPos, flashlightSpacePosition, worldSpaceNormal, 
-			g_FlashlightAttenuationFactors.xyz, g_FlashlightAttenuationFactors.w,
-			FlashlightSampler, ShadowDepthSampler, NormalizeRandRotSampler, FLASHLIGHTDEPTHFILTERMODE, FLASHLIGHTSHADOWS, true, vProjPos.xy / vProjPos.z,
-			fSpecExp, vEyeDir, bDoSpecularWarp, SpecularWarpSampler, fFresnelRanges, g_EnvmapTint_ShadowTweaks,
-
-			// These two values are output
-			diffuseLighting, specularLighting );
+				// These two values are output
+				diffuseLighting, specularLighting );
+		#endif
 	}
-
-	// Modulate with spec mask, boost and tint
-	specularLighting *= fSpecMask * g_SpecularBoost * vSpecularTint;
 
 	// If we didn't already apply Fresnel to specular warp, modulate the specular
 	if ( !bDoSpecularWarp )
-		specularLighting *= fFresnelRanges;
+		fSpecMask *= fFresnelRanges;
 
-	diffuseLighting *= g_DiffuseModulation.rgb;
+	// Modulate with spec mask, boost and tint
+	specularLighting *= fSpecMask * g_SpecularBoost;
+
+	if (bBlendTintByBaseAlpha)
+	{
+		float3 tintedColor = albedo * g_DiffuseModulation.rgb;
+		tintedColor = lerp(tintedColor, g_DiffuseModulation.rgb, g_fTintReplacementControl);
+		albedo = lerp(albedo, tintedColor, baseColor.a);
+	}
+	else
+	{
+		albedo = albedo * g_DiffuseModulation.rgb;
+	}
+
 
 	float3 diffuseComponent = albedo * diffuseLighting;
 	if ( bSelfIllum && !bFlashlight )
@@ -278,36 +343,34 @@ float4 main( PS_INPUT i ) : COLOR
 		diffuseComponent = max( 0.0f, diffuseComponent );
 	}
 
-
 #if DETAILTEXTURE
-	diffuseComponent = 
-		TextureCombinePostLighting( diffuseComponent, detailColor, 
+	diffuseComponent = TextureCombinePostLighting( diffuseComponent, detailColor, 
 		DETAIL_BLEND_MODE, g_SelfIllumTint_and_DetailBlendFactor.w );
 #endif
+
 	if ( bDoRimLighting && !bFlashlight )
 	{
-		float fRimFresnel = Fresnel4( worldSpaceNormal, vEyeDir );
-
+		float fRimMultiply = fRimMask * fRimFresnel; // both unit range: [0, 1]
+		
 		// Add in rim light modulated with tint, mask and traditional Fresnel (not using Fresnel ranges)
-		rimLighting *= vSpecularTint * fRimMask * fRimFresnel;
+		rimLighting *= fRimMultiply;
 
 		// Fold rim lighting into specular term by using the max so that we don't really add light twice...
 		specularLighting = max( specularLighting, rimLighting );
 
 		// Add in view-ray lookup from ambient cube
-		specularLighting += fRimFresnel * fRimMask * vSpecularTint * g_fRimBoost * PixelShaderAmbientLight( vEyeDir, cAmbientCube) * saturate(dot(worldSpaceNormal, float3(0, 0 , 1)) );
+		specularLighting += (vRimAmbientCubeColor * g_fRimBoost) * saturate(fRimMultiply * worldSpaceNormal.z);
 	}
 
-	float3 result = specularLighting + envMapColor + diffuseComponent;
-	float fogFactor = CalcPixelFogFactor( PIXELFOGTYPE, g_FogParams, g_EyePos_SpecExponent.z, vWorldPos.z, vProjPos.z );
+	float3 result = specularLighting*vSpecularTint + envMapColor + diffuseComponent;
 
 #if WRITEWATERFOGTODESTALPHA && ( PIXELFOGTYPE == PIXEL_FOG_TYPE_HEIGHT )
 	float alpha = fogFactor;
 #else
 	float alpha = g_DiffuseModulation.a;
-	if ( !bSelfIllum )
+	if ( !bSelfIllum && !bBlendTintByBaseAlpha )
 	{
-		alpha *= lerp( baseColor.a, 1.0f, g_fBaseMapAlphaPhongMask );
+		alpha = lerp( baseColor.a * alpha, alpha, g_fBaseMapAlphaPhongMask );
 	}
 #endif
 

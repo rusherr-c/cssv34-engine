@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // cmd.h -- Command buffer and command execution
 // Any number of commands can be added in a frame, from several different sources.
@@ -27,6 +27,8 @@
 class CCommand;
 class ConCommandBase;
 
+#define MAX_EXECUTION_MARKERS 2048
+
 typedef enum
 {
 	eCmdExecutionMarker_Enable_FCVAR_SERVER_CAN_EXECUTE='a',
@@ -49,6 +51,11 @@ void Cbuf_Shutdown( void );
 //-----------------------------------------------------------------------------
 void Cbuf_Clear(void);
 
+//-----------------------------------------------------------------------------
+// Escape an argument for a command. This *can* fail as many characters cannot
+// actually be passed through the old command syntax...
+//-----------------------------------------------------------------------------
+bool Cbuf_EscapeCommandArg( const char *pText, char *pOut, unsigned int nOut );
 
 //-----------------------------------------------------------------------------
 // as new commands are generated from the console or keybindings,
@@ -65,6 +72,9 @@ void Cbuf_AddText (const char *text);
 void Cbuf_InsertText( const char *text );
 
 
+//-----------------------------------------------------------------------------
+// Surround a command with two execution markers. The operation is performed atomically.
+//
 // These allow you to create blocks in the command stream where certain rules apply.
 // ONLY use Cbuf_AddText in between execution markers. If you use Cbuf_InsertText,
 // it will put that stuff before the execution marker and the execution marker won't apply.
@@ -73,7 +83,12 @@ void Cbuf_InsertText( const char *text );
 // anything unless it's marked with FCVAR_SERVER_CAN_EXECUTE", then inserts some commands,
 // then removes the execution marker. That way, ANYTIME Cbuf_Execute() is called, 
 // it will apply the cl_restrict_server_commands rules correctly.
-void Cbuf_AddExecutionMarker( ECmdExecutionMarker marker );
+//-----------------------------------------------------------------------------
+bool Cbuf_AddTextWithMarkers( ECmdExecutionMarker markerLeft, const char *text, ECmdExecutionMarker markerRight );
+
+
+// Returns whether or not the execution marker stack has room for N more.
+bool Cbuf_HasRoomForExecutionMarkers( int cExecutionMarkers );
 
 
 // Pulls off \n terminated lines of text from the command buffer and sends

@@ -1,24 +1,17 @@
-//========= Copyright © 1996-2007, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //=============================================================================
 
-#include "basevsshader.h"
+#include "BaseVSShader.h"
 
 #include "screenspaceeffect_vs20.inc"
+#include "engine_post_ps20.inc"
+#include "engine_post_ps20b.inc"
 
-#define SHADER_MODEL_VS_30
-
-#ifdef SHADER_MODEL_VS_30
-#include "Engine_Post_ps30.inc"
-#else
-#include "Engine_Post_ps20.inc"
-#include "Engine_Post_ps20b.inc"
-#endif
-
-#include "..\materialsystem_global.h"
+#include "../materialsystem_global.h"
 
 
 DEFINE_FALLBACK_SHADER( Engine_Post, Engine_Post_dx9 )
@@ -90,16 +83,25 @@ BEGIN_VS_SHADER_FLAGS( Engine_Post_dx9, "Engine post-processing effects (softwar
 			// one; gamma colours more closely match luminance perception. The color-correction process
 			// has always taken gamma-space values as input anyway).
 
+			// On OpenGL OSX, we MUST do sRGB reads from the bloom and full framebuffer textures AND sRGB
+			// writes on the way out to the framebuffer.  Hence, our colors are linear in the shader.
+			// Given this, we use the LINEAR_INPUTS combo to convert to sRGB for the purposes of color
+			// correction, since that is how the color correction textures are authored.
+			bool bLinearInput = IsOSX() && g_pHardwareConfig->CanDoSRGBReadFromRTs();
+			bool bLinearOutput = IsOSX() && !g_pHardwareConfig->FakeSRGBWrite() && g_pHardwareConfig->CanDoSRGBReadFromRTs();
+
+			bool bForceSRGBReadsAndWrites = IsOSX() && g_pHardwareConfig->CanDoSRGBReadFromRTs();
+
 			pShaderShadow->EnableBlending( false );
 
 			// The (sRGB) bloom texture is bound to sampler 0
 			pShaderShadow->EnableTexture(  SHADER_SAMPLER0, true  );
-			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, false );
-			pShaderShadow->EnableSRGBWrite( false );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, bForceSRGBReadsAndWrites );
+			pShaderShadow->EnableSRGBWrite( bForceSRGBReadsAndWrites );
 
 			// The (sRGB) full framebuffer texture is bound to sampler 1:
 			pShaderShadow->EnableTexture(  SHADER_SAMPLER1, true  );
-			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, false );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, bForceSRGBReadsAndWrites );
 
 			// Up to 4 (sRGB) color-correction lookup textures are bound to samplers 2-5:
 			pShaderShadow->EnableTexture(  SHADER_SAMPLER2, true );
@@ -119,18 +121,12 @@ BEGIN_VS_SHADER_FLAGS( Engine_Post_dx9, "Engine post-processing effects (softwar
 
 			DECLARE_STATIC_VERTEX_SHADER( screenspaceeffect_vs20 );
 			SET_STATIC_VERTEX_SHADER( screenspaceeffect_vs20 );
-
-#ifdef SHADER_MODEL_VS_30
-			//if ( g_pHardwareConfig->SupportsShaderModel_3_0() )
-			//{
-				DECLARE_STATIC_PIXEL_SHADER( engine_post_ps30 );
-				SET_STATIC_PIXEL_SHADER( engine_post_ps30 );
-			//}
-#else
-			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
-
+			
+			if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // GL always goes the ps2b way for this shader, even on "ps20" parts
 			{
 				DECLARE_STATIC_PIXEL_SHADER( engine_post_ps20b );
+				SET_STATIC_PIXEL_SHADER_COMBO( LINEAR_INPUT,  bLinearInput );
+				SET_STATIC_PIXEL_SHADER_COMBO( LINEAR_OUTPUT, bLinearOutput );
 				SET_STATIC_PIXEL_SHADER( engine_post_ps20b );
 			}
 			else
@@ -138,7 +134,6 @@ BEGIN_VS_SHADER_FLAGS( Engine_Post_dx9, "Engine post-processing effects (softwar
 				DECLARE_STATIC_PIXEL_SHADER( engine_post_ps20 );
 				SET_STATIC_PIXEL_SHADER( engine_post_ps20 );
 			}
-#endif
 		}
 		DYNAMIC_STATE
 		{
@@ -202,17 +197,8 @@ BEGIN_VS_SHADER_FLAGS( Engine_Post_dx9, "Engine post-processing effects (softwar
 			{
 				colCorrectNumLookups = 0;
 			}
-
-#ifdef SHADER_MODEL_VS_30
-
-			DECLARE_DYNAMIC_PIXEL_SHADER( engine_post_ps30 );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( AA_ENABLE,						aaEnabled );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( AA_QUALITY_MODE,				aaQualityMode );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( AA_REDUCE_ONE_PIXEL_LINE_BLUR,	aaReduceOnePixelLineBlur );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( COL_CORRECT_NUM_LOOKUPS,		colCorrectNumLookups );
-			SET_DYNAMIC_PIXEL_SHADER( engine_post_ps30 );
-#else
-			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			
+			if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // GL always goes the ps2b way for this shader, even on "ps20" parts
 			{
 				DECLARE_DYNAMIC_PIXEL_SHADER( engine_post_ps20b );
 				SET_DYNAMIC_PIXEL_SHADER_COMBO( AA_ENABLE,						aaEnabled );
@@ -232,7 +218,6 @@ BEGIN_VS_SHADER_FLAGS( Engine_Post_dx9, "Engine post-processing effects (softwar
 				SET_DYNAMIC_PIXEL_SHADER_COMBO( COL_CORRECT_NUM_LOOKUPS,		colCorrectNumLookups );
 				SET_DYNAMIC_PIXEL_SHADER( engine_post_ps20 );
 			}
-#endif
 
 			DECLARE_DYNAMIC_VERTEX_SHADER( screenspaceeffect_vs20 );
 			SET_DYNAMIC_VERTEX_SHADER( screenspaceeffect_vs20 );

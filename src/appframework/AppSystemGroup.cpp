@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defines a group of app systems that all have the same lifetime
 // that need to be connected/initialized, etc. in a well-defined order
@@ -20,7 +20,7 @@
 //-----------------------------------------------------------------------------
 // constructor, destructor
 //-----------------------------------------------------------------------------
-extern SpewOutputFunc_t g_DefaultSpewFunc;
+//extern ILoggingListener *g_pDefaultLoggingListener;
 
 
 //-----------------------------------------------------------------------------
@@ -46,11 +46,6 @@ CSysModule *CAppSystemGroup::LoadModuleDLL( const char *pDLLName )
 //-----------------------------------------------------------------------------
 AppModule_t CAppSystemGroup::LoadModule( const char *pDLLName )
 {
-#if 0
-	FILE * f = fopen("AppSystem_LoadModule.log", "a");
-	fprintf(f, "Loading: %s...\n", pDLLName);
-	fclose(f);
-#endif
 	// Remove the extension when creating the name.
 	int nLen = Q_strlen( pDLLName ) + 1;
 	char *pModuleName = (char*)stackalloc( nLen );
@@ -86,7 +81,7 @@ AppModule_t CAppSystemGroup::LoadModule( CreateInterfaceFn factory )
 {
 	if (!factory)
 	{
-		Warning("AppFramework : Unable to load module %s!\n", factory );
+		Warning("AppFramework : Unable to load module %p!\n", factory );
 		return APP_MODULE_INVALID;
 	}
 
@@ -146,6 +141,7 @@ IAppSystem *CAppSystemGroup::AddSystem( AppModule_t module, const char *pInterfa
 	}
 
 	IAppSystem *pAppSystem = static_cast<IAppSystem*>(pSystem);
+	
 	int sysIndex = m_Systems.AddToTail( pAppSystem );
 
 	// Inserting into the dict will help us do named lookup later
@@ -483,9 +479,11 @@ destroy:
 	// Unload all DLLs loaded in the AppCreate block
 	RemoveAllSystems();
 
-	// By default, direct dbg reporting...
-	// Have to do this because the spew func may point to a module which is being unloaded
-	SpewOutputFunc( g_DefaultSpewFunc );
+	// Have to do this because the logging listeners & response policies may live in modules which are being unloaded
+	// @TODO: this seems like a bad legacy practice... app systems should unload their spew handlers gracefully.
+//	LoggingSystem_ResetCurrentLoggingState();
+//	Assert( g_pDefaultLoggingListener != NULL );
+//	LoggingSystem_RegisterLoggingListener( g_pDefaultLoggingListener );
 
 	UnloadAllModules();
 

@@ -1,13 +1,20 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //=============================================================================//
 
-#if !defined( _X360 )
+#if defined ( WIN32 ) && !defined( _X360 )
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#elif defined( OSX )
+#include <Carbon/Carbon.h>
+#elif defined( LINUX )
+//#error
+#elif defined( _X360 )
+#else
+#error
 #endif
 #include "FontTextureCache.h"
 #include "MatSystemSurface.h"
@@ -16,18 +23,21 @@
 #include <vgui_controls/Controls.h>
 #include "bitmap/imageformat.h"
 #include "vtf/vtf.h"
-#include "materialsystem/IMaterialVar.h"
-#include "materialsystem/ITexture.h"
+#include "materialsystem/imaterialvar.h"
+#include "materialsystem/itexture.h"
 #include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
+#include "pixelwriter.h"
+#include "tier0/icommandline.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 extern CMatSystemSurface g_MatSystemSurface;
+static int g_FontRenderBoundingBoxes = -1;
 
 #define TEXTURE_PAGE_WIDTH	256
-#define TEXTURE_PAGE_HEIGHT	128
+#define TEXTURE_PAGE_HEIGHT	256
 
 // row size
 int CFontTextureCache::s_pFontPageSize[FONT_PAGE_SIZE_COUNT] = 
@@ -36,7 +46,16 @@ int CFontTextureCache::s_pFontPageSize[FONT_PAGE_SIZE_COUNT] =
 	32,
 	64,
 	128,
+	256,
 };
+
+static bool g_mat_texture_outline_fonts = false;
+CON_COMMAND( mat_texture_outline_fonts, "Outline fonts textures." )
+{
+	g_mat_texture_outline_fonts = !g_mat_texture_outline_fonts;
+	Msg( "mat_texture_outline_fonts: %d\n", g_mat_texture_outline_fonts );
+	g_MatSystemSurface.ResetFontCaches();
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -183,7 +202,7 @@ bool CFontTextureCache::GetTextureForChars( vgui::HFont font, vgui::FontDrawType
 		newChar_t		*newChars	= (newChar_t *)_alloca( numChars*sizeof( newChar_t ) );
 		newPageEntry_t	*newEntries	= (newPageEntry_t *)_alloca( numChars*sizeof( newPageEntry_t ) );
 
-		CWin32Font *winFont = FontManager().GetFontForChar( font, wch[0] );
+		font_t *winFont = FontManager().GetFontForChar( font, wch[0] );
 		if ( !winFont )
 			return false;
 		
@@ -228,8 +247,9 @@ bool CFontTextureCache::GetTextureForChars( vgui::HFont font, vgui::FontDrawType
 
 				// set the cache info
 				cacheItem.page = page;
-				
-				double adjust =  0.0f; // the 0.5 texel offset is done in CMatSystemTexture::SetMaterial()
+
+				// the 0.5 texel offset is done in CMatSystemTexture::SetMaterial() / CMatSystemSurface::StartDrawing()
+				double adjust =  0.0f;
 
 				cacheItem.texCoords[0] = (float)( (double)drawX / ((double)twide + adjust) );
 				cacheItem.texCoords[1] = (float)( (double)drawY / ((double)ttall + adjust) );
@@ -289,7 +309,34 @@ bool CFontTextureCache::GetTextureForChars( vgui::HFont font, vgui::FontDrawType
 
 					// render the character into the buffer
 					Q_memset( pRGBA, 0, nByteCount );
+
 					winFont->GetCharRGBA( newChar.wch, newChar.fontWide, newChar.fontTall, pRGBA );
+
+					if ( g_mat_texture_outline_fonts )
+					{
+						int width = newChar.fontWide;
+						int height = newChar.fontTall;
+
+						CPixelWriter pixelWriter;
+						pixelWriter.SetPixelMemory( IMAGE_FORMAT_RGBA8888, pRGBA, width * sizeof( BGRA8888_t ) );
+						for( int x = 0; x < width; x++ )
+						{
+							pixelWriter.Seek( x, 0 );
+							pixelWriter.WritePixel( 255, 0, 255, 255 );
+							pixelWriter.Seek( x, height - 1 );
+							pixelWriter.WritePixel( 255, 0, 255, 255 );
+						}
+						for( int y = 0; y < height; y++ )
+						{
+							if ( y < 4 || y > height - 4 )
+							{
+								pixelWriter.Seek( 0, y );
+								pixelWriter.WritePixel( 255, 0, 255, 255 );
+								pixelWriter.Seek( width - 1, y );
+								pixelWriter.WritePixel( 255, 0, 255, 255 );
+							}
+						}
+					}
 
 					// upload the new sub texture 
 					// NOTE: both textureIDs reference the same ITexture, so we're ok)
@@ -369,6 +416,12 @@ bool CFontTextureCache::AllocatePageForChar(int charWide, int charTall, int &pag
 {
 	// see if there is room in the last page for this character
 	int nPageType = ComputePageType( charTall );
+	if ( nPageType < 0 )
+	{
+		Assert( !"Font is too tall for texture cache of glyphs\n" );
+		return false; 
+	}
+	
 	pageIndex = m_pCurrPage[nPageType];
 
 	int nNextX = 0;
@@ -388,7 +441,7 @@ bool CFontTextureCache::AllocatePageForChar(int charWide, int charTall, int &pag
 			page.nextY += page.tallestCharOnLine;
 			page.tallestCharOnLine = charTall;
 		}
-		page.tallestCharOnLine = max( page.tallestCharOnLine, charTall );
+		page.tallestCharOnLine = max( page.tallestCharOnLine, (short)charTall );
 
 		bNeedsNewPage = ((page.nextY + page.tallestCharOnLine) > page.tall);
 	}

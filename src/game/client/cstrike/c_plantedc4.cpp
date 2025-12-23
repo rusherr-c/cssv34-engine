@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #include "engine/IEngineSound.h"
 #include "dlight.h"
 #include "iefx.h"
-#include "soundemittersystem/isoundemittersystembase.h"
+#include "SoundEmitterSystem/isoundemittersystembase.h"
 #include <bitbuf.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -38,6 +38,7 @@ C_PlantedC4::C_PlantedC4()
 
 	m_flNextRadarFlashTime = gpGlobals->curtime;
 	m_bRadarFlash = true;
+	m_pC4Explosion = NULL;
 
 	// Don't beep right away, leave time for the planting sound
 	m_flNextGlow = gpGlobals->curtime + 1.0;
@@ -48,6 +49,19 @@ C_PlantedC4::C_PlantedC4()
 C_PlantedC4::~C_PlantedC4()
 {
 	g_PlantedC4s.FindAndRemove( this );
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Upon the new round remove the remaining bomb explosion particle effect
+	//=============================================================================
+	
+	if (m_pC4Explosion)
+	{
+		m_pC4Explosion->SetRemoveFlag();
+	}
+	 
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 void C_PlantedC4::SetDormant( bool bDormant )
@@ -83,11 +97,10 @@ void C_PlantedC4::ClientThink( void )
 
 	if ( !m_bBombTicking )
 	{
-		// disbale C4 thinking if not armed
+		// disable C4 thinking if not armed
 		SetNextClientThink( CLIENT_THINK_NEVER );
 		return;
 	}
-
 
 	if( gpGlobals->curtime > m_flNextBeep )
 	{
@@ -102,7 +115,7 @@ void C_PlantedC4::ClientThink( void )
 		
 		fComplete = clamp( fComplete, 0.0f, 1.0f );
 
-		attenuation = min( 0.3 + 0.6 * fComplete, 1.0 );
+		attenuation = MIN( 0.3 + 0.6 * fComplete, 1.0 );
 		
 		CSoundParameters params;
 
@@ -115,7 +128,7 @@ void C_PlantedC4::ClientThink( void )
 			EmitSound( filter, SOUND_FROM_WORLD, ep );
 		}
 
-		freq = max( 0.1 + 0.9 * fComplete, 0.15 );
+		freq = MAX( 0.1 + 0.9 * fComplete, 0.15 );
 
 		m_flNextBeep = gpGlobals->curtime + freq;
 	}
@@ -187,5 +200,20 @@ void C_PlantedC4::ClientThink( void )
 		if( freq < 0.15 ) freq = 0.15;
 
 		m_flNextGlow = gpGlobals->curtime + freq;
-	}	
+	}
 }
+
+
+//=============================================================================
+// HPE_BEGIN:
+// [menglish] Create the client side explosion particle effect for when the bomb explodes and hide the bomb
+//=============================================================================
+void C_PlantedC4::Explode( void )
+{
+	m_pC4Explosion = ParticleProp()->Create( "bomb_explosion_huge", PATTACH_ABSORIGIN );
+	AddEffects( EF_NODRAW );
+	SetDormant( true );
+}
+//=============================================================================
+// HPE_END
+//=============================================================================

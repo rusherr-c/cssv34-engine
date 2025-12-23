@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,7 +17,7 @@
 #include "iresponse.h"
 
 
-#include "UtlRBTree.h"
+#include "utlrbtree.h"
 
 class CSocket;
 class IServerRefreshResponse;

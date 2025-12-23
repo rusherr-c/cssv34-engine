@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -71,26 +71,17 @@ CStudioRenderContext::CStudioRenderContext()
 	m_RC.m_ViewUp.Init();
 	m_RC.m_ViewPlaneNormal.Init();
 	m_RC.m_Config.m_bEnableHWMorph = true;
+	m_RC.m_Config.m_bStatsMode = false;
 
 	m_RC.m_NumLocalLights = 0;
 	for ( int i = 0; i < 6; ++i )
 	{
 		m_RC.m_LightBoxColors[i].Init( 0, 0, 0 );
 	}
-
-	m_BoneToWorldMatrices[0].Init( 1 * 1024 * 1024, 32 * 1024, 0, 32 );
-	m_BoneToWorldMatrices[1].Init( 1 * 1024 * 1024, 32 * 1024, 0, 32 );
-	m_FlexWeights[0].Init( 2 * sizeof(float) * MAXSTUDIOFLEXDESC, 512 * sizeof(float) );
-	m_FlexWeights[1].Init( 2 * sizeof(float) * MAXSTUDIOFLEXDESC, 512 * sizeof(float) );
-	m_nCurrentStack = 0;
 }
 
 CStudioRenderContext::~CStudioRenderContext()
 {
-	m_BoneToWorldMatrices[0].Term();
-	m_BoneToWorldMatrices[1].Term();
-	m_FlexWeights[0].Term();
-	m_FlexWeights[1].Term();
 }
 
 
@@ -159,71 +150,6 @@ void CStudioRenderContext::Shutdown( void )
 void CStudioRenderContext::Mat_Stub( IMaterialSystem *pMatSys )
 {
 	g_pMaterialSystem = pMatSys;
-}
-
-
-//-----------------------------------------------------------------------------
-// Allocates matrices for use in queueing 
-//-----------------------------------------------------------------------------
-matrix3x4_t *CStudioRenderContext::CreateQueuedMatrices( int nMatrixCount, const matrix3x4_t *pBoneToWorld )
-{
-	MEM_ALLOC_CREDIT_( "CStudioRenderContext::m_BoneToWorldMatrices" );
-
-	int nSizeInBytes = nMatrixCount * sizeof(matrix3x4_t);
-	matrix3x4_t *pDest = (matrix3x4_t *)m_BoneToWorldMatrices[m_nCurrentStack].Alloc( nSizeInBytes, false );
-	if ( pDest )
-	{
-		// FIXME: Should I only copy matrices that are used by this LOD?
-		memcpy( pDest, pBoneToWorld, nSizeInBytes ); 
-	}
-	else
-	{
-		Warning( "Overflowed the queued bone matrix buffer!\n" );
-	}
-	return pDest;
-}
- 
-
-//-----------------------------------------------------------------------------
-// Allocates flex weights for use in queueing 
-//-----------------------------------------------------------------------------
-float *CStudioRenderContext::CreateQueuedFlexWeights( int nWeightCount, float *pWeights )
-{
-	MEM_ALLOC_CREDIT_( "CStudioRenderContext::m_FlexWeights" );
-
-	int nSizeInBytes = nWeightCount * sizeof(float);
-	float *pDest = (float *)m_FlexWeights[m_nCurrentStack].Alloc( nSizeInBytes, false );
-	if ( pDest )
-	{
-		// FIXME: Should I only copy matrices that are used by this LOD?
-		memcpy( pDest, pWeights, nSizeInBytes ); 
-	}
-	else
-	{
-		Warning( "Overflowed the queued flex weight buffer!\n" );
-	}
-	return pDest;
-}
-
-
-//-----------------------------------------------------------------------------
-// Allocates shadow data for use in queueing 
-//-----------------------------------------------------------------------------
-void *CStudioRenderContext::CreateQueuedShadowData( int nSizeInBytes, void *pSrc )
-{
-	MEM_ALLOC_CREDIT_( "CStudioRenderContext::m_FlexWeights" );
-
-	void *pDest = m_FlexWeights[m_nCurrentStack].Alloc( nSizeInBytes, false );
-	if ( pDest )
-	{
-		// FIXME: Should I only copy matrices that are used by this LOD?
-		memcpy( pDest, pSrc, nSizeInBytes ); 
-	}
-	else
-	{
-		Warning( "Overflowed the queued shadow data buffer!\n" );
-	}
-	return pDest;
 }
 
 
@@ -335,12 +261,15 @@ void CStudioRenderContext::LoadMaterials( studiohdr_t *phdr,
 		// search through all specified directories until a valid material is found
 		for ( j = 0; j < phdr->numcdtextures && IsErrorMaterial( pMaterial ); j++ )
 		{
-			const char *pCdTexture = phdr->pCdtexture( j );
-			const char *textureName = GetTextureName( phdr, pVtxHeader, lodID, i );
-
 			// If we don't do this, we get filenames like "materials\\blah.vmt".
+			const char *textureName = GetTextureName( phdr, pVtxHeader, lodID, i );
 			if ( textureName[0] == CORRECT_PATH_SEPARATOR || textureName[0] == INCORRECT_PATH_SEPARATOR )
 				++textureName;
+
+			// This prevents filenames like /models/blah.vmt.
+			const char *pCdTexture = phdr->pCdtexture( j );
+			if ( pCdTexture[0] == CORRECT_PATH_SEPARATOR || pCdTexture[0] == INCORRECT_PATH_SEPARATOR )
+				++pCdTexture;
 
 			V_ComposeFileName( pCdTexture, textureName, szPath, sizeof( szPath ) );
 
@@ -910,11 +839,13 @@ void CStudioRenderContext::R_StudioBuildMorph( studiohdr_t *pStudioHdr,
 	}
 
 	char pTemp[256];
-	Q_snprintf( pTemp, sizeof(pTemp), "%s [%x]", pStudioHdr->name, pMeshGroup );
+	Q_snprintf( pTemp, sizeof(pTemp), "%s [%p]", pStudioHdr->pszName(), pMeshGroup );
 	pMeshGroup->m_pMorph = pRenderContext->CreateMorph( morphType, pTemp );
 
+	const float flVertAnimFixedPointScale = pStudioHdr->VertAnimFixedPointScale();
+
 	CMorphBuilder morphBuilder;
-	morphBuilder.Begin( pMeshGroup->m_pMorph, g_VertAnimFixedPointScaleInv ); 
+	morphBuilder.Begin( pMeshGroup->m_pMorph, 1.0f / flVertAnimFixedPointScale ); 
 
 	for ( int i = 0; i < pMesh->numflexes; ++i )
 	{
@@ -931,14 +862,14 @@ void CStudioRenderContext::R_StudioBuildMorph( studiohdr_t *pStudioHdr,
 			if ( nGroupVert == 0xFFFF )
 				continue;
 
-			morphBuilder.PositionDelta3( pAnim->GetDeltaFixed() ); 
-			morphBuilder.NormalDelta3( pAnim->GetNDeltaFixed() ); 
+			morphBuilder.PositionDelta3( pAnim->GetDeltaFixed( flVertAnimFixedPointScale ) ); 
+			morphBuilder.NormalDelta3( pAnim->GetNDeltaFixed( flVertAnimFixedPointScale ) ); 
 			morphBuilder.Speed1f( pAnim->speed / 255.0f );
 			morphBuilder.Side1f( pAnim->side / 255.0f );
 			if ( pFlex->vertanimtype == STUDIO_VERT_ANIM_WRINKLE )
 			{
 				mstudiovertanim_wrinkle_t *pWrinkleAnim = static_cast<mstudiovertanim_wrinkle_t*>( pAnim );
-				morphBuilder.WrinkleDelta1f( pWrinkleAnim->GetDeltaFixed().w ); 
+				morphBuilder.WrinkleDelta1f( pWrinkleAnim->GetWrinkleDeltaFixed( flVertAnimFixedPointScale ) ); 
 			}
 			else
 			{
@@ -1009,7 +940,7 @@ int CStudioRenderContext::GetNumBoneWeights( const OptimizedModel::StripGroupHea
 	for (int i = 0;i < pGroup->numStrips; i++)
 	{
 		OptimizedModel::StripHeader_t * pStrip = pGroup->pStrip( i );
-		nBoneWeightsMax = max( nBoneWeightsMax, pStrip->numBones );
+		nBoneWeightsMax = max( nBoneWeightsMax, (int)pStrip->numBones );
 	}
 
 	return nBoneWeightsMax;
@@ -1132,14 +1063,11 @@ VertexFormat_t CStudioRenderContext::CalculateVertexFormat( const studiohdr_t *p
 		// materials on models should never have tangent space as they use userdata
 		Assert( !(newVertexFormat & VERTEX_TANGENT_SPACE) );
 
-		// mask off irrelevant non-data bits
-		newVertexFormat &= ~VERTEX_FORMAT_VERTEX_SHADER;
-
 		// Don't compress the mesh unless it is HW-skinned (we only want to compress static
 		// VBs, not dynamic ones - that would slow down the MeshBuilder in dynamic use cases).
 		// Also inspect the vertex data to see if it's appropriate for the vertex element
 		// compression techniques that we do (e.g. look at UV ranges).
-		if ( IsX360() && // Disabled until the craziness is banished
+		if ( //IsX360() && // Disabled until the craziness is banished
 			 bIsHwSkinned &&
 			( g_pMaterialSystemHardwareConfig->SupportsCompressedVertices() == VERTEX_COMPRESSION_ON ) )
 		{
@@ -1412,10 +1340,10 @@ void CStudioRenderContext::BuildDecalBoneMap( studiohdr_t *pStudioHdr, int *pUse
 			if ( boneWeight.weight[j] == 0.0f )
 				continue;
 
-			if ( pBoneRemap[ boneWeight.bone[j] ] >= 0 )
+			if ( pBoneRemap[ (unsigned)boneWeight.bone[j] ] >= 0 )
 				continue;
 
-			pBoneRemap[ boneWeight.bone[j] ] = *pUsedBones;
+			pBoneRemap[ (unsigned)boneWeight.bone[j] ] = *pUsedBones;
 			*pUsedBones = *pUsedBones + 1;
 		}
 	}
@@ -1546,7 +1474,7 @@ bool CStudioRenderContext::LoadModel( studiohdr_t *pStudioHdr, void *pVtxBuffer,
 
 	// Create static meshes
 	Assert( pVertexHdr->numLODs );
-	pStudioHWData->m_RootLOD = min( pStudioHdr->rootLOD, pVertexHdr->numLODs-1 );
+	pStudioHWData->m_RootLOD = min( (int)pStudioHdr->rootLOD, pVertexHdr->numLODs-1 );
 	pStudioHWData->m_NumLODs = pVertexHdr->numLODs;
 	pStudioHWData->m_pLODs   = new studioloddata_t[pVertexHdr->numLODs];
 	memset( pStudioHWData->m_pLODs, 0, pVertexHdr->numLODs * sizeof( studioloddata_t ));
@@ -1689,7 +1617,10 @@ void CStudioRenderContext::SetLODSwitchValue( studiohwdata_t &hardwareData, int 
 //-----------------------------------------------------------------------------
 int CStudioRenderContext::GetMaterialList( studiohdr_t *pStudioHdr, int count, IMaterial** ppMaterials )
 {
-	Assert( pStudioHdr );
+	AssertMsg( pStudioHdr, "Don't ignore this assert! CStudioRenderContext::GetMaterialList() has null pStudioHdr." );
+
+	if ( !pStudioHdr )
+		return 0;
 
 	if ( pStudioHdr->textureindex == 0 )
 		return 0;
@@ -1706,22 +1637,25 @@ int CStudioRenderContext::GetMaterialList( studiohdr_t *pStudioHdr, int count, I
 		// iterate quietly through all specified directories until a valid material is found
 		for ( j = 0; j < pStudioHdr->numcdtextures && IsErrorMaterial( pMaterial ); j++ )
 		{
-			const char *pCdTexture = pStudioHdr->pCdtexture( j );
-			const char *textureName = pStudioHdr->pTexture( i )->pszName();
-			
 			// If we don't do this, we get filenames like "materials\\blah.vmt".
+			const char *textureName = pStudioHdr->pTexture( i )->pszName();
 			if ( textureName[0] == CORRECT_PATH_SEPARATOR || textureName[0] == INCORRECT_PATH_SEPARATOR )
 				++textureName;
+
+			// This prevents filenames like /models/blah.vmt.
+			const char *pCdTexture = pStudioHdr->pCdtexture( j );
+			if ( pCdTexture[0] == CORRECT_PATH_SEPARATOR || pCdTexture[0] == INCORRECT_PATH_SEPARATOR )
+				++pCdTexture;
 
 			V_ComposeFileName( pCdTexture, textureName, szPath, sizeof( szPath ) );
 
 			if ( pStudioHdr->flags & STUDIOHDR_FLAGS_OBSOLETE )
 			{
-				pMaterial = g_pMaterialSystem->FindMaterial( "models/obsolete/obsolete", TEXTURE_GROUP_MODEL, false );
+				pMaterial = g_pMaterialSystem->FindMaterialEx( "models/obsolete/obsolete", TEXTURE_GROUP_MODEL, MATERIAL_FINDCONTEXT_ISONAMODEL, false );
 			}
 			else
 			{
-				pMaterial = g_pMaterialSystem->FindMaterial( szPath, TEXTURE_GROUP_MODEL, false );
+				pMaterial = g_pMaterialSystem->FindMaterialEx( szPath, TEXTURE_GROUP_MODEL, MATERIAL_FINDCONTEXT_ISONAMODEL, false );
 			}
 		}
 
@@ -1982,11 +1916,10 @@ void CStudioRenderContext::BeginFrame( void )
 	{
 		m_RC.m_Config.m_bEnableHWMorph = false;
 	}
-	g_pStudioRenderImp->PrecacheGlint();
 
-	m_nCurrentStack = 1 - m_nCurrentStack;
-	m_BoneToWorldMatrices[ m_nCurrentStack ].FreeAll( false );
-	m_FlexWeights[ m_nCurrentStack ].FreeAll( false );
+	m_RC.m_Config.m_bStatsMode = false;
+
+	g_pStudioRenderImp->PrecacheGlint();
 }
 
 void CStudioRenderContext::EndFrame( void )
@@ -2017,6 +1950,15 @@ void CStudioRenderContext::ForcedMaterialOverride( IMaterial *newMaterial, Overr
 	m_RC.m_nForcedMaterialType = nOverrideType;
 }
 
+//-----------------------------------------------------------------------------
+// Return the material overrides
+//-----------------------------------------------------------------------------
+void CStudioRenderContext::GetMaterialOverride( IMaterial** ppOutForcedMaterial, OverrideType_t* pOutOverrideType )
+{
+	Assert( ppOutForcedMaterial != NULL && pOutOverrideType != NULL );
+	*ppOutForcedMaterial = m_RC.m_pForcedMaterial;
+	*pOutOverrideType = m_RC.m_nForcedMaterialType;
+}
 
 //-----------------------------------------------------------------------------
 // Sets the view state
@@ -2111,17 +2053,9 @@ matrix3x4_t* CStudioRenderContext::LockBoneMatrices( int nCount )
 	MEM_ALLOC_CREDIT_( "CStudioRenderContext::m_BoneToWorldMatrices" );
 
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
-	if ( !pRenderContext->GetCallQueue() )
-	{
-		m_BoneToWorldMatrices[ m_nCurrentStack ].FreeAll( false );
-	}
 
-	int nSizeInBytes = nCount * sizeof(matrix3x4_t);
-	matrix3x4_t *pDest = (matrix3x4_t *)m_BoneToWorldMatrices[m_nCurrentStack].Alloc( nSizeInBytes, false );
-	if ( !pDest )
-	{
-		ExecuteNTimes( 10, "studiorender: Out of memory in bone matrix stack\n" );
-	}
+	CMatRenderData<matrix3x4_t> rdMatrix( pRenderContext );
+	matrix3x4_t *pDest = rdMatrix.Lock( nCount );
 	return pDest;
 }
 
@@ -2138,24 +2072,22 @@ void CStudioRenderContext::LockFlexWeights( int nWeightCount, float **ppFlexWeig
 	MEM_ALLOC_CREDIT_( "CStudioRenderContext::m_FlexWeights" );
 
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
-	if ( !pRenderContext->GetCallQueue() )
+	CMatRenderData<float> rdFlex( pRenderContext );
+	CMatRenderData<float> rdFlexDelayed( pRenderContext );
+	float *pFlexOut = rdFlex.Lock( nWeightCount ); 
+	for ( int i = 0; i < nWeightCount; i++ )
 	{
-		m_FlexWeights[ m_nCurrentStack ].FreeAll( false );
+		pFlexOut[i] = 0.0f;
 	}
-
-	int nSizeInBytes = nWeightCount * sizeof(float);
-	*ppFlexWeights = (float *)m_FlexWeights[m_nCurrentStack].Alloc( nSizeInBytes, false );
-	if ( !*ppFlexWeights )
-	{
-		ExecuteNTimes( 10, "studiorender: Out of memory in flex weight stack\n" );
-	}
+	*ppFlexWeights = pFlexOut;
 	if ( ppFlexDelayedWeights )
 	{
-		*ppFlexDelayedWeights = (float *)m_FlexWeights[m_nCurrentStack].Alloc( nSizeInBytes, false );
-		if ( !*ppFlexDelayedWeights )
+		pFlexOut = rdFlexDelayed.Lock( nWeightCount );
+		for ( int i = 0; i < nWeightCount; i++ )
 		{
-			ExecuteNTimes( 10, "studiorender: Out of memory in flex weight stack\n" );
+			pFlexOut[i] = 0.0f;
 		}
+		*ppFlexDelayedWeights = pFlexOut;
 	}
 }
 
@@ -2176,7 +2108,7 @@ static ConVar r_randomflex( "r_randomflex", "0", FCVAR_CHEAT );
 void CStudioRenderContext::GenerateRandomFlexWeights( int nWeightCount, float* pWeights, float *pDelayedWeights )
 {
 	int nRandomFlex = r_randomflex.GetInt();
-	if ( nRandomFlex <= 0 )
+	if ( nRandomFlex <= 0 || !pWeights )
 		return;
 
 	if ( nRandomFlex > nWeightCount )
@@ -2291,36 +2223,12 @@ void CStudioRenderContext::InvokeBindProxies( const DrawModelInfo_t &info )
 				continue;
 			pProxyCalled[ nMaterialIndex ] = true;
 			IMaterial* pMaterial = ppMaterials[ nMaterialIndex ]; 
-			if ( pMaterial->HasProxy() )
+			if ( pMaterial && pMaterial->HasProxy() )
 			{
 				pMaterial->CallBindProxy( info.m_pClientEntity );
 			}
 		}
 	}
-}
-
-
-//-----------------------------------------------------------------------------
-// Did this matrix come from our allocator?
-//-----------------------------------------------------------------------------
-bool CStudioRenderContext::IsInternallyAllocated( const matrix3x4_t *pBoneToWorld )
-{
-	int nBaseAddress = (int)m_BoneToWorldMatrices[m_nCurrentStack].GetBase();
-	int nLastAddress = nBaseAddress + m_BoneToWorldMatrices[m_nCurrentStack].GetUsed();
-	return ( (int)pBoneToWorld >= nBaseAddress && (int)pBoneToWorld < nLastAddress );
-}
-
-
-//-----------------------------------------------------------------------------
-// Did this flex weights come from our allocator?
-//-----------------------------------------------------------------------------
-bool CStudioRenderContext::IsInternallyAllocated( const float *pFlexWeights )
-{
-	if ( pFlexWeights == s_pZeroFlexWeights )
-		return true;
-	int nBaseAddress = (int)m_FlexWeights[m_nCurrentStack].GetBase();
-	int nLastAddress = nBaseAddress + m_FlexWeights[m_nCurrentStack].GetUsed();
-	return ( (int)pFlexWeights >= nBaseAddress && (int)pFlexWeights < nLastAddress );
 }
 
 
@@ -2380,24 +2288,24 @@ void CStudioRenderContext::DrawModel( DrawModelResults_t *pResults, const DrawMo
 	}
 	else
 	{
+		CMatRenderData<matrix3x4_t> rdMatrix( pRenderContext, info.m_pStudioHdr->numbones, pBoneToWorld );
+		CMatRenderData<float> rdFlex( pRenderContext );
+		CMatRenderData<float> rdFlexDelayed( pRenderContext );
+
 		InvokeBindProxies( info );
-		if ( !IsInternallyAllocated( pBoneToWorld ) )
-		{
-			pBoneToWorld = CreateQueuedMatrices( info.m_pStudioHdr->numbones, pBoneToWorld );
-		}
+		pBoneToWorld = rdMatrix.Base();
 		if ( info.m_pStudioHdr->numflexdesc != 0 )
 		{
-			if ( !IsInternallyAllocated( flex.m_pFlexWeights ) )
+			rdFlex.Lock( info.m_pStudioHdr->numflexdesc, flex.m_pFlexWeights );
+			flex.m_pFlexWeights = rdFlex.Base();
+			if ( !pFlexDelayedWeights )
 			{
-				flex.m_pFlexWeights = CreateQueuedFlexWeights( info.m_pStudioHdr->numflexdesc, flex.m_pFlexWeights );
-				if ( !pFlexDelayedWeights )
-				{
-					flex.m_pFlexDelayedWeights = flex.m_pFlexWeights;
-				}
-				else
-				{
-					flex.m_pFlexDelayedWeights = CreateQueuedFlexWeights( info.m_pStudioHdr->numflexdesc, flex.m_pFlexDelayedWeights );
-				}
+				flex.m_pFlexDelayedWeights = flex.m_pFlexWeights;
+			}
+			else
+			{
+				rdFlexDelayed.Lock( info.m_pStudioHdr->numflexdesc, flex.m_pFlexDelayedWeights );
+				flex.m_pFlexDelayedWeights = rdFlexDelayed.Base();
 			}
 		}
 		pCallQueue->QueueCall( g_pStudioRenderImp, &CStudioRender::DrawModel, info, m_RC, pBoneToWorld, flex, flags );
@@ -2423,6 +2331,12 @@ void CStudioRenderContext::DrawModel( DrawModelResults_t *pResults, const DrawMo
 	}
 }
 
+
+void CStudioRenderContext::DrawModelArray( const DrawModelInfo_t &drawInfo, int arrayCount, model_array_instance_t *pInstanceData, int instanceStride, int flags )
+{
+	// UNDONE: Support queue mode?
+	g_pStudioRenderImp->DrawModelArray( drawInfo, m_RC, arrayCount, pInstanceData, instanceStride, flags );
+}
 
 //-----------------------------------------------------------------------------
 // Methods related to rendering static props
@@ -2482,10 +2396,10 @@ void CStudioRenderContext::AddShadow( IMaterial* pMaterial, void* pProxyData,
 			return;
 		}
 
-		FlashlightState_t *pQueuedFlashlight = CreateQueuedShadowData( pFlashlightState );
-		VMatrix *pQueuedMatrix = CreateQueuedShadowData( pWorldToTexture );
+		CMatRenderData< FlashlightState_t > rdFlashlight( pRenderContext, 1, pFlashlightState );
+		CMatRenderData< VMatrix > rdMatrix( pRenderContext, 1, pWorldToTexture );
 		pCallQueue->QueueCall( g_pStudioRenderImp, &CStudioRender::AddShadow, pMaterial, 
-			(void*)NULL, pQueuedFlashlight, pQueuedMatrix, pFlashlightDepthTexture );
+			(void*)NULL, rdFlashlight.Base(), rdMatrix.Base(), pFlashlightDepthTexture );
 	}
 }
 
@@ -2507,13 +2421,34 @@ void CStudioRenderContext::AddDecal( StudioDecalHandle_t handle, studiohdr_t *pS
 	matrix3x4_t *pBoneToWorld, const Ray_t& ray, const Vector& decalUp, 
 	IMaterial* pDecalMaterial, float radius, int body, bool noPokethru, int maxLODToDecal )
 {
-	Assert(
-		( (int)pBoneToWorld >= (int)m_BoneToWorldMatrices[m_nCurrentStack].GetBase() ) &&
-		( (int)pBoneToWorld < (int)m_BoneToWorldMatrices[m_nCurrentStack].GetBase() + m_BoneToWorldMatrices[m_nCurrentStack].GetUsed() )
-	);
+	// This substition always has to be done in the main thread, so do it here.
+	pDecalMaterial = GetModelSpecificDecalMaterial( pDecalMaterial );
 
-	QUEUE_STUDIORENDER_CALL( AddDecal, CStudioRender, g_pStudioRenderImp, handle, 
-		m_RC, pBoneToWorld, pStudioHdr, ray, decalUp, pDecalMaterial, radius, 
+	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
+	Assert( pRenderContext->IsRenderData( pBoneToWorld ) );
+	QUEUE_STUDIORENDER_CALL_RC( AddDecal, CStudioRender, g_pStudioRenderImp, pRenderContext, 
+		handle, m_RC, pBoneToWorld, pStudioHdr, ray, decalUp, pDecalMaterial, radius, 
 		body, noPokethru, maxLODToDecal );
 }
+
+// Function to do replacement because we always need to do this from the main thread.
+IMaterial* GetModelSpecificDecalMaterial( IMaterial* pDecalMaterial )
+{
+	Assert( ThreadInMainThread() );
+	// Since we're adding this to a studio model, check the decal to see if 
+	// there's an alternate form used for static props...
+	bool found;
+	IMaterialVar* pModelMaterialVar = pDecalMaterial->FindVar( "$modelmaterial", &found, false );
+	if ( found )
+	{
+		IMaterial* pModelMaterial = g_pMaterialSystem->FindMaterial( pModelMaterialVar->GetStringValue(), TEXTURE_GROUP_DECAL, false );
+		if ( !IsErrorMaterial( pModelMaterial ) )
+		{
+			return pModelMaterial;
+		}
+	}
+
+	return pDecalMaterial;
+}
+
 

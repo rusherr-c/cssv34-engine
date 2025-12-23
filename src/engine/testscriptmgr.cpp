@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,6 +6,7 @@
 //===========================================================================//
 
 
+#include "tier0/platform.h"
 #include "sys.h"
 #include "testscriptmgr.h"
 #include "tier0/dbg.h"
@@ -26,7 +27,7 @@ CTestScriptMgr g_TestScriptMgr;
 
 ConVar testscript_debug( "testscript_debug", "0", 0, "Debug test scripts." );
 
-
+#ifdef _DEBUG
 // --------------------------------------------------------------------------------------------------- //
 // Global console commands the test script manager implements.
 // --------------------------------------------------------------------------------------------------- //
@@ -146,7 +147,7 @@ CON_COMMAND( Test_StartScript, "Start a test script running.." )
 	if ( !GetTestScriptMgr()->StartTestScript( args[1] ) )
 		Warning( "Error starting testscript '%s'\n", args[1] );
 }
-
+#endif
 
 // --------------------------------------------------------------------------------------------------- //
 // CTestScriptMgr implementation.

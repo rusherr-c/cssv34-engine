@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,10 +21,13 @@
 #include "dt_common_eng.h"
 #include "host.h"
 #include "server.h"
+#include "networkstringtableclient.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+
+extern CNetworkStringTableContainer *networkStringTableContainerServer;
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -156,7 +159,7 @@ int CHLTVDemoRecorder::GetRecordingTick( void )
 
 void CHLTVDemoRecorder::WriteServerInfo()
 {
-	byte		buffer[ NET_MAX_PAYLOAD ];
+	ALIGN4 byte		buffer[ NET_MAX_PAYLOAD ] ALIGN4_POST;
 	bf_write	msg( "CHLTVDemoRecorder::WriteServerInfo", buffer, sizeof( buffer ) );
 
 	SVC_ServerInfo serverinfo;	// create serverinfo message
@@ -217,8 +220,22 @@ void CHLTVDemoRecorder::RecordCommand( const char *cmdstring )
 
 void CHLTVDemoRecorder::RecordServerClasses( ServerClass *pClasses )
 {
-	byte data[NET_MAX_PAYLOAD];
-	bf_write buf( data, sizeof(data) );
+	char *pBigBuffer;
+	CUtlBuffer bigBuff;
+
+	int buffSize = 256*1024;
+	if ( !IsX360() )
+	{
+		pBigBuffer = (char*)stackalloc( buffSize );
+	}
+	else
+	{
+		// keep temp large allocations off of stack
+		bigBuff.EnsureCapacity( buffSize );
+		pBigBuffer = (char*)bigBuff.Base();
+	}
+
+	bf_write buf( pBigBuffer, buffSize );
 
 	// Send SendTable info.
 	DataTable_WriteSendTablesBuffer( pClasses, &buf );
@@ -228,6 +245,43 @@ void CHLTVDemoRecorder::RecordServerClasses( ServerClass *pClasses )
 
 	// Now write the buffer into the demo file
 	m_DemoFile.WriteNetworkDataTables( &buf, GetRecordingTick() );
+}
+
+void CHLTVDemoRecorder::RecordStringTables()
+{
+
+	// !KLUDGE! It would be nice if the bit buffer could write into a stream
+	// with the power to grow itself.  But it can't.  Hence this really bad
+	// kludge
+	void *data = NULL;
+	int dataLen = 512 * 1024;
+	while ( dataLen <= DEMO_FILE_MAX_STRINGTABLE_SIZE )
+	{
+		data = realloc( data, dataLen );
+		bf_write buf( data, dataLen );
+		buf.SetDebugName("CHLTVDemoRecorder_StringTables");
+		buf.SetAssertOnOverflow( false ); // Doesn't turn off all the spew / asserts, but turns off one
+		networkStringTableContainerServer->WriteStringTables( buf );
+
+		// Did we fit?
+		if ( !buf.IsOverflowed() )
+		{
+
+			// Now write the buffer into the demo file
+			m_DemoFile.WriteStringTables( &buf, GetRecordingTick() );
+			break;
+		}
+
+		// Didn't fit.  Try doubling the size of the buffer
+		dataLen *= 2;
+	}
+
+	if ( dataLen > DEMO_FILE_MAX_STRINGTABLE_SIZE )
+	{
+		Warning( "Failed to RecordStringTables. Trying to record string table that's bigger than max string table size\n" );
+	}
+
+	free(data);
 }
 
 int CHLTVDemoRecorder::WriteSignonData()
@@ -242,8 +296,9 @@ int CHLTVDemoRecorder::WriteSignonData()
 	WriteServerInfo();
 
 	RecordServerClasses( serverGameDLL->GetAllServerClasses() );
+	RecordStringTables();
 
-	byte		buffer[ NET_MAX_PAYLOAD ];
+	ALIGN4 byte		buffer[ NET_MAX_PAYLOAD ] ALIGN4_POST;
 	bf_write	msg( "CHLTVDemo::WriteSignonData", buffer, sizeof( buffer ) );
 
 	// use your class infos, CRC is correct
@@ -276,7 +331,7 @@ int CHLTVDemoRecorder::WriteSignonData()
 
 void CHLTVDemoRecorder::WriteFrame( CHLTVFrame *pFrame )
 {
-	byte		buffer[ NET_MAX_PAYLOAD ];
+	ALIGN4 byte		buffer[ NET_MAX_PAYLOAD ] ALIGN4_POST;
 	bf_write	msg( "CHLTVDemo::RecordFrame", buffer, sizeof( buffer ) );
 
 	assert( hltv->IsMasterProxy() ); // this works only on the master since we use sv.

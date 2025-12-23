@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,9 +18,10 @@
 
 using namespace vgui;
 
+#include "vgui_controls/ComboBox.h"
 #include <vgui/ILocalize.h>
 
-#include "FileSystem.h"
+#include "filesystem.h"
 #include <KeyValues.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -38,7 +39,7 @@ CCreateMultiplayerGameDialog::CCreateMultiplayerGameDialog(vgui::Panel *parent) 
 	SetTitle("#GameUI_CreateServer", true);
 	SetOKButtonText("#GameUI_Start");
 
-	if (!stricmp( ModInfo().GetGameName(), "Counter-Strike Source" ))
+	if ( ModInfo().UseBots() )
 	{
 		m_bBotsEnabled = true;
 	}
@@ -141,4 +142,49 @@ bool CCreateMultiplayerGameDialog::OnOK(bool applyOnly)
 	engine->ClientCmd_Unrestricted(szMapCommand);
 
 	return true;
+}
+
+void CCreateMultiplayerGameDialog::OnKeyCodePressed( vgui::KeyCode code )
+{
+	// Handle close here, CBasePanel parent doesn't support "DialogClosing" command
+	ButtonCode_t nButtonCode = GetBaseButtonCode( code );
+
+	if ( nButtonCode == KEY_XBUTTON_B || nButtonCode == STEAMCONTROLLER_B )
+	{
+		OnCommand( "Close" );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_A || nButtonCode == STEAMCONTROLLER_A )
+	{
+		OnOK( false );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_UP || 
+			  nButtonCode == KEY_XSTICK1_UP ||
+			  nButtonCode == KEY_XSTICK2_UP ||
+			  nButtonCode == STEAMCONTROLLER_DPAD_UP ||
+			  nButtonCode == KEY_UP )
+	{
+		int nItem = m_pServerPage->GetMapList()->GetActiveItem() - 1;
+		if ( nItem < 0 )
+		{
+			nItem = m_pServerPage->GetMapList()->GetItemCount() - 1;
+		}
+		m_pServerPage->GetMapList()->ActivateItem( nItem );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_DOWN || 
+			  nButtonCode == KEY_XSTICK1_DOWN ||
+			  nButtonCode == KEY_XSTICK2_DOWN || 
+			  nButtonCode == STEAMCONTROLLER_DPAD_DOWN ||
+			  nButtonCode == KEY_DOWN )
+	{
+		int nItem = m_pServerPage->GetMapList()->GetActiveItem() + 1;
+		if ( nItem >= m_pServerPage->GetMapList()->GetItemCount() )
+		{
+			nItem = 0;
+		}
+		m_pServerPage->GetMapList()->ActivateItem( nItem );
+	}
+	else
+	{
+		BaseClass::OnKeyCodePressed( code );
+	}
 }

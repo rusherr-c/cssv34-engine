@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,7 @@
 //
 //=============================================================================//
 #include "OptionsSubVoice.h"
-#include "CvarSlider.h"
+#include "cvarslider.h"
 #include <vgui/IVGui.h>
 #include <vgui_controls/ImagePanel.h>
 #include <vgui_controls/CheckButton.h>
@@ -16,6 +16,7 @@
 #include "CvarToggleCheckButton.h"
 #include "tier1/KeyValues.h"
 #include "tier1/convar.h"
+#include <steam/steam_api.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -266,6 +267,13 @@ void COptionsSubVoice::OnCommand( const char *command)
             EndTestMicrophone();
         }
     }
+	else if (!stricmp(command, "SteamVoiceSettings"))
+	{
+		if ( steamapicontext && steamapicontext->SteamFriends() )
+		{
+			steamapicontext->SteamFriends()->ActivateGameOverlay( "voicesettings" );
+		}
+	}
     else
 	{
         BaseClass::OnCommand(command);

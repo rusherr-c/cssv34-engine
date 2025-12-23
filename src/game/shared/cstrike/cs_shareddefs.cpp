@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,6 +6,17 @@
 
 #include "cbase.h"
 #include "cs_shareddefs.h"
+
+const float CS_PLAYER_SPEED_RUN		 = 260.0f;
+const float CS_PLAYER_SPEED_VIP		 = 227.0f;
+const float CS_PLAYER_SPEED_WALK	 = 100.0f;
+const float CS_PLAYER_SPEED_SHIELD	 = 160.0f;
+const float CS_PLAYER_SPEED_STOPPED	 =   1.0f;
+const float CS_PLAYER_SPEED_OBSERVER = 900.0f;
+
+const float CS_PLAYER_SPEED_DUCK_MODIFIER	= 0.34f;
+const float CS_PLAYER_SPEED_WALK_MODIFIER	= 0.52f;
+const float CS_PLAYER_SPEED_CLIMB_MODIFIER	= 0.34f;
 
 
 CCSClassInfo g_ClassInfos[] =
@@ -29,6 +40,13 @@ const CCSClassInfo* GetCSClassInfo( int i )
 	return &g_ClassInfos[i];
 }
 
+const char *pszWinPanelCategoryHeaders[] =
+{
+	"",
+	"#winpanel_topdamage",
+	"#winpanel_topheadshots",
+	"#winpanel_kills"
+};
 
 // Construct some arrays of player model strings, so we can statically initialize CUtlVectors for general usage
 const char *CTPlayerModelStrings[] =

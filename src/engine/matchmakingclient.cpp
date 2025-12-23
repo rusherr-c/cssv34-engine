@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Handles joining clients together in a matchmaking session before a multiplayer
 //			game, tracking new players and dropped players during the game, and reporting
@@ -95,7 +95,7 @@ void CMatchmaking::HandleSystemLinkReply( netpacket_t *pPacket )
 		if ( Q_memcmp( &pCheck->info.sessionID, &pResult->info.sessionID, sizeof( pResult->info.sessionID ) ) == 0 )
 		{
 			// Already have this session
-			delete pData;
+			delete [] pData;
 			return;
 		}
 	}
@@ -136,9 +136,6 @@ void CMatchmaking::HandleSystemLinkReply( netpacket_t *pPacket )
 //-----------------------------------------------------------------------------
 bool CMatchmaking::SearchForSession()
 {
-#ifdef _LINUX
-	return false;
-#else
 	if ( m_Session.IsSystemLink() )
 	{
 		return StartSystemLinkSearch();
@@ -188,7 +185,6 @@ bool CMatchmaking::SearchForSession()
 	}
 
 	return true;
-#endif
 }
 
 
@@ -197,7 +193,6 @@ bool CMatchmaking::SearchForSession()
 //-----------------------------------------------------------------------------
 void CMatchmaking::UpdateSearch()
 {
-#ifndef _LINUX
 	if ( !m_Session.IsSystemLink() )
 	{
 		// Check if the search has finished
@@ -253,7 +248,7 @@ void CMatchmaking::UpdateSearch()
 		if ( GetTime() - m_fSendTimer > SYSTEMLINK_RETRYINTERVAL && m_nSendCount < SYSTEMLINK_MAXRETRIES )
 		{
 			// Send out a search for lan servers
-			char	 msg_buffer[MAX_ROUTABLE_PAYLOAD];
+			ALIGN4 char	 msg_buffer[MAX_ROUTABLE_PAYLOAD] ALIGN4_POST;
 			bf_write msg( msg_buffer, sizeof(msg_buffer) );
 
 			msg.WriteLong( CONNECTIONLESS_HEADER );
@@ -298,7 +293,6 @@ void CMatchmaking::UpdateSearch()
 			}
 		}
 	}
-#endif	// linux
 }
 
 //-----------------------------------------------------------------------------
@@ -747,7 +741,7 @@ void CMatchmaking::JoinInviteSessionByID( XNKID nSessionID )
 //-----------------------------------------------------------------------------
 void CMatchmaking::SendJoinRequest( netadr_t *adr )
 {
-	char	 msg_buffer[MAX_ROUTABLE_PAYLOAD];
+	ALIGN4 char	 msg_buffer[MAX_ROUTABLE_PAYLOAD] ALIGN4_POST;
 	bf_write msg( msg_buffer, sizeof(msg_buffer) );
 
 	// Send local player info
@@ -774,12 +768,9 @@ void CMatchmaking::SendJoinRequest( netadr_t *adr )
 //-----------------------------------------------------------------------------
 bool CMatchmaking::ProcessJoinResponse( MM_JoinResponse *pMsg )
 {
-#ifdef _LINUX
-	return false;
-#else
 	switch( pMsg->m_ResponseType )
 	{
-	case pMsg->JOINRESPONSE_NOTHOSTING:
+	case MM_JoinResponse::JOINRESPONSE_NOTHOSTING:
 		if ( m_CurrentState != MMSTATE_SESSION_CONNECTING )
 		{
 			return true;
@@ -788,7 +779,7 @@ bool CMatchmaking::ProcessJoinResponse( MM_JoinResponse *pMsg )
 		SessionNotification( SESSION_NOTIFY_CONNECT_NOTAVAILABLE );
 		break;
 
-	case pMsg->JOINRESPONSE_SESSIONFULL:
+	case MM_JoinResponse::JOINRESPONSE_SESSIONFULL:
 		if ( m_CurrentState != MMSTATE_SESSION_CONNECTING )
 		{
 			return true;
@@ -797,8 +788,8 @@ bool CMatchmaking::ProcessJoinResponse( MM_JoinResponse *pMsg )
 		SessionNotification( SESSION_NOTIFY_CONNECT_SESSIONFULL );
 		break;
 
-	case pMsg->JOINRESPONSE_APPROVED:
-	case pMsg->JOINRESPONSE_APPROVED_JOINGAME:
+	case MM_JoinResponse::JOINRESPONSE_APPROVED:
+	case MM_JoinResponse::JOINRESPONSE_APPROVED_JOINGAME:
 		if ( m_CurrentState != MMSTATE_SESSION_CONNECTING )
 		{
 			return true;
@@ -827,7 +818,7 @@ bool CMatchmaking::ProcessJoinResponse( MM_JoinResponse *pMsg )
 		}
 		break;
 
-	case pMsg->JOINRESPONSE_MODIFY_SESSION:
+	case MM_JoinResponse::JOINRESPONSE_MODIFY_SESSION:
 		if ( !m_Session.IsHost() )
 		{
 			if ( m_CurrentState != MMSTATE_SESSION_CONNECTED )
@@ -882,7 +873,6 @@ bool CMatchmaking::ProcessJoinResponse( MM_JoinResponse *pMsg )
 	}
 
 	return true;
-#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -989,6 +979,7 @@ void CMatchmaking::ClearSearchResults()
 		m_pSearchResults = NULL;
 	}
 
+	// This will call delete and we should technically be calling delete []
 	m_pSystemLinkResults.PurgeAndDeleteElements();
 }
 

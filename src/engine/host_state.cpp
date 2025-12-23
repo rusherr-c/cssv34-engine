@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Runs the state machine for the host & server
 //
@@ -34,6 +34,14 @@
 #include "datacache/imdlcache.h"
 #include "sys_dll.h"
 #include "testscriptmgr.h"
+#if defined( REPLAY_ENABLED )
+#include "replay_internal.h"
+#include "replayserver.h"
+#endif
+#include "GameEventManager.h"
+#include "tier0/etwprof.h"
+
+#include "ccs.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -127,9 +135,7 @@ void HostState_RunGameInit()
 //-----------------------------------------------------------------------------
 void HostState_NewGame( char const *pMapName, bool remember_location, bool background )
 {
-	char szMapName[_MAX_PATH];
-	Q_StripExtension( pMapName, szMapName, sizeof(szMapName) );
-	Q_strncpy( g_HostState.m_levelName, szMapName, sizeof( g_HostState.m_levelName ) );
+	Q_strncpy( g_HostState.m_levelName, pMapName, sizeof( g_HostState.m_levelName ) );
 
 	g_HostState.m_landmarkName[0] = 0;
 	g_HostState.m_bRememberLocation = remember_location;
@@ -209,6 +215,15 @@ void HostState_GameShutdown()
 // shutdown the engine/program as soon as possible
 void HostState_Shutdown()
 {
+#if defined( REPLAY_ENABLED )
+	// If we're recording the game, finalize the replay so players can download it.
+	if ( sv.IsDedicated() && g_pReplay && g_pReplay->IsRecording() )
+	{
+		// Stop recording and publish all blocks/session info data synchronously.
+		g_pReplay->SV_EndRecordingSession( true );
+	}
+#endif
+
 	g_HostState.SetNextState( HS_SHUTDOWN );
 }
 
@@ -224,6 +239,14 @@ bool HostState_IsGameShuttingDown()
 {
 	return g_HostState.IsGameShuttingDown();
 }
+
+bool HostState_IsShuttingDown()
+{
+	return ( g_HostState.m_currentState == HS_SHUTDOWN ||
+		g_HostState.m_currentState == HS_RESTART ||
+			g_HostState.m_currentState == HS_GAME_SHUTDOWN );
+}
+
 
 void HostState_OnClientConnected()
 {
@@ -243,7 +266,10 @@ void HostState_SetSpawnPoint(Vector &position, QAngle &angle)
 }
 
 //-----------------------------------------------------------------------------
-
+static void WatchDogHandler()
+{
+	Host_Error( "WatchdogHandler called - server exiting.\n" );
+}
 
 //-----------------------------------------------------------------------------
 // Class implementation
@@ -268,6 +294,10 @@ void CHostState::Init()
 	m_angLocation.Init();
 	m_bWaitingForConnection = false;
 	m_flShortFrameTime = 1.0;
+
+	CCS_Init();
+
+	Plat_SetWatchdogHandlerFunction( WatchDogHandler );
 }
 
 void CHostState::SetState( HOSTSTATES newState, bool clearNext )
@@ -310,6 +340,8 @@ void CHostState::GameShutdown()
 // The external API queues up state changes to happen when the state machine is processed.
 void CHostState::State_NewGame()
 {
+	CETWScope timer( "CHostState::State_NewGame" );
+
 	if ( Host_ValidGame() )
 	{
 		// Demand load game .dll if running with -nogamedll flag, etc.
@@ -324,14 +356,11 @@ void CHostState::State_NewGame()
 		}
 		else
 		{
-			if ( modelloader->Map_IsValid( m_levelName ) )
+			if ( Host_NewGame( m_levelName, false, m_bBackgroundLevel ) )
 			{
-				if ( Host_NewGame( m_levelName, false, m_bBackgroundLevel ) )
-				{
-					// succesfully started the new game
-					SetState( HS_RUN, true );
-					return;
-				}
+				// succesfully started the new game
+				SetState( HS_RUN, true );
+				return;
 			}
 		}
 	}
@@ -382,17 +411,12 @@ void CHostState::State_ChangeLevelMP()
 	{
 		Steam3Server().NotifyOfLevelChange();
 
-		g_pServerPluginHandler->LevelShutdown();
-#if !defined(SWDS)
-		audiosourcecache->LevelShutdown();
-#endif
-		if ( modelloader->Map_IsValid( m_levelName ) )
-		{
 #ifndef SWDS
-			// start progress bar immediately for multiplayer level transitions
-			EngineVGui()->EnabledProgressBarForNextLoad();
+		// start progress bar immediately for multiplayer level transitions
+		EngineVGui()->EnabledProgressBarForNextLoad();
 #endif
-			Host_Changelevel( false, m_levelName, m_landmarkName );
+		if ( Host_Changelevel( false, m_levelName, m_landmarkName ) )
+		{
 			SetState( HS_RUN, true );
 			return;
 		}
@@ -400,6 +424,13 @@ void CHostState::State_ChangeLevelMP()
 	// fail
 	ConMsg( "Unable to change level!\n" );
 	SetState( HS_RUN, true );
+
+	IGameEvent *event = g_GameEventManager.CreateEvent( "server_changelevel_failed" );
+	if ( event )
+	{
+		event->SetString( "levelname", m_levelName );
+		g_GameEventManager.FireEvent( event );
+	}
 }
 
 
@@ -407,12 +438,9 @@ void CHostState::State_ChangeLevelSP()
 {
 	if ( Host_ValidGame() )
 	{
-		if ( modelloader->Map_IsValid( m_levelName ) )
-		{
-			Host_Changelevel( true, m_levelName, m_landmarkName );
-			SetState( HS_RUN, true );
-			return;
-		}
+		Host_Changelevel( true, m_levelName, m_landmarkName );
+		SetState( HS_RUN, true );
+		return;
 	}
 	// fail
 	ConMsg( "Unable to change level!\n" );
@@ -421,34 +449,36 @@ void CHostState::State_ChangeLevelSP()
 
 static bool IsClientActive()
 {
-    if ( !sv.IsActive() )
-        return cl.IsActive();
+	if ( !sv.IsActive() )
+		return cl.IsActive();
 
-    for ( int i = 0; i < sv.GetClientCount(); i++ )
-    {
+	for ( int i = 0; i < sv.GetClientCount(); i++ )
+	{
 		CGameClient *pClient = sv.Client( i );
 		if ( pClient->IsActive() )
 			return true;
-    }
-    return false;
+	}
+	return false;
 }
 
 static bool IsClientConnected()
 {
-    if ( !sv.IsActive() )
-        return cl.IsConnected();
+	if ( !sv.IsActive() )
+		return cl.IsConnected();
 
-    for ( int i = 0; i < sv.GetClientCount(); i++ )
-    {
+	for ( int i = 0; i < sv.GetClientCount(); i++ )
+	{
 		CGameClient *pClient = sv.Client( i );
 		if ( pClient->IsConnected() )
 			return true;
-    }
-    return false;
+	}
+	return false;
 }
 
 void CHostState::State_Run( float frameTime )
 {
+	static bool s_bFirstRunFrame = true;
+
 	if ( m_flShortFrameTime > 0 )
 	{
 		if ( IsClientActive() )
@@ -461,7 +491,27 @@ void CHostState::State_Run( float frameTime )
 			frameTime = min( frameTime, host_state.interval_per_tick );
 		}
 	}
+
+	// Nice big timeout to play it safe while still ensuring that we don't get stuck in
+	// infinite loops.
+	int nTimerWaitSeconds = 60;
+	if ( s_bFirstRunFrame ) 
+	{
+		// The first frame can take a while especially during fork startup.
+		s_bFirstRunFrame = false;
+		nTimerWaitSeconds *= 2;
+	}
+	if ( sv.IsDedicated() )
+	{
+		Plat_BeginWatchdogTimer( nTimerWaitSeconds );
+	}
+
 	Host_RunFrame( frameTime );
+
+	if ( sv.IsDedicated() )
+	{
+		Plat_EndWatchdogTimer();
+	}
 
 	switch( m_nextState )
 	{
@@ -531,6 +581,8 @@ void CHostState::State_GameShutdown()
 // Tell the launcher we're done.
 void CHostState::State_Shutdown()
 {
+	CCS_Shutdown();
+
 #if !defined(SWDS)
 	CL_EndMovie();
 #endif
@@ -557,6 +609,8 @@ void CHostState::State_Restart( void )
 //-----------------------------------------------------------------------------
 void CHostState::FrameUpdate( float time )
 {
+	CCS_Tick( time );
+
 #if _DEBUG
 	int loopCount = 0;
 #endif
@@ -728,7 +782,7 @@ static bool Host_ValidGame( void )
 	// No multi-client single player games
 	if ( sv.IsMultiplayer() )
 	{
-		if ( deathmatch.GetBool() || coop.GetBool() )
+		if ( deathmatch.GetInt() )
 			return true;
 	}
 	else

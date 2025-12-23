@@ -1,6 +1,6 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose:
 //
 //=============================================================================//
 
@@ -21,6 +21,7 @@
 
 class C_PhysicsProp;
 
+extern ConVar cl_disablefreezecam;
 
 class CAddonModel
 {
@@ -29,6 +30,7 @@ public:
 	int m_iAddon;						// One of the ADDON_ bits telling which model this is.
 	int m_iAttachmentPoint;				// Which attachment point on the player model this guy is on.
 };
+
 
 
 class C_CSPlayer : public C_BasePlayer, public ICSPlayerAnimStateHelpers
@@ -55,7 +57,7 @@ public:
 	CSPlayerState State_Get() const;
 
 	virtual float GetMinFOV() const;
-	
+
 	// Get how much $$$ this guy has.
 	int GetAccount() const;
 
@@ -68,6 +70,7 @@ public:
 	// Get the amount of armor the player has.
 	int ArmorValue() const;
 	bool HasHelmet() const;
+	int GetCurrentAssaultSuitPrice();
 
 	virtual const QAngle& EyeAngles();
 	virtual const QAngle& GetRenderAngles();
@@ -99,9 +102,9 @@ public:
 
 	virtual void UpdateClientSideAnimation();
 	virtual void ProcessMuzzleFlashEvent();
-	
+
 	virtual const Vector& GetRenderOrigin( void );
-		
+
 	bool CreateMove( float flInputSampleTime, CUserCmd *pCmd );
 
 	CUtlVector< C_BaseParticleEntity* > m_SmokeGrenades;
@@ -112,7 +115,7 @@ public:
 	virtual C_BaseAnimating * BecomeRagdollOnClient();
 	virtual IRagdoll* GetRepresentativeRagdoll() const;
 
-	void ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomImpactName );
+	void ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCustomImpactName );
 
 	// Have this player play the sounds from his view model's reload animation.
 	void PlayReloadEffect();
@@ -132,6 +135,26 @@ public:
 		return ( this != C_BasePlayer::GetLocalPlayer() );
 	}
 
+	void ClearSoundEvents()
+	{
+		m_SoundEvents.RemoveAll();
+	}
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Returns whether this player is dominating or is being dominated by the specified player
+	//=============================================================================
+	bool IsPlayerDominated( int iPlayerIndex );
+	bool IsPlayerDominatingMe( int iPlayerIndex );
+
+	virtual void CalcFreezeCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov );
+
+	virtual float GetDeathCamInterpolationTime();
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
+
 // Called by shared code.
 public:
 
@@ -142,28 +165,27 @@ public:
 
 	void DoAnimationEvent( PlayerAnimEvent_t event, int nData = 0 );
 
-		
-// Implemented in shared code.
-public:	
 
-	void GetBulletTypeParameters( 
-		int iBulletType, 
-		float &fPenetrationPower, 
+// Implemented in shared code.
+public:
+	virtual float GetPlayerMaxSpeed();
+
+	void GetBulletTypeParameters(
+		int iBulletType,
+		float &fPenetrationPower,
 		float &flPenetrationDistance );
 
-	void FireBullet( 
-		Vector vecSrc, 
-		const QAngle &shootAngles, 
-		float vecSpread, 
-		float flDistance, 
-		int iPenetration, 
-		int iBulletType, 
-		int iDamage, 
-		float flRangeModifier, 
+	void FireBullet(
+		Vector vecSrc,
+		const QAngle &shootAngles,
+		float flDistance,
+		int iPenetration,
+		int iBulletType,
+		int iDamage,
+		float flRangeModifier,
 		CBaseEntity *pevAttacker,
 		bool bDoEffects,
-		float x,
-		float y );
+		float xSpread, float ySpread );
 
 	void KickBack(
 		float up_base,
@@ -176,6 +198,9 @@ public:
 
 	// Returns true if the player is allowed to move.
 	bool CanMove() const;
+
+	void OnJump( float fImpulse );
+	void OnLand( float fVelocity );
 
 	bool HasC4() const;	// Is this player carrying a C4 bomb?
 	bool IsVIP() const;	// Is this player the VIP?
@@ -202,12 +227,12 @@ public:
 	Activity m_Activity;
 
 	// Predicted variables.
-	bool m_bResumeZoom;
-	int m_iLastZoom;			// after firing a shot, set the FOV to 90, and after showing the animation, bring the FOV back to last zoom level.
+	CNetworkVar( bool, m_bResumeZoom );
+	CNetworkVar( int , m_iLastZoom ); // after firing a shot, set the FOV to 90, and after showing the animation, bring the FOV back to last zoom level.
 	CNetworkVar( CSPlayerState, m_iPlayerState );	// SupraFiend: this gives the current state in the joining process, the states are listed above
 	CNetworkVar( bool, m_bIsDefusing );			// tracks whether this player is currently defusing a bomb
 	CNetworkVar( bool, m_bInBombZone );
-	CNetworkVar( bool, m_bInBuyZone );	
+	CNetworkVar( bool, m_bInBuyZone );
 	CNetworkVar( int, m_iThrowGrenadeCounter );	// used to trigger grenade throw animations.
 
 	bool IsInHostageRescueZone( void );
@@ -222,7 +247,7 @@ public:
 	// How long the progress bar takes to get to the end. If this is 0, then the progress bar
 	// should not be drawn.
 	CNetworkVar( int, m_iProgressBarDuration );
-	
+
 	// When the progress bar should start.
 	CNetworkVar( float, m_flProgressBarStartTime );
 
@@ -231,7 +256,20 @@ public:
 	CNetworkVar( int, m_iShotsFired );	// number of shots fired recently
 	CNetworkVar( bool, m_bNightVisionOn );
 	CNetworkVar( bool, m_bHasNightVision );
-	CNetworkVar( float, m_flVelocityModifier );
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Added for fun-fact support
+    //=============================================================================
+
+    //CNetworkVar( bool, m_bPickedUpDefuser );
+    //CNetworkVar( bool, m_bDefusedWithPickedUpKit );
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+    CNetworkVar( float, m_flVelocityModifier );
 
 	bool		m_bDetected;
 
@@ -251,13 +289,13 @@ public:
 	bool IsShieldDrawn( void ) { return false; }
 	void SetShieldDrawnState( bool bState ) {}
 #endif
-	
+
 	float m_flNightVisionAlpha;
 
 	float m_flFlashAlpha;
 	float m_flFlashBangTime;
 	CNetworkVar( float, m_flFlashMaxAlpha );
-	CNetworkVar( float, m_flFlashDuration );	
+	CNetworkVar( float, m_flFlashDuration );
 
 	// Having the RecvProxy in the player allows us to keep the var private
 	static void RecvProxy_CycleLatch( const CRecvProxyData *pData, void *pStruct, void *pOut );
@@ -269,6 +307,13 @@ public:
 
 	void SurpressLadderChecks( const Vector& pos, const Vector& normal );
 	bool CanGrabLadder( const Vector& pos, const Vector& normal );
+
+//=============================================================================
+// HPE_BEGIN:
+//=============================================================================
+
+// [tj] checks if this player has another given player on their Steam friends list.
+	bool HasPlayerAsFriend(C_CSPlayer* player);
 
 private:
 	CountdownTimer m_ladderSurpressionTimer;
@@ -283,7 +328,7 @@ private:
 
 	void PushawayThink();
 
-	int		m_iAccount;	
+	int		m_iAccount;
 	bool	m_bHasHelmet;
 	int		m_iClass;
 	int		m_ArmorValue;
@@ -291,7 +336,9 @@ private:
 	bool	m_bHasDefuser;
 	bool	m_bInHostageRescueZone;
 	float	m_fNextThinkPushAway;
-	
+
+    bool    m_bPlayingFreezeCamSound;
+
 #ifdef CS_SHIELD_ENABLED
 	bool	m_bHasShield;
 	bool	m_bShieldDrawn;
@@ -320,7 +367,7 @@ private:
 	};
 	CUtlLinkedList<CCSSoundEvent,int> m_SoundEvents;
 
-	
+
 	// This is the list of addons hanging off the guy (grenades, C4, nightvision, etc).
 	CUtlLinkedList<CAddonModel, int> m_AddonModels;
 	int m_iLastAddonBits;
@@ -329,6 +376,22 @@ private:
 
 	int m_cycleLatch;				// server periodically updates this to fix up our anims, here it is a 4 bit fixed point
 	float m_serverIntendedCycle;	// server periodically updates this to fix up our anims, here it is the float we want, or -1 for no override
+
+
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj] Network variables that track who are dominating and being dominated by
+    //=============================================================================
+
+    CNetworkArray( bool, m_bPlayerDominated, MAX_PLAYERS+1 );		// array of state per other player whether player is dominating other players
+    CNetworkArray( bool, m_bPlayerDominatingMe, MAX_PLAYERS+1 );	// array of state per other player whether other players are dominating this player
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+
 
 	C_CSPlayer( const C_CSPlayer & );
 };
@@ -342,6 +405,15 @@ inline C_CSPlayer *ToCSPlayer( CBaseEntity *pEntity )
 
 	return dynamic_cast<C_CSPlayer*>( pEntity );
 }
+
+namespace vgui
+{
+	class IImage;
+}
+
+vgui::IImage* GetDefaultAvatarImage( C_BasePlayer *pPlayer );
+
+
 
 
 #endif // C_CS_PLAYER_H

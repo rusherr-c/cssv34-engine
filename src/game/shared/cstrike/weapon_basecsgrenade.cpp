@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,7 @@
 #include "datacache/imdlcache.h"
 
 
+
 #ifdef CLIENT_DLL
 
 	#include "c_cs_player.h"
@@ -22,6 +23,7 @@
 
 	#include "cs_player.h"
 	#include "items.h"
+	#include "../../server/cstrike/cs_gamestats.h"
 
 #endif
 
@@ -54,6 +56,9 @@ END_PREDICTION_DATA()
 
 LINK_ENTITY_TO_CLASS( weapon_basecsgrenade, CBaseCSGrenade );
 
+#ifndef CLIENT_DLL
+ConVar sv_ignoregrenaderadio( "sv_ignoregrenaderadio", "0", 0, "Turn off Fire in the hole messages" );
+#endif
 
 CBaseCSGrenade::CBaseCSGrenade()
 {
@@ -342,7 +347,12 @@ void CBaseCSGrenade::ItemPostFrame()
 
 		Vector vForward, vRight, vUp;
 
-		if (angThrow.x < 90 )
+		if ( angThrow.x < 0 )
+		{
+			angThrow.x += 360; // make sure we have a positive angle from LocalEyeAngles()
+		}
+
+		if ( angThrow.x < 90 )
 			angThrow.x = -10 + angThrow.x * ((90 + 10) / 90.0);
 		else
 		{
@@ -377,7 +387,13 @@ void CBaseCSGrenade::ItemPostFrame()
 		CCSPlayer *pCSPlayer = ToCSPlayer( pPlayer );
 
 		if( pCSPlayer )
-			pCSPlayer->Radio( "Radio.FireInTheHole",   "#Cstrike_TitlesTXT_Fire_in_the_hole" );
+		{
+			if ( !sv_ignoregrenaderadio.GetBool() )
+			{
+				pCSPlayer->Radio( "Radio.FireInTheHole",   "#Cstrike_TitlesTXT_Fire_in_the_hole" );
+			}
+			CCS_GameStats.IncrementStat(pCSPlayer, CSSTAT_GRENADES_THROWN, 1);
+		}
 	}
 
 	void CBaseCSGrenade::DropGrenade()
@@ -396,6 +412,13 @@ void CBaseCSGrenade::ItemPostFrame()
 		Vector vecVel = pPlayer->GetAbsVelocity();
 
 		EmitGrenade( vecSrc, vec3_angle, vecVel, AngularImpulse(600,random->RandomInt(-1200,1200),0), pPlayer );
+
+		CCSPlayer *pCSPlayer = ToCSPlayer( pPlayer );
+
+		if( pCSPlayer )
+		{
+			CCS_GameStats.IncrementStat(pCSPlayer, CSSTAT_GRENADES_THROWN, 1);
+		}
 
 		m_bRedraw = true;
 		m_fThrowTime = 0.0f;

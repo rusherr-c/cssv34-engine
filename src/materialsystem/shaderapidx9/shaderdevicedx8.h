@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,7 +17,8 @@
 #include "shaderdevicebase.h"
 #include "shaderapidx8_global.h"
 #include "tier1/utlvector.h"
-#include "d3d9.h"
+
+
 
 //-----------------------------------------------------------------------------
 // Describes which D3DDEVTYPE to use
@@ -32,10 +33,18 @@
 // PC:    By default, PIX profiling is explicitly disallowed using the D3DPERF_SetOptions(1) API on PC
 // X360:  PIX_INSTRUMENTATION will only generate PIX events in RELEASE builds on 360
 // Uncomment to use PIX instrumentation:
-//#define	PIX_INSTRUMENTATION
+#if PIX_ENABLE
+#define	PIX_INSTRUMENTATION
+#endif
 
 #define MAX_PIX_ERRORS		3
 
+#if defined( PIX_INSTRUMENTATION ) && defined ( DX_TO_GL_ABSTRACTION ) && defined( _WIN32 )
+typedef int (WINAPI *D3DPERF_BeginEvent_FuncPtr)( D3DCOLOR col, LPCWSTR wszName );
+typedef int (WINAPI *D3DPERF_EndEvent_FuncPtr)( void );
+typedef void (WINAPI *D3DPERF_SetMarker_FuncPtr)( D3DCOLOR col, LPCWSTR wszName );
+typedef void (WINAPI *D3DPERF_SetOptions_FuncPtr)( DWORD dwOptions );
+#endif
 
 //-----------------------------------------------------------------------------
 // The Base implementation of the shader device
@@ -83,6 +92,14 @@ public:
 	}
 #endif
 
+#if defined( PIX_INSTRUMENTATION ) && defined ( DX_TO_GL_ABSTRACTION ) && defined( _WIN32 )
+	HMODULE m_hD3D9;
+	D3DPERF_BeginEvent_FuncPtr m_pBeginEvent;
+	D3DPERF_EndEvent_FuncPtr m_pEndEvent;
+	D3DPERF_SetMarker_FuncPtr m_pSetMarker;
+	D3DPERF_SetOptions_FuncPtr m_pSetOptions;
+#endif
+
 protected:
 	// Determine capabilities
 	bool DetermineHardwareCaps( );
@@ -90,9 +107,6 @@ protected:
 private:
 	// Initialize adapter information
 	void InitAdapterInfo();
-
-	// Code to detect support for ATI2N and ATI1N formats for normal map compression
-	void CheckNormalCompressionSupport( HardwareCaps_t *pCaps, int nAdapter );
 
 	// Code to detect support for texture border mode (not a simple caps check)
 	void CheckBorderColorSupport( HardwareCaps_t *pCaps, int nAdapter );
@@ -138,6 +152,8 @@ inline IDirect3D9* D3D()
 
 #endif
 
+#define NUM_FRAME_SYNC_QUERIES 2
+#define NUM_FRAME_SYNC_FRAMES_LATENCY 0
 
 //-----------------------------------------------------------------------------
 // The Dx8implementation of the shader device
@@ -172,6 +188,7 @@ public:
 	virtual int GetCurrentAdapter() const;
 	virtual void EnableNonInteractiveMode( MaterialNonInteractiveMode_t mode, ShaderNonInteractiveInfo_t *pInfo = NULL );
 	virtual void RefreshFrontBufferNonInteractive();
+	virtual char *GetDisplayDeviceName() OVERRIDE; 
 
 	// Alternative method for ib/vs
 	// NOTE: If this works, remove GetDynamicVertexBuffer/IndexBuffer
@@ -190,6 +207,9 @@ public:
 
 	// Call this when another app is initializing or finished initializing
 	virtual void OtherAppInitializing( bool initializing );
+	
+	// This handles any events queued because they were called outside of the owning thread
+	virtual void HandleThreadEvent( uint32 threadEvent );
 
 	// FIXME: Make private
 	// Which device are we using?
@@ -279,8 +299,10 @@ protected:
 
 	void ReacquireResourcesInternal( bool bResetState = false, bool bForceReacquire = false, char const *pszForceReason = NULL );
 
-#ifndef _X360
-	IDirect3DDevice9	*m_pD3DDevice;
+#ifdef DX_TO_GL_ABSTRACTION
+public:
+	virtual void DoStartupShaderPreloading( void );
+protected:
 #endif
 
 	D3DPRESENT_PARAMETERS m_PresentParameters;
@@ -297,6 +319,7 @@ protected:
 	bool				m_IsResizing : 1;
 	bool				m_bPendingVideoModeChange : 1;
 	bool				m_bUsingStencil : 1;
+	bool				m_bResourcesReleased : 1;
 
 	// amount of stencil variation we have available
 	int					m_iStencilBufferBits;
@@ -305,13 +328,17 @@ protected:
 	CON_COMMAND_MEMBER_F( CShaderDeviceDx8, "360vidinfo", SpewVideoInfo360, "Get information on the video mode on the 360", 0 );
 #endif
 
-	// Frame synch objects
-	IDirect3DQuery9		*m_pFrameSyncQueryObject;
+	// Frame sync objects
+	IDirect3DQuery9		*m_pFrameSyncQueryObject[NUM_FRAME_SYNC_QUERIES];
+	bool				m_bQueryIssued[NUM_FRAME_SYNC_QUERIES];
+	int					m_currentSyncQuery;
 	IDirect3DTexture9	*m_pFrameSyncTexture;
 
 #if defined( _X360 )
 	HXUIDC m_hDC;
 #endif
+
+	CUtlString			m_sDisplayDeviceName;
 
 	// Used for x360 only
 	NonInteractiveRefreshState_t m_NonInteractiveRefresh;
@@ -328,16 +355,11 @@ protected:
 //-----------------------------------------------------------------------------
 // Globals
 //-----------------------------------------------------------------------------
-#if defined( _X360 )
-extern IDirect3DDevice9 *m_pD3DDevice;
+extern IDirect3DDevice9 *g_pD3DDevice;
 FORCEINLINE IDirect3DDevice9 *Dx9Device()
 {
-	return m_pD3DDevice;
+	return g_pD3DDevice;
 }
-#else
-class D3DDeviceWrapper;
-D3DDeviceWrapper *Dx9Device();
-#endif
 
 extern CShaderDeviceDx8* g_pShaderDeviceDx8;
 
@@ -345,12 +367,10 @@ extern CShaderDeviceDx8* g_pShaderDeviceDx8;
 //-----------------------------------------------------------------------------
 // Inline methods
 //-----------------------------------------------------------------------------
-#if defined( _X360 )
 FORCEINLINE bool CShaderDeviceDx8::IsActive() const
 {
-	return ( m_pD3DDevice != NULL );
+	return ( g_pD3DDevice != NULL );
 }
-#endif
 
 // used to determine if we're deactivated
 FORCEINLINE bool CShaderDeviceDx8::IsDeactivated() const 

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -837,17 +837,17 @@ void CDmeFilmClip::OnConstruction()
 	m_FilmTrackGroup.Init( this, "subClipTrackGroup", FATTRIB_HAS_CALLBACK | FATTRIB_HAS_PRE_CALLBACK );
 	m_Volume.InitAndSet( this, "volume", 1.0);
 
-	m_hCachedVersion = AVIMATERIAL_INVALID;
+	m_pCachedVersion = NULL;
 	m_bIsUsingCachedVersion = false;
 	m_bReloadCachedVersion = false;
 }
 
 void CDmeFilmClip::OnDestruction()
 {
-	if ( m_hCachedVersion != AVIMATERIAL_INVALID )
+	if ( g_pVideo != NULL && m_pCachedVersion != NULL )
 	{
-		g_pAVI->DestroyAVIMaterial( m_hCachedVersion );
-		m_hCachedVersion = AVIMATERIAL_INVALID;
+		g_pVideo->DestroyVideoMaterial( m_pCachedVersion );
+		m_pCachedVersion = NULL;
 	}
 }
 
@@ -1196,25 +1196,26 @@ bool CDmeFilmClip::IsUsingCachedVersion() const
 	return m_bIsUsingCachedVersion;
 }
 
-AVIMaterial_t CDmeFilmClip::GetCachedAVI()
+IVideoMaterial *CDmeFilmClip::GetCachedVideoMaterial()
 {
 	if ( m_bReloadCachedVersion )
 	{
-		if ( g_pAVI )
+		if ( g_pVideo )
 		{
-			if ( m_hCachedVersion != AVIMATERIAL_INVALID )
+			if ( m_pCachedVersion != NULL )
 			{
-				g_pAVI->DestroyAVIMaterial( m_hCachedVersion );
-				m_hCachedVersion = AVIMATERIAL_INVALID;
+				g_pVideo->DestroyVideoMaterial( m_pCachedVersion );
+				m_pCachedVersion = NULL;
 			}
 			if ( m_AVIFile[0] )
 			{
-				m_hCachedVersion = g_pAVI->CreateAVIMaterial( m_AVIFile, m_AVIFile, "MOD" );
+				m_pCachedVersion = g_pVideo->CreateVideoMaterial( m_AVIFile, m_AVIFile, "MOD" );
 			}
+		
 		}
 		m_bReloadCachedVersion = false;
 	}
-	return m_hCachedVersion;
+	return m_pCachedVersion;
 }
 	
 void CDmeFilmClip::SetCachedAVI( const char *pAVIFile )

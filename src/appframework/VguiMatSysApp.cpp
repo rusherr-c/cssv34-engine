@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -8,20 +8,20 @@
 //=============================================================================
 #ifdef _WIN32
 
-#include "appframework/vguimatsysapp.h"
 #if defined( _WIN32 ) && !defined( _X360 )
 #include <windows.h>
 #endif
-#include "FileSystem.h"
-#include "materialsystem/IMaterialSystem.h"
-#include "vgui/IVGui.h"
+#include "appframework/vguimatsysapp.h"
+#include "filesystem.h"
+#include "materialsystem/imaterialsystem.h"
+#include "vgui/ivgui.h"
 #include "vgui/ISurface.h"
 #include "vgui_controls/controls.h"
-#include "vgui/IScheme.h"
-#include "vgui/ILocalize.h"
+#include "vgui/ischeme.h"
+#include "vgui/ilocalize.h"
 #include "tier0/dbg.h"
 #include "tier0/icommandline.h"
-#include "materialsystem/MaterialSystem_Config.h"
+#include "materialsystem/materialsystem_config.h"
 #include "filesystem_init.h"
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "inputsystem/iinputsystem.h"
@@ -291,6 +291,8 @@ bool CVguiMatSysApp::SetVideoMode( )
 	config.m_VideoMode.m_Width = config.m_VideoMode.m_Height = 0;
 	config.m_VideoMode.m_Format = IMAGE_FORMAT_BGRX8888;
 	config.m_VideoMode.m_RefreshRate = 0;
+	config.SetFlag(	MATSYS_VIDCFG_FLAGS_STENCIL, true );
+
 	bool modeSet = g_pMaterialSystem->SetMode( m_HWnd, config );
 	if (!modeSet)
 	{

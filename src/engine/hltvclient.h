@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,6 +30,7 @@ public:
 	void FileReceived( const char *fileName, unsigned int transferID );
 	void FileRequested(const char *fileName, unsigned int transferID );
 	void FileDenied(const char *fileName, unsigned int transferID );
+	void FileSent(const char *fileName, unsigned int transferID );
 	
 	bool ProcessConnectionlessPacket( netpacket_t *packet );
 	
@@ -53,6 +54,8 @@ public: // IClientMessageHandlers
 	PROCESS_CLC_MESSAGE( ListenEvents );
 	PROCESS_CLC_MESSAGE( RespondCvarValue );
 	PROCESS_CLC_MESSAGE( FileCRCCheck );
+	PROCESS_CLC_MESSAGE( FileMD5Check ) { return true; }
+	PROCESS_CLC_MESSAGE( SaveReplay );
 
 public:
 	CClientFrame *GetDeltaFrame( int nTick );

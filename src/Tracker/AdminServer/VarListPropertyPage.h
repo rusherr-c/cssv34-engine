@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #include <KeyValues.h>
 #include <vgui_controls/PropertyPage.h>
 
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "RemoteServer.h"
 
 //-----------------------------------------------------------------------------

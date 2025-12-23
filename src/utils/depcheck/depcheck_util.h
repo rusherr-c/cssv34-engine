@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 #endif
 
 
-void vprint( int depth, const char *fmt, ... );
+void vprint( int depth, PRINTF_FORMAT_STRING const char *fmt, ... );
 void CC_UngetToken( void );
 char *CC_ParseToken(char *data);
 char *CC_DiscardUntilMatchingCharIncludingNesting( char *input, const char *pairing );

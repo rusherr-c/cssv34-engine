@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -46,6 +46,7 @@
 #include "testscriptmgr.h"
 #include "r_areaportal.h"
 #include "host.h"
+#include "host_cmd.h"
 #include "vox.h"
 #include "iprediction.h"
 #include "icliententitylist.h"
@@ -64,11 +65,11 @@
 #include "host_saverestore.h"
 #include "cl_main.h"
 #include "demo.h"
+#include "appframework/ilaunchermgr.h"
 #include "vgui_baseui_interface.h"
 #include "LocalNetworkBackdoor.h"
 #include "lightcache.h"
 #include "vgui/ISystem.h"
-#include "Steam.h"
 #include "ivideomode.h"
 #include "icolorcorrectiontools.h"
 #include "toolframework/itoolframework.h"
@@ -80,6 +81,22 @@
 #include "inputsystem/iinputsystem.h"
 #include "iachievementmgr.h"
 #include "profile.h"
+#include "cl_steamauth.h"
+#include "download.h"
+#include "replay/iclientreplay.h"
+#include "demofile.h"
+#include "igame.h"
+#include "iclientvirtualreality.h"
+#include "sourcevr/isourcevirtualreality.h"
+#include "cl_check_process.h"
+#include "enginethreads.h"
+
+#if defined( REPLAY_ENABLED )
+#include "replay_internal.h"
+#include "replay/replaylib.h"
+#endif
+
+
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -92,8 +109,6 @@ IMaterial* BrushModel_GetLightingAndMaterial( const Vector &start,
 const char *Key_NameForBinding( const char *pBinding );
 void CL_GetBackgroundLevelName( char *pszBackgroundName, int bufSize, bool bMapName );
 CreateInterfaceFn g_ClientFactory = NULL;
-extern char gpszVersionString[32];
-extern int g_iSteamAppID;
 extern	CGlobalVars g_ServerGlobalVariables;
 
 //-----------------------------------------------------------------------------
@@ -332,7 +347,7 @@ public:
 	Vector	GetLightForPoint(const Vector &pos, bool bClamp);
 	Vector	GetLightForPointFast(const Vector &pos, bool bClamp);
 	const char *ParseFile( const char *data, char *token, int maxlen );
-	virtual bool CopyFile( const char *source, const char *destination );
+	virtual bool CopyLocalFile( const char *source, const char *destination );
 	void GetScreenSize( int& w, int &h );
 	void ServerCmd( const char *szCmdString, bool bReliable );
 	void ClientCmd( const char *szCmdString );
@@ -349,6 +364,7 @@ public:
 	CSentence *GetSentence( CAudioSource *pAudioSource );
 	float GetSentenceLength( CAudioSource *pAudioSource );
 	bool IsStreaming( CAudioSource *pAudioSource ) const;
+	void AddPhonemeFile( const char *pszPhonemeFile );
 
 	// FIXME, move entirely to client .dll
 	void GetViewAngles( QAngle& va );
@@ -356,7 +372,8 @@ public:
 	int GetMaxClients( void );
 	void Key_Event( ButtonCode_t key, int down );
 	const char *Key_LookupBinding( const char *pBinding );
-	const char *Key_BindingForKey( ButtonCode_t &code );
+	const char *Key_LookupBindingExact( const char *pBinding );
+	const char *Key_BindingForKey( ButtonCode_t code );
 	void StartKeyTrapMode( void );
 	bool CheckDoneKeyTrapping( ButtonCode_t &key );
 	bool IsInGame( void );
@@ -414,6 +431,7 @@ public:
 	// menu display
 	virtual void GetChapterName( char *pchBuff, int iMaxLength );
 	virtual char const *GetLevelName( void );
+	virtual int GetLevelVersion( void );
 	virtual bool IsLevelMainMenuBackground( void );
 	virtual void GetMainMenuBackgroundName( char *dest, int destlen );
 
@@ -462,9 +480,15 @@ public:
 	virtual bool IsPlayingDemo( void );
 	virtual bool IsRecordingDemo( void );
 	virtual bool IsPlayingTimeDemo( void );
+	virtual int  GetDemoRecordingTick( void );
+	virtual int  GetDemoPlaybackTick( void );
+	virtual int  GetDemoPlaybackStartTick( void );
+	virtual float GetDemoPlaybackTimeScale( void );
+	virtual int  GetDemoPlaybackTotalTicks( void );
 	virtual bool IsPaused( void );
 	virtual bool IsTakingScreenshot( void );
 	virtual bool IsHLTV( void );
+	virtual void GetVideoModes( int &nCount, vmode_s *&pModes );
 	virtual void GetUILanguage( char *dest, int destlen );
 
 	// Can skybox be seen from a particular point?
@@ -476,7 +500,7 @@ public:
 	virtual float		GetScreenAspectRatio();
 
 	virtual unsigned int		GetEngineBuildNumber() { return PROTOCOL_VERSION; }
-	virtual const char *		GetProductVersionString() { return gpszVersionString; }
+	virtual const char *		GetProductVersionString() { return GetSteamInfIDVersionInfo().szVersionString; }
 	virtual void				GrabPreColorCorrectedFrame( int x, int y, int width, int height );
 	virtual bool				IsHammerRunning( ) const;
 
@@ -511,11 +535,40 @@ public:
 	virtual void				OnStorageDeviceDetached( void );
 
 	virtual void				ResetDemoInterpolation( void );
-	virtual bool				REMOVED_SteamRefreshLogin( const char *password, bool isSecure ) { return false; }
-	virtual bool				REMOVED_SteamProcessCall( bool & finished ) { return false; }
 
-private:
-	SteamHandle_t				m_hRefreshLoginHandle;
+	virtual bool		REMOVED_SteamRefreshLogin( const char *password, bool isSecure ) { return false; }
+	virtual bool		REMOVED_SteamProcessCall( bool & finished ) { return false; }
+
+	virtual void SetGamestatsData( CGamestatsData *pGamestatsData );
+	virtual CGamestatsData *GetGamestatsData();
+
+#if defined( USE_SDL )
+	virtual void GetMouseDelta( int &x, int &y, bool bIgnoreNextMouseDelta );
+#endif
+
+	virtual void ServerCmdKeyValues( KeyValues *pKeyValues );
+
+	virtual bool IsSkippingPlayback( void );
+	virtual bool IsLoadingDemo( void );
+
+	virtual bool IsPlayingDemoALocallyRecordedDemo();
+
+	virtual uint GetProtocolVersion( void );
+
+	virtual bool IsWindowedMode( void );
+
+	virtual void	FlashWindow();
+	virtual int		GetClientVersion() const; // engines build
+	virtual bool	IsActiveApp();
+	virtual void	DisconnectInternal();
+
+	virtual int		GetInstancesRunningCount( );
+
+	virtual float	GetPausedExpireTime( void ) OVERRIDE;
+
+	virtual bool	StartDemoRecording( const char *pszFilename, const char *pszFolder = NULL );
+	virtual void	StopDemoRecording( void );
+	virtual void	TakeScreenshot( const char *pszFilename, const char *pszFolder = NULL );
 };
 
 
@@ -525,6 +578,7 @@ private:
 static CEngineClient s_VEngineClient;
 IVEngineClient *engineClient = &s_VEngineClient;
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CEngineClient, IVEngineClient, VENGINE_CLIENT_INTERFACE_VERSION, s_VEngineClient );
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CEngineClient, IVEngineClient013, VENGINE_CLIENT_INTERFACE_VERSION_13, s_VEngineClient );
 
 
 //-----------------------------------------------------------------------------
@@ -601,7 +655,7 @@ const char *CEngineClient::ParseFile( const char *data, char *token, int maxlen 
 	return ::COM_ParseFile( data, token, maxlen );
 }
 
-bool CEngineClient::CopyFile( const char *source, const char *destination )
+bool CEngineClient::CopyLocalFile( const char *source, const char *destination )
 {
 	return ::COM_CopyFile( source, destination );
 }
@@ -625,21 +679,23 @@ void CEngineClient::ServerCmd( const char *szCmdString, bool bReliable )
 
 void CEngineClient::ClientCmd( const char *szCmdString )
 {
+	// Check that we can add the two execution markers
+	if ( cl.m_bRestrictClientCommands && !Cbuf_HasRoomForExecutionMarkers( 2 ) )
+	{
+		AssertMsg( false, "CEngineClient::ClientCmd called but there is no room for the execution markers. Ignoring command." );
+		return;
+	}
+
 	// Only let them run commands marked with FCVAR_CLIENTCMD_CAN_EXECUTE.
 	if ( cl.m_bRestrictClientCommands )
-		Cbuf_AddExecutionMarker( eCmdExecutionMarker_Enable_FCVAR_CLIENTCMD_CAN_EXECUTE );
-	
-	Cbuf_AddText( szCmdString );
-	Cbuf_AddText("\n");
-
-	if ( cl.m_bRestrictClientCommands )
-		Cbuf_AddExecutionMarker( eCmdExecutionMarker_Disable_FCVAR_CLIENTCMD_CAN_EXECUTE );
+		Cbuf_AddTextWithMarkers( eCmdExecutionMarker_Enable_FCVAR_CLIENTCMD_CAN_EXECUTE, szCmdString, eCmdExecutionMarker_Disable_FCVAR_CLIENTCMD_CAN_EXECUTE );
+	else
+		Cbuf_AddText( szCmdString );
 }
 
 void CEngineClient::ClientCmd_Unrestricted( const char *szCmdString )
 {
 	Cbuf_AddText( szCmdString );
-	Cbuf_AddText("\n");
 }
 
 void CEngineClient::SetRestrictServerCommands( bool bRestrict )
@@ -655,7 +711,6 @@ void CEngineClient::SetRestrictClientCommands( bool bRestrict )
 void CEngineClient::ExecuteClientCmd( const char *szCmdString )
 {
 	Cbuf_AddText( szCmdString );
-	Cbuf_AddText("\n");
 	Cbuf_Execute();
 }
 
@@ -670,10 +725,23 @@ bool CEngineClient::GetPlayerInfo( int ent_num, player_info_t *pinfo )
 	}
 
 	Assert( cl.m_pUserInfoTable );
+	if ( !cl.m_pUserInfoTable )
+	{
+		Q_memset( pinfo, 0, sizeof( player_info_t ) );
+		return false;
+	}
 
-	player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( ent_num, NULL );
+	Assert( ent_num < cl.m_pUserInfoTable->GetNumStrings() );
+	if ( ent_num >= cl.m_pUserInfoTable->GetNumStrings() )
+	{
+		Q_memset( pinfo, 0, sizeof( player_info_t ) );
+		return false;
+	}
 
-	if ( !pi )
+	int cubPlayerInfo;
+	player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( ent_num, &cubPlayerInfo );
+
+	if ( !pi || cubPlayerInfo < sizeof( player_info_t ) )
 	{
 		Q_memset( pinfo, 0, sizeof( player_info_t ) );
 		return false;
@@ -728,6 +796,13 @@ CSentence *CEngineClient::GetSentence( CAudioSource *pAudioSource )
 	return NULL;
 }
 
+void AddPhonemesFromFile( const char *pszFileName );
+
+void CEngineClient::AddPhonemeFile( const char *pszPhonemeFile )
+{
+	AddPhonemesFromFile( pszPhonemeFile );
+}
+
 float CEngineClient::GetSentenceLength( CAudioSource *pAudioSource )
 {
 	if (pAudioSource && pAudioSource->SampleRate() > 0 )
@@ -758,6 +833,9 @@ void CEngineClient::SetViewAngles( QAngle& va )
 	cl.viewangles.x = AngleNormalize( va.x );
 	cl.viewangles.y = AngleNormalize( va.y );
 	cl.viewangles.z = AngleNormalize( va.z );
+	Assert( !IS_NAN(cl.viewangles.x ) );
+	Assert( !IS_NAN(cl.viewangles.y ) );
+	Assert( !IS_NAN(cl.viewangles.z ) );
 }
 
 int CEngineClient::GetMaxClients( void )
@@ -777,7 +855,7 @@ bool CEngineClient::MapLoadFailed( void )
 
 void CEngineClient::ReadConfiguration( const bool readDefault /*= false*/ )
 {
-	Host_ReadConfiguration( readDefault );
+	Host_ReadConfiguration();
 }
 
 const char *CEngineClient::Key_LookupBinding( const char *pBinding )
@@ -785,7 +863,12 @@ const char *CEngineClient::Key_LookupBinding( const char *pBinding )
 	return ::Key_NameForBinding( pBinding );
 }
 
-const char *CEngineClient::Key_BindingForKey( ButtonCode_t &code )
+const char *CEngineClient::Key_LookupBindingExact( const char *pBinding )
+{
+	return ::Key_NameForBindingExact( pBinding );
+}
+
+const char *CEngineClient::Key_BindingForKey( ButtonCode_t code )
 {
 	return ::Key_BindingForKey( code );
 }
@@ -1007,7 +1090,12 @@ char const *CEngineClient::GetLevelName( void )
 		return "";
 	}
 
-	return cl.m_szLevelName;
+	return cl.m_szLevelFileName;
+}
+
+int CEngineClient::GetLevelVersion( void )
+{
+	return g_ServerGlobalVariables.mapversion;
 }
 
 bool CEngineClient::IsLevelMainMenuBackground( void )
@@ -1035,7 +1123,18 @@ int	CEngineClient::GetPlayerForUserID(int userID)
 	if ( !cl.m_pUserInfoTable )
 		return 0;
 
-	for ( int i = 0; i < cl.m_nMaxClients; i++ )
+	// We are occasionally getting crashes here where it looks like cl.m_nMaxClients
+	//  is larger than the number of items in cl.m_pUserInfoTable. Callstack:
+	//   engine.dll	CEngineClient::GetPlayerForUserID
+	//   client.dll	CTFHudDeathNotice::OnGameEvent
+	//   client.dll	CHudBaseDeathNotice::FireGameEvent
+	//   client.dll	CTFHudDeathNotice::FireGameEvent
+	//   engine.dll	CGameEventManager::FireEventIntern
+	//   engine.dll	CGameEventManager::FireEventClientSide
+	//   engine.dll	CClientState::ProcessGameEvent
+	// So add check to make sure we don't go over m_pUserInfoTable size.
+	int nMaxClients = Min( cl.m_nMaxClients, cl.m_pUserInfoTable->GetNumStrings() );
+	for ( int i = 0; i < nMaxClients; i++ )
 	{
 		player_info_t *pi = (player_info_t*) cl.m_pUserInfoTable->GetStringUserData( i, NULL );
 
@@ -1216,9 +1315,40 @@ bool CEngineClient::IsTakingScreenshot( void )
 	return cl_takesnapshot;
 }
 
+int CEngineClient::GetDemoRecordingTick( void )	
+{
+	return demorecorder->GetRecordingTick();
+}
+
+int CEngineClient::GetDemoPlaybackTick( void )
+{
+	return demoplayer->GetPlaybackTick();
+}
+
+int CEngineClient::GetDemoPlaybackStartTick( void )
+{
+	return demoplayer->GetPlaybackStartTick();
+}
+
+float CEngineClient::GetDemoPlaybackTimeScale( void )
+{
+	return demoplayer->GetPlaybackTimeScale();
+}
+
+int CEngineClient::GetDemoPlaybackTotalTicks( void )
+{
+	return demoplayer->GetTotalTicks();
+}
+
 bool CEngineClient::IsHLTV( void )
 {
 	return cl.ishltv;
+}
+
+void CEngineClient::GetVideoModes( int &nCount, vmode_s *&pModes )
+{
+	nCount = videomode->GetModeCount();
+	pModes = videomode->GetMode( 0 );
 }
 
 void CEngineClient::GetUILanguage( char *dest, int destlen )
@@ -1273,7 +1403,7 @@ float CEngineClient::GetScreenAspectRatio()
 
 int CEngineClient::GetAppID()
 {
-	return g_iSteamAppID;
+	return GetSteamAppID();
 }
 
 void CEngineClient::SetOverlayBindProxy( int iOverlayID, void *pBindProxy )
@@ -1447,10 +1577,89 @@ void CEngineClient::ResetDemoInterpolation( void )
 }
 
 
+extern CGamestatsData *g_pGamestatsData;
+void CEngineClient::SetGamestatsData( CGamestatsData *pGamestatsData )
+{
+	g_pGamestatsData = pGamestatsData;
+}
+
+CGamestatsData *CEngineClient::GetGamestatsData()
+{
+	return g_pGamestatsData;
+}
+
+//-----------------------------------------------------------------------------
+
+#if defined( USE_SDL )
+
+void CEngineClient::GetMouseDelta( int &x, int &y, bool bIgnoreNextMouseDelta )
+{
+	g_pLauncherMgr->GetMouseDelta( x, y, bIgnoreNextMouseDelta );
+}
+
+#endif
+
+
+void CEngineClient::ServerCmdKeyValues( KeyValues *pKeyValues )
+{
+	cl.SendServerCmdKeyValues( pKeyValues );
+}
+
+bool CEngineClient::IsSkippingPlayback( void )
+{
+	return demoplayer->IsSkipping();
+}
+
+bool CEngineClient::IsLoadingDemo( void )
+{
+	return demoplayer->IsLoading();
+}
+
+bool CEngineClient::IsPlayingDemoALocallyRecordedDemo()
+{
+	return IsPlayingDemo() &&
+		   demoplayer &&
+		   demoplayer->GetDemoFile() &&
+		   !V_strnicmp( demoplayer->GetDemoFile()->m_DemoHeader.servername, "localhost", 9 );
+}
+
+uint CEngineClient::GetProtocolVersion()
+{
+	if ( demoplayer && demoplayer->IsPlayingBack() )
+	{
+		return demoplayer->GetProtocolVersion();
+	}
+	return PROTOCOL_VERSION;
+}
+
+bool CEngineClient::IsWindowedMode()
+{
+	return videomode->IsWindowedMode();
+}
+
+int	CEngineClient::GetClientVersion() const
+{
+	return GetSteamInfIDVersionInfo().ClientVersion;
+}
+
+bool CEngineClient::IsActiveApp( void )
+{
+	return game->IsActiveApp();
+}
+
+//-----------------------------------------------------------------------------
+// Previously ConCommand disconnect
+//-----------------------------------------------------------------------------
+void CEngineClient::DisconnectInternal( void )
+{
+	Disconnect();
+}
+
 //-----------------------------------------------------------------------------
 // The client DLL serves out this interface
 //-----------------------------------------------------------------------------
 IBaseClientDLL *g_ClientDLL = NULL;
+IClientVirtualReality *g_pClientVR = NULL;
 IPrediction	*g_pClientSidePrediction = NULL;
 IClientRenderTargets *g_pClientRenderTargets = NULL;
 IClientEntityList *entitylist = NULL;
@@ -1458,6 +1667,7 @@ ICenterPrint *centerprint = NULL;
 IClientLeafSystemEngine *clientleafsystem = NULL;
 bool g_bClientLeafSystemV1;
 ClientClass *g_pClientClassHead = NULL;
+IClientReplay *g_pClientReplay = NULL;
 
 ClientClass *ClientDLL_GetAllClasses( void )
 {
@@ -1505,10 +1715,16 @@ bool ClientDLL_Load()
 {
 	Assert ( !g_ClientDLLModule );
 
-	// loads the client.dll, but ensures that the client dll is running under Steam
-	// this will have to be undone when we want mods to be able to run
-	// !!! THIS METHOD STINKS, JUST AUTO-ADD SUBDIRS TO THE GAMEBIN PATH
-	g_ClientDLLModule = g_pFileSystem->LoadModule( "\\client", "GAMEBIN", false );
+	// Check the signature on the client dll.  If this fails we load it anyway but put this client
+	// into insecure mode so it won't connect to secure servers and get VAC banned
+	if ( !Host_AllowLoadModule( "client.dll", "GAMEBIN", true ) )
+	{
+		// not supposed to load this but we will anyway
+		Host_DisallowSecureServers();
+		Host_AllowLoadModule( "client.dll","GAMEBIN", true );
+	}
+
+	g_ClientDLLModule = g_pFileSystem->LoadModule( "client", "GAMEBIN", false );
 	if ( g_ClientDLLModule )
 	{
 		g_ClientFactory = Sys_GetFactory( g_ClientDLLModule );
@@ -1522,6 +1738,15 @@ bool ClientDLL_Load()
 			{
 				Sys_Error( "Could not get client.dll interface from library client" );
 			}
+
+			if( g_pSourceVR )
+			{
+				g_pClientVR = (IClientVirtualReality *)g_ClientFactory( CLIENTVIRTUALREALITY_INTERFACE_VERSION, NULL );
+				if( !g_pClientVR )
+				{
+					Msg( "client.dll is not VR-compatible.\n" );
+				}
+			}
 		}
 		else
 		{
@@ -1530,13 +1755,18 @@ bool ClientDLL_Load()
 	}
 	else
 	{	
+		// tell Steam to do a quick verify of the install. Sys_Error doesn't return, so do this first.
+		if( Steam3Client().SteamApps() )
+			Steam3Client().SteamApps()->MarkContentCorrupt( true );
+
 		// library failed to load
-		Sys_Error( "Could not load library client" );
+		Sys_Error( "Could not load library client. Try restarting. If that doesn't work, verify the cache." );
 	}
 
 	// Load the client render targets interface from the client .dll
 	// NOTE: Its OK if this returns NULL, as some mods won't provide the interface and will just use the default behavior of the engine
 	g_pClientRenderTargets = (IClientRenderTargets *)g_ClientFactory( CLIENTRENDERTARGETS_INTERFACE_VERSION, NULL );
+
 	return true;
 }
 
@@ -1632,15 +1862,66 @@ void ClientDLL_Init( void )
 				}
 			}
 
+#if defined( REPLAY_ENABLED )
+			if ( Replay_IsSupportedModAndPlatform() )
+			{
+				// Replay dll should be loaded by this point
+				if ( !g_pReplay )
+				{
+					Sys_Error( "Replay.dll was not loaded" );
+				}
+
+				// Get pointer to client-side replay interface implementation
+				g_pClientReplay = (IClientReplay *)g_ClientFactory( CLIENT_REPLAY_INTERFACE_VERSION, NULL );
+				if ( !g_pClientReplay )
+				{
+					Sys_Error( "Could not get the replay interface from library client" );
+				}
+
+				// Allow the client dll to setup pointers to replay interfaces
+				extern CreateInterfaceFn g_fnReplayFactory;
+				if ( !g_ClientDLL->ReplayInit( g_fnReplayFactory ) )
+				{
+					Sys_Error( "Client ReplayInit() failed!" );
+				}
+
+				// Allow the replay dll to setup pointers to client interfaces
+				if ( !g_pReplay->CL_Init( g_ClientFactory ) )
+				{
+					Sys_Error( "Replay system ClientInit() failed" );
+				}
+
+				if ( !g_ClientDLL->ReplayPostInit() )
+				{
+					Sys_Error( "Client ReplayPostInit() failed!" );
+				}
+
+#if !defined( DEDICATED )
+				extern CGameServer sv;
+				if ( !sv.IsDedicated() )
+				{
+					g_pClientReplayContext = g_pReplay->CL_GetContext();
+					g_pReplayManager = g_pClientReplayContext->GetReplayManager();
+					g_pReplayMovieManager = g_pClientReplayContext->GetMovieManager();
+					g_pReplayMovieRenderer = g_pClientReplayContext->GetMovieRenderer();
+					g_pReplayPerformanceManager = g_pClientReplayContext->GetPerformanceManager();
+					g_pReplayPerformanceController = g_pClientReplayContext->GetPerformanceController();
+
+					ReplayLib_Init( com_gamedir, g_pClientReplayContext );
+				}
+#endif
+			}
+#endif
+
 			toolframework->ClientInit( g_ClientFactory );
 		}
 
 		// Don't want TF2 running less than DX 8
 		if ( g_pMaterialSystemHardwareConfig && g_pMaterialSystemHardwareConfig->GetDXSupportLevel() < 80 )
 		{
-			if ( ( Q_stricmp( COM_GetModDirectory(), "tf" ) == 0 ) || ( Q_stricmp( COM_GetModDirectory(), "ep2" ) == 0 ) || ( Q_stricmp( COM_GetModDirectory(), "portal" ) == 0 ) )
+			if ( ( Q_stricmp( COM_GetModDirectory(), "tf" ) == 0 ) || ( Q_stricmp( COM_GetModDirectory(), "ep2" ) == 0 ) || ( Q_stricmp( COM_GetModDirectory(), "portal" ) == 0 ) || ( Q_stricmp( COM_GetModDirectory(), "tf_beta" ) == 0 ) )
 			{
-				Sys_Error( "This game has a minimum requirement of DirectX 8.0 to run properly." );
+				Sys_Error( "Your graphics hardware must support at least pixel shader version 1.1 to run this game!" );
 			}
 		}
 	}
@@ -1657,6 +1938,13 @@ void ClientDLL_Init( void )
 //-----------------------------------------------------------------------------
 void ClientDLL_Shutdown( void )
 {
+#if defined( REPLAY_ENABLED )
+	if ( g_pReplay )
+	{
+		g_pReplay->CL_Shutdown();
+	}
+#endif
+
 	toolframework->ClientShutdown();
 
 	ClientDLL_ShutdownRecvTableMgr();
@@ -1710,14 +1998,19 @@ void ClientDLL_ProcessInput( void )
 		return;
 
 	VPROF("ClientDLL_ProcessInput");
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
 	g_ClientDLL->HudProcessInput( cl.IsConnected() );
 }
 
-
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
 void ClientDLL_FrameStageNotify( ClientFrameStage_t frameStage )
 {
 	if ( !g_ClientDLL )
 		return;
+
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
 
 	g_ClientDLL->FrameStageNotify( frameStage );
 }
@@ -1738,7 +2031,9 @@ void ClientDLL_Update( void )
 }
 
 
-
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
 void ClientDLL_VoiceStatus( int entindex, bool bTalking )
 {
 	if( g_ClientDLL )
@@ -1746,5 +2041,173 @@ void ClientDLL_VoiceStatus( int entindex, bool bTalking )
 }
 
 
+#ifdef IS_WINDOWS_PC
+#include "winlite.h"
+#endif
 
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CEngineClient::FlashWindow()
+{
+#ifndef USE_SDL
+	FLASHWINFO flashwinfo;
+	flashwinfo.cbSize = sizeof( flashwinfo );
+	flashwinfo.hwnd = (HWND)game->GetMainWindow();
+	flashwinfo.dwFlags = FLASHW_ALL;
+	flashwinfo.uCount = 5;
+	flashwinfo.dwTimeout = 0;
+	FlashWindowEx( &flashwinfo );
+#endif
+}
 
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+int CEngineClient::GetInstancesRunningCount( )
+{
+	return CheckOtherInstancesRunning( );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+float CEngineClient::GetPausedExpireTime( void )
+{
+	return cl.GetPausedExpireTime();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CEngineClient::StartDemoRecording( const char *pszFilename, const char *pszFolder /* = NULL */ )
+{
+	bool bUseFolder = ( pszFolder && pszFolder[0] );
+
+	if ( demorecorder->IsRecording() )
+	{
+		ConMsg( "Already recording.\n" );
+		return false;
+	}
+
+	if ( demoplayer->IsPlayingBack() )
+	{
+		ConMsg( "Can't record during demo playback.\n" );
+		return false;
+	}
+
+	// check filename
+	if ( !COM_IsValidPath( pszFilename ) )
+	{
+		ConMsg( "record %s: invalid filename.\n", pszFilename );
+		return false;
+	}
+
+	if ( bUseFolder )
+	{
+		// check folder
+		if ( !COM_IsValidPath( pszFolder ) )
+		{
+			ConMsg( "record %s: invalid folder.\n", pszFolder );
+			return false;
+		}
+	}
+
+	char szFinal[MAX_OSPATH];
+	char szTemp[MAX_OSPATH];
+
+	if ( !g_ClientDLL->CanRecordDemo( szTemp, sizeof( szTemp ) ) )
+	{
+		ConMsg( "%s\n", szTemp );	// re-use szTemp as the error string if the client prevents us from starting a demo
+		return false;
+	}
+
+	if ( bUseFolder )
+	{
+		V_sprintf_safe( szTemp, "%s%c%s", pszFolder, CORRECT_PATH_SEPARATOR, pszFilename );
+	}
+	else
+	{
+		V_sprintf_safe( szTemp, "%s", pszFilename );
+	}
+
+	// remove .dem extension if it exists
+	Q_StripExtension( szTemp, szFinal, sizeof( szFinal ) );
+
+	// record it
+	demorecorder->StartRecording( szFinal, false );
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CEngineClient::StopDemoRecording( void )
+{
+	if ( !demorecorder->IsRecording() )
+	{
+		ConDMsg( "Not recording a demo.\n" );
+		return;
+	}
+
+	demorecorder->StopRecording();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CEngineClient::TakeScreenshot( const char *pszFilename, const char *pszFolder /* = NULL */ )
+{
+	bool bUseFolder = ( pszFolder && pszFolder[0] );
+
+	// check filename
+	if ( !COM_IsValidPath( pszFilename ) )
+	{
+		ConMsg( "TakeScreenshot invalid filename: %s\n", pszFilename );
+		return;
+	}
+
+	if ( bUseFolder )
+	{
+		// check folder
+		if ( !COM_IsValidPath( pszFolder ) )
+		{
+			ConMsg( "TakeScreenshot invalid folder: %s\n", pszFolder );
+			return;
+		}
+	}
+
+	bool bReadPixelsFromFrontBuffer = g_pMaterialSystemHardwareConfig->ReadPixelsFromFrontBuffer();
+	if ( bReadPixelsFromFrontBuffer )
+	{
+		Shader_SwapBuffers();
+	}
+
+	// Disable threading for the duration of the screenshots, because we need to get pointers to the (complete) 
+	// back buffer right now.
+	bool bEnabled = materials->AllowThreading( false, g_nMaterialSystemThread );
+
+	char szFinal[MAX_OSPATH] = {0};
+
+	if ( bUseFolder )
+	{
+		V_sprintf_safe( szFinal, "%s%c%s", pszFolder, CORRECT_PATH_SEPARATOR, pszFilename );
+	}
+	else
+	{
+		V_sprintf_safe( szFinal, "%s", pszFilename );
+	}
+
+	V_SetExtension( szFinal, ".tga", sizeof( szFinal ) ); 
+
+	videomode->TakeSnapshotTGA( szFinal );
+
+	// Restore threading if it was previously enabled (if it wasn't this will do nothing).
+	materials->AllowThreading( bEnabled, g_nMaterialSystemThread );
+
+	if ( !bReadPixelsFromFrontBuffer )
+	{
+		Shader_SwapBuffers();
+	}
+}

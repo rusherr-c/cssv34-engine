@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,11 +11,10 @@
 
 class IMaterial;
 
-class CRadioStatus : CAutoGameSystem
+class CRadioStatus : public CAutoGameSystem
 {
 public:
 	CRadioStatus();
-	~CRadioStatus();
 
 	virtual bool Init();
 	virtual void Shutdown();

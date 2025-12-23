@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,9 +16,9 @@ using namespace vgui;
 #include <vgui_controls/Label.h>
 #include <vgui_controls/TextEntry.h>
 
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "PanelListPanel.h"
-#include "ScriptObject.h"
+#include "scriptobject.h"
 #include <tier0/vcrmode.h>
 #include "tier1/convar.h"
 #include "EngineInterface.h"
@@ -118,8 +118,8 @@ CCreateMultiplayerGameBotPage::CCreateMultiplayerGameBotPage( vgui::Panel *paren
 	// NOTE: If order of AddItem is changed, update the associated enum
 	m_joinTeamCombo = new ComboBox( this, "BotJoinTeamCombo", 3, false );
 	m_joinTeamCombo->AddItem( "#Cstrike_Random", NULL );
-	m_joinTeamCombo->AddItem( "#Cstrike_ScoreBoard_CT", NULL );
-	m_joinTeamCombo->AddItem( "#Cstrike_ScoreBoard_Ter", NULL );
+	m_joinTeamCombo->AddItem( "#Cstrike_Team_CT", NULL );
+	m_joinTeamCombo->AddItem( "#Cstrike_Team_T", NULL );
 
 	// set up chatter combo box
 	// NOTE: If order of AddItem is changed, update the associated enum

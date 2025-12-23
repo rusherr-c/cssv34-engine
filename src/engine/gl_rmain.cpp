@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -42,7 +42,11 @@
 extern ConVar r_waterforceexpensive;
 #endif
 
-ConVar r_aspectratio( "r_aspectratio", "0" );
+ConVar r_aspectratio( "r_aspectratio", "0" 
+#if !defined( _X360 )
+					 , FCVAR_CHEAT
+#endif
+					 );
 ConVar r_dynamiclighting( "r_dynamiclighting", "1", FCVAR_CHEAT );
 extern ConVar building_cubemaps;
 extern float scr_demo_override_fov;	
@@ -124,8 +128,9 @@ float GetScreenAspect( )
 	if ( r_aspectratio.GetFloat() > 0.0f )
 		return r_aspectratio.GetFloat();
 
-	// just use the screen size
-	CMatRenderContextPtr pRenderContext( materials );
+	// mikesart: This is just sticking in unnecessary BeginRender/EndRender calls to the queue.
+	//   CMatRenderContextPtr pRenderContext( materials );
+	IMatRenderContext *pRenderContext = g_pMaterialSystem->GetRenderContext();
 
 	int width, height;
 	pRenderContext->GetRenderTargetDimensions( width, height );
@@ -277,6 +282,7 @@ public:
 	float	GetFovY( void ) { return m_yFOV; };
 	float	GetFovViewmodel( void ) { return CurrentView().fovViewmodel; };
 
+	virtual bool	ClipTransformWithProjection ( const VMatrix& worldToScreen, const Vector& point, Vector* pClip );
 	virtual bool	ClipTransform( const Vector& point, Vector* pClip );
 	virtual bool	ScreenTransform( const Vector& point, Vector* pScreen );
 
@@ -380,7 +386,6 @@ void CRender::FrameBegin( void )
 
 	UpdateStudioRenderConfig();
 	g_pStudioRender->BeginFrame();
-	DecalBeginFrame();
 }
 
 
@@ -486,11 +491,12 @@ void CRender::ClearView( CViewSetup &view, int nFlags, ITexture* pRenderTarget, 
 {
 	bool bClearColor = (nFlags & VIEW_CLEAR_COLOR) != 0;
 	bool bClearDepth = (nFlags & VIEW_CLEAR_DEPTH) != 0;
+	bool bClearStencil = (nFlags & VIEW_CLEAR_STENCIL) != 0;
 	bool bForceClearWholeRenderTarget = (nFlags & VIEW_CLEAR_FULL_TARGET) != 0;
 	bool bObeyStencil = (nFlags & VIEW_CLEAR_OBEY_STENCIL) != 0;
 
 	// Handle an initial clear request if asked for
-	if ( !bClearColor && !bClearDepth )
+	if ( !bClearColor && !bClearDepth && !bClearStencil )
 		return;
 
 	CMatRenderContextPtr pRenderContext( materials );
@@ -500,7 +506,7 @@ void CRender::ClearView( CViewSetup &view, int nFlags, ITexture* pRenderTarget, 
 		if( bObeyStencil )
 			pRenderContext->ClearBuffersObeyStencil( bClearColor, bClearDepth );
 		else
-			pRenderContext->ClearBuffers( bClearColor, bClearDepth );
+			pRenderContext->ClearBuffers( bClearColor, bClearDepth, bClearStencil );
 	}
 	else
 	{
@@ -517,12 +523,12 @@ void CRender::ClearView( CViewSetup &view, int nFlags, ITexture* pRenderTarget, 
 		}
 
 		pRenderContext->PushRenderTargetAndViewport( pRenderTarget, pDepthTexture, 0, 0, nWidth, nHeight );
-		
+
 		if( bObeyStencil )
 			pRenderContext->ClearBuffersObeyStencil( bClearColor, bClearDepth );
 		else
-			pRenderContext->ClearBuffers( bClearColor, bClearDepth );
-		
+			pRenderContext->ClearBuffers( bClearColor, bClearDepth, bClearStencil );
+
 		pRenderContext->PopRenderTargetAndViewport( );
 	}
 }
@@ -535,6 +541,7 @@ void CRender::Push3DView( const CViewSetup &view, int nFlags, ITexture* pRenderT
 {
 	Push3DView( view, nFlags, pRenderTarget, frustumPlanes, NULL );
 }
+
 
 
 //-----------------------------------------------------------------------------
@@ -561,6 +568,12 @@ float ComputeViewMatrices( VMatrix *pWorldToView, VMatrix *pViewToProjection, VM
 			viewSetup.zNear, viewSetup.zFar, viewSetup.m_flOffCenterBottom, viewSetup.m_flOffCenterTop,
 			viewSetup.m_flOffCenterLeft, viewSetup.m_flOffCenterRight );
 	}
+    else if ( viewSetup.m_bViewToProjectionOverride )
+    {
+        *pViewToProjection = viewSetup.m_ViewToProjection;
+		// ...but then override the Z range (needed for correct skybox rendering, etc).
+		MatrixBuildPerspectiveZRange ( *pViewToProjection, viewSetup.zNear, viewSetup.zFar );
+    }
 	else
 	{
 		MatrixBuildPerspectiveX( *pViewToProjection, viewSetup.fov, flAspectRatio, viewSetup.zNear, viewSetup.zFar );
@@ -853,11 +866,10 @@ bool CRender::InLightmapUpdate( void ) const
 //-----------------------------------------------------------------------------
 // Compute the scene coordinates of a point in 3D
 //-----------------------------------------------------------------------------
-bool CRender::ClipTransform( const Vector& point, Vector* pClip )
+bool CRender::ClipTransformWithProjection ( const VMatrix& worldToScreen, const Vector& point, Vector* pClip )
 {
 // UNDONE: Clean this up some, handle off-screen vertices
 	float w;
-	const VMatrix &worldToScreen = g_EngineRenderer->WorldToScreenMatrix();
 
 	pClip->x = worldToScreen[0][0] * point[0] + worldToScreen[0][1] * point[1] + worldToScreen[0][2] * point[2] + worldToScreen[0][3];
 	pClip->y = worldToScreen[1][0] * point[0] + worldToScreen[1][1] * point[1] + worldToScreen[1][2] * point[2] + worldToScreen[1][3];
@@ -884,6 +896,16 @@ bool CRender::ClipTransform( const Vector& point, Vector* pClip )
 
 	return behind;
 }
+
+//-----------------------------------------------------------------------------
+// Compute the scene coordinates of a point in 3D using the current engine's projection
+//-----------------------------------------------------------------------------
+bool CRender::ClipTransform ( const Vector& point, Vector* pClip )
+{
+	const VMatrix &worldToScreen = g_EngineRenderer->WorldToScreenMatrix();
+	return CRender::ClipTransformWithProjection ( worldToScreen, point, pClip );
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Given a point, return the screen position in pixels
@@ -925,17 +947,13 @@ void CRender::ViewDrawFade( byte *color, IMaterial* pFadeMaterial )
 	float flUOffset = 0.5f / nTexWidth;
 	float flVOffset = 0.5f / nTexHeight;
 
-	int width, height;
-	pRenderContext->GetRenderTargetDimensions( width, height );
-	pRenderContext->Viewport( 0, 0, width, height );
-
 	pRenderContext->MatrixMode( MATERIAL_PROJECTION );
 
 	pRenderContext->PushMatrix();
 	pRenderContext->LoadIdentity();
 
 	pRenderContext->Scale( 1, -1, 1 );
-	pRenderContext->Ortho( 0, 0, width, height, -99999, 99999 );
+	pRenderContext->Ortho( 0, 0, view.width, view.height, -99999, 99999 );
 
 	pRenderContext->MatrixMode( MATERIAL_MODEL );
 	pRenderContext->PushMatrix();
@@ -948,12 +966,15 @@ void CRender::ViewDrawFade( byte *color, IMaterial* pFadeMaterial )
 	IMesh* pMesh = pRenderContext->GetDynamicMesh();
 	CMeshBuilder meshBuilder;
 	meshBuilder.Begin( pMesh, MATERIAL_QUADS, 1 );
+	
+	float flOffset = 0.5f;
 
-	// adjusted xys
-	float x1=view.x-.5;
-	float x2=view.x+view.width;
-	float y1=view.y-.5;
-	float y2=view.y+view.height;
+	// Note - the viewport has already adjusted the origin
+	float x1=0.0f - flOffset;
+	float x2=view.width - flOffset;
+	float y1=0.0f - flOffset;
+	float y2=view.height - flOffset;
+
 	// adjust nominal uvs to reflect adjusted xys
 	float u1=FLerp(flUOffset, 1-flUOffset,view.x,view.x+view.width,x1);
 	float u2=FLerp(flUOffset, 1-flUOffset,view.x,view.x+view.width,x2);
@@ -1174,6 +1195,8 @@ void R_DrawLightmaps( IWorldRenderList *pList, int pageId )
 
 void R_CheckForLightingConfigChanges()
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	UpdateStudioRenderConfig();
 	UpdateMaterialSystemConfig();
 	if( MaterialConfigLightingChanged() || g_RebuildLightmaps )

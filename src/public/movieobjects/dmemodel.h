@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =====//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Dme version of a skeletal model (gets compiled into a MDL)
 //
@@ -51,6 +51,12 @@ public:
 
 	// Recursively render the Dag hierarchy
 	virtual void Draw( CDmeDrawSettings *pDrawSettings = NULL );
+
+	// Set if Z is the up axis of the model
+	void ZUp( bool bYUp );
+
+	// Returns true if the DmeModel is Z Up.
+	bool IsZUp() const;
 
 protected:
 	// The order in which the joint transform names appear in this list

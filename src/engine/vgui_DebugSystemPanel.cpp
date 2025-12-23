@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,13 +16,13 @@
 #include <vgui_controls/TreeView.h>
 #include <vgui_controls/ImageList.h>
 #include <vgui/IScheme.h>
-#include <vgui/IVgui.h>
+#include <vgui/IVGui.h>
 #include <vgui_controls/Frame.h>
 #include <vgui_controls/CheckButton.h>
 #include <vgui_controls/PropertyPage.h>
 #include <vgui_controls/PropertyDialog.h>
 #include <vgui_controls/PropertySheet.h>
-#include "tier1/commandbuffer.h"
+#include "tier1/CommandBuffer.h"
 #include "tier1/tier1.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -293,10 +293,13 @@ public:
 		}
 	
 		GetPropertySheet()->SetTabWidth(72);
-		SetPos( videomode->GetModeWidth() - GetWide() - 10 , 10 );
+		SetPos( videomode->GetModeStereoWidth() - GetWide() - 10 , 10 );
 		SetVisible( true );
 
-		LoadControlSettings( "resource\\DebugOptionsPanel.res" );
+		if ( g_pFullFileSystem->FileExists( "resource/DebugOptionsPanel.res" ) )
+		{
+			LoadControlSettings( "resource/DebugOptionsPanel.res" );
+		}
 	}
 
 	void	Init( KeyValues *kv );
@@ -333,7 +336,7 @@ CDebugSystemPanel::CDebugSystemPanel( Panel *parent, const char *panelName )
 	: BaseClass( parent, panelName )
 {
 
-	SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	SetBounds( 0, 0, videomode->GetModeStereoWidth(), videomode->GetModeStereoHeight() );
 
 	// Show arrow cursor while in this mode
 	SetCursor( vgui::dc_arrow );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -51,7 +51,6 @@ public:
 	void Spawn();
 
 	void PrimaryAttack();
-	void DEAGLEFire( float flSpread );
 	virtual bool Deploy();
 	bool Reload();
 	void WeaponIdle();
@@ -59,13 +58,12 @@ public:
 	void BeamUpdate ();
 	virtual bool UseDecrement() {return true;};
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_DEAGLE; }
 
-
 public:
-
 	float m_flLastFire;
-
 
 private:
 	CDEagle( const CDEagle & );
@@ -78,8 +76,11 @@ IMPLEMENT_NETWORKCLASS_ALIASED( DEagle, DT_WeaponDEagle )
 BEGIN_NETWORK_TABLE( CDEagle, DT_WeaponDEagle )
 END_NETWORK_TABLE()
 
+#if defined CLIENT_DLL
 BEGIN_PREDICTION_DATA( CDEagle )
+	DEFINE_FIELD( m_flLastFire, FIELD_FLOAT ),
 END_PREDICTION_DATA()
+#endif
 
 LINK_ENTITY_TO_CLASS( weapon_deagle, CDEagle );
 PRECACHE_WEAPON_REGISTER( weapon_deagle );
@@ -105,38 +106,36 @@ bool CDEagle::Deploy()
 	return BaseClass::Deploy();
 }
 
+float CDEagle::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 1.5f * (1 - m_flAccuracy);
+
+		else if (pPlayer->GetAbsVelocity().Length2D() > 5)
+			return 0.25f * (1 - m_flAccuracy);
+
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			return 0.115f * (1 - m_flAccuracy);
+
+		else
+			return 0.13f * (1 - m_flAccuracy);
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
 
 void CDEagle::PrimaryAttack()
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
-	
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		DEAGLEFire( 1.5f * (1 - m_flAccuracy) );
-	
-	else if (pPlayer->GetAbsVelocity().Length2D() > 5)
-		DEAGLEFire( 0.25f * (1 - m_flAccuracy) );
-	
-	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
-		DEAGLEFire( 0.115f * (1 - m_flAccuracy) );
-	
-	else
-		DEAGLEFire( 0.13f * (1 - m_flAccuracy) );
-}
-
-
-void CDEagle::DEAGLEFire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
-	pPlayer->m_iShotsFired++;
-
-	if (pPlayer->m_iShotsFired > 1)
-		return;
-
+		
 	// Mark the time of this shot and determine the accuracy modifier based on the last shot fired...
 	m_flAccuracy -= (0.35)*(0.4 - ( gpGlobals->curtime - m_flLastFire ) );
 
@@ -149,14 +148,17 @@ void CDEagle::DEAGLEFire( float flSpread )
 
 	if (m_iClip1 <= 0)
 	{
-		if (m_bFireOnEmpty)
+		if ( m_bFireOnEmpty )
 		{
 			PlayEmptySound();
-			m_flNextPrimaryAttack = gpGlobals->curtime + 0.2;
+			m_flNextPrimaryAttack = gpGlobals->curtime + 0.1f;
+			m_bFireOnEmpty = false;
 		}
 
 		return;
 	}
+
+	pPlayer->m_iShotsFired++;
 
 	m_iClip1--;
 
@@ -182,7 +184,8 @@ void CDEagle::DEAGLEFire( float flSpread )
 		GetWeaponID(),
 		Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		flSpread );	// bullets
+		GetInaccuracy(),
+		GetSpread());
 
 	m_flNextPrimaryAttack = gpGlobals->curtime + GetCSWpnData().m_flCycleTime;
 
@@ -193,6 +196,9 @@ void CDEagle::DEAGLEFire( float flSpread )
 	}
 
 	SetWeaponIdleTime( gpGlobals->curtime + 1.8 );
+
+	// update accuracy
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyImpulseFire[Primary_Mode];
 
 	QAngle punchAngle = pPlayer->GetPunchAngle();
 	punchAngle.x -= 2;

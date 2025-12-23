@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,10 +26,6 @@ class RecvTable;
 class CDTISendTable;
 
 
-// (Temporary.. switch to something more efficient). Number of bits to
-// encode property indices in the delta bits.
-#define PROP_SENTINEL	0x7FFFFFFF
-
 
 #define MAX_EXCLUDE_PROPS		512
 
@@ -39,7 +35,7 @@ class CDTISendTable;
 #define PROPINFOBITS_TYPE				5
 #define PROPINFOBITS_FLAGS				SPROP_NUMFLAGBITS_NETWORKED
 #define PROPINFOBITS_STRINGBUFFERLEN	10
-#define PROPINFOBITS_NUMBITS			6
+#define PROPINFOBITS_NUMBITS			7
 #define PROPINFOBITS_RIGHTSHIFT			6
 #define PROPINFOBITS_NUMELEMENTS		10	// For arrays.
 
@@ -57,26 +53,107 @@ public:
 // CDeltaBitsReader.
 // ------------------------------------------------------------------------------------ //
 
+
 class CDeltaBitsReader
 {
 public:
-				CDeltaBitsReader( bf_read *pBuf );
-				~CDeltaBitsReader();
+	CDeltaBitsReader( bf_read *pBuf );
+	~CDeltaBitsReader();
 
 	// Write the next property index. Returns the number of bits used.
-	int		ReadNextPropIndex();
+	unsigned int ReadNextPropIndex();
+	unsigned int ReadNextPropIndex_Continued();
+	void	SkipPropData( const SendProp *pProp );
+	int		ComparePropData( CDeltaBitsReader* pOut, const SendProp *pProp );
+	void	CopyPropData( bf_write* pOut, const SendProp *pProp );
 
 	// If you know you're done but you're not at the end (you haven't called until
 	// ReadNextPropIndex returns -1), call this so it won't assert in its destructor.
 	void		ForceFinished();
 
-
 private:
-
 	bf_read		*m_pBuf;
-	bool		m_bFinished;
 	int			m_iLastProp;
 };
+
+
+FORCEINLINE CDeltaBitsReader::CDeltaBitsReader( bf_read *pBuf )
+{
+	m_pBuf = pBuf;
+	m_iLastProp = -1;
+}
+
+FORCEINLINE CDeltaBitsReader::~CDeltaBitsReader()
+{
+	// Make sure they read to the end unless they specifically said they don't care.
+	Assert( !m_pBuf );
+}
+
+FORCEINLINE void CDeltaBitsReader::ForceFinished()
+{
+#ifdef DBGFLAG_ASSERT
+	m_pBuf = NULL;
+#endif
+}
+
+FORCEINLINE unsigned int CDeltaBitsReader::ReadNextPropIndex()
+{
+	Assert( m_pBuf );
+	// Expanded and optimized version of
+	// if ( m_pBuf->ReadOneBit() )
+	// { 
+	//    m_iLastProp += 1 + m_pBuf->ReadUBitVar();
+	//    return m_iLastProp;
+	// }
+	// return ~0u;
+	if ( m_pBuf->GetNumBitsLeft() >= 7 )
+	{
+		uint bits = m_pBuf->ReadUBitLong( 7 );
+		if ( bits & 1 )
+		{
+			uint delta = bits >> 3;
+			if ( bits & 6 )
+			{
+				delta = m_pBuf->ReadUBitVarInternal( (bits & 6) >> 1 );
+			}
+			m_iLastProp = m_iLastProp + 1 + delta;
+			Assert( m_iLastProp < MAX_DATATABLE_PROPS );
+			return m_iLastProp;
+		}
+		m_pBuf->m_iCurBit -= 6; // Unread six bits we shouldn't have looked at
+	}
+	else
+	{
+		// Not enough bits for a property index.
+		if ( m_pBuf->ReadOneBit() )
+		{
+			// Expected a zero bit! Force an overflow!
+			m_pBuf->Seek(-1);
+		}
+	}
+	ForceFinished();
+	return ~0u;
+}
+
+FORCEINLINE void CDeltaBitsReader::SkipPropData( const SendProp *pProp )
+{
+	g_PropTypeFns[ pProp->GetType() ].SkipProp( pProp, m_pBuf );
+}
+
+FORCEINLINE void CDeltaBitsReader::CopyPropData( bf_write* pOut, const SendProp *pProp )
+{
+	int start = m_pBuf->GetNumBitsRead();
+	g_PropTypeFns[ pProp->GetType() ].SkipProp( pProp, m_pBuf );
+	int len = m_pBuf->GetNumBitsRead() - start;
+	m_pBuf->Seek( start );
+	pOut->WriteBitsFromBuffer( m_pBuf, len );
+}
+
+FORCEINLINE int CDeltaBitsReader::ComparePropData( CDeltaBitsReader *pInReader, const SendProp *pProp )
+{
+	bf_read *pIn = pInReader->m_pBuf;
+	return g_PropTypeFns[pProp->m_Type].CompareDeltas( pProp, m_pBuf, pIn );
+}
 
 
 // ------------------------------------------------------------------------------------ //
@@ -96,14 +173,38 @@ public:
 	bf_write*	GetBitBuf();
 
 private:
-	
 	bf_write	*m_pBuf;
 	int			m_iLastProp;
 };
 
+inline CDeltaBitsWriter::CDeltaBitsWriter( bf_write *pBuf )
+{
+	m_pBuf = pBuf;
+	m_iLastProp = -1;
+}
+
 inline bf_write* CDeltaBitsWriter::GetBitBuf()
 {
 	return m_pBuf;
+}
+
+FORCEINLINE void CDeltaBitsWriter::WritePropIndex( int iProp )
+{
+	Assert( iProp >= 0 && iProp < MAX_DATATABLE_PROPS );
+	unsigned int diff = iProp - m_iLastProp;
+	m_iLastProp = iProp;
+	Assert( diff > 0 && diff <= MAX_DATATABLE_PROPS );
+	// Expanded inline for maximum efficiency.
+	//m_pBuf->WriteOneBit( 1 );
+	//m_pBuf->WriteUBitVar( diff - 1 );
+	COMPILE_TIME_ASSERT( MAX_DATATABLE_PROPS <= 0x1000u );
+	int n = ((diff < 0x11u) ? -1 : 0) + ((diff < 0x101u) ? -1 : 0);
+	m_pBuf->WriteUBitLong( diff*8 - 8 + 4 + n*2 + 1, 8 + n*4 + 4 + 2 + 1 );
+}
+
+inline CDeltaBitsWriter::~CDeltaBitsWriter()
+{
+	m_pBuf->WriteOneBit( 0 );
 }
 
 
@@ -359,7 +460,7 @@ inline void CSendTablePrecalc::SetNumDataTableProxies( int count )
 // ------------------------------------------------------------------------ //
 
 // Used internally by various datatable modules.
-void DataTable_Warning( const char *pInMessage, ... );
+void DataTable_Warning( PRINTF_FORMAT_STRING const char *pInMessage, ... ) FMTFUNCTION( 1, 2 );
 bool ShouldWatchThisProp( const SendTable *pTable, int objectID, const char *pPropName );
 
 // Same as AreBitArraysEqual but does a trivial test to make sure the 
@@ -371,24 +472,12 @@ bool CompareBitArrays(
 	int nBits2
 	);
 
-
-// Helper routines for seeking through encoded buffers.
-inline int NextProp( CDeltaBitsReader *pDeltaBitsReader )
-{
-	int iProp = pDeltaBitsReader->ReadNextPropIndex();
-	if ( iProp >= 0 )
-		return iProp;
-	else
-		return PROP_SENTINEL;
-}
-
 // to skip of a Property we just IsEncodedZero to read over it
 // this is faster then doing a full Decode()
 inline void SkipPropData( bf_read *pIn, const SendProp *pProp )
 {
 	g_PropTypeFns[ pProp->GetType() ].SkipProp( pProp, pIn );
 }
-
 
 // This is to be called on SendTables and RecvTables to setup array properties
 // to point at their property templates and to set the SPROP_INSIDEARRAY flag

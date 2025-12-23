@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 //=============================================================================//
 
 #include "commeditdoc.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "toolutils/enginetools_int.h"
 #include "filesystem.h"
@@ -104,9 +104,6 @@ bool CCommEditDoc::LoadFromFile( const char *pFileName )
 		return false;
 
 	char mapname[ 256 ];
-	const char *pGame = Q_stristr( pFileName, "\\game\\" );
-	if ( !pGame )
-		return false;
 
 	// Compute the map name
 	const char *pMaps = Q_stristr( pFileName, "\\maps\\" );
@@ -163,7 +160,7 @@ bool CCommEditDoc::LoadFromFile( const char *pFileName )
 		*pComm = '\0';
 
 		// This is not undoable
-		CDisableUndoScopeGuard guard;
+		CDisableUndoScopeGuard guardFile;
 
 		CDmElement *pTXT = NULL;
 
@@ -348,6 +345,9 @@ CDmeCommentaryNodeEntity *CCommEditDoc::GetCommentaryNodeForLocation( Vector &ve
 	for ( int i = 0; i < nCount; ++i )
 	{
 		CDmeCommentaryNodeEntity *pNode = entities[ i ];
+		if ( !pNode )
+			continue;
+
 		Vector &vecAngles = *(Vector*)(&pNode->GetRenderAngles());
 		if ( pNode->GetRenderOrigin().DistTo( vecOrigin ) < 1e-3 && vecAngles.DistTo( *(Vector*)&angAbsAngles ) < 1e-1 )
 			return pNode;
@@ -375,9 +375,11 @@ bool CCommEditDoc::GetStringChoiceList( const char *pChoiceListType, CDmElement 
 		for ( int i = 0; i < nCount; ++i )
 		{
 			CDmeCommentaryNodeEntity *pNode = entities[ i ];
+			if ( !pNode )
+				continue;
+
 			if ( !V_stricmp( pNode->GetClassName(), "info_target" ) )
 			{
-				StringChoice_t sChoice;
 				sChoice.m_pValue = pNode->GetTargetName();
 				sChoice.m_pChoiceString = pNode->GetTargetName();
 				list.AddToTail( sChoice );
@@ -410,7 +412,7 @@ bool CCommEditDoc::GetElementChoiceList( const char *pChoiceListType, CDmElement
 		for ( int i = 0; i < nCount; ++i )
 		{
 			CDmeCommentaryNodeEntity *pNode = entities[ i ];
-			if ( !V_stricmp( pNode->GetClassName(), "info_target" ) )
+			if ( pNode && !V_stricmp( pNode->GetClassName(), "info_target" ) )
 			{
 				bFound = true;
 				ElementChoice_t sChoice;

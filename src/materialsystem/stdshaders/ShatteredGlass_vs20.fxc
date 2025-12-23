@@ -43,6 +43,7 @@ VS_OUTPUT main( const VS_INPUT v )
 	float4 projPos;
 	projPos = mul( float4( v.vPos, 1 ), cModelViewProj );
 	o.projPos = projPos;
+	projPos.z = dot( float4( v.vPos, 1 ), cModelViewProjZ );
 	
 	o.worldPos_projPosZ.w = projPos.z;
 	o.worldPos_projPosZ.xyz = mul( float4( v.vPos, 1 ), cModel[0] );

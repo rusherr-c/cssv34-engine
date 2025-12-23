@@ -1,17 +1,17 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================
 
 #include "filesystem.h"
-#include "matsys_controls/Picker.h"
-#include "tier1/keyvalues.h"
+#include "matsys_controls/picker.h"
+#include "tier1/KeyValues.h"
 #include "vgui_controls/ListPanel.h"
 #include "vgui_controls/TextEntry.h"
 #include "vgui_controls/Button.h"
-#include "vgui/isurface.h"
-#include "vgui/iinput.h"
+#include "vgui/ISurface.h"
+#include "vgui/IInput.h"
 
 
 using namespace vgui;
@@ -74,17 +74,17 @@ CPicker::~CPicker()
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CPicker::OnKeyCodeTyped( KeyCode code )
+void CPicker::OnKeyCodePressed( KeyCode code )
 {
 	if (( code == KEY_UP ) || ( code == KEY_DOWN ) || ( code == KEY_PAGEUP ) || ( code == KEY_PAGEDOWN ))
 	{
-		KeyValues *pMsg = new KeyValues("KeyCodeTyped", "code", code);
+		KeyValues *pMsg = new KeyValues("KeyCodePressed", "code", code);
 		vgui::ipanel()->SendMessage( m_pPickerBrowser->GetVPanel(), pMsg, GetVPanel());
 		pMsg->deleteThis();
 	}
 	else
 	{
-		BaseClass::OnKeyCodeTyped( code );
+		BaseClass::OnKeyCodePressed( code );
 	}
 }
 

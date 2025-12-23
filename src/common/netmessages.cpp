@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,13 +10,19 @@
 #include "../engine/net_chan.h"
 #include "mathlib/mathlib.h"
 #include "networkstringtabledefs.h"
-#include "sound.h"
 #include "../engine/event_system.h"
 #include "../engine/dt.h"
 #include "tier0/vprof.h"
+#include "convar.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+// XXX(JohnS): This is no longer used, but we're keeping it so we can check if old network streams set it to work around
+//             missing information in the older SVC_VoiceInit packet. See SVC_VoiceInit::ReadFromBuffer
+ConVar sv_use_steam_voice( "sv_use_steam_voice", "0", FCVAR_HIDDEN | FCVAR_REPLICATED,
+                           "Deprecated - placeholder convar for handling old network streams that "
+                           "had an incomplete SVC_VoiceInit packet.  Use \"sv_voicecodec steam\"" );
 
 static char s_text[1024];
 
@@ -118,6 +124,10 @@ bool CLC_ClientInfo::WriteToBuffer( bf_write &buffer )
 		}
 	}
 		
+#if defined( REPLAY_ENABLED )
+	buffer.WriteOneBit( m_bIsReplay?1:0 );
+#endif
+
 	return !buffer.IsOverflowed();
 }
 
@@ -143,6 +153,9 @@ bool CLC_ClientInfo::ReadFromBuffer( bf_read &buffer )
 		}
 	}
 
+#if defined( REPLAY_ENABLED )
+	m_bIsReplay = buffer.ReadOneBit()!=0;
+#endif
 
 	return !buffer.IsOverflowed();
 }
@@ -312,15 +325,23 @@ bool CLC_FileCRCCheck::WriteToBuffer( bf_write &buffer )
 	if ( iCode == -1 )
 	{
 		buffer.WriteUBitLong( 0, 3 );
+		buffer.WriteChar( 1 ); // so we can detect the new message version
 		buffer.WriteString( m_szFilename );
 	}
 	else
 	{
 		buffer.WriteUBitLong( iCode+1, 3 );
+		buffer.WriteChar( 1 ); // so we can detect the new message version
 		buffer.WriteString( &m_szFilename[ V_strlen(g_MostCommonPrefixes[iCode])+1 ] );
 	}
 
-	buffer.WriteUBitLong( m_CRC, 32 );
+	buffer.WriteBits( &m_MD5.bits, sizeof(m_MD5.bits)*8 );
+	buffer.WriteUBitLong( m_CRCIOs, 32 );
+	buffer.WriteUBitLong( m_eFileHashType, 32 );
+	buffer.WriteUBitLong( m_cbFileLen, 32 );
+	buffer.WriteUBitLong( m_nPackFileNumber, 32 );
+	buffer.WriteUBitLong( m_PackFileID, 32 );
+	buffer.WriteUBitLong( m_nFileFraction, 32 );
 	return !buffer.IsOverflowed();
 }
 
@@ -347,6 +368,121 @@ bool CLC_FileCRCCheck::ReadFromBuffer( bf_read &buffer )
 		return false;
 	}
 
+	// Prefix string
+	iCode = buffer.ReadUBitLong( 3 );
+
+	// Read filename, and check for the new message format version?
+	char szTemp[ MAX_PATH ];
+	int c = buffer.ReadChar();
+	bool bNewVersion = false;
+	if ( c == 1 )
+	{
+		bNewVersion = true;
+		buffer.ReadString( szTemp, sizeof( szTemp ) );
+	}
+	else
+	{
+		szTemp[0] = (char)c;
+		buffer.ReadString( szTemp+1, sizeof( szTemp)-1 );
+	}
+	if ( iCode == 0 )
+	{
+		V_strcpy_safe( m_szFilename, szTemp );
+	}
+	else if ( (iCode-1) < ARRAYSIZE( g_MostCommonPrefixes ) )
+	{
+		V_sprintf_safe( m_szFilename, "%s%c%s", g_MostCommonPrefixes[iCode-1], CORRECT_PATH_SEPARATOR, szTemp );
+	}
+	else
+	{
+		Assert( !"Invalid prefix code in CLC_FileCRCCheck." );
+		return false;
+	}
+
+	if ( bNewVersion )
+	{
+		buffer.ReadBits( &m_MD5.bits, sizeof(m_MD5.bits)*8 );
+		m_CRCIOs = buffer.ReadUBitLong( 32 );
+		m_eFileHashType = buffer.ReadUBitLong( 32 );
+		m_cbFileLen = buffer.ReadUBitLong( 32 );
+		m_nPackFileNumber = buffer.ReadUBitLong( 32 );
+		m_PackFileID = buffer.ReadUBitLong( 32 );
+		m_nFileFraction = buffer.ReadUBitLong( 32 );
+	}
+	else
+	{
+		/* m_CRC */ buffer.ReadUBitLong( 32 );
+		m_CRCIOs = buffer.ReadUBitLong( 32 );
+		m_eFileHashType = buffer.ReadUBitLong( 32 );
+	}
+	
+	return !buffer.IsOverflowed();
+}
+
+const char *CLC_FileCRCCheck::ToString(void) const
+{
+	V_snprintf( s_text, sizeof(s_text), "%s: path: %s, file: %s", GetName(), m_szPathID, m_szFilename );
+	return s_text;
+}
+
+bool CLC_FileMD5Check::WriteToBuffer( bf_write &buffer )
+{
+	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
+
+	// Reserved for future use.
+	buffer.WriteOneBit( 0 );
+
+	// Just write a couple bits for the path ID if it's one of the common ones.
+	int iCode = FindCommonPathID( m_szPathID );
+	if ( iCode == -1 )
+	{
+		buffer.WriteUBitLong( 0, 2 );
+		buffer.WriteString( m_szPathID );
+	}
+	else
+	{
+		buffer.WriteUBitLong( iCode+1, 2 );
+	}
+
+	iCode = FindCommonPrefix( m_szFilename );
+	if ( iCode == -1 )
+	{
+		buffer.WriteUBitLong( 0, 3 );
+		buffer.WriteString( m_szFilename );
+	}
+	else
+	{
+		buffer.WriteUBitLong( iCode+1, 3 );
+		buffer.WriteString( &m_szFilename[ V_strlen(g_MostCommonPrefixes[iCode])+1 ] );
+	}
+
+	buffer.WriteBytes( m_MD5.bits, MD5_DIGEST_LENGTH );
+	return !buffer.IsOverflowed();
+}
+
+bool CLC_FileMD5Check::ReadFromBuffer( bf_read &buffer )
+{
+	VPROF( "CLC_FileMD5Check::ReadFromBuffer" );
+
+	// Reserved for future use.
+	buffer.ReadOneBit();
+
+	// Read the path ID.
+	int iCode = buffer.ReadUBitLong( 2 );
+	if ( iCode == 0 )
+	{
+		buffer.ReadString( m_szPathID, sizeof( m_szPathID ) );
+	}
+	else if ( (iCode-1) < ARRAYSIZE( g_MostCommonPathIDs ) )
+	{
+		V_strncpy( m_szPathID, g_MostCommonPathIDs[iCode-1], sizeof( m_szPathID ) );
+	}
+	else
+	{
+		Assert( !"Invalid path ID code in CLC_FileMD5Check" );
+		return false;
+	}
+
 	// Read the filename.
 	iCode = buffer.ReadUBitLong( 3 );
 	if ( iCode == 0 )
@@ -361,20 +497,170 @@ bool CLC_FileCRCCheck::ReadFromBuffer( bf_read &buffer )
 	}
 	else
 	{
-		Assert( !"Invalid prefix code in CLC_FileCRCCheck." );
+		Assert( !"Invalid prefix code in CLC_FileMD5Check." );
 		return false;
 	}
-		
-	m_CRC = buffer.ReadUBitLong( 32 );
-	
+
+	buffer.ReadBytes( m_MD5.bits, MD5_DIGEST_LENGTH );
+
 	return !buffer.IsOverflowed();
 }
 
-const char *CLC_FileCRCCheck::ToString(void) const
+const char *CLC_FileMD5Check::ToString(void) const
 {
 	V_snprintf( s_text, sizeof(s_text), "%s: path: %s, file: %s", GetName(), m_szPathID, m_szFilename );
 	return s_text;
 }
+
+#if defined( REPLAY_ENABLED )
+bool CLC_SaveReplay::WriteToBuffer( bf_write &buffer )
+{
+	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
+	buffer.WriteString( m_szFilename );
+	buffer.WriteUBitLong( m_nStartSendByte, sizeof( m_nStartSendByte ) );
+	buffer.WriteFloat( m_flPostDeathRecordTime );
+	return !buffer.IsOverflowed();
+}
+
+bool CLC_SaveReplay::ReadFromBuffer( bf_read &buffer )
+{
+	buffer.ReadString( m_szFilename, sizeof( m_szFilename ) );
+	m_nStartSendByte = buffer.ReadUBitLong( sizeof( m_nStartSendByte ) );
+	m_flPostDeathRecordTime = buffer.ReadFloat();
+	return !buffer.IsOverflowed();
+}
+
+const char *CLC_SaveReplay::ToString() const
+{
+	V_snprintf( s_text, sizeof( s_text ), "%s: filename: %s, start byte: %i, post death record time: %f", GetName(), m_szFilename, m_nStartSendByte, m_flPostDeathRecordTime );
+	return s_text;
+}
+#endif
+
+
+//
+// CmdKeyValues message
+//
+
+Base_CmdKeyValues::Base_CmdKeyValues( KeyValues *pKeyValues /* = NULL */ ) :
+	m_pKeyValues( pKeyValues )
+{
+}
+
+Base_CmdKeyValues::~Base_CmdKeyValues()
+{
+	if ( m_pKeyValues )
+		m_pKeyValues->deleteThis();
+	m_pKeyValues = NULL;
+}
+
+bool Base_CmdKeyValues::WriteToBuffer( bf_write &buffer )
+{
+	Assert( m_pKeyValues );
+	if ( !m_pKeyValues )
+		return false;
+
+	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
+
+	CUtlBuffer bufData;
+	if ( !m_pKeyValues->WriteAsBinary( bufData ) )
+	{
+		Assert( false );
+		return false;
+	}
+
+	// Note how many we're sending
+	int numBytes = bufData.TellMaxPut();
+	buffer.WriteLong( numBytes );
+	buffer.WriteBits( bufData.Base(), numBytes * 8 );
+
+	return !buffer.IsOverflowed();
+}
+
+bool Base_CmdKeyValues::ReadFromBuffer( bf_read &buffer )
+{
+	VPROF( "Base_CmdKeyValues::ReadFromBuffer" );
+
+	if ( !m_pKeyValues )
+		m_pKeyValues = new KeyValues( "" );
+
+	m_pKeyValues->Clear();
+
+	int numBytes = buffer.ReadLong();
+	if ( numBytes <= 0 || numBytes > buffer.GetNumBytesLeft() )
+	{
+		return false; // don't read past the end of the buffer
+	}
+
+	void *pvBuffer = malloc( numBytes );
+	if ( !pvBuffer )
+	{
+		return false;
+	}
+
+	buffer.ReadBits( pvBuffer, numBytes * 8 );
+
+	CUtlBuffer bufRead( pvBuffer, numBytes, CUtlBuffer::READ_ONLY );
+	if ( !m_pKeyValues->ReadAsBinary( bufRead ) )
+	{
+		Assert( false );
+		free( pvBuffer );
+		return false;
+	}
+
+	free( pvBuffer );
+	return !buffer.IsOverflowed();
+}
+
+const char * Base_CmdKeyValues::ToString(void) const
+{
+	Q_snprintf( s_text, sizeof(s_text), "%s: %s", 
+		GetName(), m_pKeyValues ? m_pKeyValues->GetName() : "<<null>>" );
+	return s_text;
+}
+
+CLC_CmdKeyValues::CLC_CmdKeyValues( KeyValues *pKeyValues /* = NULL */ ) : Base_CmdKeyValues( pKeyValues )
+{
+}
+
+bool CLC_CmdKeyValues::WriteToBuffer( bf_write &buffer )
+{
+	return Base_CmdKeyValues::WriteToBuffer( buffer );
+}
+
+bool CLC_CmdKeyValues::ReadFromBuffer( bf_read &buffer )
+{
+	return Base_CmdKeyValues::ReadFromBuffer( buffer );
+}
+
+const char *CLC_CmdKeyValues::ToString(void) const
+{
+	return Base_CmdKeyValues::ToString();
+}
+
+SVC_CmdKeyValues::SVC_CmdKeyValues( KeyValues *pKeyValues /* = NULL */ ) : Base_CmdKeyValues( pKeyValues )
+{
+}
+
+bool SVC_CmdKeyValues::WriteToBuffer( bf_write &buffer )
+{
+	return Base_CmdKeyValues::WriteToBuffer( buffer );
+}
+
+bool SVC_CmdKeyValues::ReadFromBuffer( bf_read &buffer )
+{
+	return Base_CmdKeyValues::ReadFromBuffer( buffer );
+}
+
+const char *SVC_CmdKeyValues::ToString(void) const
+{
+	return Base_CmdKeyValues::ToString();
+}
+
+
+//
+// SVC_Print message
+//
 
 bool SVC_Print::WriteToBuffer( bf_write &buffer )
 {
@@ -425,9 +711,9 @@ bool SVC_ServerInfo::WriteToBuffer( bf_write &buffer )
 	buffer.WriteLong  ( m_nServerCount );
 	buffer.WriteOneBit( m_bIsHLTV?1:0);
 	buffer.WriteOneBit( m_bIsDedicated?1:0);
-	buffer.WriteLong  ( m_nClientCRC );  // To prevent cheating with hacked client dlls
+	buffer.WriteLong  ( 0xffffffff );  // Used to be client.dll CRC.  This was far before signed binaries, VAC, and cross-platform play
 	buffer.WriteWord  ( m_nMaxClasses );
-	buffer.WriteLong  ( m_nMapCRC );       // To prevent cheating with hacked maps
+	buffer.WriteBytes( m_nMapMD5.bits, MD5_DIGEST_LENGTH );		// To prevent cheating with hacked maps
 	buffer.WriteByte  ( m_nPlayerSlot );
 	buffer.WriteByte  ( m_nMaxClients );
 	buffer.WriteFloat ( m_fTickInterval );
@@ -436,6 +722,10 @@ bool SVC_ServerInfo::WriteToBuffer( bf_write &buffer )
 	buffer.WriteString( m_szMapName );
 	buffer.WriteString( m_szSkyName );
 	buffer.WriteString( m_szHostName );
+
+#if defined( REPLAY_ENABLED )
+	buffer.WriteOneBit( m_bIsReplay?1:0);
+#endif
 
 	return !buffer.IsOverflowed();
 }
@@ -453,9 +743,19 @@ bool SVC_ServerInfo::ReadFromBuffer( bf_read &buffer )
 	m_nServerCount	= buffer.ReadLong();
 	m_bIsHLTV		= buffer.ReadOneBit()!=0;
 	m_bIsDedicated	= buffer.ReadOneBit()!=0;
-	m_nClientCRC	= buffer.ReadLong();  // To prevent cheating with hacked client dlls
+	buffer.ReadLong();  // Legacy client CRC.
 	m_nMaxClasses	= buffer.ReadWord();
-	m_nMapCRC		= buffer.ReadLong(); // To prevent cheating with hacked maps
+
+	// Prevent cheating with hacked maps
+	if ( m_nProtocol > PROTOCOL_VERSION_17 )
+	{
+		buffer.ReadBytes( m_nMapMD5.bits, MD5_DIGEST_LENGTH );
+	}
+	else
+	{
+		m_nMapCRC	= buffer.ReadLong();
+	}
+
 	m_nPlayerSlot	= buffer.ReadByte();
 	m_nMaxClients	= buffer.ReadByte();
 	m_fTickInterval	= buffer.ReadFloat();
@@ -464,7 +764,19 @@ bool SVC_ServerInfo::ReadFromBuffer( bf_read &buffer )
 	buffer.ReadString( m_szMapNameBuffer, sizeof(m_szMapNameBuffer) );
 	buffer.ReadString( m_szSkyNameBuffer, sizeof(m_szSkyNameBuffer) );
 	buffer.ReadString( m_szHostNameBuffer, sizeof(m_szHostNameBuffer) );
-		
+
+#if defined( REPLAY_ENABLED )
+	// Only attempt to read the 'replay' bit if the net channel's protocol
+	// version is greater or equal than the protocol version for replay's release.
+	// INetChannel::GetProtocolVersion() will return PROTOCOL_VERSION for
+	// a regular net channel, or the network protocol version from the demo
+	// file, if we're playing back a demo.
+	if ( m_NetChannel->GetProtocolVersion() >= PROTOCOL_VERSION_REPLAY )
+	{
+		m_bIsReplay = buffer.ReadOneBit() != 0;
+	}
+#endif
+
 	return !buffer.IsOverflowed();
 }
 
@@ -626,8 +938,9 @@ const char *SVC_CrosshairAngle::ToString(void) const
 bool SVC_VoiceInit::WriteToBuffer( bf_write &buffer )
 {
 	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
-	buffer.WriteString( m_szVoiceCodec ? m_szVoiceCodec : "svc_voiceinit NULL" );
-	buffer.WriteByte( m_nQuality );
+	buffer.WriteString( m_szVoiceCodec );
+	buffer.WriteByte( /* Legacy Quality Field */ 255 );
+	buffer.WriteShort( m_nSampleRate );
 	return !buffer.IsOverflowed();
 }
 
@@ -635,16 +948,45 @@ bool SVC_VoiceInit::ReadFromBuffer( bf_read &buffer )
 {
 	VPROF( "SVC_VoiceInit::ReadFromBuffer" );
 
-	m_szVoiceCodec = m_szVoiceCodecBuffer;
-	
-	buffer.ReadString(m_szVoiceCodecBuffer, sizeof(m_szVoiceCodecBuffer) );
-	m_nQuality = buffer.ReadByte();
+	buffer.ReadString( m_szVoiceCodec, sizeof(m_szVoiceCodec) );
+	unsigned char nLegacyQuality = buffer.ReadByte();
+	if ( nLegacyQuality == 255 )
+	{
+		// v2 packet
+		m_nSampleRate = buffer.ReadShort();
+	}
+	else
+	{
+		// v1 packet
+		//
+		// Hacky workaround for v1 packets not actually indicating if we were using steam voice -- we've kept the steam
+		// voice separate convar that was in use at the time as replicated&hidden, and if whatever network stream we're
+		// interpreting sets it, lie about the subsequent voice init's codec & sample rate.
+		if ( sv_use_steam_voice.GetBool() )
+		{
+			Msg( "Legacy SVC_VoiceInit - got a set for sv_use_steam_voice convar, assuming Steam voice\n" );
+			V_strncpy( m_szVoiceCodec, "steam", sizeof( m_szVoiceCodec ) );
+			// Legacy steam voice can always be parsed as auto sample rate.
+			m_nSampleRate = 0;
+		}
+		else if ( V_strncasecmp( m_szVoiceCodec, "vaudio_celt", sizeof( m_szVoiceCodec ) ) == 0 )
+		{
+			// Legacy rate vaudio_celt always selected during v1 packet era
+			m_nSampleRate = 22050;
+		}
+		else
+		{
+			// Legacy rate everything but CELT always selected during v1 packet era
+			m_nSampleRate = 11025;
+		}
+	}
+
 	return !buffer.IsOverflowed();
 }
 
 const char *SVC_VoiceInit::ToString(void) const
 {
-	Q_snprintf(s_text, sizeof(s_text), "%s: codec \"%s\", qualitty %i", GetName(), m_szVoiceCodec, m_nQuality );
+	Q_snprintf( s_text, sizeof(s_text), "%s: codec \"%s\", sample rate %i", GetName(), m_szVoiceCodec, m_nSampleRate );
 	return s_text;
 }
 
@@ -659,7 +1001,7 @@ bool SVC_VoiceData::WriteToBuffer( bf_write &buffer )
 	{
 		buffer.WriteLongLong( m_xuid );
 	}
-	
+
 	return buffer.WriteBits( m_DataOut, m_nLength );
 }
 
@@ -719,11 +1061,15 @@ const char *NET_Tick::ToString(void) const
 
 bool SVC_UserMessage::WriteToBuffer( bf_write &buffer )
 {
-	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
 	m_nLength = m_DataOut.GetNumBitsWritten();
 
+	Assert( m_nLength < (1 << NETMSG_LENGTH_BITS) );
+	if ( m_nLength >= (1 << NETMSG_LENGTH_BITS) )
+		return false;
+
+	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
 	buffer.WriteByte( m_nMsgType );
-	buffer.WriteUBitLong( m_nLength, 11 );  // max 256 * 8 bits, see MAX_USER_MSG_DATA
+	buffer.WriteUBitLong( m_nLength, NETMSG_LENGTH_BITS );  // max 256 * 8 bits, see MAX_USER_MSG_DATA
 	
 	return buffer.WriteBits( m_DataOut.GetData(), m_nLength );
 }
@@ -732,7 +1078,7 @@ bool SVC_UserMessage::ReadFromBuffer( bf_read &buffer )
 {
 	VPROF( "SVC_UserMessage::ReadFromBuffer" );
 	m_nMsgType = buffer.ReadByte();
-	m_nLength = buffer.ReadUBitLong( 11 ); // max 256 * 8 bits, see MAX_USER_MSG_DATA
+	m_nLength = buffer.ReadUBitLong( NETMSG_LENGTH_BITS ); // max 256 * 8 bits, see MAX_USER_MSG_DATA
 	m_DataIn = buffer;
 	return buffer.SeekRelative( m_nLength );
 }
@@ -764,21 +1110,43 @@ const char *SVC_SetPause::ToString(void) const
 	return s_text;
 }
 
+bool SVC_SetPauseTimed::WriteToBuffer( bf_write &buffer )
+{
+	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
+	buffer.WriteOneBit( m_bPaused ? 1 : 0 );
+	buffer.WriteFloat( m_flExpireTime );
+	return !buffer.IsOverflowed();
+}
+
+bool SVC_SetPauseTimed::ReadFromBuffer( bf_read &buffer )
+{
+	VPROF( "SVC_SetPauseTimed::ReadFromBuffer" );
+
+	m_bPaused = buffer.ReadOneBit() != 0;
+	m_flExpireTime = buffer.ReadFloat();
+	return !buffer.IsOverflowed();
+}
+
+const char *SVC_SetPauseTimed::ToString( void ) const
+{
+	Q_snprintf( s_text, sizeof( s_text ), "%s: %s", GetName(), m_bPaused ? "paused" : "unpaused" );
+	return s_text;
+}
 
 bool NET_SetConVar::WriteToBuffer( bf_write &buffer )
 {
 	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
 
 	int numvars = m_ConVars.Count();
-	
+
 	// Note how many we're sending
 	buffer.WriteByte( numvars );
 
 	for (int i=0; i< numvars; i++ )
 	{
-		cvar_t * cvar = &m_ConVars[i];
-		buffer.WriteString( cvar->name  );
-		buffer.WriteString( cvar->value );
+		cvar_t * var = &m_ConVars[i];
+		buffer.WriteString( var->name  );
+		buffer.WriteString( var->value );
 	}
 
 	return !buffer.IsOverflowed();
@@ -789,15 +1157,15 @@ bool NET_SetConVar::ReadFromBuffer( bf_read &buffer )
 	VPROF( "NET_SetConVar::ReadFromBuffer" );
 
 	int numvars = buffer.ReadByte();
-	
+
 	m_ConVars.RemoveAll();
-		
+
 	for (int i=0; i< numvars; i++ )
 	{
-		cvar_t cvar;
-		buffer.ReadString( cvar.name, sizeof(cvar.name) );
-		buffer.ReadString( cvar.value, sizeof(cvar.value) );
-		m_ConVars.AddToTail( cvar );
+		cvar_t var;
+		buffer.ReadString( var.name, sizeof(var.name) );
+		buffer.ReadString( var.value, sizeof(var.value) );
+		m_ConVars.AddToTail( var );
 
 	}
 	return !buffer.IsOverflowed();
@@ -883,7 +1251,7 @@ bool SVC_CreateStringTable::WriteToBuffer( bf_write &buffer )
 	buffer.WriteWord( m_nMaxEntries );
 	int encodeBits = Q_log2( m_nMaxEntries );
 	buffer.WriteUBitLong( m_nNumEntries, encodeBits+1 );
-	buffer.WriteUBitLong( m_nLength, NET_MAX_PALYLOAD_BITS+3 ); // length in bits
+	buffer.WriteVarInt32( m_nLength ); // length in bits
 
 	buffer.WriteOneBit( m_bUserDataFixedSize ? 1 : 0 );
 	if ( m_bUserDataFixedSize )
@@ -892,6 +1260,7 @@ bool SVC_CreateStringTable::WriteToBuffer( bf_write &buffer )
 		buffer.WriteUBitLong( m_nUserDataSizeBits, 4 );
 	}
 	
+	buffer.WriteOneBit( m_bDataCompressed ? 1 : 0 );
 	return buffer.WriteBits( m_DataOut.GetData(), m_nLength );
 }
 
@@ -916,7 +1285,10 @@ bool SVC_CreateStringTable::ReadFromBuffer( bf_read &buffer )
 	m_nMaxEntries = buffer.ReadWord();
 	int encodeBits = Q_log2( m_nMaxEntries );
 	m_nNumEntries = buffer.ReadUBitLong( encodeBits+1 );
-	m_nLength = buffer.ReadUBitLong( NET_MAX_PALYLOAD_BITS+3 ); // length in bits
+	if ( m_NetChannel->GetProtocolVersion() > PROTOCOL_VERSION_23 )
+		m_nLength = buffer.ReadVarInt32();
+	else
+		m_nLength = buffer.ReadUBitLong( NET_MAX_PAYLOAD_BITS_V23 + 3 );
 
 	m_bUserDataFixedSize = buffer.ReadOneBit() ? true : false;
 	if ( m_bUserDataFixedSize )
@@ -928,6 +1300,15 @@ bool SVC_CreateStringTable::ReadFromBuffer( bf_read &buffer )
 	{
 		m_nUserDataSize = 0;
 		m_nUserDataSizeBits = 0;
+	}
+
+	if ( m_pMessageHandler->GetDemoProtocolVersion() > PROTOCOL_VERSION_14 )
+	{
+		m_bDataCompressed = buffer.ReadOneBit() != 0;
+	}
+	else
+	{
+		m_bDataCompressed = false;
 	}
 
 	m_DataIn = buffer;
@@ -1010,7 +1391,14 @@ bool SVC_Prefetch::ReadFromBuffer( bf_read &buffer )
 	VPROF( "SVC_Prefetch::ReadFromBuffer" );
 
 	m_fType = SOUND; // buffer.ReadUBitLong( 1 );
-	m_nSoundIndex = buffer.ReadUBitLong( MAX_SOUND_INDEX_BITS );
+	if( m_pMessageHandler->GetDemoProtocolVersion() > 22 )
+	{
+		m_nSoundIndex = buffer.ReadUBitLong( MAX_SOUND_INDEX_BITS );
+	}
+	else
+	{
+		m_nSoundIndex = buffer.ReadUBitLong( 13 );
+	}
 
 	return !buffer.IsOverflowed();
 }
@@ -1027,12 +1415,12 @@ const char *SVC_Prefetch::ToString(void) const
 bool SVC_TempEntities::WriteToBuffer( bf_write &buffer )
 {
 	Assert( m_nNumEntries > 0 );
-	
+
 	m_nLength = m_DataOut.GetNumBitsWritten();
 
 	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
 	buffer.WriteUBitLong( m_nNumEntries, CEventInfo::EVENT_INDEX_BITS );
-	buffer.WriteUBitLong( m_nLength, NET_MAX_PALYLOAD_BITS  );
+	buffer.WriteVarInt32( m_nLength );
 	return buffer.WriteBits( m_DataOut.GetData(), m_nLength );
 }
 
@@ -1041,7 +1429,11 @@ bool SVC_TempEntities::ReadFromBuffer( bf_read &buffer )
 	VPROF( "SVC_TempEntities::ReadFromBuffer" );
 
 	m_nNumEntries = buffer.ReadUBitLong( CEventInfo::EVENT_INDEX_BITS );
-	m_nLength = buffer.ReadUBitLong( NET_MAX_PALYLOAD_BITS );
+	if ( m_pMessageHandler->GetDemoProtocolVersion() > PROTOCOL_VERSION_23 )
+		m_nLength = buffer.ReadVarInt32();
+	else
+		m_nLength = buffer.ReadUBitLong( NET_MAX_PAYLOAD_BITS_V23 );
+
 	m_DataIn = buffer;
 	return buffer.SeekRelative( m_nLength );
 }
@@ -1160,9 +1552,12 @@ const char *SVC_SpawnBaseline::ToString(void) const
 bool SVC_GameEvent::WriteToBuffer( bf_write &buffer )
 {
 	m_nLength = m_DataOut.GetNumBitsWritten();
+	Assert( m_nLength < (1 << NETMSG_LENGTH_BITS) );
+	if ( m_nLength >= (1 << NETMSG_LENGTH_BITS) )
+		return false;
 
 	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
-	buffer.WriteUBitLong( m_nLength, 11 );  // max 8 * 256 bits
+	buffer.WriteUBitLong( m_nLength, NETMSG_LENGTH_BITS );  // max 8 * 256 bits
 	return buffer.WriteBits( m_DataOut.GetData(), m_nLength );
 	
 }
@@ -1171,7 +1566,7 @@ bool SVC_GameEvent::ReadFromBuffer( bf_read &buffer )
 {
 	VPROF( "SVC_GameEvent::ReadFromBuffer" );
 
-	m_nLength = buffer.ReadUBitLong( 11 ); // max 8 * 256 bits
+	m_nLength = buffer.ReadUBitLong( NETMSG_LENGTH_BITS ); // max 8 * 256 bits
 	m_DataIn = buffer;
 	return buffer.SeekRelative( m_nLength );
 }
@@ -1216,11 +1611,14 @@ const char *SVC_SendTable::ToString(void) const
 bool SVC_EntityMessage::WriteToBuffer( bf_write &buffer )
 {
 	m_nLength = m_DataOut.GetNumBitsWritten();
+	Assert( m_nLength < (1 << NETMSG_LENGTH_BITS) );
+	if ( m_nLength >= (1 << NETMSG_LENGTH_BITS) )
+		return false;
 
 	buffer.WriteUBitLong( GetType(), NETMSG_TYPE_BITS );
 	buffer.WriteUBitLong( m_nEntityIndex, MAX_EDICT_BITS );
 	buffer.WriteUBitLong( m_nClassID, MAX_SERVER_CLASS_BITS );
-	buffer.WriteUBitLong( m_nLength, 11 );  // max 8 * 256 bits
+	buffer.WriteUBitLong( m_nLength, NETMSG_LENGTH_BITS );  // max 8 * 256 bits
 	
 	return buffer.WriteBits( m_DataOut.GetData(), m_nLength );
 }
@@ -1231,7 +1629,7 @@ bool SVC_EntityMessage::ReadFromBuffer( bf_read &buffer )
 
 	m_nEntityIndex = buffer.ReadUBitLong( MAX_EDICT_BITS );
 	m_nClassID = buffer.ReadUBitLong( MAX_SERVER_CLASS_BITS );
-	m_nLength = buffer.ReadUBitLong( 11 );  // max 8 * 256 bits
+	m_nLength = buffer.ReadUBitLong( NETMSG_LENGTH_BITS );  // max 8 * 256 bits
 	m_DataIn = buffer;
 	return buffer.SeekRelative( m_nLength );
 }
@@ -1465,7 +1863,7 @@ bool MM_ClientInfo::ReadFromBuffer( bf_read &buffer )
 
 const char *MM_ClientInfo::ToString( void ) const
 {
-	Q_snprintf( s_text, sizeof( s_text ), "Client Info: ID: %d, Players: %d", m_id, m_cPlayers );
+	Q_snprintf( s_text, sizeof( s_text ), "Client Info: ID: %llu, Players: %d", m_id, m_cPlayers );
 	return s_text;
 }
 
@@ -1604,7 +2002,7 @@ bool MM_JoinResponse::ReadFromBuffer( bf_read &buffer )
 
 const char *MM_JoinResponse::ToString( void ) const
 {
-	Q_snprintf( s_text, sizeof( s_text ), "ID: %d, Nonce: %d, Flags: %d", m_id, m_Nonce, m_SessionFlags );
+	Q_snprintf( s_text, sizeof( s_text ), "ID: %llu, Nonce: %llu, Flags: %u", m_id, m_Nonce, m_SessionFlags );
 	return s_text;
 }
 

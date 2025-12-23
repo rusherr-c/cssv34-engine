@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -25,6 +25,7 @@
 #include "ControlPanel.h"
 #include "ViewerSettings.h"
 #include "StudioModel.h"
+#include "IStudioRender.h"
 #include "MatSysWin.h"
 #include "vphysics/constraints.h"
 #include "physmesh.h"
@@ -35,20 +36,24 @@
 #include <mxtk/mx.h>
 #include <mxtk/mxBmp.h>
 #include "vphysics_interface.h"
-#include "UtlVector.h"
-#include "UtlSymbol.h"
+#include "utlvector.h"
+#include "utlsymbol.h"
 #include "UtlBuffer.h"
 #include "attachments_window.h"
 #include "istudiorender.h"
 #include "studio_render.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier0/icommandline.h"
+#include "valve_ipc_win32.h"
+#include "mdlviewer.h"
 
 extern char g_appTitle[];
 extern IPhysicsSurfaceProps *physprop;
 extern bool LoadPhysicsProperties( void );
 extern ISoundEmitterSystemBase *g_pSoundEmitterBase;
+extern CValveIpcClientUtl g_HlmvIpcClient;
+extern bool g_bHlmvMaster;
 
 
 //-----------------------------------------------------------------------------
@@ -200,7 +205,7 @@ void SetFrameString( mxLineEdit2 *pLineEdit, int iLayer )
 // Finds the index of a surface prop
 //-----------------------------------------------------------------------------
 
-static int FindSurfaceProp( char const* pSurfaceProp )
+static int FindSurfaceProp( const char* pSurfaceProp )
 {
 	for (int i = 0; i < physprop->SurfacePropCount(); ++i)
 	{
@@ -324,8 +329,8 @@ private:
 	mxButton*	m_bDeleteHitbox;
 
 	// The list of hitboxes per bone...
-	typedef CUtlVector< int	>	HitboxList_t;
-	typedef CUtlVector<	HitboxList_t > BoneHitboxes_t;
+	typedef CUtlVector< int	>	BoneHitboxList_t;
+	typedef CUtlVector<	BoneHitboxList_t > BoneHitboxes_t;
 	
 	CUtlVector< BoneHitboxes_t >	m_SetBoneHitBoxes;
 
@@ -456,7 +461,7 @@ void CBoneControlWindow::Init( )
 	left += 160;
 
 	// Generate a QC file
-	mxButton* btnGenerateQC = new mxButton (this, left, top + 10, 100, 20, "Generate QC", IDC_BONE_GENERATEQC);
+	mxButton* btnGenerateQC = new mxButton (this, left, top + 10, 100, 20, "Generate QC", IDC_BONE_GENERATEQC );
 	mxToolTip::add (btnGenerateQC, "Copy a .qc file snippet to the clipboard");
 
 	// Add, remove hitboxes here
@@ -479,15 +484,14 @@ void CBoneControlWindow::PopulateHitboxLists()
 		return;
 
 	m_SetBoneHitBoxes.RemoveAll();
-	for (int set = 0; set < g_pStudioModel->m_HitboxSets.Size(); set++ )
+	for (int set = 0; set < g_pStudioModel->m_HitboxSets.Count(); set++ )
 	{
 		m_SetBoneHitBoxes.AddToTail();
 
-		for (unsigned short i = g_pStudioModel->m_HitboxSets[ set ].Head(); 
-			i != g_pStudioModel->m_HitboxSets[ set ].InvalidIndex(); 
-			i = g_pStudioModel->m_HitboxSets[ set ].Next(i) )
+		HitboxList_t &list = g_pStudioModel->m_HitboxSets[ set ].m_Hitboxes;
+		for ( unsigned short i = list.Head(); i != list.InvalidIndex(); i = list.Next(i) )
 		{
-			mstudiobbox_t* pHitbox = &g_pStudioModel->m_HitboxSets[ set ][i];
+			mstudiobbox_t* pHitbox = &list[i].m_BBox;
 			m_SetBoneHitBoxes[ set ].EnsureCount( pHitbox->bone + 1 );
 			m_SetBoneHitBoxes[ set ][ pHitbox->bone ].AddToTail( i );
 		}
@@ -554,9 +558,9 @@ void CBoneControlWindow::ComputeHitboxSetList( void )
 {
 	m_cHitboxSet->removeAll();
 
-	for ( int i = 0 ; i < g_pStudioModel->m_HitboxSets.Size(); i++ )
+	for ( int i = 0 ; i < g_pStudioModel->m_HitboxSets.Count(); i++ )
 	{
-		char const *name = g_pStudioModel->m_HitboxSetNames[ i ].name;
+		const char *name = g_pStudioModel->m_HitboxSets[ i ].m_Name;
 		m_cHitboxSet->add( name );
 	}
 	m_cHitboxSet->select( 0 );
@@ -571,7 +575,7 @@ void CBoneControlWindow::ComputeHitboxList( )
 	// Reset the hitbox list
 	m_cHitbox->removeAll();
 	int count = 0;
-	if ( m_SetBoneHitBoxes.Size() > 0 )
+	if ( m_SetBoneHitBoxes.Count() > 0 )
 	{
 		if (m_SetBoneHitBoxes[ m_nHitboxSet ].Count() > m_Bone)
 			count = m_SetBoneHitBoxes[ m_nHitboxSet ][m_Bone].Count();
@@ -610,7 +614,7 @@ void CBoneControlWindow::OnBoneSelected( int boneIndex )
 	if ( physprop && g_pStudioModel->m_SurfaceProps.Count() )
 	{
 		// Find the surface prop associated with this bone
-		char const* pSurfaceProp = g_pStudioModel->m_SurfaceProps[boneIndex].String();
+		const char* pSurfaceProp = g_pStudioModel->m_SurfaceProps[boneIndex].String();
 		int idx = FindSurfaceProp( pSurfaceProp );
 
 		// Can't find it? Then apply the default one
@@ -655,10 +659,10 @@ void CBoneControlWindow::OnBoneHighlighted( bool isChecked )
 	g_viewerSettings.highlightBone = isChecked ? m_Bone : -1;
 }
 
+
 //-----------------------------------------------------------------------------
 // When the hitbox is highlighted or not
 //-----------------------------------------------------------------------------
-
 void CBoneControlWindow::OnHitboxHighlighted( bool isChecked )
 {
 	g_viewerSettings.highlightHitbox = isChecked ? m_Hitbox : -1;
@@ -668,18 +672,17 @@ void CBoneControlWindow::OnHitboxHighlighted( bool isChecked )
 //-----------------------------------------------------------------------------
 // Refreshes the hitbox size
 //-----------------------------------------------------------------------------
-
 void CBoneControlWindow::RefreshHitbox( )
 {
-	if ( m_nHitboxSet < 0 || m_nHitboxSet >= g_pStudioModel->m_HitboxSets.Size() )
+	if ( m_nHitboxSet < 0 || m_nHitboxSet >= g_pStudioModel->m_HitboxSets.Count() )
 	{
 		m_nHitboxSet = 0;
 	}
 
-	if (m_Hitbox >= 0 && g_pStudioModel->m_HitboxSets.Size() > 0 )
+	if ( m_Hitbox >= 0 && g_pStudioModel->m_HitboxSets.Count() > 0 )
 	{
 		// Set the hitbox size + origin + group
-		mstudiobbox_t* pHitbox = &g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][ m_Hitbox ];
+		mstudiobbox_t* pHitbox = &g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes[ m_Hitbox ].m_BBox;
 
 		Vector origin, size;
 		VectorSubtract( pHitbox->bbmax, pHitbox->bbmin, size );
@@ -687,12 +690,7 @@ void CBoneControlWindow::RefreshHitbox( )
 		origin *= 0.5f;
 
 		m_eHitboxGroup->setLabel( "%i", pHitbox->group );
-		char const *hitboxname = "";
-		if ( pHitbox->szhitboxnameindex != 0 )
-		{
-			hitboxname = (char*)(g_pStudioModel->GetStudioHdr()->GetRenderHdr() ) + pHitbox->szhitboxnameindex;
-		}
-
+		const char *hitboxname = g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes[ m_Hitbox ].m_Name;
 		m_eHitboxName->setLabel( hitboxname );
 
 		m_eOriginX->setLabel("%.3f", origin.x );
@@ -728,7 +726,7 @@ void CBoneControlWindow::OnHitboxSelected( int hitbox )
 
 	m_cHitbox->select(hitbox);
 
-	if ( m_SetBoneHitBoxes.Size() == 0 ||
+	if ( m_SetBoneHitBoxes.Count() == 0 ||
 		(m_SetBoneHitBoxes[ m_nHitboxSet ].Count() <= m_Bone) || 
 		(m_SetBoneHitBoxes[ m_nHitboxSet ][m_Bone].Count() <= hitbox))
 	{
@@ -781,12 +779,12 @@ void CBoneControlWindow::OnAutogenerateHitboxes( bool isChecked )
 
 void CBoneControlWindow::OnHitboxChanged( )
 {
-	if ( m_nHitboxSet < 0 || m_nHitboxSet >= g_pStudioModel->m_HitboxSets.Size() )
+	if ( m_nHitboxSet < 0 || m_nHitboxSet >= g_pStudioModel->m_HitboxSets.Count() )
 	{
 		m_nHitboxSet = 0;
 	}
 
-	if (m_Hitbox < 0 || g_pStudioModel->m_HitboxSets.Size() <= 0 )
+	if ( m_Hitbox < 0 || g_pStudioModel->m_HitboxSets.Count() <= 0 )
 	{
 		// Blat out the hitbox size + origin + group
 		RefreshHitbox();
@@ -798,7 +796,7 @@ void CBoneControlWindow::OnHitboxChanged( )
 	const char *pGroup;
 
 	// Gotta do it this way since getLabel whacks the previous return result to getLable
-	char const* pLabel = m_eOriginX->getLabel();
+	const char* pLabel = m_eOriginX->getLabel();
 	if (!pLabel)
 		goto errOut;
 	origin.x = atof( pLabel );
@@ -828,7 +826,7 @@ void CBoneControlWindow::OnHitboxChanged( )
 		goto errOut;
 	size.z = atof( pLabel );
 
-	pHitbox = &g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][m_Hitbox];
+	pHitbox = &g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes[m_Hitbox].m_BBox;
 
 	// Recompute the hitbox from the new data
 	VectorMA( origin, -0.5f, size, pHitbox->bbmin );
@@ -839,6 +837,9 @@ void CBoneControlWindow::OnHitboxChanged( )
 	{
 		pHitbox->group = atol( pGroup );
 	}
+
+	// Store off the hitbox name
+	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes[m_Hitbox].m_Name = m_eHitboxName->getLabel();
 
 errOut:
 	RefreshHitbox();
@@ -860,18 +861,19 @@ void CBoneControlWindow::OnHitboxSetChanged( void )
 	//OnHitboxGroupChanged( );  // Refresh hitbox will update the group label from the hitbox's group.  No need to turn that back into a group #
 }
 
+
 //-----------------------------------------------------------------------------
 // Hitbox size/origin changed
 //-----------------------------------------------------------------------------
-
 void CBoneControlWindow::OnHitboxGroupChanged( )
 {
-	if (m_Hitbox >= 0 && g_pStudioModel->m_HitboxSets.Size() > 0 )
+	if ( m_Hitbox >= 0 && g_pStudioModel->m_HitboxSets.Count() > 0 )
 	{
 		const char *pGroup = m_eHitboxGroup->getLabel();
-		if (pGroup && m_Hitbox < g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].Count() )
+		HitboxList_t &list = g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes;
+		if ( pGroup && list.IsInList( m_Hitbox ) )
 		{
-			mstudiobbox_t* pHitbox = &g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][m_Hitbox];
+			mstudiobbox_t* pHitbox = &list[m_Hitbox].m_BBox;
 			pHitbox->group = atol( pGroup );
 		}
 	}
@@ -881,26 +883,25 @@ void CBoneControlWindow::OnHitboxGroupChanged( )
 //-----------------------------------------------------------------------------
 // Add, remove hitboxes
 //-----------------------------------------------------------------------------
-
 void CBoneControlWindow::OnAddHitbox( )
 {
 	if (!g_pStudioModel)
 		return;
 
 	// Remove the 'none' entry
-	if (m_SetBoneHitBoxes[ m_nHitboxSet ].Size() > 0 &&
+	if (m_SetBoneHitBoxes[ m_nHitboxSet ].Count() > 0 &&
 		m_SetBoneHitBoxes[ m_nHitboxSet ][m_Bone].Count() == 0)
 	{
 		m_cHitbox->removeAll();
 	}
 
-	int i = g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].AddToTail();
-	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][i].bone = m_Bone;
-	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][i].group = 0;
-	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][i].bbmin.Init( -8, -8, -8 );
-	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][i].bbmax.Init( 8, 8, 8 );
-	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ][i].szhitboxnameindex = 0;
-
+	int i = g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes.AddToTail();
+	HitboxInfo_t &hitbox = g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes[i];
+	hitbox.m_BBox.bone = m_Bone;
+	hitbox.m_BBox.group = 0;
+	hitbox.m_BBox.bbmin.Init( -8, -8, -8 );
+	hitbox.m_BBox.bbmax.Init( 8, 8, 8 );
+	hitbox.m_BBox.szhitboxnameindex = 0;
 
 	m_SetBoneHitBoxes[ m_nHitboxSet ].EnsureCount( m_Bone + 1 );
 	m_SetBoneHitBoxes[ m_nHitboxSet ][m_Bone].AddToTail(i);
@@ -913,10 +914,10 @@ void CBoneControlWindow::OnAddHitbox( )
 
 void CBoneControlWindow::OnDeleteHitbox( )
 {
-	if (!g_pStudioModel || (m_Hitbox < 0))
+	if ( !g_pStudioModel || ( m_Hitbox < 0 ) )
 		return;
 
-	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].Remove(m_Hitbox);
+	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Hitboxes.Remove(m_Hitbox);
 	for (int i = m_SetBoneHitBoxes[ m_nHitboxSet ][m_Bone].Count(); --i >= 0; )
 	{
 		if (m_SetBoneHitBoxes[ m_nHitboxSet ][m_Bone][i] == m_Hitbox)
@@ -1011,19 +1012,24 @@ bool CBoneControlWindow::SerializeQC( CUtlBuffer& buf )
 	{
 		buf.Printf("\n");
 
-		for ( i = 0 ; i < g_pStudioModel->m_HitboxSets.Size(); i++ )
+		for ( i = 0 ; i < g_pStudioModel->m_HitboxSets.Count(); i++ )
 		{
-			buf.Printf( "\n$hboxset \"%s\"\n\n", g_pStudioModel->m_HitboxSetNames[ i ].name );
+			buf.Printf( "\n$hboxset \"%s\"\n\n", g_pStudioModel->m_HitboxSets[ i ].m_Name.Get() );
 
-			for (unsigned short j = g_pStudioModel->m_HitboxSets[ i ].Head(); 
-				j != g_pStudioModel->m_HitboxSets[ i ].InvalidIndex(); 
-				j = g_pStudioModel->m_HitboxSets[ i ].Next(j) )
+			HitboxList_t &list = g_pStudioModel->m_HitboxSets[ i ].m_Hitboxes;
+			for ( unsigned short j = list.Head(); j != list.InvalidIndex(); j = list.Next(j) )
 			{
-				mstudiobone_t* pBone = hdr->pBone(g_pStudioModel->m_HitboxSets[ i ][j].bone);
-				buf.Printf( "$hbox %d \"%s\"\t  %7.2f %7.2f %7.2f  %7.2f %7.2f %7.2f\n", 
-					g_pStudioModel->m_HitboxSets[ i ][j].group, pBone->pszName(), 
-					g_pStudioModel->m_HitboxSets[ i ][j].bbmin.x, g_pStudioModel->m_HitboxSets[ i ][j].bbmin.y, g_pStudioModel->m_HitboxSets[ i ][j].bbmin.z,
-					g_pStudioModel->m_HitboxSets[ i ][j].bbmax.x, g_pStudioModel->m_HitboxSets[ i ][j].bbmax.y, g_pStudioModel->m_HitboxSets[ i ][j].bbmax.z );
+				mstudiobbox_t &hitbox = list[j].m_BBox;
+				mstudiobone_t* pBone = hdr->pBone( hitbox.bone );
+				buf.Printf( "$hbox %d \"%s\"\t  %7.2f %7.2f %7.2f  %7.2f %7.2f %7.2f", 
+					hitbox.group, pBone->pszName(), 
+					hitbox.bbmin.x, hitbox.bbmin.y, hitbox.bbmin.z,
+					hitbox.bbmax.x, hitbox.bbmax.y, hitbox.bbmax.z );
+				if ( !list[j].m_Name.IsEmpty() )
+				{
+					buf.Printf( " \"%s\"", list[j].m_Name.Get() );
+				}
+				buf.Printf( "\n" );
 			}
 		}
 	}
@@ -1036,7 +1042,6 @@ bool CBoneControlWindow::SerializeQC( CUtlBuffer& buf )
 //-----------------------------------------------------------------------------
 // Generates the QC file and copies it to the clipboard
 //-----------------------------------------------------------------------------
-
 void CBoneControlWindow::OnGenerateQC( )
 {
 	CUtlBuffer outbuf( 0, 0, CUtlBuffer::TEXT_BUFFER );
@@ -1045,7 +1050,7 @@ void CBoneControlWindow::OnGenerateQC( )
 	{
 		// Null-terminate the string so CopyString works...
 		outbuf.PutChar('\0');
-		Sys_CopyStringToClipboard( (char const*)outbuf.Base() );
+		Sys_CopyStringToClipboard( (const char*)outbuf.Base() );
 	}
 }
 
@@ -1055,11 +1060,10 @@ void CBoneControlWindow::OnGenerateQC( )
 void CBoneControlWindow::OnHitboxAddSet( void )
 {
 	char sz[ 32 ];
-	sprintf( sz, "set%02i", g_pStudioModel->m_HitboxSets.Size() + 1 );
+	sprintf( sz, "set%02i", g_pStudioModel->m_HitboxSets.Count() + 1 );
 
 	int newsetnumber = g_pStudioModel->m_HitboxSets.AddToTail();
-	StudioModel::hbsetname_s *setname = &g_pStudioModel->m_HitboxSetNames[ g_pStudioModel->m_HitboxSetNames.AddToTail() ];
-	strcpy( setname->name, sz );
+	g_pStudioModel->m_HitboxSets[ newsetnumber ].m_Name = sz;
 	
 	ComputeHitboxSetList();
 
@@ -1080,7 +1084,6 @@ void CBoneControlWindow::OnHitboxDeleteSet( void )
 	}
 
 	g_pStudioModel->m_HitboxSets.Remove( m_nHitboxSet );
-	g_pStudioModel->m_HitboxSetNames.Remove( m_nHitboxSet );
 
 	ComputeHitboxSetList();
 
@@ -1094,7 +1097,7 @@ void CBoneControlWindow::OnHitboxDeleteSet( void )
 //-----------------------------------------------------------------------------
 void CBoneControlWindow::OnHitboxSetChangeName( void )
 {
-	if ( g_pStudioModel->m_HitboxSetNames.Size() <= 0 )
+	if ( g_pStudioModel->m_HitboxSets.Count() <= 0 )
 		return;
 
 	char newname[ 512 ];
@@ -1103,7 +1106,7 @@ void CBoneControlWindow::OnHitboxSetChangeName( void )
 	if ( !newname[ 0 ] )
 		return;
 
-	strcpy( g_pStudioModel->m_HitboxSetNames[ m_nHitboxSet ].name, newname );
+	g_pStudioModel->m_HitboxSets[ m_nHitboxSet ].m_Name = newname;
 
 	int oldsel = m_nHitboxSet;
 
@@ -1213,7 +1216,6 @@ int CBoneControlWindow::handleEvent (mxEvent *event)
 }
 
 
-
 //-----------------------------------------------------------------------------
 // Singleton instance
 //-----------------------------------------------------------------------------
@@ -1274,7 +1276,8 @@ void ControlPanel::SetupRenderWindow( mxTab* pTab )
 	cRenderMode->add ("Textured");
 	cRenderMode->add ("BoneWeights");
 	cRenderMode->add ("BadVertexData");
-	cRenderMode->select (3);
+	cRenderMode->add ("UV Chart");
+	cRenderMode->select (2);
 	mxToolTip::add (cRenderMode, "Select Render Mode");
 	cbGround = new mxCheckBox (wRender, 125, 5, 150, 20, "Ground (Ctrl-G)", IDC_GROUND);
 	cbGround->setEnabled( true );
@@ -1319,7 +1322,7 @@ void ControlPanel::SetupRenderWindow( mxTab* pTab )
 
 	cbNormalMap = new mxCheckBox (wRender, 5, 25, 100, 20, "Normal Mapping", IDC_NORMALMAP);
 	cbNormalMap->setEnabled( true );
-	cbNormalMap->setChecked( false );
+	cbNormalMap->setChecked( true );
 
 	cbRunIK = new mxCheckBox (wRender, 275, 65, 150, 20, "Enable IK", IDC_RUNIK);
 	cbEnableHead = new mxCheckBox (wRender, 275, 85, 150, 20, "Head Turn", IDC_HEADTURN);
@@ -1327,6 +1330,13 @@ void ControlPanel::SetupRenderWindow( mxTab* pTab )
 	cbIllumPosition = new mxCheckBox (wRender, 275, 105, 150, 20, "Illum. Position", IDC_ILLUMPOSITION);
 
 	cbPlaySounds = new mxCheckBox (wRender, 275, 125, 150, 20, "Play Sounds", IDC_PLAYSOUNDS);
+
+	cbShowOriginAxis = new mxCheckBox (wRender, 275, 145, 150, 20, "Show Origin Axis", IDC_SHOWORIGINAXIS);
+
+	new mxLabel (wRender, 275, 170, 45, 18, "Axis Len:");
+	leOriginAxisLength = new mxSlider(wRender, 320, 165, 105, 22, IDC_ORIGINAXISLENGTH);
+	leOriginAxisLength->setRange( 1, 100 );
+	leOriginAxisLength->setValue( 10 );
 
 	new mxCheckBox (wRender, 275, 5, 150, 20, "Physics Model", IDC_PHYSICSMODEL);
 	cHighlightBone = new mxChoice (wRender, 275, 25, 150, 22, IDC_PHYSICSHIGHLIGHT);
@@ -1393,6 +1403,11 @@ void ControlPanel::SetupSequenceWindow( mxTab* pTab )
 	slBlendTime->setRange( 0, 1.0, 100 );
 	slBlendTime->setValue( DEFAULT_BLEND_TIME );
 	laBlendTime = new mxLabel( wSequence, 540, 142, 80, 22, "" );
+
+	new mxLabel (wSequence, 5, 170, 90, 18, "Activity modifiers:");
+	cActivityModifiers = new mxChoice (wSequence, 105, 166, 350, 22, IDC_ACTIVITY_MODIFIERS);
+
+	new mxCheckBox (wSequence, 460, 166, 350, 22, "Animate weapons", IDC_ANIMATEWEAPONS);
 }
 
 //-----------------------------------------------------------------------------
@@ -1416,9 +1431,13 @@ void ControlPanel::SetupBodyWindow( mxTab* pTab )
 	lModelInfo2 = new mxLabel (wBody, 340, 5, 120, 130, "");
 	cSkin = new mxChoice (wBody, 5, 55, 100, 22, IDC_SKINS);
 	mxToolTip::add (cSkin, "Choose a skin family");
+	new mxLabel (wBody, 5, 170, 90, 18, "Materials used:");
+	cMaterials = new mxChoice (wBody, 105, 166, 350, 22, IDC_MATERIALS);	
+	mxToolTip::add (cMaterials, "Select material for UV Chart view");
 
-	lModelInfo3 = new mxLabel (wBody, 220, 100, 120, 22, "");
-	lModelInfo4 = new mxLabel (wBody, 220, 118, 120, 22, "");
+	lModelInfo3 = new mxLabel (wBody, 220, 100, 220, 18, "");
+	lModelInfo4 = new mxLabel (wBody, 220, 118, 260, 18, "");
+	lModelInfo5 = new mxLabel (wBody, 220, 136, 120, 18, "");
 	setTransparent( false );
 
 	cbAutoLOD = new mxCheckBox (wBody, 5, 80, 100, 20, "Auto LOD", IDC_AUTOLOD);
@@ -1430,6 +1449,17 @@ void ControlPanel::SetupBodyWindow( mxTab* pTab )
 	new mxLabel (wBody, 5, 151, 60, 18, "LOD Metric:" ); 
 	lLODMetric = new mxLabel( wBody, 70, 151, 35, 22, "" );
 
+	new mxLabel( wBody, 505, 5, 100, 18, "VMTs Loaded:" );
+	cMessageList = new mxListBox( wBody, 500, 25, 540, 160, IDC_MESSAGES );
+	cMessageList->add ("None");
+	cMessageList->select (1);
+	mxToolTip::add (cMessageList, "Materials (VMT files) this model has loaded");
+
+	new mxLabel( wBody, 785, 5, 100, 18, "Shader:" );
+	cShaderUsed = new mxListBox( wBody, 830, 3, 210, 28, IDC_SHADERS );
+	cShaderUsed->add ("Select material to show shader");
+	cShaderUsed->select (0);
+	mxToolTip::add (cShaderUsed, "Shader Used");
 
 }
 
@@ -1923,6 +1953,12 @@ ControlPanel::handleEvent (mxEvent *event)
 			break;
 		}
 
+		case IDC_ORIGINAXISLENGTH:
+		{
+			g_viewerSettings.originAxisLength = reinterpret_cast< mxSlider * >( event->widget )->getValue();
+			break;
+		}
+
 		case IDC_LODCHOICE:
 		{
 			int index = cLODChoice->getSelectedIndex();
@@ -2031,6 +2067,35 @@ ControlPanel::handleEvent (mxEvent *event)
 			g_viewerSettings.showAttachments = ((mxCheckBox *) event->widget)->isChecked();
 			break;
 
+		case IDC_SHOWORIGINAXIS:
+			setShowOriginAxis (((mxCheckBox *) event->widget)->isChecked());
+			break;
+			
+		case IDC_MESSAGES:
+		{
+			int index = cMessageList->getSelectedIndex();
+			if (index >= 0)
+			{
+				studiohdr_t* pStudioR = g_pStudioModel->GetStudioRenderHdr();
+				if ( pStudioR )
+				{
+					IMaterial *pMaterials[128];
+					g_pStudioRender->GetMaterialList( pStudioR, ARRAYSIZE( pMaterials ), &pMaterials[0] );
+
+					cShaderUsed->removeAll();
+					if ( pMaterials[index]->IsErrorMaterial() )
+					{
+						cShaderUsed->add( "*** ERROR *** Can't load VMT");
+					}
+					else
+					{
+						cShaderUsed->add( pMaterials[index]->GetShaderName() );
+					}
+				}
+			}
+		}
+		break;
+
 		case IDC_SEQUENCE0:
 		case IDC_SEQUENCE1:
 		case IDC_SEQUENCE2:
@@ -2045,6 +2110,7 @@ ControlPanel::handleEvent (mxEvent *event)
 				if (i == 0)
 				{
 					setSequence (index);
+					showActivityModifiers( index );
 				}
 				else
 				{
@@ -2068,6 +2134,7 @@ ControlPanel::handleEvent (mxEvent *event)
 				if (i == 0)
 				{
 					setSequence (index);
+					showActivityModifiers( index );
 				}
 				else
 				{
@@ -2099,6 +2166,9 @@ ControlPanel::handleEvent (mxEvent *event)
 		case IDC_BLENDSEQUENCECHANGES:
 			g_viewerSettings.blendSequenceChanges = ((mxCheckBox *) event->widget)->isChecked();
 			break;
+		case IDC_ANIMATEWEAPONS:
+			g_viewerSettings.animateWeapons = ((mxCheckBox *) event->widget)->isChecked();
+			break;
 		case IDC_BLENDNOW:
 			startBlending();
 			break;
@@ -2114,6 +2184,15 @@ ControlPanel::handleEvent (mxEvent *event)
 
 			// stop the animation
 			setSpeedScale( 0 );
+
+			if ( g_bHlmvMaster && g_HlmvIpcClient.Connect() )
+			{
+				CUtlBuffer cmd;
+				CUtlBuffer res;
+				cmd.Printf( "%s %f", "hlmvForceFrame", reinterpret_cast< mxSlider * >( event->widget )->getValue() );
+				g_HlmvIpcClient.ExecuteCommand( cmd, res );
+				g_HlmvIpcClient.Disconnect();
+			}
 		}
 		break;
 
@@ -2122,9 +2201,8 @@ ControlPanel::handleEvent (mxEvent *event)
 			int index = cBodypart->getSelectedIndex();
 			if (index >= 0)
 			{
-				g_pStudioModel->SetBodygroup (cBodypart->getSelectedIndex(), index);
+				g_pStudioModel->SetBodygroup( cBodypart->getSelectedIndex() );
 				setBodypart (index);
-
 			}
 		}
 		break;
@@ -2135,7 +2213,6 @@ ControlPanel::handleEvent (mxEvent *event)
 			if (index >= 0)
 			{
 				setSubmodel (index);
-
 			}
 		}
 		break;
@@ -2176,6 +2253,16 @@ ControlPanel::handleEvent (mxEvent *event)
 			}
 		}
 		break;
+
+		case IDC_MATERIALS:
+			{
+				int index = cMaterials->getSelectedIndex();
+				if (index >= 0)
+				{
+					g_viewerSettings.materialIndex = index;
+				}
+			}
+			break;
 
 		case IDC_IKRULE_CHAIN:
 		case IDC_IKRULE_CHOICE:
@@ -2252,7 +2339,7 @@ ControlPanel::handleEvent (mxEvent *event)
 				CStudioHdr *hdr = g_pStudioModel->GetStudioHdr();
 				for (LocalFlexController_t i = LocalFlexController_t(0); i < hdr->numflexcontrollers(); i++)
 				{
-					float r = rand() / float( RAND_MAX );
+					float r = rand() / float( VALVE_RAND_MAX );
 					g_pStudioModel->SetFlexController( i, r );
 				}
 
@@ -2494,6 +2581,7 @@ LoadModelResult_t ControlPanel::loadModel(const char *filename)
 void ControlPanel::OnLoadModel( void )
 {
 	int i;
+	m_bVMTInfoLoaded = false;
 
 	if (!g_pStudioModel->HasModel())
 		return;
@@ -2502,17 +2590,21 @@ void ControlPanel::OnLoadModel( void )
 	initBodypartChoices();
 	initBoneControllers();
 	initSkinChoices();
+	initMaterialChoices();
 	initPhysicsBones();
 	initLODs();
 	initFlexes();
 
 	setModelInfo();
 
-	if (!LoadViewerSettings( g_pStudioModel->GetFileName(), g_pStudioModel ))
+	UnloadAllMergedModels();
+
+	const bool bNoModelSettings = LoadViewerSettings( g_pStudioModel->GetFileName(), g_pStudioModel );
+	if ( !bNoModelSettings )
 	{
 		InitViewerSettings( "hlmv" );
-		centerView();
 		setSequence( 0 );
+		showActivityModifiers( 0 );
 		setSpeedScale( 1.0 );
 	}
 
@@ -2533,18 +2625,20 @@ void ControlPanel::OnLoadModel( void )
 
 	mx_setcwd (mx_getpath (g_pStudioModel->GetFileName()));
 
-	for (i = 0; i < 4; i++)
+	for ( i = 0; i < HLMV_MAX_MERGED_MODELS; ++i )
 	{
-		if (g_pStudioExtraModel[i])
-		{
-			g_pStudioExtraModel[i]->FreeModel( false );
-			delete g_pStudioExtraModel[i];
-			g_pStudioExtraModel[i] = NULL;
-		}
-		if (strlen( g_viewerSettings.mergeModelFile[i] ) != 0)
+		if ( strlen( g_viewerSettings.mergeModelFile[i] ) != 0 )
 		{
 			loadModel( g_viewerSettings.mergeModelFile[i], i );
 		}
+	}
+
+	// Center the model if we don't have last view position data in the registry
+	if ( !bNoModelSettings )
+	{
+		// Need to call this twice for some reason. Really - I don't have OCD!
+		centerView();
+		centerView();
 	}
 }
 
@@ -2569,6 +2663,12 @@ LoadModelResult_t ControlPanel::loadModel(const char *filename, int slot )
 	{
 		if (g_pStudioExtraModel[slot]->PostLoadModel( filename ))
 		{
+			connectFlexes( g_pStudioExtraModel[slot]->GetStudioHdr() );
+			if ( g_MDLViewer && g_MDLViewer->getMenuBar() )
+			{
+				g_MDLViewer->getMenuBar()->modify (IDC_FILE_UNLOADMERGEDMODEL1 + slot, IDC_FILE_UNLOADMERGEDMODEL1 + slot, filename);
+				g_MDLViewer->getMenuBar()->setEnabled (IDC_FILE_UNLOADMERGEDMODEL1 + slot, true);
+			}
 			return LoadModel_Success;
 		}
 		else
@@ -2585,6 +2685,7 @@ void
 ControlPanel::resetControlPanel( void )
 {
 	setSequence( g_pStudioModel->GetSequence() );
+	showActivityModifiers( g_pStudioModel->GetSequence() );
 	setOverlaySequence( 1, g_pStudioModel->GetOverlaySequence( 0 ), g_pStudioModel->GetOverlaySequenceWeight( 0 ) );
 	setOverlaySequence( 2, g_pStudioModel->GetOverlaySequence( 1 ), g_pStudioModel->GetOverlaySequenceWeight( 1 ) );
 	setOverlaySequence( 3, g_pStudioModel->GetOverlaySequence( 2 ), g_pStudioModel->GetOverlaySequenceWeight( 2 ) );
@@ -2610,6 +2711,9 @@ ControlPanel::resetControlPanel( void )
 	cbAttachments->setChecked( g_viewerSettings.showAttachments );
 	cbNormals->setChecked( g_viewerSettings.showNormals );
 	cbEnableHead->setChecked( g_pStudioModel->GetSolveHeadTurn() ? 1 : 0 );
+
+	cbShowOriginAxis->setChecked( g_viewerSettings.showOriginAxis );
+	setOriginAxisLength( g_viewerSettings.originAxisLength );
 }
 
 
@@ -2679,8 +2783,28 @@ ControlPanel::setPolycount( int polycount )
 	}
 	savePolycount = polycount;
 	char tmp[128];
-	sprintf( tmp, "Polycount: %d", polycount );
+	sprintf( tmp, "Shader Draw Count: %d", polycount );
 	lModelInfo3->setLabel( tmp );
+}
+
+void ControlPanel::setModelInfo( int nVertCount, int nIndexCount, int nTriCount )
+{
+	static int nSaveVertCount = -10;
+	static int nSaveIndexCount = -10;
+	static int nSaveTriCount = -10;
+
+	if ( nVertCount == nSaveVertCount && nIndexCount == nSaveIndexCount && nTriCount == nSaveTriCount )
+	{
+		return;
+	}
+
+	nSaveVertCount = nVertCount;
+	nSaveIndexCount = nIndexCount;
+	nSaveTriCount = nTriCount;
+
+	char tmp[ 128 ];
+	sprintf( tmp, "Verts: %d  Indexes: %d  Triangles: %d", nVertCount, nIndexCount, nTriCount );
+	lModelInfo4->setLabel( tmp );
 }
 
 void
@@ -2693,7 +2817,7 @@ ControlPanel::setTransparent( bool isTransparent )
 	saveTransparent = isTransparent;
 	char tmp[128];
 	sprintf( tmp, "Model is: %s", isTransparent ? "transparent" : "opaque" );
-	lModelInfo4->setLabel( tmp );
+	lModelInfo5->setLabel( tmp );
 }
 
 void
@@ -2814,6 +2938,13 @@ ControlPanel::setPlaySounds (bool b)
 {
 	g_viewerSettings.playSounds = b;
 	cbPlaySounds->setChecked (b);
+}
+
+void
+ControlPanel::setShowOriginAxis (bool b)
+{
+	g_viewerSettings.showOriginAxis = b;
+	cbShowOriginAxis->setChecked (b);
 }
 
 struct SortInfo_t
@@ -3114,7 +3245,7 @@ ControlPanel::initBodypartChoices()
 			for (i = 0; i < pbodyparts[0].nummodels; i++)
 			{
 				char str[64];
-				sprintf (str, "Submodel %d", i + 1);
+				sprintf (str, "Submodel %d", i );
 				cSubmodel->add (str);
 			}
 			cSubmodel->select (0);
@@ -3140,7 +3271,7 @@ ControlPanel::setBodypart (int index)
 			for (int i = 0; i < pbodyparts[index].nummodels; i++)
 			{
 				char str[64];
-				sprintf (str, "Submodel %d", i + 1);
+				sprintf (str, "Submodel %d", i );
 				cSubmodel->add (str);
 			}
 			cSubmodel->select (0);
@@ -3209,11 +3340,10 @@ ControlPanel::initBoneControllers()
 		if (hdr->numbonecontrollers() > 0)
 		{
 			cController->select (0);
-			mstudiobonecontroller_t *pbonecontroller = hdr->pBonecontroller(i);
+			mstudiobonecontroller_t *pbonecontroller = hdr->pBonecontroller(0);
 			slController->setRange (pbonecontroller->start, pbonecontroller->end);
 			slController->setValue (0);
 		}
-
 	}
 }
 
@@ -3258,7 +3388,7 @@ ControlPanel::initSkinChoices()
 		for (int i = 0; i < hdr->numskinfamilies(); i++)
 		{
 			char str[32];
-			sprintf (str, "Skin %d", i + 1);
+			sprintf (str, "Skin %d", i );
 			cSkin->add (str);
 		}
 
@@ -3268,7 +3398,53 @@ ControlPanel::initSkinChoices()
 	}
 }
 
+void ControlPanel::initMaterialChoices()
+{
+	CStudioHdr *hdr = g_pStudioModel->GetStudioHdr();
+	if (hdr)
+	{
+		const studiohdr_t *pStudioHdr = hdr->GetRenderHdr();
+		if (pStudioHdr) 
+		{
+			cMaterials->setEnabled(pStudioHdr->numtextures > 0);
+			cMaterials->removeAll();
 
+			for (int i = 0; i < pStudioHdr->numtextures; i++)
+			{
+				char str[512];
+				sprintf (str, "%s", pStudioHdr->pTexture(i)->pszName() );
+				cMaterials->add (str);
+			}
+
+			cMaterials->select (0);
+			g_viewerSettings.materialIndex = 0;
+		}
+	}
+}
+
+void ControlPanel::showActivityModifiers( int sequence )
+{
+	CStudioHdr *hdr = g_pStudioModel->GetStudioHdr();
+	if ( !hdr->SequencesAvailable() )
+		return;
+
+	if ( sequence < 0 || sequence >= hdr->GetNumSeq() )
+		return;
+
+	mstudioseqdesc_t &desc = hdr->pSeqdesc( sequence );
+
+	cActivityModifiers->setEnabled( desc.numactivitymodifiers > 0);
+	cActivityModifiers->removeAll();
+
+	for (int i = 0; i < desc.numactivitymodifiers; i++)
+	{
+		char str[512];
+		sprintf (str, "%s", desc.pActivityModifier( i )->pszName() );
+		cActivityModifiers->add (str);
+	}
+
+	cActivityModifiers->select (0);
+}
 
 void
 ControlPanel::setModelInfo()
@@ -3282,6 +3458,11 @@ ControlPanel::setModelInfo()
 	static int checkSum = 0;
 	static int boneLODCount = 0;
 	static int numBatches = 0;
+	if ( g_pStudioModel && !m_bVMTInfoLoaded )
+	{
+		UpdateMaterialList();
+	}
+
 	if( checkSum == hdr->GetRenderHdr()->checksum && boneLODCount == g_DrawModelResults.m_NumHardwareBones && numBatches == g_DrawModelResults.m_NumBatches)
 	{
 		return;
@@ -3328,6 +3509,35 @@ ControlPanel::setModelInfo()
 	lModelInfo2->setLabel (str);
 }
 
+void ControlPanel::UpdateMaterialList( )
+{
+	cMessageList->removeAll();
+	studiohdr_t* pStudioR = g_pStudioModel->GetStudioRenderHdr();
+	if ( pStudioR )
+	{
+		IMaterial *pMaterials[128];
+		int nMaterials = g_pStudioRender->GetMaterialList( pStudioR, ARRAYSIZE( pMaterials ), &pMaterials[0] );
+
+		for ( int i = 0; i < nMaterials; i++ )
+		{
+			char c_MaterialLine[256];
+			Q_strcpy( c_MaterialLine, "" );
+
+			if ( pMaterials[i]->IsErrorMaterial() )
+			{
+				Q_strcat( c_MaterialLine, "*** ERROR *** Model attempted to load one or more VMTs it can't find." , sizeof( c_MaterialLine ) );
+			}
+			else
+			{
+				Q_strcat( c_MaterialLine, pMaterials[i]->GetName() , sizeof( c_MaterialLine ) );
+			}
+			cMessageList->add( c_MaterialLine );
+		}
+		m_bVMTInfoLoaded = true;
+	}
+}
+
+
 extern 	matrix3x4_t g_viewtransform;
 
 void ControlPanel::centerView( )
@@ -3342,9 +3552,10 @@ void ControlPanel::centerView( )
 	matrix3x4_t rootxform;
 	MatrixInvert( g_viewtransform, rootxform );
 
-	for (unsigned short j = g_pStudioModel->m_HitboxSets[ hitboxset ].Head(); j != g_pStudioModel->m_HitboxSets[ hitboxset ].InvalidIndex(); j = g_pStudioModel->m_HitboxSets[ hitboxset ].Next(j) )
+	HitboxList_t &list = g_pStudioModel->m_HitboxSets[ hitboxset ].m_Hitboxes;
+	for (unsigned short j = list.Head(); j != list.InvalidIndex(); j = list.Next(j) )
 	{
-		mstudiobbox_t *pBBox = &g_pStudioModel->m_HitboxSets[ hitboxset ][j];
+		mstudiobbox_t *pBBox = &list[j].m_BBox;
 
 		Vector tmpmin, tmpmax;
 		matrix3x4_t bonesetup;
@@ -3415,6 +3626,12 @@ void ControlPanel::setFOV( float fov )
 }
 
 
+void ControlPanel::setOriginAxisLength( float originAxisLength )
+{
+	leOriginAxisLength->setValue( originAxisLength );
+}
+
+
 void ControlPanel::initFlexes()
 {
 	CStudioHdr *hdr = g_pStudioModel->GetStudioHdr();
@@ -3454,6 +3671,32 @@ void ControlPanel::initFlexes()
 		if (i >= 0)
 		{
 			slFlexScale[j]->setValue( g_pStudioModel->GetFlexControllerRaw( i ) );
+		}
+	}
+}
+
+void ControlPanel::connectFlexes( CStudioHdr *hdr )
+{
+	if ( !g_pStudioModel )
+		return;
+		
+	LocalFlexController_t i;
+	LocalFlexController_t j;
+
+	CStudioHdr *root = g_pStudioModel->GetStudioHdr();
+
+	if (hdr && root)
+	{
+		for (i = LocalFlexController_t(0); i < hdr->numflexcontrollers(); i++)
+		{
+			for ( j = LocalFlexController_t(0); j < root->numflexcontrollers(); j++)
+			{
+				if ( stricmp( hdr->pFlexcontroller(i)->pszName(), root->pFlexcontroller(j)->pszName() ) == 0 )
+				{
+					hdr->pFlexcontroller(i)->localToGlobal = root->pFlexcontroller(j)->localToGlobal;
+					break;
+				}
+			}
 		}
 	}
 }
@@ -3713,4 +3956,34 @@ void ControlPanel::writePhysicsData( void )
 
 	// store it in the model
 	g_pStudioModel->Physics_SetData( boneIndex, &solid, &constraint );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void ControlPanel::SetFrameSlider( float flFrame )
+{
+	slForceFrame->setValue( flFrame );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void ControlPanel::UnloadAllMergedModels()
+{
+	for ( int i = 0; i < HLMV_MAX_MERGED_MODELS; ++i )
+	{
+		g_MDLViewer->getMenuBar()->modify( IDC_FILE_UNLOADMERGEDMODEL1 + i, IDC_FILE_UNLOADMERGEDMODEL1 + i, "(empty)" );
+		g_MDLViewer->getMenuBar()->setEnabled( IDC_FILE_UNLOADMERGEDMODEL1 + i, false );
+		V_strcpy_safe( g_viewerSettings.mergeModelFile[i], "" );
+
+		if ( g_pStudioExtraModel[i] )
+		{
+			g_pStudioExtraModel[i]->FreeModel( false );
+			delete g_pStudioExtraModel[i];
+			g_pStudioExtraModel[i] = NULL;
+		}
+	}
 }

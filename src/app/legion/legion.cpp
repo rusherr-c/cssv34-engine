@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -15,8 +15,8 @@
 #include <windows.h>
 #include "inputsystem/iinputsystem.h"
 #include "networksystem/inetworksystem.h"
-#include "FileSystem.h"
-#include "materialsystem/IMaterialSystem.h"
+#include "filesystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "vgui/IVGui.h"
 #include "vgui/ISurface.h"
 #include "VGuiMatSurface/IMatSystemSurface.h"

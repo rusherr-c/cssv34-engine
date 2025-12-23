@@ -1,11 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
 
 #include "BasePanel.h"
-#include "SavegameDialog.h"
+#include "SaveGameDialog.h"
 
 #include "winlite.h"		// FILETIME
 #include "vgui/ILocalize.h"
@@ -31,7 +31,7 @@ using namespace vgui;
 #include "tier0/memdbgon.h"
 
 #include "vgui_controls/Frame.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 
 extern const char *COM_GetModDirectory();
 
@@ -169,10 +169,14 @@ void CSaveGameDialogXbox::InitiateSaving()
 	if ( bNewSave )
 	{
 		// Create a new save game (name is created from the current time, which should be pretty unique)
+#ifdef WIN32
 		FILETIME currentTime;
 		GetSystemTimeAsFileTime( &currentTime );
-
-		Q_snprintf( szFilename, maxFilenameLen, "%s_%u", COM_GetModDirectory(), currentTime );
+		Q_snprintf( szFilename, maxFilenameLen, "%s_%u", COM_GetModDirectory(), currentTime.dwLowDateTime );
+#else
+		time_t currentTime = time( NULL );
+		Q_snprintf( szFilename, maxFilenameLen, "%s_%u", COM_GetModDirectory(), (unsigned)currentTime );
+#endif
 		Q_snprintf( szCmd, sizeof( szCmd ), "xsave %s", szFilename );
 		engine->ExecuteClientCmd( szCmd );
 		Q_strncat( szFilename, ".360.sav", maxFilenameLen );

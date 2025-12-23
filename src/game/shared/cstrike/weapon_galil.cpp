@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,6 +31,8 @@ public:
 
 	virtual void PrimaryAttack();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_GALIL; }
 
 private:
@@ -58,6 +60,24 @@ CWeaponGalil::CWeaponGalil()
 {
 }
 
+float CWeaponGalil::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.04f + 0.3f * m_flAccuracy;
+		else if (pPlayer->GetAbsVelocity().Length2D() > 140)
+			return 0.04f + 0.07f * m_flAccuracy;
+		else
+			return 0.0375f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
 
 void CWeaponGalil::PrimaryAttack()
 {
@@ -73,22 +93,11 @@ void CWeaponGalil::PrimaryAttack()
 		return;
 	}
 	
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		GalilFire( 0.04f + 0.3f * m_flAccuracy );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 140)
-		GalilFire( 0.04f + 0.07f * m_flAccuracy );
-	else
-		GalilFire( 0.0375f * m_flAccuracy );
-}
-
-void CWeaponGalil::GalilFire( float flSpread )
-{
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
-
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 

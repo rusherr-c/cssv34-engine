@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,6 +30,7 @@ public:
 
 protected:
 	virtual bool OnOK(bool applyOnly);
+	virtual void OnKeyCodePressed( vgui::KeyCode code );
 
 private:
 	CCreateMultiplayerGameServerPage *m_pServerPage;

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,16 +12,17 @@
 #endif
 
 #include "SoundEmitterSystem/isoundemittersystembase.h"
-#include "utldict.h"
 #include "soundflags.h"
 #include "interval.h"
 #include "UtlSortVector.h"
+#include <tier1/utlstring.h>
+#include <tier1/utlhashtable.h>
 
 soundlevel_t TextToSoundLevel( const char *key );
 
 struct CSoundEntry
 {
-	CUtlSymbol					m_Name;
+	CUtlConstString				m_Name;
 	CSoundParametersInternal	m_SoundParams;
 	uint16						m_nScriptFileIndex;
 	bool						m_bRemoved : 1;
@@ -31,15 +32,31 @@ struct CSoundEntry
 	{
 		return m_bIsOverride;
 	}
-	class CSoundEntryLess
-	{
-	public:
-		bool Less( CSoundEntry * const & lhs, CSoundEntry *const & rhs, void *pCtx )
-		{
-			return ( Q_stricmp( lhs->m_Name.String(), rhs->m_Name.String() ) < 0 ) ? true : false;
-		}
-	};
 };
+
+struct CSoundEntryHashFunctor : CaselessStringHashFunctor
+{
+	using CaselessStringHashFunctor::operator();
+	unsigned int operator()( CSoundEntry *e ) const
+	{
+		return CaselessStringHashFunctor::operator()( e->m_Name.Get() );
+	}
+};
+
+struct CSoundEntryEqualFunctor : CaselessStringEqualFunctor
+{
+	using CaselessStringEqualFunctor::operator();
+	bool operator()( CSoundEntry *lhs, CSoundEntry *rhs ) const
+	{
+		return CaselessStringEqualFunctor::operator()( lhs->m_Name.Get(), rhs->m_Name.Get() );
+	}
+	bool operator()( CSoundEntry *lhs, const char *rhs ) const
+	{
+		return CaselessStringEqualFunctor::operator()( lhs->m_Name.Get(), rhs );
+	}
+};
+
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Base class for sound emitter system handling (can be used by tools)
@@ -115,13 +132,22 @@ public:
 
 	// Called from both client and server (single player) or just one (server only in dedicated server and client only if connected to a remote server)
 	// Called by LevelInitPreEntity to override sound scripts for the mod with level specific overrides based on custom mapnames, etc.
-	virtual void			AddSoundOverrides( char const *scriptfile );
+	virtual void			AddSoundOverrides( char const *scriptfile, bool bPreload = false );
 
 	// Called by either client or server in LevelShutdown to clear out custom overrides
 	virtual void			ClearSoundOverrides();
+
+	virtual void		ReloadSoundEntriesInList( IFileList *pFilesToReload );
+
+	// Called by either client or server to force ModShutdown and ModInit
+	virtual void			Flush();
+
 private:
 
-	void AddSoundsFromFile( const char *filename, bool bPreload, bool bIsOverride = false );
+	bool InternalModInit();
+	void InternalModShutdown();
+
+	void AddSoundsFromFile( const char *filename, bool bPreload, bool bIsOverride = false, bool bRefresh = false );
 
 	bool		InitSoundInternalParameters( const char *soundname, KeyValues *kv, CSoundParametersInternal& params );
 
@@ -135,8 +161,8 @@ private:
 	void	EnsureAvailableSlotsForGender( SoundFile *pSoundnames, int c, gender_t gender );
 	void	AddSoundName( CSoundParametersInternal& params, char const *wavename, gender_t gender );
 
-	CUtlDict< gender_t, uint8 >					m_ActorGenders;
-	CUtlSortVector< CSoundEntry *, CSoundEntry::CSoundEntryLess >				m_Sounds;
+	CUtlHashtable< CUtlConstString, gender_t, CaselessStringHashFunctor, UTLConstStringCaselessStringEqualFunctor<char> > m_ActorGenders;
+	CUtlStableHashtable< CSoundEntry*, empty_t, CSoundEntryHashFunctor, CSoundEntryEqualFunctor, uint16, const char* > m_Sounds;
 
     CUtlVector< CSoundEntry * >			m_SavedOverrides; 
 	CUtlVector< FileNameHandle_t >				m_OverrideFiles;

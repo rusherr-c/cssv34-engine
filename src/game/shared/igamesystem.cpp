@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Deals with singleton  
 //
@@ -260,6 +260,11 @@ void IGameSystem::LevelInitPostEntityAllSystems( void )
 	InvokeMethod( &IGameSystem::LevelInitPostEntity, "LevelInitPostEntity" );
 }
 
+void IGameSystem::LevelShutdownPreClearSteamAPIContextAllSystems()
+{
+	InvokeMethodReverseOrder( &IGameSystem::LevelShutdownPreClearSteamAPIContext );
+}
+
 void IGameSystem::LevelShutdownPreEntityAllSystems()
 {
 	InvokeMethodReverseOrder( &IGameSystem::LevelShutdownPreEntity );
@@ -309,6 +314,7 @@ void IGameSystem::UpdateAllSystems( float frametime )
 	{
 		IGameSystemPerFrame *sys = s_GameSystemsPerFrame[i];
 		MDLCACHE_CRITICAL_SECTION();
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s - %s", __FUNCTION__, sys->Name() );
 		sys->Update( frametime );
 	}
 }

@@ -338,6 +338,48 @@ public:
 #endif
 	}
 private:
+	int m_nOUTLINE;
+#ifdef _DEBUG
+	bool m_bOUTLINE;
+#endif
+public:
+	void SetOUTLINE( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nOUTLINE = i;
+#ifdef _DEBUG
+		m_bOUTLINE = true;
+#endif
+	}
+	void SetOUTLINE( bool i )
+	{
+		m_nOUTLINE = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bOUTLINE = true;
+#endif
+	}
+private:
+	int m_nSOFTEDGES;
+#ifdef _DEBUG
+	bool m_bSOFTEDGES;
+#endif
+public:
+	void SetSOFTEDGES( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nSOFTEDGES = i;
+#ifdef _DEBUG
+		m_bSOFTEDGES = true;
+#endif
+	}
+	void SetSOFTEDGES( bool i )
+	{
+		m_nSOFTEDGES = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bSOFTEDGES = true;
+#endif
+	}
+private:
 	int m_nBUMPMASK;
 #ifdef _DEBUG
 	bool m_bBUMPMASK;
@@ -356,6 +398,48 @@ public:
 		m_nBUMPMASK = i ? 1 : 0;
 #ifdef _DEBUG
 		m_bBUMPMASK = true;
+#endif
+	}
+private:
+	int m_nNORMAL_DECODE_MODE;
+#ifdef _DEBUG
+	bool m_bNORMAL_DECODE_MODE;
+#endif
+public:
+	void SetNORMAL_DECODE_MODE( int i )
+	{
+		Assert( i >= 0 && i <= 0 );
+		m_nNORMAL_DECODE_MODE = i;
+#ifdef _DEBUG
+		m_bNORMAL_DECODE_MODE = true;
+#endif
+	}
+	void SetNORMAL_DECODE_MODE( bool i )
+	{
+		m_nNORMAL_DECODE_MODE = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bNORMAL_DECODE_MODE = true;
+#endif
+	}
+private:
+	int m_nNORMALMASK_DECODE_MODE;
+#ifdef _DEBUG
+	bool m_bNORMALMASK_DECODE_MODE;
+#endif
+public:
+	void SetNORMALMASK_DECODE_MODE( int i )
+	{
+		Assert( i >= 0 && i <= 0 );
+		m_nNORMALMASK_DECODE_MODE = i;
+#ifdef _DEBUG
+		m_bNORMALMASK_DECODE_MODE = true;
+#endif
+	}
+	void SetNORMALMASK_DECODE_MODE( bool i )
+	{
+		m_nNORMALMASK_DECODE_MODE = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bNORMALMASK_DECODE_MODE = true;
 #endif
 	}
 private:
@@ -447,9 +531,25 @@ public:
 #endif // _DEBUG
 		m_nSEAMLESS = 0;
 #ifdef _DEBUG
+		m_bOUTLINE = false;
+#endif // _DEBUG
+		m_nOUTLINE = 0;
+#ifdef _DEBUG
+		m_bSOFTEDGES = false;
+#endif // _DEBUG
+		m_nSOFTEDGES = 0;
+#ifdef _DEBUG
 		m_bBUMPMASK = false;
 #endif // _DEBUG
 		m_nBUMPMASK = 0;
+#ifdef _DEBUG
+		m_bNORMAL_DECODE_MODE = false;
+#endif // _DEBUG
+		m_nNORMAL_DECODE_MODE = 0;
+#ifdef _DEBUG
+		m_bNORMALMASK_DECODE_MODE = false;
+#endif // _DEBUG
+		m_nNORMALMASK_DECODE_MODE = 0;
 #ifdef _DEBUG
 		m_bDETAIL_BLEND_MODE = false;
 #endif // _DEBUG
@@ -460,13 +560,13 @@ public:
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bMASKEDBLENDING && m_bBASETEXTURE2 && m_bDETAILTEXTURE && m_bBUMPMAP && m_bBUMPMAP2 && m_bCUBEMAP && m_bENVMAPMASK && m_bBASEALPHAENVMAPMASK && m_bSELFILLUM && m_bNORMALMAPALPHAENVMAPMASK && m_bDIFFUSEBUMPMAP && m_bBASETEXTURENOENVMAP && m_bBASETEXTURE2NOENVMAP && m_bWARPLIGHTING && m_bFANCY_BLENDING && m_bSEAMLESS && m_bBUMPMASK && m_bDETAIL_BLEND_MODE;
+		bool bAllStaticVarsDefined = m_bMASKEDBLENDING && m_bBASETEXTURE2 && m_bDETAILTEXTURE && m_bBUMPMAP && m_bBUMPMAP2 && m_bCUBEMAP && m_bENVMAPMASK && m_bBASEALPHAENVMAPMASK && m_bSELFILLUM && m_bNORMALMAPALPHAENVMAPMASK && m_bDIFFUSEBUMPMAP && m_bBASETEXTURENOENVMAP && m_bBASETEXTURE2NOENVMAP && m_bWARPLIGHTING && m_bFANCY_BLENDING && m_bSEAMLESS && m_bOUTLINE && m_bSOFTEDGES && m_bBUMPMASK && m_bNORMAL_DECODE_MODE && m_bNORMALMASK_DECODE_MODE && m_bDETAIL_BLEND_MODE;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 16 * m_nMASKEDBLENDING ) + ( 32 * m_nBASETEXTURE2 ) + ( 64 * m_nDETAILTEXTURE ) + ( 128 * m_nBUMPMAP ) + ( 384 * m_nBUMPMAP2 ) + ( 768 * m_nCUBEMAP ) + ( 1536 * m_nENVMAPMASK ) + ( 3072 * m_nBASEALPHAENVMAPMASK ) + ( 6144 * m_nSELFILLUM ) + ( 12288 * m_nNORMALMAPALPHAENVMAPMASK ) + ( 24576 * m_nDIFFUSEBUMPMAP ) + ( 49152 * m_nBASETEXTURENOENVMAP ) + ( 98304 * m_nBASETEXTURE2NOENVMAP ) + ( 196608 * m_nWARPLIGHTING ) + ( 393216 * m_nFANCY_BLENDING ) + ( 786432 * m_nSEAMLESS ) + ( 1572864 * m_nBUMPMASK ) + ( 3145728 * m_nDETAIL_BLEND_MODE ) + 0;
+		return ( 48 * m_nMASKEDBLENDING ) + ( 96 * m_nBASETEXTURE2 ) + ( 192 * m_nDETAILTEXTURE ) + ( 384 * m_nBUMPMAP ) + ( 1152 * m_nBUMPMAP2 ) + ( 2304 * m_nCUBEMAP ) + ( 4608 * m_nENVMAPMASK ) + ( 9216 * m_nBASEALPHAENVMAPMASK ) + ( 18432 * m_nSELFILLUM ) + ( 36864 * m_nNORMALMAPALPHAENVMAPMASK ) + ( 73728 * m_nDIFFUSEBUMPMAP ) + ( 147456 * m_nBASETEXTURENOENVMAP ) + ( 294912 * m_nBASETEXTURE2NOENVMAP ) + ( 589824 * m_nWARPLIGHTING ) + ( 1179648 * m_nFANCY_BLENDING ) + ( 2359296 * m_nSEAMLESS ) + ( 4718592 * m_nOUTLINE ) + ( 9437184 * m_nSOFTEDGES ) + ( 18874368 * m_nBUMPMASK ) + ( 37748736 * m_nNORMAL_DECODE_MODE ) + ( 37748736 * m_nNORMALMASK_DECODE_MODE ) + ( 37748736 * m_nDETAIL_BLEND_MODE ) + 0;
 	}
 };
-#define shaderStaticTest_lightmappedgeneric_ps20 psh_forgot_to_set_static_MASKEDBLENDING + psh_forgot_to_set_static_BASETEXTURE2 + psh_forgot_to_set_static_DETAILTEXTURE + psh_forgot_to_set_static_BUMPMAP + psh_forgot_to_set_static_BUMPMAP2 + psh_forgot_to_set_static_CUBEMAP + psh_forgot_to_set_static_ENVMAPMASK + psh_forgot_to_set_static_BASEALPHAENVMAPMASK + psh_forgot_to_set_static_SELFILLUM + psh_forgot_to_set_static_NORMALMAPALPHAENVMAPMASK + psh_forgot_to_set_static_DIFFUSEBUMPMAP + psh_forgot_to_set_static_BASETEXTURENOENVMAP + psh_forgot_to_set_static_BASETEXTURE2NOENVMAP + psh_forgot_to_set_static_WARPLIGHTING + psh_forgot_to_set_static_FANCY_BLENDING + psh_forgot_to_set_static_SEAMLESS + psh_forgot_to_set_static_BUMPMASK + psh_forgot_to_set_static_DETAIL_BLEND_MODE + 0
+#define shaderStaticTest_lightmappedgeneric_ps20 psh_forgot_to_set_static_MASKEDBLENDING + psh_forgot_to_set_static_BASETEXTURE2 + psh_forgot_to_set_static_DETAILTEXTURE + psh_forgot_to_set_static_BUMPMAP + psh_forgot_to_set_static_BUMPMAP2 + psh_forgot_to_set_static_CUBEMAP + psh_forgot_to_set_static_ENVMAPMASK + psh_forgot_to_set_static_BASEALPHAENVMAPMASK + psh_forgot_to_set_static_SELFILLUM + psh_forgot_to_set_static_NORMALMAPALPHAENVMAPMASK + psh_forgot_to_set_static_DIFFUSEBUMPMAP + psh_forgot_to_set_static_BASETEXTURENOENVMAP + psh_forgot_to_set_static_BASETEXTURE2NOENVMAP + psh_forgot_to_set_static_WARPLIGHTING + psh_forgot_to_set_static_FANCY_BLENDING + psh_forgot_to_set_static_SEAMLESS + psh_forgot_to_set_static_OUTLINE + psh_forgot_to_set_static_SOFTEDGES + psh_forgot_to_set_static_BUMPMASK + psh_forgot_to_set_static_NORMAL_DECODE_MODE + psh_forgot_to_set_static_NORMALMASK_DECODE_MODE + psh_forgot_to_set_static_DETAIL_BLEND_MODE + 0
 class lightmappedgeneric_ps20_Dynamic_Index
 {
 private:
@@ -561,7 +661,7 @@ private:
 public:
 	void SetLIGHTING_PREVIEW( int i )
 	{
-		Assert( i >= 0 && i <= 0 );
+		Assert( i >= 0 && i <= 2 );
 		m_nLIGHTING_PREVIEW = i;
 #ifdef _DEBUG
 		m_bLIGHTING_PREVIEW = true;

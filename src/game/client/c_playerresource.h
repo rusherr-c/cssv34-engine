@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Entity that propagates general data needed by clients for every player.
 //
@@ -16,6 +16,9 @@
 #include "c_baseentity.h"
 #include <igameresources.h>
 
+#define PLAYER_UNCONNECTED_NAME	"unconnected"
+#define PLAYER_ERROR_NAME		"ERRORNAME"
+
 class C_PlayerResource : public C_BaseEntity, public IGameResources
 {
 	DECLARE_CLASS( C_PlayerResource, C_BaseEntity );
@@ -26,7 +29,7 @@ public:
 					C_PlayerResource();
 	virtual			~C_PlayerResource();
 
-public : // IGameResources intreface
+public : // IGameResources interface
 
 	// Team data access 
 	virtual int		GetTeamScore( int index );
@@ -39,6 +42,7 @@ public : // IGameResources intreface
 	virtual bool	IsFakePlayer( int index );
 	virtual bool	IsLocalPlayer( int index  );
 	virtual bool	IsHLTV(int index);
+	virtual bool	IsReplay(int index);
 
 	virtual const char *GetPlayerName( int index );
 	virtual int		GetPing( int index );
@@ -51,6 +55,9 @@ public : // IGameResources intreface
 
 	virtual void ClientThink();
 	virtual	void	OnDataChanged(DataUpdateType_t updateType);
+
+	uint32 GetAccountID( int iIndex );
+	bool IsValid( int iIndex );
 
 protected:
 	void	UpdatePlayerName( int slot );
@@ -66,7 +73,9 @@ protected:
 	bool	m_bAlive[MAX_PLAYERS+1];
 	int		m_iHealth[MAX_PLAYERS+1];
 	Color	m_Colors[MAX_TEAMS];
-
+	uint32	m_iAccountID[MAX_PLAYERS+1];
+	bool	m_bValid[MAX_PLAYERS+1];
+	string_t m_szUnconnectedName;
 };
 
 extern C_PlayerResource *g_PR;

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //////////////////////////////////////////////////////////////////////////////////////
 //
 // Written by Zoltan Csizmadia, zoltan_csizmadia@yahoo.com

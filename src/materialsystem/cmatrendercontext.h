@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -57,7 +57,11 @@ class CMatRenderContextBase : public CRefCounted1<IMatRenderContextInternal>
 public:
 	virtual void							InitializeFrom( CMatRenderContextBase *pInitialState );
 
-	void									SetFrameTime( float frameTime ) { 	m_LastSetToneMapScale=Vector(1,1,1); m_FrameTime = frameTime; }
+	InitReturnVal_t							Init();
+	void									Shutdown();
+	void									CompactMemory();
+
+	void									SetFrameTime( float frameTime ) { m_FrameTime = frameTime; }
 
 	ICallQueue *							GetCallQueue() { return NULL; }
 	CMatCallQueue *							GetCallQueueInternal() { return NULL; }
@@ -138,6 +142,25 @@ public:
 	// Inherited from IMaterialSystemInternal
 	int										GetLightmapPage( void );
 
+	virtual void *							LockRenderData( int nSizeInBytes );
+	virtual void							UnlockRenderData( void *pData );
+	virtual void							AddRefRenderData();
+	virtual void							ReleaseRenderData();
+	virtual bool							IsRenderData( const void *pData ) const;
+	void									MarkRenderDataUnused( bool bFrameEnd );
+	int										RenderDataSizeUsed() const;
+
+	// debugging
+	virtual void							PrintfVA( char *fmt, va_list vargs );
+	virtual void							Printf( PRINTF_FORMAT_STRING const char *fmt, ... );
+	virtual	float							Knob( char *knobname, float *setvalue = NULL );
+
+protected:
+	void									OnAsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char** pDstName, IAsyncTextureOperationReceiver* pRecipient );
+	void									OnAsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs );
+	void									OnAsyncUnmap( ITextureInternal* pTexToUnmap );
+	void									OnAsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient );
+
 protected:
 	enum MatrixStackFlags_t
 	{
@@ -180,6 +203,7 @@ protected:
 	void RecomputeViewState();
 	void RecomputeViewProjState();
 	void CurrentMatrixChanged();
+	virtual void OnRenderDataUnreferenced() {}
 
 protected:
 	IMaterialInternal *					m_pCurrentMaterial;
@@ -221,6 +245,11 @@ protected:
 	ShaderViewport_t					m_Viewport;
 	CMaterialSystem *					m_pMaterialSystem;
 
+	static CMemoryStack					sm_RenderData[2];
+	static int							sm_nRenderLockCount;
+	static int							sm_nRenderStack;
+	static int							sm_nInitializeCount;
+
 	bool								m_bFlashlightEnable : 1;
 	bool								m_bDirtyViewState : 1;
 	bool								m_bDirtyViewProjState : 1;
@@ -234,6 +263,8 @@ protected:
 
 class CMatRenderContext : public CMatRenderContextBase
 {
+	typedef CMatRenderContextBase BaseClass;
+
 public:
 	CMatRenderContext();
 
@@ -312,6 +343,8 @@ public:
 
 	// Allows us to override the depth buffer setting of a material
 	DELEGATE_TO_OBJECT_2V(					OverrideDepthEnable, bool, bool, g_pShaderAPI );
+	DELEGATE_TO_OBJECT_2V(					OverrideAlphaWriteEnable, bool, bool, g_pShaderAPI );
+	DELEGATE_TO_OBJECT_2V(					OverrideColorWriteEnable, bool, bool, g_pShaderAPI );
 
 	// FIXME: This is a hack required for NVidia/XBox, can they fix in drivers?
 	void									DrawScreenSpaceQuad( IMaterial* pMaterial );
@@ -334,6 +367,7 @@ public:
 	DELEGATE_TO_OBJECT_3V(					ClearColor3ub, unsigned char, unsigned char, unsigned char, g_pShaderAPI );
 	DELEGATE_TO_OBJECT_4V(					ClearColor4ub, unsigned char, unsigned char, unsigned char, unsigned char, g_pShaderAPI );
 	DELEGATE_TO_OBJECT_2V(					ClearBuffersObeyStencil, bool, bool, g_pShaderAPI );
+	DELEGATE_TO_OBJECT_3V(					ClearBuffersObeyStencilEx, bool, bool, bool, g_pShaderAPI );
 	DELEGATE_TO_OBJECT_0V(					PerformFullScreenStencilOperation, g_pShaderAPI );
 
 	// read to a unsigned char rgb image.
@@ -442,7 +476,7 @@ public:
 	// What are the lightmap dimensions?
 	void									GetLightmapDimensions( int *w, int *h );
 
-	void									DrawClearBufferQuad( unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool bClearColor, bool bClearDepth );
+	void									DrawClearBufferQuad( unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool bClearColor, bool bClearAlpha, bool bClearDepth );
 
 	void									UpdateHeightClipUserClipPlane( void );
 
@@ -453,6 +487,7 @@ public:
 
 	void									BindLightmapTexture( ITexture *pLightmapTexture );
 	void									CopyRenderTargetToTextureEx( ITexture *pTexture, int nRenderTargetID, Rect_t *pSrcRect, Rect_t *pDstRect = NULL );
+	void									CopyTextureToRenderTargetEx( int nRenderTargetID, ITexture *pTexture, Rect_t *pSrcRect, Rect_t *pDstRect = NULL );
 	
 	DELEGATE_TO_OBJECT_2V(					SetFloatRenderingParameter, int, float, g_pShaderAPI );
 	DELEGATE_TO_OBJECT_2V(					SetIntRenderingParameter, int, int, g_pShaderAPI );
@@ -501,6 +536,14 @@ public:
 	DELEGATE_TO_OBJECT_0V(					BeginFrame, g_pShaderAPI );
 	DELEGATE_TO_OBJECT_0V(					EndFrame, g_pShaderAPI );
 
+	virtual void							AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs );
+
+	virtual void							AsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE;
+	virtual void							AsyncUnmap( ITextureInternal* pTexToUnmap ) OVERRIDE;
+	virtual void							AsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE;
+
+
+
 	virtual void							BeginMorphAccumulation();
 	virtual void							EndMorphAccumulation();
 	virtual void							AccumulateMorph( IMorph* pMorph, int nMorphCount, const MorphWeight_t* pWeights );
@@ -534,6 +577,17 @@ public:
 	virtual void							EnableNonInteractiveMode( MaterialNonInteractiveMode_t mode );
 	virtual void			                RefreshFrontBufferNonInteractive();
 
+	// debug logging
+	virtual void							PrintfVA( char *fmt, va_list vargs );
+	virtual void							Printf( PRINTF_FORMAT_STRING const char *fmt, ... );
+	virtual float							Knob( char *knobname, float *setvalue=NULL );
+
+#ifdef DX_TO_GL_ABSTRACTION
+	void									DoStartupShaderPreloading( void );
+#endif
+
+	virtual void							TextureManagerUpdate();
+
 	//---------------------------------------------------------
 protected:
 	
@@ -557,6 +611,8 @@ protected:
 	void BindBumpLightmap( Sampler_t stage );
 	void BindFullbrightLightmap( Sampler_t stage );
 	void BindBumpedFullbrightLightmap( Sampler_t stage );
+
+	virtual void OnRenderDataUnreferenced();
 
 	const CMatLightmaps *GetLightmaps() const;
 	CMatLightmaps *GetLightmaps();

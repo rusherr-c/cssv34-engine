@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,6 +8,9 @@
 #include "usermessages.h"
 #include "shake.h"
 #include "voice_gamemgr.h"
+
+// NVNT include to register in haptic user messages
+#include "haptics/haptic_msgs.h"
 
 void RegisterUserMessages()
 {
@@ -47,5 +50,31 @@ void RegisterUserMessages()
 	usermessages->Register( "UpdateRadar", -1 );
 	usermessages->Register( "KillCam", -1 );
 	usermessages->Register( "MarkAchievement", -1 );
-}
 
+	// Voting
+	usermessages->Register( "CallVoteFailed", -1 );
+	usermessages->Register( "VoteStart", -1 );
+	usermessages->Register( "VotePass", -1 );
+	usermessages->Register( "VoteFailed", 2 );
+	usermessages->Register( "VoteSetup", -1 );  // Initiates client-side voting UI
+
+	// NVNT register haptic user messages
+	RegisterHapticMessages();
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Registering PlayerStatsUpdate for Stats implementation
+	// [dwenger] AchievementEvent: Necessary for server-side achievement awarding
+    // [tj]      Added support for absolute current match statistics updates   
+	//=============================================================================
+	 
+	usermessages->Register( "PlayerStatsUpdate_DEPRECATED", -1 ); // Protocol changed, this message replaced below
+    usermessages->Register( "AchievementEvent", -1 );
+	usermessages->Register( "MatchEndConditions", -1 ); //The end conditions for the match.  long frag limit, long max rounds, long rounds needed won, and long time
+    usermessages->Register( "MatchStatsUpdate", -1 ); 
+	usermessages->Register( "PlayerStatsUpdate", -1 ); //Processes stats update
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+}

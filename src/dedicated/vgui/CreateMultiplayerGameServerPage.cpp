@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,6 @@
 
 #ifdef _WIN32
 #include <stdio.h>
-#include "steam.h"
 
 #include "CreateMultiplayerGameServerPage.h"
 #include <Winsock2.h>
@@ -24,7 +23,7 @@ using namespace vgui;
 
 #include <OfflineMode.h>
 
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "mainpanel.h"
 #include "tier0/icommandline.h"
 #include "netapi.h"
@@ -36,10 +35,6 @@ using namespace vgui;
 
 
 //#define ALLOW_OLD_ENGINE_GAMES
-
-
-// filesystem_steam.cpp implements this useful function - mount all the caches for a given app ID.
-extern void MountDependencies( int iAppId, CUtlVector<unsigned int> &depList );
 
 
 bool IsEp1EraAppID( int iSteamAppId )
@@ -55,7 +50,7 @@ const char *GetLiblistFallbackDir( const char *pszGameDir )
 
 	szFallback[0] = 0;
 
-	_snprintf( szTemp, sizeof(szTemp) - 1, "%s\\liblist.gam", pszGameDir );
+	V_sprintf_safe( szTemp, "%s\\liblist.gam", pszGameDir );
 	g_pFullFileSystem->GetLocalCopy( szTemp );
 
 	FileHandle_t hFile = g_pFullFileSystem->Open( szTemp, "rt" );
@@ -147,7 +142,7 @@ CCreateMultiplayerGameServerPage::CCreateMultiplayerGameServerPage(vgui::Panel *
 	int i;
 	for( i = 1 ; i <= MAX_PLAYERS ; i++ ) 
 	{
-		_snprintf(num, 3, "%i", i);
+		V_sprintf_safe(num, "%i", i);
 		m_pNumPlayers->AddItem(num, NULL);
 	}
 	m_pNumPlayers->ActivateItemByRow(23); // 24 players by default 
@@ -167,7 +162,7 @@ CCreateMultiplayerGameServerPage::CCreateMultiplayerGameServerPage(vgui::Panel *
 
 	// load some defaults into the controls
 	SetControlString("ServerNameEdit", "Half-Life dedicated server");
-	Q_strncpy(m_szGameName, "Half-Life", sizeof(m_szGameName));
+	V_strcpy_safe(m_szGameName, "Half-Life");
 
 	LoadMODList();
 
@@ -352,7 +347,7 @@ bool CCreateMultiplayerGameServerPage::BadRconChars(const char *pass)
 
 	for(unsigned int i=0;i<strlen(pass);i++)
 	{
-		bad |= !static_cast<bool>(isalnum(pass[i]));
+		bad |= !( V_isalnum(pass[i]) ? true : false );
 	}
 	return bad;
 }
@@ -374,8 +369,8 @@ void CCreateMultiplayerGameServerPage::OnCommand(const char *cmd)
 	int secure = GetControlInt("SecureCheck", 1);
 	m_pNumPlayers->GetText(cvars, 1024);
 	m_iMaxPlayers = atoi(cvars);
-	strncpy(m_szHostName, GetControlString("ServerNameEdit", ""), DATA_STR_LENGTH);
-	strncpy(m_szPassword, GetControlString("RCONPasswordEdit", ""), DATA_STR_LENGTH);
+	V_strcpy_safe(m_szHostName, GetControlString("ServerNameEdit", ""));
+	V_strcpy_safe(m_szPassword, GetControlString("RCONPasswordEdit", ""));
 	m_iPort = GetControlInt("PortEdit", 27015);
 
 	if (!stricmp(cmd, "cancel"))
@@ -402,7 +397,7 @@ void CCreateMultiplayerGameServerPage::OnCommand(const char *cmd)
 		}
 		
 	
-	//	strncpy(m_szPassword, GetControlString("RCONPasswordEdit", ""), DATA_STR_LENGTH);
+	//	V_strcpy_safe(m_szPassword, GetControlString("RCONPasswordEdit", ""));
 		if (strlen(m_szPassword) < 3 || BadRconChars(m_szPassword))
 		{
 			MessageBox *dlg = new MessageBox("#Start_Server_RCON_Error_Title", "#Start_Server_RCON_Error");
@@ -410,7 +405,7 @@ void CCreateMultiplayerGameServerPage::OnCommand(const char *cmd)
 		}
 		else
 		{
-			_snprintf(cvars, 1024, "rcon_password \"%s\"\nsetmaster enable\nhostname \"%s\"\n", m_szPassword, m_szHostName);
+			V_sprintf_safe(cvars, "rcon_password \"%s\"\nsetmaster enable\nhostname \"%s\"\n", m_szPassword, m_szHostName);
 
 			m_pGameCombo->SetEnabled(false);
 			m_pNumPlayers->SetEnabled(false);
@@ -425,36 +420,37 @@ void CCreateMultiplayerGameServerPage::OnCommand(const char *cmd)
 			}
 			m_iServer.port = (local.port & 0xff) << 8 | (local.port & 0xff00) >> 8;;
 
-			strcpy(m_iServer.name, m_szHostName);
-			strcpy(m_iServer.map, GetMapName());
-			strcpy(m_iServer.gameDir, m_szMod);
+			V_strcpy_safe(m_iServer.name, m_szHostName);
+			V_strcpy_safe(m_iServer.map, GetMapName());
+			V_strcpy_safe(m_iServer.gameDir, m_szMod);
 			m_iServer.maxPlayers = m_iMaxPlayers;
 
 			SetVisible(false);
 
-			// mount the caches
 			KeyValues *gameData = m_pGameCombo->GetActiveItemUserData();
-			if (CommandLine()->CheckParm("-steam"))
-			{
-				if (gameData)
-				{
-					KeyValues *pFileSystem = gameData->FindKey( "FileSystem" );
-					if ( !pFileSystem )
-						Error( "Game %s missing FileSystem key.", gameData->GetString( "game" ) );
 
-					// Mods just specify their app ID (CS, HL2, HL2MP, etc), and it mounts all the necessary caches.
-					int iAppId = pFileSystem->GetInt( "SteamAppId" );
-					if ( iAppId )
-					{
-						CUtlVector<unsigned int> depList;
-						MountDependencies( iAppId, depList );
-
-						char gameinfoFilename[MAX_PATH];
-						Q_snprintf( gameinfoFilename, sizeof( gameinfoFilename ), "%s\\gameinfo.txt", m_iServer.gameDir );
-						g_pFullFileSystem->GetLocalCopy( gameinfoFilename );
-					}
-				}
-			}
+//			// mount the caches
+//			if (CommandLine()->CheckParm("-steam"))
+//			{
+//				if (gameData)
+//				{
+//					KeyValues *pFileSystem = gameData->FindKey( "FileSystem" );
+//					if ( !pFileSystem )
+//						Error( "Game %s missing FileSystem key.", gameData->GetString( "game" ) );
+//
+//					// Mods just specify their app ID (CS, HL2, HL2MP, etc), and it mounts all the necessary caches.
+//					int iAppId = pFileSystem->GetInt( "SteamAppId" );
+//					if ( iAppId )
+//					{
+//						CUtlVector<unsigned int> depList;
+//						MountDependencies( iAppId, depList );
+//
+//						char gameinfoFilename[MAX_PATH];
+//						Q_snprintf( gameinfoFilename, sizeof( gameinfoFilename ), "%s\\gameinfo.txt", m_iServer.gameDir );
+//						g_pFullFileSystem->GetLocalCopy( gameinfoFilename );
+//					}
+//				}
+//			}
 
 			// Launch the old dedicated server if necessary.
 			if ( LaunchOldDedicatedServer( gameData ) )
@@ -557,7 +553,7 @@ void CCreateMultiplayerGameServerPage::LoadMODList()
 void CCreateMultiplayerGameServerPage::LoadModListInDirectory( const char *pDirectoryName )
 {
 	char searchString[MAX_PATH*2];
-	Q_strncpy( searchString, pDirectoryName, sizeof( searchString ) );
+	V_strcpy_safe( searchString, pDirectoryName );
 	Q_AppendSlash( searchString, sizeof( searchString ) );
 	Q_strncat( searchString, "*.*", sizeof( searchString ), COPY_ALL_CHARACTERS );
 
@@ -573,11 +569,11 @@ void CCreateMultiplayerGameServerPage::LoadModListInDirectory( const char *pDire
 			{
 				// If we don't do this, then the games in hlds_steamgames.vdf will get listed twice
 				// since their gamedir is listed as "cstrike" and "hl2mp", not ".\cstrike" or ".\hl2mp".
-				Q_strncpy( fullFilename, filename, sizeof( fullFilename ) );
+				V_strcpy_safe( fullFilename, filename );
 			}
 			else
 			{
-				Q_strncpy( fullFilename, pDirectoryName, sizeof( fullFilename ) );
+				V_strcpy_safe( fullFilename, pDirectoryName );
 				Q_AppendSlash( fullFilename, sizeof( fullFilename ) );
 				Q_strncat( fullFilename, filename, sizeof( fullFilename ), COPY_ALL_CHARACTERS );
 			}
@@ -689,11 +685,11 @@ int CCreateMultiplayerGameServerPage::LoadMaps( const char *pszMod )
 		const char *str = strstr( pszFilename, "maps" );
 		if ( str )
 		{
-			strncpy( mapname, str + 5, sizeof(mapname) - 1 ); // maps + \\ = 5
+			V_strcpy_safe( mapname, str + 5 ); // maps + \\ = 5
 		}
 		else
 		{
-			strncpy( mapname, pszFilename, sizeof(mapname) - 1 );
+			V_strcpy_safe( mapname, pszFilename );
 		}
 
 		char *ext = strstr( mapname, ".bsp" );
@@ -808,13 +804,13 @@ const char *CCreateMultiplayerGameServerPage::GetRconPassword()
 void CCreateMultiplayerGameServerPage::GetServer(serveritem_t &s)
 {
 	s=m_iServer;
-	strcpy(s.name,m_iServer.name);
-	strcpy(s.rconPassword,m_iServer.rconPassword);
+	V_strcpy_safe(s.name,m_iServer.name);
+	V_strcpy_safe(s.rconPassword,m_iServer.rconPassword);
 	memcpy(s.ip,m_iServer.ip,sizeof(m_iServer.ip));
 	memcpy(s.pings,m_iServer.pings,3*sizeof(int));
-	strcpy(s.gameDir,m_iServer.gameDir);
-	strcpy(s.map,m_iServer.map);
-	strcpy(s.gameDescription,m_iServer.gameDescription);
+	V_strcpy_safe(s.gameDir,m_iServer.gameDir);
+	V_strcpy_safe(s.map,m_iServer.map);
+	V_strcpy_safe(s.gameDescription,m_iServer.gameDescription);
 }
 
 //-----------------------------------------------------------------------------
@@ -828,7 +824,7 @@ void CCreateMultiplayerGameServerPage::OnTextChanged(Panel *panel)
 		bool updateHostname = false;
 		char hostname[256];
 		GetControlString("ServerNameEdit", m_szHostName, sizeof(m_szHostName));
-		_snprintf(hostname, sizeof(hostname) - 1, "%s dedicated server", m_szGameName);
+		V_sprintf_safe(hostname, "%s dedicated server", m_szGameName);
 		if (!stricmp(m_szHostName, hostname))
 		{
 			updateHostname = true;
@@ -847,7 +843,7 @@ void CCreateMultiplayerGameServerPage::OnTextChanged(Panel *panel)
 		if ( !pGameDir )
 			Error( "Game %s missing 'gamedir' key.", m_szGameName );
 
-		Q_strncpy( m_szMod, pGameDir, sizeof( m_szMod ) );
+		V_strcpy_safe( m_szMod, pGameDir );
 
 
 		// re-load the GameInfo KeyValues
@@ -863,7 +859,7 @@ void CCreateMultiplayerGameServerPage::OnTextChanged(Panel *panel)
 		// redo the hostname with the new game name
 		if (updateHostname)
 		{
-			_snprintf(hostname, sizeof(hostname) - 1, "%s dedicated server", m_szGameName);
+			V_sprintf_safe(hostname, "%s dedicated server", m_szGameName);
 			SetControlString("ServerNameEdit", hostname);
 		}
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,7 +21,7 @@ ConVar r_ClipAreaPortals( "r_ClipAreaPortals", "1", FCVAR_CHEAT );
 ConVar r_DrawPortals( "r_DrawPortals", "0", FCVAR_CHEAT );
 
 CUtlVector<CPortalRect> g_PortalRects;
-extern bool				g_bViewerInSolidSpace = false;
+static bool				g_bViewerInSolidSpace = false;
 
 			  
 
@@ -67,6 +67,13 @@ static int g_nVisibleAreas;
 
 // Tied to CAreaCullInfo::m_GlobalCounter.
 static unsigned short g_GlobalCounter = 1;
+
+
+// A copy of the current view setup, but possibly nobbled a bit.
+static CViewSetup g_viewSetup;
+static CPortalRect g_viewWindow;
+// Maps from world space to normalised (-1,1) screen coords.
+static VMatrix g_ScreenFromWorldProjection;
 
 
 // ------------------------------------------------------------------------------------ //
@@ -120,7 +127,7 @@ static inline bool GetPortalScreenExtents( dareaportal_t *pPortal,
 	bool bValidExtents = false;
 	worldbrushdata_t *pBrushData = host_state.worldbrush;
 	
-	int nStartVerts = min( pPortal->m_nClipPortalVerts, MAX_PORTAL_VERTS );
+	int nStartVerts = min( (int)pPortal->m_nClipPortalVerts, MAX_PORTAL_VERTS );
 
 	// NOTE: We need two passes to deal with reflection. We need to compute
 	// the screen extents for both the reflected + non-reflected area portals
@@ -203,7 +210,7 @@ static inline bool GetPortalScreenExtents( dareaportal_t *pPortal,
 		{
 			Vector &point = clip->v0[i];
 
-			g_EngineRenderer->ClipTransform( point, &screenPos );
+			g_EngineRenderer->ClipTransformWithProjection ( g_ScreenFromWorldProjection, point, &screenPos );
 
 			portalRect.left   = fpmin( screenPos.x, portalRect.left );
 			portalRect.bottom = fpmin( screenPos.y, portalRect.bottom );
@@ -356,21 +363,20 @@ static void IncrementGlobalCounter()
 	}
 }
 
-ConVar r_snapportal( "r_snapportal", "-1" );
-extern void CSGFrustum( Frustum_t &frustum );
 
-static void R_SetupVisibleAreaFrustums()
+static void R_SetupGlobalFrustum()
 {
 #ifndef SWDS
-	const CViewSetup &viewSetup = g_EngineRenderer->ViewGetCurrent();
-	
-	CPortalRect viewWindow;
-	if( viewSetup.m_bOrtho )
+
+	// Copy the current view away so that we can play with it if needed.
+	g_viewSetup = g_EngineRenderer->ViewGetCurrent();
+
+	if( g_viewSetup.m_bOrtho )
 	{
-		viewWindow.right	= viewSetup.m_OrthoRight;
-		viewWindow.left		= viewSetup.m_OrthoLeft;
-		viewWindow.top		= viewSetup.m_OrthoTop;
-		viewWindow.bottom	= viewSetup.m_OrthoBottom;
+		g_viewWindow.right	= g_viewSetup.m_OrthoRight;
+		g_viewWindow.left		= g_viewSetup.m_OrthoLeft;
+		g_viewWindow.top		= g_viewSetup.m_OrthoTop;
+		g_viewWindow.bottom	= g_viewSetup.m_OrthoBottom;
 	}
 	else
 	{
@@ -379,11 +385,47 @@ static void R_SetupVisibleAreaFrustums()
 		float xFOV = g_EngineRenderer->GetFov() * 0.5f;
 		float yFOV = g_EngineRenderer->GetFovY() * 0.5f;
 
-		viewWindow.right	= tan( DEG2RAD( xFOV ) );
-		viewWindow.left		= -viewWindow.right;
-		viewWindow.top		= tan( DEG2RAD( yFOV ) );
-		viewWindow.bottom	= -viewWindow.top;
+		g_viewWindow.right	= tan( DEG2RAD( xFOV ) );
+		g_viewWindow.left	= -g_viewWindow.right;
+		g_viewWindow.top	= tan( DEG2RAD( yFOV ) );
+		g_viewWindow.bottom	= -g_viewWindow.top;
+
+		if ( g_viewSetup.m_bOffCenter )
+		{
+			// How did this ever work?
+			Assert ( !"test m_bOffCenter frustums with area portals" );
+		}
+		else if ( g_viewSetup.m_bViewToProjectionOverride )
+		{
+			// ...this has been tested and works!
+		}
+
+		// Rather than try to deal with crazy projection matrices (shear, trapezoid, etc), take whatever FOV we're given,
+		// assume it's conservative, and then construct a matching projection matrix for it. Then use that consistent
+		// hallucination throughout, rather than refer back to the engine's actual proj. matrix for anything.
+		VMatrix matrixView;
+		VMatrix matrixProjection;
+		VMatrix matrixWorldToScreen;
+		g_viewSetup.m_bViewToProjectionOverride = false;
+
+		ComputeViewMatrices (
+			&matrixView, 
+			&matrixProjection,
+			&matrixWorldToScreen,
+			g_viewSetup );
+
+		g_ScreenFromWorldProjection = matrixWorldToScreen;
 	}
+
+#endif //#ifndef SWDS
+}
+
+ConVar r_snapportal( "r_snapportal", "-1" );
+extern void CSGFrustum( Frustum_t &frustum );
+
+static void R_SetupVisibleAreaFrustums()
+{
+#ifndef SWDS
 
 	// Now scale the portals as specified in the normalized view frustum (-1,-1,1,1)
 	// into our view window and generate planes out of that.
@@ -392,12 +434,12 @@ static void R_SetupVisibleAreaFrustums()
 		CAreaCullInfo *pInfo = &g_AreaCullInfo[ g_VisibleAreas[i] ];
 
 		CPortalRect portalWindow;
-		portalWindow.left    = RemapVal( pInfo->m_Rect.left,   -1, 1, viewWindow.left,   viewWindow.right );
-		portalWindow.right   = RemapVal( pInfo->m_Rect.right,  -1, 1, viewWindow.left,   viewWindow.right );
-		portalWindow.top     = RemapVal( pInfo->m_Rect.top,    -1, 1, viewWindow.bottom, viewWindow.top );
-		portalWindow.bottom  = RemapVal( pInfo->m_Rect.bottom, -1, 1, viewWindow.bottom, viewWindow.top );
+		portalWindow.left    = RemapVal( pInfo->m_Rect.left,   -1, 1, g_viewWindow.left,   g_viewWindow.right );
+		portalWindow.right   = RemapVal( pInfo->m_Rect.right,  -1, 1, g_viewWindow.left,   g_viewWindow.right );
+		portalWindow.top     = RemapVal( pInfo->m_Rect.top,    -1, 1, g_viewWindow.bottom, g_viewWindow.top );
+		portalWindow.bottom  = RemapVal( pInfo->m_Rect.bottom, -1, 1, g_viewWindow.bottom, g_viewWindow.top );
 		
-		if( viewSetup.m_bOrtho )
+		if( g_viewSetup.m_bOrtho )
 		{
 			// Left and right planes...
 			float orgOffset = DotProduct(CurrentViewOrigin(), CurrentViewRight());
@@ -411,6 +453,17 @@ static void R_SetupVisibleAreaFrustums()
 		}
 		else
 		{
+
+			if ( g_viewSetup.m_bOffCenter )
+			{
+				// How did this ever work?
+				Assert ( !"test m_bOffCenter frustums with area portals" );
+			}
+			else if ( g_viewSetup.m_bViewToProjectionOverride )
+			{
+				// ...this has been tested and works!
+			}
+
 			Vector normal;
 			const cplane_t *pTest;
 
@@ -440,7 +493,7 @@ static void R_SetupVisibleAreaFrustums()
 
 			// farz
 			pInfo->m_Frustum.SetPlane( FRUSTUM_FARZ, PLANE_ANYZ, -CurrentViewForward(), 
-				DotProduct(-CurrentViewForward(), CurrentViewOrigin() + CurrentViewForward()*viewSetup.zFar) );
+				DotProduct(-CurrentViewForward(), CurrentViewOrigin() + CurrentViewForward()*g_viewSetup.zFar) );
 		}
 
 		// DEBUG: Code to visualize the areaportal frustums in 3D
@@ -558,7 +611,7 @@ bool R_CullNode( Frustum_t *pAreaFrustum, mnode_t *pNode, int& nClipMask )
 }
 
 
-static ConVar r_portalscloseall( "r_portalscloseall", "0" );
+static ConVar r_portalscloseall( "r_portalscloseall", "0", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY );
 static ConVar r_portalsopenall( "r_portalsopenall", "0", FCVAR_CHEAT, "Open all portals" );
 static ConVar r_ShowViewerArea( "r_ShowViewerArea", "0" );
 
@@ -610,8 +663,13 @@ void R_SetupAreaBits( int iForceViewLeaf /* = -1 */, const VisOverrideData_t* pV
 		return;
 	}
 
+#if defined( REPLAY_ENABLED )
+	if ( host_state.worldbrush->leafs[leaf].contents & CONTENTS_SOLID ||
+		 cl.ishltv || cl.isreplay || !cl.m_bAreaBitsValid || r_portalsopenall.GetBool()  )
+#else
 	if ( host_state.worldbrush->leafs[leaf].contents & CONTENTS_SOLID ||
 		 cl.ishltv || !cl.m_bAreaBitsValid || r_portalsopenall.GetBool()  )
+#endif
 	{
 		// Draw everything if we're in solid space or if r_portalsopenall is true (used for building cubemaps)
 		g_bViewerInSolidSpace = true;
@@ -628,7 +686,8 @@ void R_SetupAreaBits( int iForceViewLeaf /* = -1 */, const VisOverrideData_t* pV
 
 		g_nVisibleAreas = 0;		
 		Vector vecVisOrigin = (pVisData)?(pVisData->m_vecVisOrigin):(g_EngineRenderer->ViewOrigin());
-		R_FlowThroughArea( area, vecVisOrigin, &rect, pVisData, pWaterReflectionHeight );
+		R_SetupGlobalFrustum();
+		R_FlowThroughArea ( area, vecVisOrigin, &rect, pVisData, pWaterReflectionHeight );
 		R_SetupVisibleAreaFrustums();
 	}
 }

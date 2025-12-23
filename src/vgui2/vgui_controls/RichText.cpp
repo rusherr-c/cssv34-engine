@@ -54,7 +54,6 @@ public:
 		SetPaintEnabled(true);
 #endif
 	}
-	virtual ~ClickPanel() {}
 	
 	void SetTextIndex( int linkStartIndex, int viewStartIndex )
 	{
@@ -114,7 +113,6 @@ public:
 		SetPaintEnabled( false );
 		m_pRichText = pParent;
 	}
-	virtual ~RichTextInterior() {}
 
 /*	virtual IAppearance *GetAppearance()
 	{
@@ -1585,7 +1583,7 @@ void RichText::OnCursorExited()
 //-----------------------------------------------------------------------------
 // Purpose: Handle selection of text by mouse
 //-----------------------------------------------------------------------------
-void RichText::OnCursorMoved(int x, int y)
+void RichText::OnCursorMoved(int ignX, int ignY)
 {
 	if (_mouseSelection)
 	{
@@ -2207,7 +2205,7 @@ void RichText::CopySelected()
 	if (GetSelectedRange(x0, x1))
 	{
 		CUtlVector<wchar_t> buf;
-		for (int i = x0; i <= x1; i++)
+		for (int i = x0; i < x1; i++)
 		{
 			if ( m_TextStream.IsValidIndex(i) == false )
 				 continue;

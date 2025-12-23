@@ -5,18 +5,32 @@ my $dir = getcwd;
 chdir "../../materialsystem/stdshaders";
  
 @output = `perl ..\\..\\devtools\\bin\\checkshaderchecksums.pl stdshader_dx9_20b.txt`;
-$output = join "", @output;
+foreach $_ (@output)
+{
+  $output.=$_ unless(/appchooser360/i);
+}
+
 @output = `perl ..\\..\\devtools\\bin\\checkshaderchecksums.pl stdshader_dx9_30.txt`;
-$output .= join "", @output;
+foreach $_ (@output)
+{
+  $output.=$_ unless(/appchooser360/i);
+}
+
+my $errors;
+
+foreach $_ (@output )
+{
+  $errors.=$_ unless (/appchooser360movie/);
+}
 
 chdir $dir;
 
-print $output;
+print $errors;
 
-if( length( $output ) > 0 )
+if( length( $errors ) > 0 )
 {
 	print "writing errors.txt\n";
 	open FP, ">errors.txt";
-	print FP "$output";
+	print FP "$errors";
 	close FP;
 }

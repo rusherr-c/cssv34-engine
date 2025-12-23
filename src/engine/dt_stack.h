@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -60,7 +60,7 @@ public:
 	
 	enum
 	{
-		MAX_PROXY_RESULTS = 64
+		MAX_PROXY_RESULTS = 256
 	};
 
 	// These point at the various values that the proxies returned. They are setup once, then 
@@ -169,6 +169,10 @@ public:
 		void *pVal = NULL;
 
 		Assert( pProp );
+
+		// We may crash later for doing this, but at least this will allow users to watch their demos
+		if ( !pProp )
+			return NULL;
 
 		pProp->GetDataTableProxyFn()( 
 			pProp,

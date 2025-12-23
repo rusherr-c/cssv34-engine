@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,11 +16,12 @@
 
 class PackedEntity;
 class HLTVEntityData;
+class ReplayEntityData;
 class ServerClass;
 class CEventInfo;
 
 #define INVALID_PACKED_ENTITY_HANDLE (0)
-typedef int PackedEntityHandle_t;
+typedef intptr_t PackedEntityHandle_t;
 
 //-----------------------------------------------------------------------------
 // Purpose: Individual entity data, did the entity exist and what was it's serial number
@@ -42,6 +43,13 @@ public:
 	unsigned int	m_nNodeCluster;  // if (1<<31) is set it's a node, otherwise a cluster
 };
 
+// Replay needs some more data per entity 
+class CReplayEntityData
+{
+public:
+	vec_t			origin[3];	// entity position
+	unsigned int	m_nNodeCluster;  // if (1<<31) is set it's a node, otherwise a cluster
+};
 
 typedef struct
 {
@@ -90,6 +98,7 @@ public:
 
 	// Additional HLTV info
 	CHLTVEntityData			*m_pHLTVEntityData; // is NULL if not in HLTV mode or array of m_pValidEntities entries
+	CReplayEntityData		*m_pReplayEntityData; // is NULL if not in replay mode or array of m_pValidEntities entries
 
 	CEventInfo				**m_pTempEntities; // temp entities
 	int						m_nTempEntities;
@@ -159,7 +168,6 @@ private:
 
 	CUtlLinkedList<CFrameSnapshot*, unsigned short>		m_FrameSnapshots;
 	CClassMemoryPool< PackedEntity >					m_PackedEntitiesPool;
-	CUtlFixedLinkedList<PackedEntity *>					m_PackedEntities; 
 
 	int								m_nPackedEntityCacheCounter;  // increase with every cache access
 	CUtlVector<UnpackedDataCache_t>	m_PackedEntityCache;	// cache for uncompressed packed entities

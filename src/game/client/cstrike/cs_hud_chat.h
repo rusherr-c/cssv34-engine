@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -54,8 +54,11 @@ public:
 	virtual void	Init( void );
 	virtual void	Reset( void );
 
-	void			MsgFunc_SayText2( bf_read &msg );
-	void			MsgFunc_RadioText( bf_read &msg );
+	virtual void	StartMessageMode( int iMessageModeType );
+	virtual void	StopMessageMode( void );
+
+	virtual void	MsgFunc_SayText2( bf_read &msg );
+	virtual void	MsgFunc_RadioText( bf_read &msg );
 	void			MsgFunc_RawAudio( bf_read &msg );
 
 	int				GetChatInputOffset( void );

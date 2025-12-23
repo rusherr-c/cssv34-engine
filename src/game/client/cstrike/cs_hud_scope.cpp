@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,9 +11,9 @@
 #include "hud_numericdisplay.h"
 #include "iclientmode.h"
 #include "c_cs_player.h"
-#include "vguimatsurface/IMatSystemSurface.h"
-#include "materialsystem/IMaterial.h"
-#include "materialsystem/IMesh.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
+#include "materialsystem/imaterial.h"
+#include "materialsystem/imesh.h"
 #include "materialsystem/imaterialvar.h"
 
 #include <vgui/IScheme.h>
@@ -49,7 +49,7 @@ private:
 	int m_iScopeDustTexture;
 };
 
-DECLARE_HUDELEMENT_DEPTH( CHudScope, 100 );
+DECLARE_HUDELEMENT_DEPTH( CHudScope, 70 );
 
 using namespace vgui;
 

@@ -48,6 +48,7 @@ VS_OUTPUT main( const VS_INPUT v )
 	// Transform the input position.
 	float4 projPos = mul( v.vPos, cModelViewProj );
 	o.projPos = projPos;
+	projPos.z = dot( v.vPos, cModelViewProjZ );
 	
 #if defined( _X360 )
 	o.vScreenPos_ReverseZ.x = projPos.x;

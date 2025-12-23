@@ -11,7 +11,7 @@
 #pragma once
 #endif
 
-#include "..\hammer\boundbox.h"
+#include "boundbox.h"
 
 //
 // Each cordon is a named collection of bounding boxes.

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,7 @@
 #include <windows.h>
 #include "mdlcheck_util.h"
 #include "tier0/dbg.h"
+#include "utlvector.h"
 
 extern bool uselogfile;
 
@@ -44,7 +45,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )
@@ -62,6 +63,65 @@ void vprint( int depth, const char *fmt, ... )
 		fclose( fp );
 	}
 }
+
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+// Input  : depth - 
+//			*fmt - 
+//			... - 
+//-----------------------------------------------------------------------------
+CUtlVector< char * > printQueue;
+
+void vprint_queued( int depth, const char *fmt, ... )
+{
+	char string[ 8192 ];
+	strnset( string, ' ', depth * 2 );
+
+	va_list va;
+	va_start( va, fmt );
+	vsprintf( &string[depth * 2], fmt, va );
+	va_end( va );
+
+	printQueue.AddToTail( strdup( string ) );
+}
+
+void dump_print_queue( )
+{
+	FILE *fp = NULL;
+
+	if ( uselogfile )
+	{
+		fp = fopen( "log.txt", "ab" );
+	}
+
+	for (int i = 0; i < printQueue.Count(); i++)
+	{
+		::printf( "%s", printQueue[i] );
+		OutputDebugString( printQueue[i] );
+
+		if ( fp )
+		{
+			char *p = printQueue[i];
+			while ( *p )
+			{
+				if ( *p == '\n' )
+				{
+					fputc( '\r', fp );
+				}
+				fputc( *p, fp );
+				p++;
+			}
+		}
+	}
+	if (fp)
+	{
+		fclose( fp );
+	}
+	printQueue.RemoveAll();
+}
+
 
 
 bool com_ignorecolons = false;  // YWB:  Ignore colons as token separators in COM_Parse

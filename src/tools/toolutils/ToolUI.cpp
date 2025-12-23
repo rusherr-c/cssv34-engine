@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The tool UI has 4 purposes:
 //		1) Create the menu bar and client area (lies under the menu bar)
@@ -10,9 +10,9 @@
 #include "ToolUI.h"
 #include "toolutils/toolmenubar.h"
 #include "toolutils/basetoolsystem.h"
-#include "vgui/cursor.h"
-#include "vgui/isurface.h"
-#include "tier1/keyvalues.h"
+#include "vgui/Cursor.h"
+#include "vgui/ISurface.h"
+#include "tier1/KeyValues.h"
 #include "toolutils/toolmenubar.h"
 
 // memdbgon must be the last include file in a .cpp file!!!

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,6 +26,7 @@
 #include "GameEventManager.h"
 #include "dt_recv_decoder.h"
 #include "utllinkedlist.h"
+#include "cl_demo.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -127,7 +128,7 @@ void CHLTVClientState::CopyNewEntity(
 	pPackedEntity->SetServerAndClientClass( pServerClass, pClientClass );
 
 	// Make space for the baseline data.
-	char packedData[MAX_PACKEDENTITY_DATA];
+	ALIGN4 char packedData[MAX_PACKEDENTITY_DATA] ALIGN4_POST;
 	bf_read fromBuf( "HLTV_ReadEnterPVS1", pFromData, Bits2Bytes( nFromBits ), nFromBits );
 	bf_write writeBuf( "HLTV_ReadEnterPVS2", packedData, sizeof( packedData ) );
 
@@ -135,7 +136,7 @@ void CHLTVClientState::CopyNewEntity(
 	
 	// decode basline, is compressed against zero values 
 	int nChangedProps = RecvTable_MergeDeltas( pClientClass->m_pRecvTable, &fromBuf, 
-		u.m_pBuf, &writeBuf, -1, false, changedProps );
+		u.m_pBuf, &writeBuf, -1, changedProps );
 
 	// update change tick in ChangeFrameList
 	if ( pChangeFrame )
@@ -219,8 +220,8 @@ bool CHLTVClientState::SetSignonState ( int state, int count )
 
 											// let server know that we are a proxy server:
 											NET_SetConVar::cvar_t acvar;
-											Q_strcpy( acvar.name, "tv_relay" );
-											Q_strcpy( acvar.value, "1" );
+											V_strcpy_safe( acvar.name, "tv_relay" );
+											V_strcpy_safe( acvar.value, "1" );
 											convars.m_ConVars.AddToTail( acvar );
 
 											m_NetChannel->SendNetMsg( convars );
@@ -266,6 +267,9 @@ void CHLTVClientState::SendClientInfo( void )
 	info.m_nSendTableCRC = SendTable_GetCRC();
 	info.m_nServerCount = m_nServerCount;
 	info.m_bIsHLTV = true;
+#if defined( REPLAY_ENABLED )
+	info.m_bIsReplay = false;
+#endif
 	info.m_nFriendsID = 0;
 	info.m_FriendsName[0] = 0;
 
@@ -299,7 +303,7 @@ void CHLTVClientState::SendPacket()
 		// use full update rate when active
 		float commandInterval = (2.0f/3.0f) / tv_snapshotrate.GetInt();
 		float maxDelta = min ( host_state.interval_per_tick, commandInterval );
-		float delta = clamp( net_time - m_flNextCmdTime, 0.0f, maxDelta );
+		float delta = clamp( (float)(net_time - m_flNextCmdTime), 0.0f, maxDelta );
 		m_flNextCmdTime = net_time + commandInterval - delta;
 	}
 	else
@@ -341,7 +345,7 @@ bool CHLTVClientState::ProcessServerInfo(SVC_ServerInfo *msg )
 		if ( !msg->m_bIsHLTV )
 		{
 			ConMsg ( "Server (%s) is not a SourceTV proxy.\n", m_NetChannel->GetAddress() );
-			Disconnect();
+			Disconnect( "Server is not a SourceTV proxy", true );
 			return false; 
 		}	
 	}
@@ -352,7 +356,7 @@ bool CHLTVClientState::ProcessServerInfo(SVC_ServerInfo *msg )
 	// Process the message
 	if ( !CBaseClientState::ProcessServerInfo( msg ) )
 	{
-		Disconnect();
+		Disconnect( "CBaseClientState::ProcessServerInfo failed", true );
 		return false;
 	}
 
@@ -372,8 +376,7 @@ bool CHLTVClientState::ProcessServerInfo(SVC_ServerInfo *msg )
 	m_pHLTV->m_nPlayerSlot		= m_nPlayerSlot;
 	
 	// copy other settings to HLTV server
-	m_pHLTV->worldmapCRC		= msg->m_nMapCRC;
-	m_pHLTV->clientDllCRC		= msg->m_nClientCRC;
+	V_memcpy( m_pHLTV->worldmapMD5.bits, msg->m_nMapMD5.bits, MD5_DIGEST_LENGTH );
 	m_pHLTV->m_flTickInterval	= msg->m_fTickInterval;
 
 	host_state.interval_per_tick = msg->m_fTickInterval;
@@ -389,7 +392,7 @@ bool CHLTVClientState::ProcessClassInfo( SVC_ClassInfo *msg )
 	if ( !msg->m_bCreateOnClient )
 	{
 		ConMsg("HLTV SendTable CRC differs from server.\n");
-		Disconnect();
+		Disconnect( "HLTV SendTable CRC differs from server.", true );
 		return false;
 	}
 
@@ -404,8 +407,14 @@ bool CHLTVClientState::ProcessClassInfo( SVC_ClassInfo *msg )
 	DataTable_CreateClientClassInfosFromServerClasses( this );
 
 	LinkClasses();	// link server and client classes
-		
-	if ( !RecvTable_CreateDecoders( serverGameDLL->GetStandardSendProxies() ) ) // create receive table decoders
+
+#ifdef DEDICATED
+	bool bAllowMismatches = false;
+#else
+	bool bAllowMismatches = ( demoplayer && demoplayer->IsPlayingBack() );
+#endif // DEDICATED
+
+	if ( !RecvTable_CreateDecoders( serverGameDLL->GetStandardSendProxies(), bAllowMismatches ) ) // create receive table decoders
 	{
 		Host_EndGame( true, "CL_ParseClassInfo_EndClasses: CreateDecoders failed.\n" );
 		return false;
@@ -719,7 +728,7 @@ void CHLTVClientState::ReadDeltaEnt( CEntityReadInfo &u )
 	}
 
 	// Make space for the baseline data.
-	char packedData[MAX_PACKEDENTITY_DATA];
+	ALIGN4 char packedData[MAX_PACKEDENTITY_DATA] ALIGN4_POST;
 	const void *pFromData;
 	int nFromBits;
 
@@ -740,7 +749,7 @@ void CHLTVClientState::ReadDeltaEnt( CEntityReadInfo &u )
 	
 	// decode baseline, is compressed against zero values 
 	int nChangedProps = RecvTable_MergeDeltas( pToPackedEntity->m_pClientClass->m_pRecvTable,
-		&fromBuf, u.m_pBuf, &writeBuf, -1, false, changedProps );
+		&fromBuf, u.m_pBuf, &writeBuf, -1, changedProps, false );
 
 	// update change tick in ChangeFrameList
 	if ( pChangeFrame )
@@ -776,13 +785,19 @@ void CHLTVClientState::ReadDeltaEnt( CEntityReadInfo &u )
 void CHLTVClientState::ReadPreserveEnt( CEntityReadInfo &u )
 {
 	// copy one of the old entities over to the new packet unchanged
-	if ( u.m_nNewEntity >= MAX_EDICTS )
+
+	// XXX(JohnS): This was historically checking for NewEntity overflow, though this path does not care (and new entity
+	//             may be -1).  The old entity bounds check here seems like what was intended, but since nNewEntity
+	//             should not be overflowed either, I've left that check in case it was guarding against a case I am
+	//             overlooking.
+	if ( u.m_nOldEntity >= MAX_EDICTS || u.m_nOldEntity < 0 || u.m_nNewEntity >= MAX_EDICTS )
 	{
-		Host_Error ("CL_ReadPreserveEnt: u.m_nNewEntity == MAX_EDICTS");
+		Host_Error( "CL_ReadPreserveEnt: Entity out of bounds. Old: %i, New: %i",
+		            u.m_nOldEntity, u.m_nNewEntity );
 	}
 
 	HLTV_CopyExitingEnt( u );
-	
+
 	u.NextOldEntity();
 }
 
@@ -844,7 +859,7 @@ void CHLTVClientState::RunFrame()
 	if ( m_NetChannel && m_NetChannel->IsTimedOut() && IsConnected() )
 	{
 		ConMsg ("\nSourceTV connection timed out.\n");
-		Disconnect();
+		Disconnect( "nSourceTV connection timed out", true );
 		return;
 	}
 

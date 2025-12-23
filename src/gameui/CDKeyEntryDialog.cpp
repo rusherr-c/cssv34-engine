@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 #include "CDKeyEntryDialog.h"
 #include "EngineInterface.h"
 
-#include "SteamCommon.h" // VALVE_AUTH cd key checking code
+#include "steamcommon.h" // VALVE_AUTH cd key checking code
 #include "ValidateNewValveCDKeyClient.h"
 #include "ValveCDKeyGameAndTerritoryCodes.h"
 

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include <windows.h>
 #include "tier1/strtools.h"
 #include <conio.h>

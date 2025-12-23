@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Parsing of entity network packets.
 //
@@ -29,7 +29,7 @@ static ConVar cl_flushentitypacket("cl_flushentitypacket", "0", FCVAR_CHEAT, "Fo
 // Prints important entity creation/deletion events to console
 #if defined( _DEBUG )
 static ConVar cl_deltatrace( "cl_deltatrace", "0", 0, "For debugging, print entity creation/deletion info to console." );
-#define TRACE_DELTA( text ) if ( cl_deltatrace.GetInt() ) { ConMsg( text ); };
+#define TRACE_DELTA( text ) if ( cl_deltatrace.GetInt() ) { ConMsg( "%s", text ); };
 #else
 #define TRACE_DELTA( funcs )
 #endif
@@ -114,7 +114,7 @@ void SpewToFile( char const* pFmt, ... )
 // Purpose: Frees the client DLL's binding to the object.
 // Input  : iEnt - 
 //-----------------------------------------------------------------------------
-void CL_DeleteDLLEntity( int iEnt, char *reason, bool bOnRecreatingAllEntities )
+void CL_DeleteDLLEntity( int iEnt, const char *reason, bool bOnRecreatingAllEntities )
 {
 	IClientNetworkable *pNet = entitylist->GetClientNetworkable( iEnt );
 
@@ -165,7 +165,7 @@ IClientNetworkable* CL_CreateDLLEntity( int iEnt, int iClass, int iSerialNum )
 	}
 
 	Assert(false);
-	return false;
+	return NULL;
 }
 
 void	SpewBitStream( unsigned char* pMem, int bit, int lastbit )
@@ -300,9 +300,9 @@ void CL_CopyNewEntity(
 	int iSerialNum
 	)
 {
-	if ( u.m_nNewEntity >= MAX_EDICTS )
+	if ( u.m_nNewEntity < 0 || u.m_nNewEntity >= MAX_EDICTS )
 	{
-		Host_Error ("CL_CopyNewEntity: m_nNewEntity >= MAX_EDICTS");
+		Host_Error ("CL_CopyNewEntity: u.m_nNewEntity < 0 || m_nNewEntity >= MAX_EDICTS");
 		return;
 	}
 
@@ -334,7 +334,8 @@ void CL_CopyNewEntity(
 		ent = CL_CreateDLLEntity( u.m_nNewEntity, iClass, iSerialNum );
 		if( !ent )
 		{
-			Host_Error( "CL_ParsePacketEntities:  Error creating entity %s(%i)\n", cl.m_pServerClasses[iClass].m_pClientClass->m_pNetworkName, u.m_nNewEntity );
+			const char *pNetworkName = cl.m_pServerClasses[iClass].m_pClientClass ? cl.m_pServerClasses[iClass].m_pClientClass->m_pNetworkName : "";
+			Host_Error( "CL_ParsePacketEntities:  Error creating entity %s(%i)\n", pNetworkName, u.m_nNewEntity );
 			return;
 		}
 
@@ -379,26 +380,26 @@ void CL_CopyNewEntity(
 	if ( u.m_bUpdateBaselines )
 	{
 		// store this baseline in u.m_pUpdateBaselines
-		char packedData[MAX_PACKEDENTITY_DATA];
+		ALIGN4 char packedData[MAX_PACKEDENTITY_DATA] ALIGN4_POST;
 		bf_write writeBuf( "CL_CopyNewEntity->newBuf", packedData, sizeof(packedData) );
 
-		RecvTable_MergeDeltas( pRecvTable, &fromBuf, u.m_pBuf, &writeBuf );
+		RecvTable_MergeDeltas( pRecvTable, &fromBuf, u.m_pBuf, &writeBuf, -1, NULL, true );
 
 		// set the other baseline
 		cl.SetEntityBaseline( (u.m_nBaseline==0)?1:0, pClass, u.m_nNewEntity, packedData, writeBuf.GetNumBytesWritten() );
 
 		fromBuf.StartReading( packedData, writeBuf.GetNumBytesWritten() );
 
-		RecvTable_Decode( pRecvTable, ent->GetDataTableBasePtr(), &fromBuf, u.m_nNewEntity );
+		RecvTable_Decode( pRecvTable, ent->GetDataTableBasePtr(), &fromBuf, u.m_nNewEntity, false );
 
 	}
 	else
 	{
 		// write data from baseline into entity
-		RecvTable_Decode( pRecvTable, ent->GetDataTableBasePtr(), &fromBuf, u.m_nNewEntity );
+		RecvTable_Decode( pRecvTable, ent->GetDataTableBasePtr(), &fromBuf, u.m_nNewEntity, false );
 
 		// Now parse in the contents of the network stream.
-		RecvTable_Decode( pRecvTable, ent->GetDataTableBasePtr(), u.m_pBuf, u.m_nNewEntity );
+		RecvTable_Decode( pRecvTable, ent->GetDataTableBasePtr(), u.m_pBuf, u.m_nNewEntity, true );
 	}
 
 	CL_AddPostDataUpdateCall( u, u.m_nNewEntity, updateType );
@@ -430,6 +431,28 @@ void CL_CopyNewEntity(
 	}
 }
 
+void CL_PreserveExistingEntity( int nOldEntity )
+{
+	IClientNetworkable *pEnt = entitylist->GetClientNetworkable( nOldEntity );
+	if ( !pEnt )
+	{
+		// If you hit this, this is because there's a networked client entity that got released
+		// by some method other than a server update.  This can happen if client code calls
+		// release on a networked entity.
+
+#if defined( STAGING_ONLY )
+		// Try to use the cl_removeentity_backtrace_capture code in cliententitylist.cpp...
+		Msg( "%s: missing client entity %d.\n", __FUNCTION__, nOldEntity );
+		Cbuf_AddText( CFmtStr( "cl_removeentity_backtrace_dump %d\n", nOldEntity ) );
+		Cbuf_Execute();
+#endif // STAGING_ONLY
+
+		Host_Error( "CL_PreserveExistingEntity: missing client entity %d.\n", nOldEntity );
+		return;
+	}
+
+	pEnt->OnDataUnchangedInPVS();
+}
 
 void CL_CopyExistingEntity( CEntityReadInfo &u )
 {
@@ -532,6 +555,9 @@ static void CL_CallPostDataUpdates( CEntityReadInfo &u )
 	}
 }
 
+static float g_flLastPerfRequest = 0.0f;
+
+static ConVar cl_debug_player_perf( "cl_debug_player_perf", "0", 0 );
 
 //-----------------------------------------------------------------------------
 // Purpose: An svc_packetentities has just been parsed, deal with the
@@ -562,6 +588,20 @@ bool CL_ProcessPacketEntities ( SVC_PacketEntities *entmsg )
 
 	if ( entmsg->m_bIsDelta )
 	{
+		int nDeltaTicks = cl.GetServerTickCount() - entmsg->m_nDeltaFrom;
+		float flDeltaSeconds = TICKS_TO_TIME( nDeltaTicks );
+
+		// If we have cl_debug_player_perf set and we see a huge delta between what we've ack'd to the server and where it's at
+		//  ask it for an instantaneous perf snapshot
+		if ( cl_debug_player_perf.GetBool() &&
+			( flDeltaSeconds > 0.5f ) &&							// delta is pretty out of date
+			( ( realtime - g_flLastPerfRequest ) > 5.0f ) )		// haven't requested in a while
+		{
+			g_flLastPerfRequest = realtime;
+			Warning( "Gap in server data, requesting connection perf data\n" );
+			cl.SendStringCmd( "playerperf\n" );
+		}
+
 		if ( cl.GetServerTickCount() == entmsg->m_nDeltaFrom )
 		{
 			Host_Error( "Update self-referencing, connection dropped.\n" );
@@ -578,9 +618,14 @@ bool CL_ProcessPacketEntities ( SVC_PacketEntities *entmsg )
 		}
 	}
 	else
-	{	
+	{
+		if ( cl_debug_player_perf.GetBool() )
+		{
+			Warning( "Received uncompressed server update\n" );
+		}
+
 		// Clear out the client's entity states..
-		for ( int i=0; i < entitylist->GetHighestEntityIndex(); i++ )
+		for ( int i=0; i <= entitylist->GetHighestEntityIndex(); i++ )
 		{
 			CL_DeleteDLLEntity( i, "ProcessPacketEntities", true );
 		}

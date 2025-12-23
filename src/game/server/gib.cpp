@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		A gib is a chunk of a body, or a piece of wood/metal/rocks/etc.
 //
@@ -400,7 +400,9 @@ bool CGib::SUB_AllowedToFade( void )
 			return false;
 	}
 
-	if ( UTIL_IsAnyPlayerLookingAtEntity(this) && m_bForceRemove == false )
+	CBasePlayer *pPlayer = ( AI_IsSinglePlayer() ) ? UTIL_GetLocalPlayer() : NULL;
+
+	if ( pPlayer && pPlayer->FInViewCone( this ) && m_bForceRemove == false )
 	{
 		return false;
 	}
@@ -538,7 +540,7 @@ void CGib::BounceGibTouch ( CBaseEntity *pOther )
 			float volume;
 			float zvel = fabs(GetAbsVelocity().z);
 		
-			volume = 0.8f * min(1.0, ((float)zvel) / 450.0f);
+			volume = 0.8f * MIN(1.0, ((float)zvel) / 450.0f);
 
 			CBreakable::MaterialSoundRandom( entindex(), (Materials)m_material, volume );
 		}

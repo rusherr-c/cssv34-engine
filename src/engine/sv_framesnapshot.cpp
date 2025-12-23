@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,6 +8,9 @@
 #include <utllinkedlist.h>
 
 #include "hltvserver.h"
+#if defined( REPLAY_ENABLED )
+#include "replayserver.h"
+#endif
 #include "framesnapshot.h"
 #include "sys_dll.h"
 
@@ -30,7 +33,6 @@ CFrameSnapshotManager *framesnapshotmanager = &g_FrameSnapshotManager;
 CFrameSnapshotManager::CFrameSnapshotManager( void ) : m_PackedEntitiesPool( MAX_EDICTS / 16, CUtlMemoryPool::GROW_SLOW )
 {
 	COMPILE_TIME_ASSERT( INVALID_PACKED_ENTITY_HANDLE == 0 );
-	Assert( INVALID_PACKED_ENTITY_HANDLE == m_PackedEntities.InvalidIndex() );
 	Q_memset( m_pPackedData, 0x00, MAX_EDICTS * sizeof(PackedEntityHandle_t) );
 
 }
@@ -40,18 +42,10 @@ CFrameSnapshotManager::CFrameSnapshotManager( void ) : m_PackedEntitiesPool( MAX
 //-----------------------------------------------------------------------------
 CFrameSnapshotManager::~CFrameSnapshotManager( void )
 {
-#ifdef _DEBUG
-	if ( IsInErrorExit() )
-	{
-		// These may have been freed already. Don't crash when freeing these.
-		Q_memset( &m_PackedEntities, 0, sizeof( m_PackedEntities ) );
-	}
-	else
-	{
-		Assert( m_FrameSnapshots.Count() == 0 );
-		Assert( m_PackedEntities.Count() == 0 );
-	}
-#endif
+	AssertMsg1( m_FrameSnapshots.Count() == 0 || IsInErrorExit(), "Expected m_FrameSnapshots to be empty. It had %i items.", m_FrameSnapshots.Count() );
+
+	// TODO: This assert has been failing. HenryG says it's a valid assert and that we're probably leaking memory.
+	AssertMsg1( m_PackedEntitiesPool.Count() == 0 || IsInErrorExit(), "Expected m_PackedEntitiesPool to be empty. It had %i items.", m_PackedEntitiesPool.Count() );
 }
 
 //-----------------------------------------------------------------------------
@@ -64,7 +58,6 @@ void CFrameSnapshotManager::LevelChanged()
 	Assert( m_FrameSnapshots.Count() == 0 );
 
 	// Release the most recent snapshot...
-	m_PackedEntities.RemoveAll();
 	m_PackedEntityCache.RemoveAll();
 	COMPILE_TIME_ASSERT( INVALID_PACKED_ENTITY_HANDLE == 0 );
 	Q_memset( m_pPackedData, 0x00, MAX_EDICTS * sizeof(PackedEntityHandle_t) );
@@ -93,7 +86,7 @@ CFrameSnapshot*	CFrameSnapshotManager::CreateEmptySnapshot( int tickcount, int m
 	snap->m_nValidEntities = 0;
 	snap->m_pValidEntities = NULL;
 	snap->m_pHLTVEntityData = NULL;
-
+	snap->m_pReplayEntityData = NULL;
 	snap->m_pEntities = new CFrameSnapshotEntry[maxEntities];
 
 	CFrameSnapshotEntry *entry = snap->m_pEntities;
@@ -168,6 +161,14 @@ CFrameSnapshot* CFrameSnapshotManager::TakeTickSnapshot( int tickcount )
 		Q_memset( snap->m_pHLTVEntityData, 0, snap->m_nValidEntities * sizeof(CHLTVEntityData) );
 	}
 
+#if defined( REPLAY_ENABLED )
+	if ( replay && replay->IsActive() )
+	{
+		snap->m_pReplayEntityData = new CReplayEntityData[snap->m_nValidEntities];
+		Q_memset( snap->m_pReplayEntityData, 0, snap->m_nValidEntities * sizeof(CReplayEntityData) );
+	}
+#endif
+
 	snap->m_iExplicitDeleteSlots.CopyArray( m_iExplicitDeleteSlots.Base(), m_iExplicitDeleteSlots.Count() );
 	m_iExplicitDeleteSlots.Purge();
 
@@ -197,13 +198,12 @@ void CFrameSnapshotManager::RemoveEntityReference( PackedEntityHandle_t handle )
 {
 	Assert( handle != INVALID_PACKED_ENTITY_HANDLE );
 
-	PackedEntity *packedEntity = m_PackedEntities[ handle ];
+	PackedEntity *packedEntity = reinterpret_cast< PackedEntity * >( handle );
 
 	if ( --packedEntity->m_ReferenceCount <= 0)
 	{
-		AUTO_LOCK_FM( m_WriteMutex );
+		AUTO_LOCK( m_WriteMutex );
 
-		m_PackedEntities.Remove( handle ); 
 		m_PackedEntitiesPool.Free( packedEntity );
 
 		// if we have a uncompression cache, remove reference too
@@ -223,13 +223,12 @@ void CFrameSnapshotManager::RemoveEntityReference( PackedEntityHandle_t handle )
 void CFrameSnapshotManager::AddEntityReference( PackedEntityHandle_t handle )
 {
 	Assert( handle != INVALID_PACKED_ENTITY_HANDLE );
-
-	m_PackedEntities[ handle ]->m_ReferenceCount++;
+	reinterpret_cast< PackedEntity * >( handle )->m_ReferenceCount++;
 }
 
 void CFrameSnapshotManager::AddExplicitDelete( int iSlot )
 {
-	AUTO_LOCK_FM( m_WriteMutex );
+	AUTO_LOCK( m_WriteMutex );
 
 	if ( m_iExplicitDeleteSlots.Find(iSlot) == m_iExplicitDeleteSlots.InvalidIndex() )
 	{
@@ -245,7 +244,7 @@ bool CFrameSnapshotManager::ShouldForceRepack( CFrameSnapshot* pSnapshot, int en
 {
 	if ( sv_creationtickcheck.GetBool() )
 	{
-		PackedEntity *pe = m_PackedEntities[ handle ];
+		PackedEntity *pe = reinterpret_cast< PackedEntity * >( handle );
 		Assert( pe );
 		if ( pe && pe->ShouldCheckCreationTick() )
 		{
@@ -279,7 +278,7 @@ bool CFrameSnapshotManager::UsePreviouslySentPacket( CFrameSnapshot* pSnapshot,
 
 			Assert( entity < pSnapshot->m_nNumEntities );
 			pSnapshot->m_pEntities[entity].m_pPackedData = handle;
-			m_PackedEntities[handle]->m_ReferenceCount++;
+			reinterpret_cast< PackedEntity * >( handle )->m_ReferenceCount++;
 			return true;
 		}
 		else
@@ -301,7 +300,7 @@ PackedEntity* CFrameSnapshotManager::GetPreviouslySentPacket( int iEntity, int i
 		// serial number change....
 		if ( m_pSerialNumber[iEntity] == iSerialNumber )
 		{
-			return m_PackedEntities[handle];
+			return reinterpret_cast< PackedEntity * >( handle );
 		}
 		else
 		{
@@ -325,7 +324,7 @@ PackedEntity* CFrameSnapshotManager::CreatePackedEntity( CFrameSnapshot* pSnapsh
 {
 	m_WriteMutex.Lock();
 	PackedEntity *packedEntity = m_PackedEntitiesPool.Alloc();
-	PackedEntityHandle_t handle = m_PackedEntities.AddToTail( packedEntity );
+	PackedEntityHandle_t handle = reinterpret_cast< PackedEntityHandle_t >( packedEntity );
 	m_WriteMutex.Unlock();
 	
 	Assert( entity < pSnapshot->m_nNumEntities );
@@ -366,9 +365,9 @@ PackedEntity* CFrameSnapshotManager::GetPackedEntity( CFrameSnapshot* pSnapshot,
 	if ( index == INVALID_PACKED_ENTITY_HANDLE )
 		return NULL;
 
-	Assert( m_PackedEntities[index]->m_nEntityIndex == entity );
-
-	return m_PackedEntities[index];
+	PackedEntity *packedEntity = reinterpret_cast< PackedEntity * >( index );
+	Assert( packedEntity->m_nEntityIndex == entity );
+	return packedEntity;
 }
 
 
@@ -470,7 +469,11 @@ CFrameSnapshot::~CFrameSnapshot()
 	{
 		delete [] m_pHLTVEntityData;
 	}
-	
+
+	if ( m_pReplayEntityData )
+	{
+		delete [] m_pReplayEntityData;
+	}
 	Assert ( m_nReferences == 0 );
 
 #if defined( _DEBUG )

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,10 +13,13 @@
 
 #if defined(_WIN32) && !defined(_X360)
 #include "winlite.h"		// FILETIME
-#elif defined(_LINUX)
-#include <time.h>                  
+#elif defined(POSIX)
+#include <time.h>
+/*
 #include <sys/sysinfo.h>          
 #include <asm/param.h> // for HZ
+*/
+#include <sys/resource.h>
 #include <netinet/in.h>
 #elif defined(_X360)
 #else
@@ -29,7 +32,6 @@
 #include "quakedef.h"
 #include "host.h"
 #include "netmessages.h"
-#include "master.h"
 #include "sys.h"
 #include "framesnapshot.h"
 #include "sv_packedentities.h"
@@ -39,7 +41,6 @@
 #include "sys_dll.h"
 #include "host_cmd.h"
 #include "sv_steamauth.h"
-#include "SteamUserIDValidation.h"
 
 #include <proto_oob.h>
 #include <vstdlib/random.h>
@@ -53,6 +54,8 @@
 #include "sv_steamauth.h"
 #include "tier0/vcrmode.h"
 #include "sv_ipratelimit.h"
+#include "cl_steamauth.h"
+#include "sv_filter.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
@@ -61,6 +64,20 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+CThreadFastMutex g_svInstanceBaselineMutex;
+extern	CGlobalVars g_ServerGlobalVariables;
+
+static ConVar	sv_max_queries_sec( "sv_max_queries_sec", "3.0", 0, "Maximum queries per second to respond to from a single IP address." );
+static ConVar	sv_max_queries_window( "sv_max_queries_window", "30", 0, "Window over which to average queries per second averages." );
+static ConVar	sv_max_queries_sec_global( "sv_max_queries_sec_global", "3000", 0, "Maximum queries per second to respond to from anywhere." );
+
+static ConVar	sv_max_connects_sec( "sv_max_connects_sec", "2.0", 0, "Maximum connections per second to respond to from a single IP address." );
+static ConVar	sv_max_connects_window( "sv_max_connects_window", "4", 0, "Window over which to average connections per second averages." );
+// This defaults to zero so that somebody spamming the server with packets cannot lock out other clients.
+static ConVar	sv_max_connects_sec_global( "sv_max_connects_sec_global", "0", 0, "Maximum connections per second to respond to from anywhere." );
+
+static CIPRateLimit s_queryRateChecker( &sv_max_queries_sec, &sv_max_queries_window, &sv_max_queries_sec_global );
+static CIPRateLimit s_connectRateChecker( &sv_max_connects_sec, &sv_max_connects_window, &sv_max_connects_sec_global );
 
 // Give new data to Steam's master server updater every N seconds.
 // This is NOT how often packets are sent to master servers, only how often the
@@ -68,15 +85,88 @@
 // machine, not the Steam servers).
 #define MASTER_SERVER_UPDATE_INTERVAL		2.0
 
+// Steam has a matching one in matchmakingtypes.h
+#define MAX_TAG_STRING_LENGTH		128
+
+int SortServerTags( char* const *p1, char* const *p2 )
+{
+	return ( Q_strcmp( *p1, *p2 ) > 0 );
+}
+
+static void ServerTagsCleanUp( void )
+{
+	CUtlVector<char*> TagList;
+	ConVarRef sv_tags( "sv_tags" );
+	if ( sv_tags.IsValid() )
+	{
+		int i;
+		char tmptags[MAX_TAG_STRING_LENGTH];
+		tmptags[0] = '\0';
+
+		V_SplitString( sv_tags.GetString(), ",", TagList );
+
+		// make a pass on the tags to eliminate preceding whitespace and empty tags
+		for ( i = 0; i < TagList.Count(); i++ )
+		{
+			if ( i > 0 )
+			{
+				Q_strncat( tmptags, ",", MAX_TAG_STRING_LENGTH );
+			}
+
+			char *pChar = TagList[i];
+			while ( *pChar && *pChar == ' ' )
+			{
+				pChar++;
+			}
+
+			// make sure we don't have an empty string (all spaces or ,,)
+			if ( *pChar )
+			{
+				Q_strncat( tmptags, pChar, MAX_TAG_STRING_LENGTH );
+			}
+		}
+
+		// reset our lists and sort the tags
+		TagList.PurgeAndDeleteElements();
+		V_SplitString( tmptags, ",", TagList );
+		TagList.Sort( SortServerTags );
+		tmptags[0] = '\0';
+
+		// create our new, sorted list of tags
+		for ( i = 0; i < TagList.Count(); i++ )
+		{
+			if ( i > 0 )
+			{
+				Q_strncat( tmptags, ",", MAX_TAG_STRING_LENGTH );
+			}
+
+			Q_strncat( tmptags, TagList[i], MAX_TAG_STRING_LENGTH );
+		}
+
+		// set our convar and purge our list
+		sv_tags.SetValue( tmptags );
+		TagList.PurgeAndDeleteElements();
+	}
+}
+
 static void SvTagsChangeCallback( IConVar *pConVar, const char *pOldValue, float flOldValue )
 {
+	// We're going to modify the sv_tags convar here, which will cause this to be called again. Prevent recursion.
+	static bool bTagsChangeCallback = false;
+	if ( bTagsChangeCallback )
+		return;
+
+	bTagsChangeCallback = true;
+
+	ServerTagsCleanUp();
+
 	ConVarRef var( pConVar );
-#ifndef NO_STEAM
-	if ( SteamGameServer() )
+	if ( Steam3Server().SteamGameServer() )
 	{
-		SteamGameServer()->SetGameTags( var.GetString() );
+		Steam3Server().SteamGameServer()->SetGameTags( var.GetString() );
 	}
-#endif
+
+	bTagsChangeCallback = false;
 }
 
 ConVar			sv_region( "sv_region","-1", FCVAR_NONE, "The region of the world to report this server in." );
@@ -90,16 +180,8 @@ ConVar			sv_alternateticks( "sv_alternateticks", ( IsX360() ) ? "1" : "0", FCVAR
 ConVar			sv_allow_wait_command( "sv_allow_wait_command", "1", FCVAR_REPLICATED, "Allow or disallow the wait command on clients connected to this server." );
 ConVar			sv_allow_color_correction( "sv_allow_color_correction", "1", FCVAR_REPLICATED, "Allow or disallow clients to use color correction on this server." );
 
-// Steam has a matching one in matchmakingtypes.h
-#define MAX_TAG_STRING_LENGTH		128
-
 extern CNetworkStringTableContainer *networkStringTableContainerServer;
-extern char gpszVersionString[32];
-extern int g_iSteamAppID;
 extern ConVar sv_stressbots;
-
-extern char gpszVersionString[32];
-extern char gpszProductString[32];
 
 int g_CurGameServerID = 1;
 
@@ -118,7 +200,7 @@ bool AllowDebugDedicatedServerOutsideSteam()
 static void SetMasterServerKeyValue( ISteamGameServer *pUpdater, IConVar *pConVar )
 {
 	ConVarRef var( pConVar );
-#ifndef NO_STEAM
+
 	// For protected cvars, don't send the string
 	if ( var.IsFlagSet( FCVAR_PROTECTED ) )
 	{
@@ -138,11 +220,10 @@ static void SetMasterServerKeyValue( ISteamGameServer *pUpdater, IConVar *pConVa
 		pUpdater->SetKeyValue( var.GetName(), var.GetString() );
 	}
 
-	if ( SteamGameServer() )
+	if ( Steam3Server().BIsActive() )
 	{
 		sv.RecalculateTags();
 	}
-#endif
 }
 
 
@@ -150,17 +231,16 @@ static void ServerNotifyVarChangeCallback( IConVar *pConVar, const char *pOldVal
 {
 	if ( !pConVar->IsFlagSet( FCVAR_NOTIFY ) )
 		return;
-#ifndef NO_STEAM
-	ISteamGameServer *pUpdater = SteamGameServer();
+	
+	ISteamGameServer *pUpdater = Steam3Server().SteamGameServer();
 	if ( !pUpdater )
 	{
 		// This will force it to send all the rules whenever the master server updater is there.
 		sv.SetMasterServerRulesDirty();
 		return;
 	}
+
 	SetMasterServerKeyValue( pUpdater, pConVar );
-#endif
-	
 }
 
 
@@ -168,7 +248,7 @@ static void ServerNotifyVarChangeCallback( IConVar *pConVar, const char *pOldVal
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-CBaseServer::CBaseServer() : m_ServerQueryChallenges( 0, 1024 ) // start with 1K of entries, and alloc in 1K chunks
+CBaseServer::CBaseServer() 
 {
 	// Just get a unique ID to talk to the steam master server updater.
 	m_bRestartOnLevelChange = false;
@@ -189,13 +269,13 @@ CBaseServer::CBaseServer() : m_ServerQueryChallenges( 0, 1024 ) // start with 1K
 	m_szMapname[0] = 0;
 	m_szSkyname[0] = 0;
 	m_Password[0] = 0;
-	worldmapCRC = 0;
-	clientDllCRC = 0;
+	V_memset( worldmapMD5.bits, 0, MD5_DIGEST_LENGTH );
 
 	serverclasses = serverclassbits = 0;
 	m_nMaxclients = m_nSpawnCount = 0;
 	m_flTickInterval = 0.03;
 	m_nUserid = 0;
+	m_nNumConnections = 0;
 	m_bIsDedicated = false;
 	m_fCPUPercent = 0;
 	m_fStartTime = 0;
@@ -203,6 +283,12 @@ CBaseServer::CBaseServer() : m_ServerQueryChallenges( 0, 1024 ) // start with 1K
 	
 	m_bMasterServerRulesDirty = true;
 	m_flLastMasterServerUpdateTime = 0;
+	m_CurrentRandomNonce = 0;
+	m_LastRandomNonce = 0;
+	m_flLastRandomNumberGenerationTime = -3.0f; // force it to calc first frame
+
+	m_bReportNewFakeClients = true;
+	m_flPausedTimeEnd = -1.f;
 }
 
 CBaseServer::~CBaseServer()
@@ -228,37 +314,24 @@ bool CBaseServer::CheckChallengeNr( netadr_t &adr, int nChallengeValue )
 	if ( IsX360() )
 		return true;
 
-	for (int i=0 ; i<m_ServerQueryChallenges.Count() ; i++)
-	{
-		if ( adr.CompareAdr(m_ServerQueryChallenges[i].adr, true) ) // base adr only
-		{
-			if (nChallengeValue != m_ServerQueryChallenges[i].challenge)
-			{
-				return false;
-			}
+	uint64 challenge = ((uint64)adr.GetIPNetworkByteOrder() << 32) + m_CurrentRandomNonce;
+	CRC32_t hash;
+	CRC32_Init( &hash );
+	CRC32_ProcessBuffer( &hash, &challenge, sizeof(challenge) );
+	CRC32_Final( &hash );
+	if ( (int)hash == nChallengeValue )
+		return true;
 
-			if ( net_time > ( m_ServerQueryChallenges[i].time+ CHALLENGE_LIFETIME) ) // allow challenge values to last for 1 hour
-			{
-				m_ServerQueryChallenges.FastRemove(i);
-				ConMsg( "Old challenge from %s.\n", adr.ToString() );
-				return false;
-			}
+	// try with the old random nonce
+	challenge &= 0xffffffff00000000ull;
+	challenge += m_LastRandomNonce;
+	hash = 0;
+	CRC32_Init( &hash );
+	CRC32_ProcessBuffer( &hash, &challenge, sizeof(challenge) );
+	CRC32_Final( &hash );
+	if ( (int)hash == nChallengeValue )
+		return true;
 
-			return true;
-		}
-
-		// clean up any old entries
-		if ( net_time > ( m_ServerQueryChallenges[i].time+ CHALLENGE_LIFETIME) ) 
-		{
-			m_ServerQueryChallenges.FastRemove(i);
-			i--; // backup one as we just shifted the whole vector back by the deleted element
-		}
-	}
-	
-	if ( nChallengeValue != -1 )
-	{
-		ConDMsg( "No challenge from %s.\n", adr.ToString() ); // this is a common message
-	}
 	return false;
 }
 
@@ -309,6 +382,7 @@ bool CBaseServer::CheckIPConnectionReuse( netadr_t &adr )
 		// if the user is connected but not fully in AND the addr's match
 		if ( client->IsConnected() &&
 			 !client->IsActive() &&
+			 !client->IsFakeClient() && 
 			 adr.CompareAdr ( client->m_NetChannel->GetRemoteAddress(), true ) )
 		{
 			nSimultaneouslyConnections++;
@@ -357,8 +431,8 @@ Initializes a CSVClient for a new net connection.  This will only be called
 once for a player each game, not once for each level change.
 ================
 */
-IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge, int authProtocol, 
-							    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen, CSteamID steamid )
+IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge, int clientChallenge, int authProtocol, 
+							    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen )
 {
 	COM_TimestampedLog( "CBaseServer::ConnectClient" );
 
@@ -373,7 +447,7 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 	}
 
 	// Make sure protocols match up
-	if ( !CheckProtocol( adr, protocol ) )
+	if ( !CheckProtocol( adr, protocol, clientChallenge ) )
 	{
 		return NULL;
 	}
@@ -381,25 +455,19 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 
 	if ( !CheckChallengeNr( adr, challenge ) )
 	{
-		RejectConnection( adr, "Bad challenge.\n");
+		RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectBadChallenge" );
 		return NULL;
 	}
 
 	// SourceTV checks password & restrictions later once we know
 	// if its a normal spectator client or a relay proxy
-	if ( !IsHLTV() )
+	if ( !IsHLTV() && !IsReplay() )
 	{
-		if ( !CheckIPConnectionReuse( adr ) )
-		{
-			RejectConnection( adr, "Too many pending connections.\n");
-			return NULL;
-		}
-
 #ifndef NO_STEAM
 		// LAN servers restrict to class b IP addresses
 		if ( !CheckIPRestrictions( adr, authProtocol ) )
 		{
-			RejectConnection( adr, "LAN servers are restricted to local clients (class C).\n");
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectLANRestrict");
 			return NULL;
 		}
 #endif
@@ -409,7 +477,7 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 			// failed
 			ConMsg ( "%s:  password failed.\n", adr.ToString() );
 			// Special rejection handler.
-			RejectConnection( adr, "Bad password.\n" );
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectBadPassword" );
 			return NULL;
 		}
 	}
@@ -417,22 +485,44 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 	COM_TimestampedLog( "CBaseServer::ConnectClient:  GetFreeClient" );
 
 	CBaseClient	*client = GetFreeClient( adr );
+
 	if ( !client )
 	{
-		RejectConnection( adr, "Server is full.\n" );
+		RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectServerFull" );
 		return NULL;	// no free slot found
 	}
 
-	client->SetSteamID( steamid );
 	int nNextUserID = GetNextUserID();
-	if ( !CheckChallengeType( client, nNextUserID, adr, authProtocol, hashedCDkey, cdKeyLen ) ) // we use the client pointer to track steam requests
+	if ( !CheckChallengeType( client, nNextUserID, adr, authProtocol, hashedCDkey, cdKeyLen, clientChallenge ) ) // we use the client pointer to track steam requests
 	{
 		return NULL;
 	}
 
-#ifndef _HLTVTEST
-	if ( !FinishCertificateCheck( adr, authProtocol, hashedCDkey	) )
+	ISteamGameServer *pSteamGameServer = Steam3Server().SteamGameServer();
+	if ( !pSteamGameServer && authProtocol == PROTOCOL_STEAM )
 	{
+		Warning("NULL ISteamGameServer in ConnectClient. Steam authentication may fail.\n");
+	}
+
+	if ( Filter_IsUserBanned( client->GetNetworkID() ) )
+	{
+		// Need to make sure the master server is updated with the rejected connection because
+		// we called Steam3Server().NotifyClientConnect() in CheckChallengeType() above.
+		if ( pSteamGameServer && authProtocol == PROTOCOL_STEAM )
+			pSteamGameServer->SendUserDisconnect( client->m_SteamID ); 
+
+		RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectBanned" );
+		return NULL;
+	}
+
+#if !defined( _HLTVTEST ) && !defined( _REPLAYTEST )
+	if ( !FinishCertificateCheck( adr, authProtocol, hashedCDkey, clientChallenge ) )
+	{
+		// Need to make sure the master server is updated with the rejected connection because
+		// we called Steam3Server().NotifyClientConnect() in CheckChallengeType() above.
+		if ( pSteamGameServer && authProtocol == PROTOCOL_STEAM )
+			pSteamGameServer->SendUserDisconnect( client->m_SteamID ); 
+
 		return NULL;
 	}
 #endif
@@ -444,7 +534,12 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 
 	if ( !netchan )
 	{
-		RejectConnection( adr, "Failed to create net channel.\n");
+		// Need to make sure the master server is updated with the rejected connection because
+		// we called Steam3Server().NotifyClientConnect() in CheckChallengeType() above.
+		if ( pSteamGameServer && authProtocol == PROTOCOL_STEAM )
+			pSteamGameServer->SendUserDisconnect( client->m_SteamID ); 
+
+		RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectFailedChannel" );
 		return NULL;
 	}
 
@@ -454,9 +549,10 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 	COM_TimestampedLog( "CBaseServer::ConnectClient:  client->Connect" );
 
 	// make sure client is reset and clear
-	client->Connect( name, nNextUserID, netchan, false );
+	client->Connect( name, nNextUserID, netchan, false, clientChallenge );
 
 	m_nUserid = nNextUserID;
+	m_nNumConnections++;
 
 	// Will get reset from userinfo, but this value comes from sv_updaterate ( the default )
 	client->m_fSnapshotInterval = 1.0f/20.0f;
@@ -464,10 +560,21 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 	// Force a full delta update on first packet.
 	client->m_nDeltaTick = -1;
 	client->m_nSignonTick = 0;
+	client->m_nStringTableAckTick = 0;
 	client->m_pLastSnapshot = NULL;
 	
 	// Tell client connection worked, now use netchannels
-	NET_OutOfBandPrintf ( m_Socket, adr, "%c00000000000000", S2C_CONNECTION );
+	{
+		ALIGN4 char		msg_buffer[MAX_ROUTABLE_PAYLOAD] ALIGN4_POST;
+		bf_write	msg( msg_buffer, sizeof(msg_buffer) );
+
+		msg.WriteLong( CONNECTIONLESS_HEADER );
+		msg.WriteByte( S2C_CONNECTION );
+		msg.WriteLong( clientChallenge );
+		msg.WriteString( "0000000000" ); // pad out
+
+		NET_SendPacket ( NULL, m_Socket, adr, msg.GetData(), msg.GetNumBytesWritten() );
+	}
 
 	// Set up client structure.
 	if ( authProtocol == PROTOCOL_HASHEDCDKEY )
@@ -539,6 +646,9 @@ bool CBaseServer::ValidInfoChallenge( netadr_t & adr, const char *nugget )
 	if ( !IsMultiplayer() )   // ignore in single player
 		return false ;
 
+	if ( IsReplay() )
+		return false;
+
 	if ( RequireValidChallenge( adr) )
 	{
 		if ( Q_stricmp( nugget, A2S_KEY_STRING ) ) // if the string isn't equal then fail out
@@ -557,91 +667,124 @@ bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 
 	char c = msg.ReadChar();
 
-	if ( !CheckConnectionLessRateLimits( packet->from ) )
+	if ( c== 0  )
 	{
 		return false;
 	}
 
 	switch ( c )
 	{
-		case A2A_PING :		NET_OutOfBandPrintf (packet->source, packet->from, "%c00000000000000", A2A_ACK );
-							break;
-	
-		case A2A_PRINT :	// if ( net_remoteprint.GetInt() != 0 ) TODO
-							{
-								char str[1024];
-								msg.ReadString( str, sizeof(str) );
-								ConMsg( "A2C_PRINT from %s : %s", packet->from.ToString(), str );
-							}
-							break;
-
-		case A2A_ACK :		ConMsg ("A2A_ACK from %s\n", packet->from.ToString() );
-							break;
-
-
-		case A2S_GETCHALLENGE :  ReplyChallenge( packet->from );
-							break;
-		
-		case A2S_SERVERQUERY_GETCHALLENGE: ReplyServerChallenge( packet->from );
-							break;
-
-		case C2S_CONNECT :	{	char AuthTicket[1024];
-								char name[256];
-								char password[256];
-								
-								int protocol = msg.ReadLong();
-								int authProtocol = msg.ReadLong();
-								int challengeNr = msg.ReadLong();
-
-								msg.ReadString( name, sizeof(name) );
-								msg.ReadString( password, sizeof(password) );
-								if ( authProtocol == PROTOCOL_STEAM )
-								{
-									int AuthTicketLength = msg.ReadShort();
-									if ( AuthTicketLength < 0 || AuthTicketLength > sizeof( AuthTicket ) )
-									{
-										RejectConnection( packet->from, "Invalid Auth Ticket length\n" );
-										break;
-									}
-									msg.ReadBytes( AuthTicket, AuthTicketLength );
-
-									ConnectClient( packet->from, protocol, 
-										challengeNr, authProtocol, name, password, AuthTicket, AuthTicketLength, CSteamID(msg.ReadVarInt64()) );	// cd key is actually a raw encrypted key	
-								}
-								else
-								{
-									char cdkey[STEAM_KEYSIZE];
-									msg.ReadString( cdkey, sizeof(cdkey) );
-									ConnectClient( packet->from, protocol, 
-										challengeNr, authProtocol, name, password, cdkey, strlen(cdkey), CSteamID() );
-								}
-
-							}
-							break;
-		
-		case A2A_CUSTOM	:	// TODO fire game event with string and adr so 3rd party tool can get it
-							break;
-							
-		default:
-		{
-#ifndef NO_STEAM
-			// We don't understand it, let the master server updater at it.
-			if ( SteamGameServer() && Steam3Server().IsMasterServerUpdaterSharingGameSocket() )
+		case A2S_GETCHALLENGE :
 			{
-				SteamGameServer()->HandleIncomingPacket( 
-					packet->message.GetBasePointer(), 
-					packet->message.TotalBytesAvailable(),
-					BigLong( packet->from.GetIPNetworkByteOrder() ),
-					packet->from.GetPort()
-					);
-			
-				// This is where it will usually want to respond to something immediately by sending some
-				// packets, so check for that immediately.
-				ForwardPacketsFromMasterServerUpdater();
+				int clientChallenge = msg.ReadLong();
+				ReplyChallenge( packet->from, clientChallenge );
 			}
-#endif
-		}
-		break;
+
+			break;
+		
+		case A2S_SERVERQUERY_GETCHALLENGE:
+			ReplyServerChallenge( packet->from );
+			break;
+
+		case C2S_CONNECT :
+			{
+				char cdkey[STEAM_KEYSIZE];
+				char name[256];
+				char password[256];
+				char productVersion[32];
+				
+				int protocol = msg.ReadLong();
+				int authProtocol = msg.ReadLong();
+				int challengeNr = msg.ReadLong();
+				int clientChallenge = msg.ReadLong();
+
+				// pull the challenge number check early before we do any expensive processing on the connect
+				if ( !CheckChallengeNr( packet->from, challengeNr ) )
+				{
+					RejectConnection( packet->from, clientChallenge, "#GameUI_ServerRejectBadChallenge" );
+					break;
+				}
+
+				// rate limit the connections
+				if ( !s_connectRateChecker.CheckIP( packet->from ) )
+					return false;
+
+				msg.ReadString( name, sizeof(name) );
+				msg.ReadString( password, sizeof(password) );
+				msg.ReadString( productVersion, sizeof(productVersion) );
+				
+//				bool bClientPlugins = ( msg.ReadByte() > 0 );
+
+				// There's a magic number we use in the steam.inf in P4 that we don't update.
+				// We can use this to detect if they are running out of P4, and if so, don't do any version
+				// checking.
+				const char *pszVersionInP4 = "2000";
+				const char *pszVersionString = GetSteamInfIDVersionInfo().szVersionString;
+				if ( V_strcmp( pszVersionString, pszVersionInP4 ) && V_strcmp( productVersion, pszVersionInP4 ) )
+				{
+					int nVersionCheck = Q_strncmp( pszVersionString, productVersion, V_strlen( pszVersionString ) );
+					if ( nVersionCheck < 0 )
+					{
+						RejectConnection( packet->from, clientChallenge, "#GameUI_ServerRejectOldVersion" );
+						break;
+					}
+					if ( nVersionCheck > 0 )
+					{
+						RejectConnection( packet->from, clientChallenge, "#GameUI_ServerRejectNewVersion" );
+						break;
+					}
+				}
+
+// 				if ( Steam3Server().BSecure() && bClientPlugins )
+// 				{
+// 					RejectConnection( packet->from, "Cannot connect to a secure server while plug-ins are\nloaded on your client\n" );
+//					break;
+// 				}
+
+				if ( authProtocol == PROTOCOL_STEAM )
+				{
+					int keyLen = msg.ReadShort();
+					if ( keyLen < 0 || keyLen > sizeof(cdkey) )
+					{
+						RejectConnection( packet->from, clientChallenge, "#GameUI_ServerRejectBadSteamKey" );
+						break;
+					}
+					msg.ReadBytes( cdkey, keyLen );
+
+					ConnectClient( packet->from, protocol, challengeNr, clientChallenge, authProtocol, name, password, cdkey, keyLen );	// cd key is actually a raw encrypted key	
+				}
+				else
+				{
+					msg.ReadString( cdkey, sizeof(cdkey) );
+					ConnectClient( packet->from, protocol, challengeNr, clientChallenge, authProtocol, name, password, cdkey, strlen(cdkey) );
+				}
+			}
+
+			break;
+		
+		default:
+			{
+				// rate limit the more expensive server query packets
+				if ( !s_queryRateChecker.CheckIP( packet->from ) )
+					return false;
+
+				// We don't understand it, let the master server updater at it.
+				if ( Steam3Server().SteamGameServer() && Steam3Server().IsMasterServerUpdaterSharingGameSocket() )
+				{
+					Steam3Server().SteamGameServer()->HandleIncomingPacket( 
+						packet->message.GetBasePointer(), 
+						packet->message.TotalBytesAvailable(),
+						packet->from.GetIPHostByteOrder(),
+						packet->from.GetPort()
+						);
+				
+					// This is where it will usually want to respond to something immediately by sending some
+					// packets, so check for that immediately.
+					ForwardPacketsFromMasterServerUpdater();
+				}
+			}
+
+			break;
 	}
 
 	return true;
@@ -686,7 +829,7 @@ int CBaseServer::GetNumClients( void ) const
 ==================
 void SV_CountPlayers
 
-Counts number of HLTV connections.  Clients includes regular connections
+Counts number of HLTV and Replay connections.  Clients includes regular connections
 ==================
 */
 int CBaseServer::GetNumProxies( void ) const
@@ -695,7 +838,11 @@ int CBaseServer::GetNumProxies( void ) const
 
 	for (int i=0 ; i < m_Clients.Count() ; i++ )
 	{
+#if defined( REPLAY_ENABLED )
+		if ( m_Clients[ i ]->IsConnected() && (m_Clients[ i ]->IsHLTV() || m_Clients[ i ]->IsReplay() ) )
+#else
 		if ( m_Clients[ i ]->IsConnected() && m_Clients[ i ]->IsHLTV() )
+#endif
 		{
 			count++;
 		}
@@ -735,7 +882,7 @@ bool CBaseServer::GetPlayerInfo( int nClientIndex, player_info_t *pinfo )
 	if ( !pinfo )
 		return false;
 
-	if ( nClientIndex < 0 || nClientIndex >= GetUserInfoTable()->GetNumStrings() )
+	if ( nClientIndex < 0 || !GetUserInfoTable() || nClientIndex >= GetUserInfoTable()->GetNumStrings() )
 	{
 		Q_memset( pinfo, 0, sizeof( player_info_t ) );
 		return false;
@@ -746,7 +893,7 @@ bool CBaseServer::GetPlayerInfo( int nClientIndex, player_info_t *pinfo )
 	if ( !pi )
 	{
 		Q_memset( pinfo, 0, sizeof( player_info_t ) );
-		return false;	
+		return false;
 	}
 
 	Q_memcpy( pinfo, pi, sizeof( player_info_t ) );
@@ -791,8 +938,7 @@ void CBaseServer::FillServerInfo(SVC_ServerInfo &serverinfo)
 
 	serverinfo.m_nProtocol		= PROTOCOL_VERSION;
 	serverinfo.m_nServerCount	= GetSpawnCount();
-	serverinfo.m_nMapCRC		= worldmapCRC;
-	serverinfo.m_nClientCRC		= clientDllCRC;
+	V_memcpy( serverinfo.m_nMapMD5.bits, worldmapMD5.bits, MD5_DIGEST_LENGTH );
 	serverinfo.m_nMaxClients	= GetMaxClients();
 	serverinfo.m_nMaxClasses	= serverclasses;
 	serverinfo.m_bIsDedicated	= IsDedicated();
@@ -811,6 +957,9 @@ void CBaseServer::FillServerInfo(SVC_ServerInfo &serverinfo)
 	serverinfo.m_szSkyName		= m_szSkyname;
 	serverinfo.m_szHostName		= GetName();
 	serverinfo.m_bIsHLTV		= IsHLTV();
+#if defined( REPLAY_ENABLED )
+	serverinfo.m_bIsReplay		= IsReplay();
+#endif
 }
 
 /*
@@ -825,9 +974,9 @@ challenge, they must give a valid IP address.
 =================
 */
 
-void CBaseServer::ReplyChallenge(netadr_t &adr)
+void CBaseServer::ReplyChallenge(netadr_t &adr, int clientChallenge )
 {
-	char	buffer[STEAM_KEYSIZE+32];
+	ALIGN4 char	buffer[STEAM_KEYSIZE+32] ALIGN4_POST;
 	bf_write msg(buffer,sizeof(buffer));
 
 	// get a free challenge number
@@ -837,13 +986,19 @@ void CBaseServer::ReplyChallenge(netadr_t &adr)
 	msg.WriteLong( CONNECTIONLESS_HEADER );
 	
 	msg.WriteByte( S2C_CHALLENGE );
-	msg.WriteLong( challengeNr );
+	msg.WriteLong( S2C_MAGICVERSION ); // This makes it so we can detect that this server is correct
+	msg.WriteLong( challengeNr ); // Server to client challenge
+	msg.WriteLong( clientChallenge ); // Client to server challenge to ensure our reply is what they asked
 	msg.WriteLong( authprotocol );
 
 #if !defined( NO_STEAM ) //#ifndef _XBOX
 	if ( authprotocol == PROTOCOL_STEAM )
 	{
-		msg.WriteByte( SteamGameServer()->BSecure() );
+		msg.WriteShort( 0 ); //  steam2 encryption key not there anymore
+		CSteamID steamID = Steam3Server().GetGSSteamID();
+		uint64 unSteamID = steamID.ConvertToUint64();
+		msg.WriteBytes( &unSteamID, sizeof(unSteamID) );
+		msg.WriteByte( Steam3Server().BSecure() );
 	}
 #else
 	msg.WriteShort( 1 );
@@ -870,7 +1025,7 @@ amplification.
 */
 void CBaseServer::ReplyServerChallenge(netadr_t &adr)
 {
-	char	buffer[16];
+	ALIGN4 char	buffer[16] ALIGN4_POST;
 	bf_write msg(buffer,sizeof(buffer));
 
 	// get a free challenge number
@@ -891,17 +1046,15 @@ int CBaseServer::GetChallengeType(netadr_t &adr)
 {
 	if ( AllowDebugDedicatedServerOutsideSteam() )
 		return PROTOCOL_HASHEDCDKEY;
-	
+
+#ifndef SWDS	
 	// don't auth SP games or local mp games if steam isn't running
-#ifndef NO_STEAM
-	if ( Host_IsSinglePlayerGame() || ( !SteamUser() && !IsDedicated() ))
-#else
-	if ( Host_IsSinglePlayerGame() || ( !IsDedicated() ))
-#endif
+	if ( Host_IsSinglePlayerGame() || ( !Steam3Client().SteamUser() && !IsDedicated() ))
 	{
 		return PROTOCOL_HASHEDCDKEY;
 	}
 	else
+#endif
 	{
 		return PROTOCOL_STEAM;
 	}
@@ -909,39 +1062,12 @@ int CBaseServer::GetChallengeType(netadr_t &adr)
 
 int CBaseServer::GetChallengeNr (netadr_t &adr)
 {
-	int		oldest = 0;
-	float	oldestTime = FLT_MAX;
-		
-	// see if we already have a challenge for this ip
-	for (int i = 0 ; i < m_ServerQueryChallenges.Count() ; i++)
-	{
-		if ( adr.CompareAdr (m_ServerQueryChallenges[i].adr, true) )
-		{
-			// reuse challenge number, but update time
-			m_ServerQueryChallenges[i].time = net_time;
-			return m_ServerQueryChallenges[i].challenge;
-		}
-		
-		if (m_ServerQueryChallenges[i].time < oldestTime)
-		{
-			// remember oldest challenge
-			oldestTime = m_ServerQueryChallenges[i].time;
-			oldest = i;
-		}
-	}
-
-	if ( m_ServerQueryChallenges.Count() > MAX_CHALLENGES )
-	{
-		m_ServerQueryChallenges.FastRemove( oldest );	
-	}
-
-	int newEntry = m_ServerQueryChallenges.AddToTail();
-	// note the 0x0FFF of the top 16 bits, so that -1 will never be sent as a challenge
-	m_ServerQueryChallenges[newEntry].challenge = (RandomInt(0,0x0FFF) << 16) | RandomInt(0,0xFFFF);
-	m_ServerQueryChallenges[newEntry].adr = adr;
-	m_ServerQueryChallenges[newEntry].time = net_time;
-	
-	return m_ServerQueryChallenges[newEntry].challenge;
+	uint64 challenge = ((uint64)adr.GetIPNetworkByteOrder() << 32) + m_CurrentRandomNonce;
+	CRC32_t hash;
+	CRC32_Init( &hash );
+	CRC32_ProcessBuffer( &hash, &challenge, sizeof(challenge) );
+	CRC32_Final( &hash );
+	return (int)hash;
 }
 
 void CBaseServer::GetNetStats( float &avgIn, float &avgOut )
@@ -973,13 +1099,17 @@ void CBaseServer::CalculateCPUUsage( void )
 		return;
 	}
 
-	if(m_fStartTime==0)
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
+	float curtime = Sys_FloatTime();
+
+	if ( m_fStartTime == 0 )
 	// record when we started
 	{
-		m_fStartTime=Sys_FloatTime();
+		m_fStartTime = curtime;
 	}
 
-	if( Sys_FloatTime () > m_fLastCPUCheckTime+1)
+	if( curtime > m_fLastCPUCheckTime + 1 )
 	// only do this every 1 second
 	{
 #if defined ( _WIN32 ) 
@@ -990,112 +1120,62 @@ void CBaseServer::CalculateCPUUsage( void )
 		FILETIME creationTime, exitTime, kernelTime, userTime, nowTime;
  		__int64 totalTime,now;
 			
-		handle = GetCurrentProcess ();
+		handle = GetCurrentProcess();
 
 		// get CPU time
 		GetProcessTimes (handle, &creationTime, &exitTime,
 						&kernelTime, &userTime);
 		GetSystemTimeAsFileTime(&nowTime);
 
-		if(lastNow==0)
+		if ( lastNow == 0 )
 		{
-			memcpy(&lastNow,&creationTime,sizeof(__int64));;
+			memcpy(&lastNow, &creationTime, sizeof(__int64));
 		}
 
-
-		memcpy(&totalTime,&userTime,sizeof(__int64));;
-		memcpy(&now,&kernelTime,sizeof(__int64));;
+		memcpy(&totalTime, &userTime, sizeof(__int64));
+		memcpy(&now, &kernelTime, sizeof(__int64));
 		totalTime+=now;
 
-		memcpy(&now,&nowTime,sizeof(__int64));;
-
+		memcpy(&now, &nowTime, sizeof(__int64));
 
 		m_fCPUPercent = (double)(totalTime-lastTotalTime)/(double)(now-lastNow);
 		
 		// now save this away for next time
-		if(Sys_FloatTime () > lastAvg+5) 
+		if ( curtime > lastAvg+5 ) 
 		// only do it every 5 seconds, so we keep a moving average
 		{
 			memcpy(&lastNow,&nowTime,sizeof(__int64));
 			memcpy(&lastTotalTime,&totalTime,sizeof(__int64));
 			lastAvg=m_fLastCPUCheckTime;
 		}
-#else
-		// linux CPU % code here :)
-		static int32 lastrunticks,lastcputicks;
-		static float lastAvg=0;
+#elif defined ( POSIX )
+		static struct rusage s_lastUsage;
+		static float s_lastAvg = 0;
+		struct rusage currentUsage;
 
-		struct sysinfo infos; 
-		int32 dummy;
-		int length;
-		char statFile[PATH_MAX];
-		int32 now = time(NULL);
-		int32 ctime,stime,start_time;
-		FILE *pFile;
-		int32 runticks,cputicks;
-
-		snprintf(statFile,PATH_MAX,"/proc/%i/stat",getpid());
-		
-		// we can't use FS_Open() cause its outside our dir
-		pFile = fopen(statFile, "r");
-		if ( pFile == NULL )
-        	{
-			goto end;
-        	}
-	        sysinfo(&infos);
-
-		fscanf(pFile,
-			"%d %s %c %d %d %d %d %d %lu %lu \
-			%lu %lu %lu %ld %ld %ld %ld %ld %ld %lu \
-			%lu %ld %lu %lu %lu %lu %lu %lu %lu %lu \
-			%lu %lu %lu %lu %lu %lu",
-			&dummy,statFile,&dummy,&dummy,&dummy,&dummy,
-			&dummy,&dummy,&dummy,&dummy, // end of first line
-			&dummy,&dummy,&dummy,&ctime,&stime,
-			&dummy,&dummy,&dummy,&dummy,&dummy, // end of second
-			&start_time,&dummy,&dummy,&dummy,&dummy,
-			&dummy,&dummy,&dummy,&dummy,&dummy, // end of third
-			&dummy,&dummy,&dummy,&dummy,&dummy,&dummy);
-		fclose(pFile);					
-
-		runticks = infos.uptime*HZ -start_time; // time the process has been running
-		cputicks = stime+ctime;
-			
-		if(lastcputicks==0)
+		if ( getrusage( RUSAGE_SELF, &currentUsage ) == 0 )
 		{
-			lastcputicks=cputicks;
-		}
+			double flTimeDiff = (double)( currentUsage.ru_utime.tv_sec - s_lastUsage.ru_utime.tv_sec ) +
+				(double)(( currentUsage.ru_utime.tv_usec - s_lastUsage.ru_utime.tv_usec ) / 1000000); 
+			m_fCPUPercent = flTimeDiff / ( m_fLastCPUCheckTime - s_lastAvg );
 
-		if(lastrunticks==0)
-		{
-			lastrunticks=runticks;
-		}
-		else
-		{
-			m_fCPUPercent = (float)(cputicks-lastcputicks)/(float)(runticks-lastrunticks);
-		}	
-
-		//ConMsg("%f %li %li %li %li\n",cpuPercent,
-		//	cputicks,(cputicks-lastcputicks),
-		//	(runticks-lastrunticks),runticks);
-	
-		// now save this away for next time
-		if(Sys_FloatTime () > lastAvg+5) 
-		{
-			lastcputicks=cputicks;
-			lastrunticks=runticks;	
-			lastAvg=Sys_FloatTime();
+			// now save this away for next time
+			if( m_fLastCPUCheckTime > s_lastAvg + 5) 
+			{
+				s_lastUsage = currentUsage;
+				s_lastAvg = m_fLastCPUCheckTime;
+			}
 		}
 
 		// limit checking :)
-		if( m_fCPUPercent > 0.999 )
-			m_fCPUPercent = 0.999;
+		if( m_fCPUPercent > 0.9999 )
+			m_fCPUPercent = 0.9999;
 		if( m_fCPUPercent < 0 )
 			m_fCPUPercent = 0;
-
-end:
+#else
+#error
 #endif
-		m_fLastCPUCheckTime=Sys_FloatTime(); 
+		m_fLastCPUCheckTime = curtime; 
 	}
 }
 
@@ -1110,7 +1190,11 @@ void CBaseServer::InactivateClients( void )
 		CBaseClient	*cl = m_Clients[ i ];
 
 		// Fake clients get killed in here.
+#if defined( REPLAY_ENABLED )
+		if ( cl->IsFakeClient() && !cl->IsHLTV() && !cl->IsReplay() )
+#else
 		if ( cl->IsFakeClient() && !cl->IsHLTV() )
+#endif
 		{
 			// If we don't do this, it'll have a bunch of extra steam IDs for unauthenticated users.
 			Steam3Server().NotifyClientDisconnect( cl );
@@ -1155,6 +1239,7 @@ if necessary
 */
 void CBaseServer::CheckTimeouts (void)
 {
+	VPROF_BUDGET( "CBaseServer::CheckTimeouts", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	// Don't timeout in _DEBUG builds
 	int i;
 
@@ -1176,7 +1261,7 @@ void CBaseServer::CheckTimeouts (void)
 
 		if ( netchan->IsTimedOut() )
 		{
-			cl->Disconnect ("%s timed out", cl->GetClientName() );
+			cl->Disconnect( CLIENTNAME_TIMED_OUT, cl->GetClientName() );
 		}
 	}
 #endif
@@ -1200,9 +1285,12 @@ void CBaseServer::CheckTimeouts (void)
 // ==================
 void CBaseServer::UpdateUserSettings(void)
 {
+	VPROF_BUDGET( "CBaseServer::UpdateUserSettings", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	for (int i=0 ; i< m_Clients.Count() ; i++ )
 	{
 		CBaseClient	*cl = m_Clients[ i ];
+
+		cl->CheckFlushNameChange();
 
 		if ( cl->m_bConVarsChanged )
 		{
@@ -1216,6 +1304,7 @@ void CBaseServer::UpdateUserSettings(void)
 // ==================
 void CBaseServer::SendPendingServerInfo()
 {
+	VPROF_BUDGET( "CBaseServer::SendPendingServerInfo", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	for (int i=0 ; i< m_Clients.Count() ; i++ )
 	{
 		CBaseClient	*cl = m_Clients[ i ];
@@ -1230,7 +1319,7 @@ void CBaseServer::SendPendingServerInfo()
 // compresses a packed entity, returns data & bits
 const char *CBaseServer::CompressPackedEntity(ServerClass *pServerClass, const char *data, int &bits)
 {
-	static char s_packedData[MAX_PACKEDENTITY_DATA];
+	ALIGN4 static char s_packedData[MAX_PACKEDENTITY_DATA] ALIGN4_POST;
 
 	bf_write writeBuf( "CompressPackedEntity", s_packedData, sizeof( s_packedData ) );
 
@@ -1305,21 +1394,19 @@ SV_CheckProtocol
 Make sure connecting client is using proper protocol
 ================
 */
-bool CBaseServer::CheckProtocol( netadr_t &adr, int nProtocol )
+bool CBaseServer::CheckProtocol( netadr_t &adr, int nProtocol, int clientChallenge )
 {
 	if ( nProtocol != PROTOCOL_VERSION )
 	{
 		// Client is newer than server
 		if ( nProtocol > PROTOCOL_VERSION )
 		{
-			RejectConnection( adr, "This server is using an older protocol ( %i ) than your client ( %i ).\n",
-				PROTOCOL_VERSION, nProtocol  );
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectOldProtocol" );
 		}
 		else
 		// Server is newer than client
 		{
-			RejectConnection( adr, "This server is using a newer protocol ( %i ) than your client ( %i ).\n",
-				PROTOCOL_VERSION, nProtocol );
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectNewProtocol" );
 		}
 		return false;
 	}
@@ -1335,7 +1422,7 @@ SV_CheckKeyInfo
 Determine if client is outside appropriate address range
 ================
 */
-bool CBaseServer::CheckChallengeType( CBaseClient * client, int nNewUserID, netadr_t & adr, int nAuthProtocol, const char *pchLogonCookie, int cbCookie )
+bool CBaseServer::CheckChallengeType( CBaseClient * client, int nNewUserID, netadr_t & adr, int nAuthProtocol, const char *pchLogonCookie, int cbCookie, int clientChallenge )
 {
 	if ( AllowDebugDedicatedServerOutsideSteam() )
 		return true;
@@ -1343,17 +1430,26 @@ bool CBaseServer::CheckChallengeType( CBaseClient * client, int nNewUserID, neta
 	// Check protocol ID
 	if ( ( nAuthProtocol <= 0 ) || ( nAuthProtocol > PROTOCOL_LASTVALID ) )
 	{
-		RejectConnection( adr, "Invalid connection.\n");
+		RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectInvalidConnection");
 		return false;
 	}
 
 	if ( ( nAuthProtocol == PROTOCOL_HASHEDCDKEY ) && (Q_strlen( pchLogonCookie ) <= 0 ||  Q_strlen(pchLogonCookie) != 32 ) )
 	{
-		RejectConnection( adr, "Invalid authentication certificate length.\n" );
+		RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectInvalidCertLen" );
 		return false;
 	}
 
-	if ( nAuthProtocol == PROTOCOL_STEAM )
+	Assert( !IsReplay() );
+
+	if ( IsHLTV() )
+	{
+		// Don't authenticate spectators or add them to the
+		// player list in the singleton Steam3Server()
+		Assert( nAuthProtocol == PROTOCOL_HASHEDCDKEY );
+		Assert( !client->m_SteamID.IsValid() );
+	}
+	else if ( nAuthProtocol == PROTOCOL_STEAM )
 	{
 		// Dev hack to allow 360/Steam PC cross platform play
 // 		int ip0 = 207;
@@ -1371,29 +1467,51 @@ bool CBaseServer::CheckChallengeType( CBaseClient * client, int nNewUserID, neta
 // 			return true;
 // 		}
 
-		client->m_NetworkID.idtype = IDTYPE_STEAM;
-		Q_memset( &client->m_NetworkID.steamid, 0x0, sizeof(client->m_NetworkID.steamid) );
-		// Convert raw certificate back into data
+		client->SetSteamID( CSteamID() ); // set an invalid SteamID
 
+		// Convert raw certificate back into data
+		if ( cbCookie <= 0 || cbCookie >= STEAM_KEYSIZE )
+		{
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectInvalidSteamCertLen" );
+			return false;
+		}
 		netadr_t checkAdr = adr;
 		if ( adr.GetType() == NA_LOOPBACK || adr.IsLocalhost() )
 		{
-			checkAdr.SetIP( net_local_adr.GetIPNetworkByteOrder() );
+			checkAdr.SetIP( net_local_adr.GetIPHostByteOrder() );
 		}
-#ifndef NO_STEAM
-		if ( !Steam3Server().NotifyClientConnect( client, checkAdr, pchLogonCookie, cbCookie ) 
+
+		if ( !Steam3Server().NotifyClientConnect( client, nNewUserID, checkAdr, pchLogonCookie, cbCookie ) 
 			&& !Steam3Server().BLanOnly() ) // the userID isn't alloc'd yet so we need to fill it in manually
 		{
-			RejectConnection( adr, "STEAM validation rejected\n" );
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectSteam" );
 			return false;
 		}
-#endif
+
+		//
+		// Any rejections below this must call SendUserDisconnect
+		//
+
+		// Now that we have auth'd with steam, client->GetSteamID() is now valid and we can verify against the GC lobby
+		bool bHasGCLobby = g_iServerGameDLLVersion >= 8 && serverGameDLL->GetServerGCLobby();
+		if ( bHasGCLobby )
+		{
+			if ( !serverGameDLL->GetServerGCLobby()->SteamIDAllowedToConnect( client->m_SteamID ) )
+			{
+				ISteamGameServer *pSteamGameServer = Steam3Server().SteamGameServer();
+				if ( pSteamGameServer )
+					pSteamGameServer->SendUserDisconnect( client->m_SteamID);
+
+				RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectMustUseMatchmaking" );
+				return false;
+			}
+		}
 	}
 	else
 	{
 		if ( !Steam3Server().NotifyLocalClientConnect( client ) ) // the userID isn't alloc'd yet so we need to fill it in manually
 		{
-			RejectConnection( adr, "GSCreateLocalUser failed\n" );
+			RejectConnection( adr, clientChallenge, "#GameUI_ServerRejectGS" );
 			return false;
 		}
 	}
@@ -1496,8 +1614,7 @@ void CBaseServer::Clear( void )
 	Q_memset( m_szMapname, 0, sizeof( m_szMapname ) );
 	Q_memset( m_szSkyname, 0, sizeof( m_szSkyname ) );
 
-	clientDllCRC = 0;
-	worldmapCRC = 0;
+	V_memset( worldmapMD5.bits, 0, MD5_DIGEST_LENGTH );
 
 	MEM_ALLOC_CREDIT();
 
@@ -1517,7 +1634,8 @@ void CBaseServer::Clear( void )
 	serverclasses = 0;
 	serverclassbits = 0;
 
-	m_ServerQueryChallenges.RemoveAll();
+	m_LastRandomNonce = m_CurrentRandomNonce = 0;
+	m_flPausedTimeEnd = -1.f;
 }
 
 /*
@@ -1527,16 +1645,17 @@ SV_RejectConnection
 Rejects connection request and sends back a message
 ================
 */
-void CBaseServer::RejectConnection( const netadr_t &adr, char *fmt, ... )
+void CBaseServer::RejectConnection( const netadr_t &adr, int clientChallenge, const char *s )
 {
-	va_list		argptr;
-	char	text[1024];
+	ALIGN4 char		msg_buffer[MAX_ROUTABLE_PAYLOAD] ALIGN4_POST;
+	bf_write	msg( msg_buffer, sizeof(msg_buffer) );
 
-	va_start (argptr, fmt);
-	Q_vsnprintf ( text, sizeof( text ), fmt, argptr);
-	va_end (argptr);
+	msg.WriteLong( CONNECTIONLESS_HEADER );
+	msg.WriteByte( S2C_CONNREJECT );
+	msg.WriteLong( clientChallenge );
+	msg.WriteString( s );
 
-	NET_OutOfBandPrintf( m_Socket, adr, "%c%s", S2C_CONNREJECT, text );
+	NET_SendPacket ( NULL, m_Socket, adr, msg.GetData(), msg.GetNumBytesWritten() );
 }
 
 void CBaseServer::SetPaused(bool paused)
@@ -1570,6 +1689,7 @@ void CBaseServer::Init (bool bIsDedicated)
 	m_nMaxclients = 0;
 	m_nSpawnCount = 0;
 	m_nUserid = 1;
+	m_nNumConnections = 0;
 	m_bIsDedicated = bIsDedicated;
 	m_Socket = NS_SERVER;	
 	
@@ -1623,6 +1743,7 @@ bool CBaseServer::GetClassBaseline( ServerClass *pClass, void const **pData, int
 			("SV_GetInstanceBaseline: missing instance baseline for class '%s'", pClass->m_pNetworkName)
 		);
 		
+		AUTO_LOCK( g_svInstanceBaselineMutex );
 		*pData = GetInstanceBaselineTable()->GetStringUserData(
 			pClass->m_InstanceBaselineIndex,
 			pDatalen );
@@ -1649,13 +1770,9 @@ bool CBaseServer::ShouldUpdateMasterServer()
 
 void CBaseServer::CheckMasterServerRequestRestart()
 {
-#ifndef NO_STEAM
-	if ( !SteamGameServer() || !SteamGameServer()->WasRestartRequested() )
+	if ( !Steam3Server().SteamGameServer() || !Steam3Server().SteamGameServer()->WasRestartRequested() )
 		return;
-#else
-	return;
-#endif
-
+	
 	// Connection was rejected by the HLMaster (out of date version)
 
 	// hack, vgui console looks for this string; 
@@ -1669,11 +1786,8 @@ void CBaseServer::CheckMasterServerRequestRestart()
 		SetRestartOnLevelChange( true );
 	}
 #endif
-#ifdef _WIN32
-	if (g_pFileSystem->IsSteam())
-#else
-	else if ( 1 ) // under linux assume steam
-#endif
+	
+	if ( sv.IsDedicated() ) // under linux assume steam
 	{
 		Msg("Your server needs to be restarted in order to receive the latest update.\n");
 		Log("Your server needs to be restarted in order to receive the latest update.\n");
@@ -1687,11 +1801,11 @@ void CBaseServer::CheckMasterServerRequestRestart()
 
 void CBaseServer::UpdateMasterServer()
 {
-#ifndef NO_STEAM
+	VPROF_BUDGET( "CBaseServer::UpdateMasterServer", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	if ( !ShouldUpdateMasterServer() )
 		return;
-	
-	if ( !SteamGameServer() )
+
+	if ( !Steam3Server().SteamGameServer() )
 		return;
 	
 	// Only update every so often.
@@ -1720,32 +1834,31 @@ void CBaseServer::UpdateMasterServer()
 	if ( !bUpdateMasterServers )
 		return;
 
-	bool bActive = IsActive() && IsMultiplayer() && g_bEnableMasterServerUpdater;
+	bool bActive = IsActive() && IsMultiplayer();
 	if ( serverGameDLL && serverGameDLL->ShouldHideServer() )
 		bActive = false;
-
-	SteamGameServer()->EnableHeartbeats( bActive );
+	
+	Steam3Server().SteamGameServer()->EnableHeartbeats( bActive );
 
 	if ( !bActive )
 		return;
 
 	UpdateMasterServerRules();
 	UpdateMasterServerPlayers();
-#endif
+	Steam3Server().SendUpdatedServerDetails();
 }
 
 
 void CBaseServer::UpdateMasterServerRules()
 {
-#ifndef NO_STEAM
 	// Only do this if the rules vars are dirty.
 	if ( !m_bMasterServerRulesDirty )
 		return;
 
-	ISteamGameServer *pUpdater = SteamGameServer();
+	ISteamGameServer *pUpdater = Steam3Server().SteamGameServer();
 	if ( !pUpdater )
 		return;
-		
+
 	pUpdater->ClearAllKeyValues();
 	
 	// Need to respond with game directory, game name, and any server variables that have been set that
@@ -1755,29 +1868,29 @@ void CBaseServer::UpdateMasterServerRules()
 	{
 		if ( !(var->IsFlagSet( FCVAR_NOTIFY ) ) )
 			continue;
+		if ( var->IsCommand() )
+			continue;
 
-		ConVar *pConVar = dynamic_cast< ConVar* >( var );
+		ConVar *pConVar = static_cast< ConVar* >( var );
 		if ( !pConVar )
 			continue;
 
 		SetMasterServerKeyValue( pUpdater, pConVar );
 	}
 
-	if ( SteamGameServer() )
+	if (  Steam3Server().SteamGameServer() )
 	{
 		RecalculateTags();
 	}
 
 	// Ok.. it's all updated, only send incremental updates now until we decide they're all dirty.
 	m_bMasterServerRulesDirty = false;
-#endif
 }
 
 
 void CBaseServer::ForwardPacketsFromMasterServerUpdater()
 {
-#ifndef NO_STEAM
-	ISteamGameServer *p = SteamGameServer();
+	ISteamGameServer *p = Steam3Server().SteamGameServer();
 	if ( !p )
 		return;
 	
@@ -1794,7 +1907,6 @@ void CBaseServer::ForwardPacketsFromMasterServerUpdater()
 		netadr_t adr( netadrAddress, netadrPort );
 		NET_SendPacket( NULL, m_Socket, adr, packetData, len );
 	}
-#endif
 }
 
 
@@ -1809,8 +1921,15 @@ Read's packets from clients and executes messages as appropriate.
 void CBaseServer::RunFrame( void )
 {
 	VPROF_BUDGET( "CBaseServer::RunFrame", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "CBaseServer::RunFrame" );
 
 	NET_ProcessSocket( m_Socket, this );	
+
+#ifdef LINUX
+	// Process the linux sv lan port if it's open.
+	if ( NET_GetUDPPort( NS_SVLAN ) )
+		NET_ProcessSocket( NS_SVLAN, this );
+#endif
 
 	CheckTimeouts();	// drop clients that timeed out
 
@@ -1822,10 +1941,20 @@ void CBaseServer::RunFrame( void )
 
 	UpdateMasterServer();
 
-	if ( m_bMasterServerRulesDirty )
+	if ( m_flLastRandomNumberGenerationTime < 0 || (m_flLastRandomNumberGenerationTime + CHALLENGE_NONCE_LIFETIME) < g_ServerGlobalVariables.realtime  )
 	{
-		m_bMasterServerRulesDirty = false;
-		RecalculateTags();
+		m_LastRandomNonce = m_CurrentRandomNonce;
+
+		// RandomInt maps a uniform distribution on the interval [0,INT_MAX], so make two calls to get the random number.
+		// RandomInt will always return the minimum value if the difference in min and max is greater than or equal to INT_MAX.
+		m_CurrentRandomNonce = ( ( (uint32)RandomInt( 0, 0xFFFF ) ) << 16 ) | RandomInt( 0, 0xFFFF );
+		m_flLastRandomNumberGenerationTime = g_ServerGlobalVariables.realtime;
+	}
+
+	// Timed pause - resume game when time expires
+	if ( m_flPausedTimeEnd >= 0.f && m_State == ss_paused && Sys_FloatTime() >= m_flPausedTimeEnd )
+	{
+		SetPausedForced( false );
 	}
 }
 
@@ -1917,7 +2046,7 @@ void CBaseServer::SendClientMessages ( bool bSendSnapshots )
 	}
 }
 
-CBaseClient *CBaseServer::CreateFakeClient(const char *name)
+CBaseClient *CBaseServer::CreateFakeClient( const char *name )
 {
 	netadr_t adr; // it's an empty address
 
@@ -1932,13 +2061,16 @@ CBaseClient *CBaseServer::CreateFakeClient(const char *name)
 	INetChannel *netchan = NULL;
 	if ( sv_stressbots.GetBool() )
 	{
-		netadr_t adr( 0, 0 ); // 0.0.0.0:0 signifies a bot. It'll plumb all the way down to winsock calls but it won't make them.
-		netchan = NET_CreateNetChannel( m_Socket, &adr, adr.ToString(), fakeclient, true );
+		netadr_t adrNull( 0, 0 ); // 0.0.0.0:0 signifies a bot. It'll plumb all the way down to winsock calls but it won't make them.
+		netchan = NET_CreateNetChannel( m_Socket, &adrNull, adrNull.ToString(), fakeclient, true );
 	}
 
 	// a NULL netchannel signals a fakeclient
 	m_nUserid = GetNextUserID();
-	fakeclient->Connect( name, m_nUserid, netchan, true );
+	m_nNumConnections++;
+
+	fakeclient->SetReportThisFakeClient( m_bReportNewFakeClients );
+	fakeclient->Connect( name, m_nUserid, netchan, true, 0 );
 
 	// fake some cvar settings
 	//fakeclient->SetUserCVar( "name", name ); // set already by Connect()
@@ -1952,6 +2084,19 @@ CBaseClient *CBaseServer::CreateFakeClient(const char *name)
 	fakeclient->SetUserCVar( "cl_lagcompensation", "1" );
 	fakeclient->SetUserCVar( "closecaption","0" );
 	fakeclient->SetUserCVar( "english", "1" );
+
+	fakeclient->SetUserCVar( "cl_clanid", "0" );
+	fakeclient->SetUserCVar( "cl_team", "blue" );
+	fakeclient->SetUserCVar( "hud_classautokill", "1" );
+	fakeclient->SetUserCVar( "tf_medigun_autoheal", "0" );
+	fakeclient->SetUserCVar( "cl_autorezoom", "1" );
+	fakeclient->SetUserCVar( "fov_desired", "75" );
+	fakeclient->SetUserCVar( "tf_remember_lastswitched", "0" );
+
+	fakeclient->SetUserCVar( "cl_autoreload", "0" );
+	fakeclient->SetUserCVar( "tf_remember_activeweapon", "0" );
+	fakeclient->SetUserCVar( "hud_combattext", "0" );
+	fakeclient->SetUserCVar( "cl_flipviewmodels", "0" );
 
 	// create client in game.dll
 	fakeclient->ActivatePlayer();
@@ -1979,8 +2124,8 @@ void CBaseServer::Shutdown( void )
 		else
 		{
 			// free any memory do this out side here in case the reason the server is shutting down 
-			//  is because the listen server client typed disconnect, in which case we won't call
-			//  cl->DropClient, but the client might have some frame snapshot references left over, etc.
+			// is because the listen server client typed disconnect, in which case we won't call
+			// cl->DropClient, but the client might have some frame snapshot references left over, etc.
 			cl->Clear();	
 		}
 
@@ -1992,7 +2137,7 @@ void CBaseServer::Shutdown( void )
 	// Let drop messages go out
 	Sys_Sleep( 100 );
 
-	// clear everthing
+	// clear everything
 	Clear();
 }
 
@@ -2108,7 +2253,9 @@ static bool CEventInfo_LessFunc( CEventInfo * const &lhs, CEventInfo * const &rh
 
 void CBaseServer::WriteTempEntities( CBaseClient *client, CFrameSnapshot *pCurrentSnapshot, CFrameSnapshot *pLastSnapshot, bf_write &buf, int ev_max )
 {
-	char data[NET_MAX_PAYLOAD];
+	VPROF_BUDGET( "CBaseServer::WriteTempEntities", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
+	ALIGN4 char data[NET_MAX_PAYLOAD] ALIGN4_POST;
 	SVC_TempEntities msg;
 	msg.m_DataOut.StartWriting( data, sizeof(data) );
 	bf_write &buffer = msg.m_DataOut; // shortcut
@@ -2147,7 +2294,7 @@ void CBaseServer::WriteTempEntities( CBaseClient *client, CFrameSnapshot *pCurre
 			if ( (int)sorted.Count() >= ev_max )
 				break;	
 		}
-		
+
 		// stop, we reached our current snapshot
 		if ( pSnapshot == pCurrentSnapshot )
 			break; 
@@ -2246,30 +2393,16 @@ void CBaseServer::SetMaxClients( int number )
 	m_nMaxclients = clamp( number, 1, ABSOLUTE_PLAYER_LIMIT );
 }
 
-struct convar_tags_t
-{
-	const char *pszConVar;
-	const char *pszTag;
-};
-// The list of convars that automatically turn on tags when they're changed.
-// Convars in this list need to have the FCVAR_NOTIFY flag set on them, so the
-// tags are recalculated and uploaded to the master server when the convar is changed.
-convar_tags_t convars_to_check_for_tags[] =
-{
-	{ "mp_friendlyfire", "friendlyfire" },
-	{ "mp_stalemate_enable", "suddendeath" },
-	{ "sv_gravity", "gravity" },
-	{ "tf_birthday", "birthday" },
-	{ "mp_respawnwavetime", "respawntimes" },
-	{ "sv_alltalk", "alltalk" },
-	{ "mp_fadetoblack", "fadetoblack" },
-};
+extern ConVar tv_enable;
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 void CBaseServer::RecalculateTags( void )
 {
+	if ( IsHLTV() || IsReplay() )
+		return;
+
 	// We're going to modify the sv_tags convar here, which will cause this to be called again. Prevent recursion.
 	static bool bRecalculatingTags = false;
 	if ( bRecalculatingTags )
@@ -2277,23 +2410,35 @@ void CBaseServer::RecalculateTags( void )
 
 	bRecalculatingTags = true;
 
-	// Check convars first
-	for ( int i = 0; i < ARRAYSIZE(convars_to_check_for_tags); i++ )
+	// Games without this interface will have no tagged cvars besides "increased_maxplayers"
+	if ( serverGameTags )
 	{
-		ConVar *pConVar = g_pCVar->FindVar( convars_to_check_for_tags[i].pszConVar );
-		if ( pConVar )
+		KeyValues *pKV = new KeyValues( "GameTags" );
+
+		serverGameTags->GetTaggedConVarList( pKV );
+
+		KeyValues *p = pKV->GetFirstSubKey();
+		while ( p )
 		{
-			const char *pszDef = pConVar->GetDefault();
-			const char *pszCur = pConVar->GetString();
-			if ( Q_strcmp( pszDef, pszCur ) )
+			ConVar *pConVar = g_pCVar->FindVar( p->GetString("convar") );
+			if ( pConVar )
 			{
-				AddTag( convars_to_check_for_tags[i].pszTag );
+				const char *pszDef = pConVar->GetDefault();
+				const char *pszCur = pConVar->GetString();
+				if ( Q_strcmp( pszDef, pszCur ) )
+				{
+					AddTag( p->GetString("tag") );
+				}
+				else
+				{
+					RemoveTag( p->GetString("tag") );
+				}
 			}
-			else
-			{
-				RemoveTag( convars_to_check_for_tags[i].pszTag );
-			}
+
+			p = p->GetNextKey();
 		}
+
+		pKV->deleteThis();
 	}
 
 	// Check maxplayers
@@ -2301,12 +2446,12 @@ void CBaseServer::RecalculateTags( void )
 	int maxmaxplayers = ABSOLUTE_PLAYER_LIMIT;
 	int defaultmaxplayers = 1;
 	serverGameClients->GetPlayerLimits( minmaxplayers, maxmaxplayers, defaultmaxplayers );
-	unsigned short nMaxReportedClients = GetMaxClients();
-	if ( sv_visiblemaxplayers.GetInt() > 0 && sv_visiblemaxplayers.GetInt() < GetMaxClients() )
+	int nMaxReportedClients = GetMaxClients() - GetNumProxies();
+	if ( sv_visiblemaxplayers.GetInt() > 0 && sv_visiblemaxplayers.GetInt() < nMaxReportedClients )
 	{
 		nMaxReportedClients = sv_visiblemaxplayers.GetInt();
 	}
-	if ( nMaxReportedClients > maxmaxplayers )
+	if ( nMaxReportedClients > defaultmaxplayers )
 	{
 		AddTag( "increased_maxplayers" );
 	}
@@ -2314,6 +2459,18 @@ void CBaseServer::RecalculateTags( void )
 	{
 		RemoveTag( "increased_maxplayers" );
 	}
+
+#if defined( REPLAY_ENABLED )
+	ConVarRef replay_enable( "replay_enable", true );
+	if ( replay_enable.IsValid() && replay_enable.GetBool() )
+	{
+		AddTag( "replays" );
+	}
+	else
+	{
+		RemoveTag( "replays" );
+	}
+#endif
 
 	bRecalculatingTags = false;
 }
@@ -2331,6 +2488,7 @@ void CBaseServer::AddTag( const char *pszTag )
 		if ( !Q_stricmp(TagList[i],pszTag) )
 			return;
 	}
+	TagList.PurgeAndDeleteElements();
 
 	// Append it
 	char tmptags[MAX_TAG_STRING_LENGTH];
@@ -2369,10 +2527,26 @@ void CBaseServer::RemoveTag( const char *pszTag )
 			bFoundIt = true;
 		}
 	}
+	TagList.PurgeAndDeleteElements();
 
 	// Didn't find it in our list?
 	if ( !bFoundIt )
 		return;
 
 	sv_tags.SetValue( tmptags );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Server-only override (ignores sv_pausable).  Can be on a timer.
+//-----------------------------------------------------------------------------
+void CBaseServer::SetPausedForced( bool bPaused, float flDuration /*= -1.f*/ )
+{
+	if ( !IsActive() )
+		return;
+
+	m_State = ( bPaused ) ? ss_paused : ss_active;
+	m_flPausedTimeEnd = ( bPaused && flDuration > 0.f ) ? Sys_FloatTime() + flDuration : -1.f;
+
+	SVC_SetPauseTimed setpause( bPaused, m_flPausedTimeEnd );
+	BroadcastMessage( setpause );
 }

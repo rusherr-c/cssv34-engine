@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -174,7 +174,8 @@ void CManageGamesDialog::OnCommand( const char *command )
 
 		Close();
 	}
-	else if ( Q_stricmp( command, "Browse" ) == 0 )
+	// Modified to allow more than one browse button
+	else if ( Q_stricmp( command, "BrowseDir" ) == 0 )
 	{
 		// Create a new dialog
 		CModalDirectorySelectDialog *pDlg = vgui::SETUP_PANEL( new CModalDirectorySelectDialog( this, "Select Game Directory" ) );

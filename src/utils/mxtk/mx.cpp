@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "tier1/UtlVector.h"
+#include "tier1/utlvector.h"
 
 
 #define WM_MOUSEWHEEL                   0x020A

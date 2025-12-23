@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,13 +18,14 @@
 #include "movieobjects/dmedrawsettings.h"
 #include "dme_controls/dmepanel.h"
 #include "tier1/KeyValues.h"
-#include "vguimatsurface/IMatSystemSurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "tier3/tier3.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "materialsystem/imesh.h"
 #include "vgui_controls/Menu.h"
 #include "vgui_controls/MenuBar.h"
 #include "vgui_controls/MenuButton.h"
+#include "vgui/IVGui.h"
 
 
 //-----------------------------------------------------------------------------
@@ -42,7 +43,10 @@ IMPLEMENT_DMEPANEL_FACTORY( CDmeDagRenderPanel, DmeDCCMakefile, "DmeMakeFileOutp
 // Constructor, destructor
 //-----------------------------------------------------------------------------
 CDmeDagRenderPanel::CDmeDagRenderPanel( vgui::Panel *pParent, const char *pName ) : BaseClass( pParent, pName )
-{
+{											 
+	// Used to poll input
+	vgui::ivgui()->AddTickSignal( GetVPanel() );
+
 	m_bDrawJointNames = false;
 	m_bDrawJoints = false;
 	m_bDrawGrid = true;
@@ -52,10 +56,6 @@ CDmeDagRenderPanel::CDmeDagRenderPanel( vgui::Panel *pParent, const char *pName 
 	m_DefaultEnvCubemap.Init( pCubemapTexture );
 	pCubemapTexture = g_pMaterialSystem->FindTexture( "editor/cubemap.hdr", NULL, true );
 	m_DefaultHDREnvCubemap.Init( pCubemapTexture );
-
-	KeyValues *pMaterialKeys = new KeyValues( "Wireframe", "$model", "1" );
-	pMaterialKeys->SetString( "$vertexcolor", "1" );
-	m_Wireframe.Init( "mdlpanelwireframe", pMaterialKeys );
 
 	m_pDrawSettings = CreateElement< CDmeDrawSettings >( "drawSettings", g_pDataModel->FindOrCreateFileId( "DagRenderPanelDrawSettings" ) );
 	m_hDrawSettings = m_pDrawSettings;
@@ -115,8 +115,8 @@ void CDmeDagRenderPanel::ApplySchemeSettings( vgui::IScheme *pScheme )
 //-----------------------------------------------------------------------------
 void CDmeDagRenderPanel::SetDmeElement( CDmeDag *pScene )
 {
-	m_pDag = pScene;
-	ComputeDefaultTangentData( m_pDag, false );
+	m_hDag = pScene;
+	ComputeDefaultTangentData( m_hDag, false );
 }
 
 
@@ -129,7 +129,7 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeSourceSkin *pSkin )
 	CDmeMakefile *pSourceMakefile = pSkin->GetDependentMakefile();
 	if ( !pSourceMakefile )
 	{
-		m_pDag = NULL;
+		m_hDag = NULL;
 		return;
 	}
 
@@ -137,13 +137,13 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeSourceSkin *pSkin )
 	CDmElement *pOutput = pSourceMakefile->GetOutputElement( true );
 	if ( !pOutput )
 	{
-		m_pDag = NULL;
+		m_hDag = NULL;
 		return;
 	}
 
 	// Finally, grab the 'skin' attribute of that makefile
-	m_pDag = pOutput->GetValueElement< CDmeDag >( "model" );
-	ComputeDefaultTangentData( m_pDag, false );
+	m_hDag = pOutput->GetValueElement< CDmeDag >( "model" );
+	ComputeDefaultTangentData( m_hDag, false );
 	DrawJoints( false );
 	DrawJointNames( false );
 }
@@ -154,7 +154,7 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeSourceAnimation *pAnimation )
 	CDmeMakefile *pSourceMakefile = pAnimation->GetDependentMakefile();
 	if ( !pSourceMakefile )
 	{
-		m_pDag = NULL;
+		m_hDag = NULL;
 		return;
 	}
 
@@ -162,7 +162,7 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeSourceAnimation *pAnimation )
 	CDmElement *pOutput = pSourceMakefile->GetOutputElement( true );
 	if ( !pOutput )
 	{
-		m_pDag = NULL;
+		m_hDag = NULL;
 		return;
 	}
 
@@ -182,8 +182,8 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeSourceAnimation *pAnimation )
 	if ( pAnimationList->FindAnimation( pAnimation->m_SourceAnimationName ) < 0 )
 		return;
 
-	m_pDag = pDag;
-	ComputeDefaultTangentData( m_pDag, false );
+	m_hDag = pDag;
+	ComputeDefaultTangentData( m_hDag, false );
 	m_hAnimationList = pAnimationList;
 	SelectAnimation( pAnimation->m_SourceAnimationName );
 	DrawJoints( true );
@@ -196,7 +196,7 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeDCCMakefile *pDCCMakefile )
 	CDmElement *pOutputElement = pDCCMakefile->GetOutputElement( true );
 	if ( !pOutputElement )
 	{
-		m_pDag = NULL;
+		m_hDag = NULL;
 		return;
 	}
 
@@ -211,8 +211,8 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeDCCMakefile *pDCCMakefile )
 
 	CDmeAnimationList *pAnimationList = pOutputElement->GetValueElement< CDmeAnimationList >( "animationList" );
 
-	m_pDag = pDag;
-	ComputeDefaultTangentData( m_pDag, false );
+	m_hDag = pDag;
+	ComputeDefaultTangentData( m_hDag, false );
 	m_hAnimationList = pAnimationList;
 	SelectAnimation( 0 );
 	DrawJoints( pAnimationList != NULL );
@@ -221,7 +221,7 @@ void CDmeDagRenderPanel::SetDmeElement( CDmeDCCMakefile *pDCCMakefile )
 
 CDmeDag *CDmeDagRenderPanel::GetDmeElement()
 {
-	return m_pDag;
+	return m_hDag;
 }
 
 
@@ -385,13 +385,17 @@ void CDmeDagRenderPanel::OnGrayShade()
 //-----------------------------------------------------------------------------
 void CDmeDagRenderPanel::OnFrame()
 {
-	if ( !m_pDag )
+	if ( !m_hDag )
 		return;
 
 	float flRadius;
-	Vector vecCenter;
-	m_pDag->GetBoundingSphere( vecCenter, flRadius );
-	LookAt( vecCenter, flRadius );
+	Vector vecCenter, vecWorldCenter;
+	m_hDag->GetBoundingSphere( vecCenter, flRadius );
+
+	matrix3x4_t dmeToEngine;
+	CDmeDag::DmeToEngineMatrix( dmeToEngine );
+	VectorTransform( vecCenter, dmeToEngine, vecWorldCenter );
+	LookAt( vecWorldCenter, flRadius );
 }
 
 
@@ -470,11 +474,11 @@ void CDmeDagRenderPanel::Paint()
 	BaseClass::Paint();
 
 	// Overlay the joint names
-	if ( m_bDrawJointNames && m_pDag )
+	if ( m_bDrawJointNames && m_hDag )
 	{
 		matrix3x4_t modelToWorld;
-		SetIdentityMatrix( modelToWorld );
-		DrawJointNames( m_pDag, m_pDag, modelToWorld );
+		CDmeDag::DmeToEngineMatrix( modelToWorld );
+		DrawJointNames( m_hDag, m_hDag, modelToWorld );
 	}
 }
 
@@ -524,7 +528,7 @@ void CDmeDagRenderPanel::OnPaint3D()
 
 	if ( m_bDrawGrid )
 	{
-		DrawGrid();
+		BaseClass::DrawGrid();
 	}
 
 	if ( m_bDrawJoints )
@@ -532,7 +536,10 @@ void CDmeDagRenderPanel::OnPaint3D()
 		CDmeJoint::DrawJointHierarchy( true );
 	}
 
-	m_pDrawSettings->DrawDag( m_pDag );
+	pRenderContext->CullMode( MATERIAL_CULLMODE_CW );
+	CDmeDag::DrawUsingEngineCoordinates( true );
+	m_pDrawSettings->DrawDag( m_hDag );
+	CDmeDag::DrawUsingEngineCoordinates( false );
 
 	pRenderContext->Flush();
 	pRenderContext->BindLocalCubemap( pLocalCube );
@@ -561,53 +568,6 @@ void CDmeDagRenderPanel::OnKeyCodePressed( vgui::KeyCode code )
 	{
 		OnFrame();
 	}
-}
-
-
-//-----------------------------------------------------------------------------
-// Draws the grid under the MDL
-//-----------------------------------------------------------------------------
-void CDmeDagRenderPanel::DrawGrid()
-{
-	matrix3x4_t transform;
-
-	SetIdentityMatrix( transform );
-
-	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
-	pRenderContext->MatrixMode( MATERIAL_MODEL );
-	pRenderContext->LoadMatrix( transform );
-
-	pRenderContext->Bind( m_Wireframe );
-
-	IMesh *pMesh = pRenderContext->GetDynamicMesh();
-
-	int nGridDim = 10;
-	CMeshBuilder meshBuilder;
-	meshBuilder.Begin( pMesh, MATERIAL_LINES, 2 * nGridDim + 2 );
-
-	float bounds = 100.0f;
-	float delta = 2 * bounds / nGridDim;
-	for ( int i = 0; i < nGridDim + 1; ++i )
-	{
-		float xz = -bounds + delta * i;
-
-		meshBuilder.Position3f( xz, 0, -bounds );
-		meshBuilder.Color4ub( 255, 255, 255, 255 );
-		meshBuilder.AdvanceVertex();
-		meshBuilder.Position3f( xz, 0, bounds );
-		meshBuilder.Color4ub( 255, 255, 255, 255 );
-		meshBuilder.AdvanceVertex();
-
-		meshBuilder.Position3f( -bounds, 0, xz );
-		meshBuilder.Color4ub( 255, 255, 255, 255 );
-		meshBuilder.AdvanceVertex();
-		meshBuilder.Position3f( bounds, 0, xz );
-		meshBuilder.Color4ub( 255, 255, 255, 255 );
-		meshBuilder.AdvanceVertex();
-	}
-
-	meshBuilder.End();
-	pMesh->Draw();
 }
 
 

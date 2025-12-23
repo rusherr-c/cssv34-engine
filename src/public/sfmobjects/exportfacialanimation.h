@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,11 +21,7 @@ class CDmeAnimationSet;
 //-----------------------------------------------------------------------------
 // Exports an .fac file
 //-----------------------------------------------------------------------------
-bool ExportFacialAnimation(const char *pFileName, CDmeFilmClip *pMovie, CDmeFilmClip *pShot, CDmeAnimationSet *pAnimationSet)
-{
-	// STUB
-	return true;
-};
+bool ExportFacialAnimation( const char *pFileName, CDmeFilmClip *pMovie, CDmeFilmClip *pShot, CDmeAnimationSet *pAnimationSet );
 
 
 #endif // EXPORTFACIALANIMATION_H

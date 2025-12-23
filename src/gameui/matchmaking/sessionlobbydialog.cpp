@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,8 +6,8 @@
 
 #include "sessionlobbydialog.h"
 #include "engine/imatchmaking.h"
-#include "gameui_interface.h"
-#include "engineinterface.h"
+#include "GameUI_Interface.h"
+#include "EngineInterface.h"
 #include "vgui/ISurface.h"
 #include "vgui_controls/ImagePanel.h"
 #include "vgui/ILocalize.h"
@@ -296,7 +296,7 @@ void CSessionLobbyDialog::UpdatePlayerCountDisplay( int iTeam )
 	wchar_t wszString[32];
 	wchar_t *wzPlayersFmt = g_pVGuiLocalize->Find( ct != 1 ? "#TF_ScoreBoard_Players" : "#TF_ScoreBoard_Player" );
 	wchar_t wzPlayerCt[8];
-	_itow_s( ct, wzPlayerCt, ARRAYSIZE( wzPlayerCt ), 10 );
+	V_snwprintf( wzPlayerCt, ARRAYSIZE( wzPlayerCt ), L"%d", ct );
 	g_pVGuiLocalize->ConstructString( wszString, sizeof( wszString ), wzPlayersFmt, 1, wzPlayerCt );
 
 	m_pTeamInfos[iTeam]->m_pSubtitle->SetText( wszString );
@@ -420,7 +420,7 @@ void CSessionLobbyDialog::UpdatePlayerInfo( uint64 nPlayerId, const char *pName,
 		wchar_t *wzHostFmt = g_pVGuiLocalize->Find( "#TF_Lobby_Host" );
 		g_pVGuiLocalize->ConvertANSIToUnicode( pName, wszHostname, sizeof( wszHostname ) );
 
-		swprintf( wszString, L"%s\n%s", wzHostFmt, wszHostname );
+		V_snwprintf( wszString, ARRAYSIZE(wszString), L"%s\n%s", wzHostFmt, wszHostname );
 
 		m_pHostLabel->SetText( wszString );
 		m_nHostId = nPlayerId;
@@ -464,7 +464,7 @@ void CSessionLobbyDialog::SetLobbyReadyState( int nPlayersNeeded )
 			wzWaitingFmt = g_pVGuiLocalize->Find( "#TF_WaitingForPlayersFmt" );
 		}
 		wchar_t wzPlayers[8];
-		_itow_s( nPlayersNeeded, wzPlayers, ARRAYSIZE( wzPlayers ), 10 );
+		V_snwprintf( wzPlayers, ARRAYSIZE( wzPlayers ), L"%d", nPlayersNeeded );
 		g_pVGuiLocalize->ConstructString( wszWaiting, sizeof( wszWaiting ), wzWaitingFmt, 1, wzPlayers );
 		m_pLobbyStateLabel->SetText( wszWaiting );
 		m_pLobbyStateIcon->SetText( "#TF_Icon_Alert" );
@@ -495,7 +495,7 @@ void CSessionLobbyDialog::UpdateCountdown( int seconds )
 	{
 		wzCountdownFmt = g_pVGuiLocalize->Find( "#TF_StartingInSec" );
 	}
-	_itow_s( seconds, wszSeconds, ARRAYSIZE( wszSeconds ), 10 );
+	V_snwprintf( wszSeconds, ARRAYSIZE( wszSeconds ), L"%d", seconds );
 	g_pVGuiLocalize->ConstructString( wszCountdown, sizeof( wszCountdown ), wzCountdownFmt, 1, wszSeconds );
 
 	m_pLobbyStateLabel->SetText( wszCountdown );
@@ -528,6 +528,7 @@ void CSessionLobbyDialog::OnKeyCodePressed( vgui::KeyCode code )
 	{
 	case KEY_XBUTTON_DOWN:
 	case KEY_XSTICK1_DOWN:
+	case STEAMCONTROLLER_DPAD_DOWN:
 		if ( idx >= itemCt - 1 )
 		{
 			ActivateNextMenu();
@@ -540,6 +541,7 @@ void CSessionLobbyDialog::OnKeyCodePressed( vgui::KeyCode code )
 
 	case KEY_XBUTTON_UP:
 	case KEY_XSTICK1_UP:
+	case STEAMCONTROLLER_DPAD_UP:
 		if ( idx <= 0 )
 		{
 			ActivatePreviousMenu();
@@ -551,6 +553,7 @@ void CSessionLobbyDialog::OnKeyCodePressed( vgui::KeyCode code )
 		break;
 
 	case KEY_XBUTTON_A:
+	case STEAMCONTROLLER_A:
 #ifdef _X360
 		XShowGamerCardUI( XBX_GetPrimaryUserId(), pItem->m_nId );
 #endif
@@ -587,6 +590,7 @@ void CSessionLobbyDialog::OnKeyCodePressed( vgui::KeyCode code )
 		break;
 
 	case KEY_XBUTTON_B:
+	case STEAMCONTROLLER_B:
 		GameUI().ShowMessageDialog( MD_EXIT_SESSION_CONFIRMATION, this );
 
 		if ( m_bHostLobby )
@@ -596,6 +600,7 @@ void CSessionLobbyDialog::OnKeyCodePressed( vgui::KeyCode code )
 		break;
 
 	case KEY_XBUTTON_X:
+	case STEAMCONTROLLER_X:
 		if ( m_bStartingGame )
 		{
 			// We think we're loading the game, so play deny sound
@@ -608,6 +613,7 @@ void CSessionLobbyDialog::OnKeyCodePressed( vgui::KeyCode code )
 		break;
 
 	case KEY_XBUTTON_Y:
+	case STEAMCONTROLLER_Y:
 		if ( m_bHostLobby )
 		{
 			// Don't allow settings changes in ranked games
@@ -709,7 +715,7 @@ CON_COMMAND( mm_add_player, "Add a player" )
 	{
 		int team = atoi( args[1] );
 		const char *pName = args[2];
-		ULONGLONG id = atoi( args[3] );
+		uint32 id = atoi( args[3] );
 		byte cVoiceState = atoi( args[4] ) != 0;
 		int nPlayersNeeded = atoi( args[5] );
 		g_pLobbyDialog->UpdatePlayerInfo( id, pName, team, cVoiceState, nPlayersNeeded, false );

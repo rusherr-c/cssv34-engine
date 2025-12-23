@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -56,7 +56,7 @@ void InitViewerSettings ( const char *subkey )
 
 	g_viewerSettings.renderMode = RM_TEXTURED;
 	g_viewerSettings.fov = 65.0f;
-	g_viewerSettings.enableNormalMapping = false;
+	g_viewerSettings.enableNormalMapping = true;
 	g_viewerSettings.enableParallaxMapping = false;
 	g_viewerSettings.showNormals = false;
 	g_viewerSettings.showTangentFrame = false;
@@ -91,6 +91,8 @@ void InitViewerSettings ( const char *subkey )
 	g_viewerSettings.thumbnailsize = 128;
 	g_viewerSettings.thumbnailsizeanim = 128;
 
+	g_viewerSettings.m_iEditAttachment = -1;
+
 	g_viewerSettings.highlightHitbox = -1;
 	g_viewerSettings.highlightBone = -1;
 
@@ -102,6 +104,8 @@ void InitViewerSettings ( const char *subkey )
 	g_viewerSettings.ypos = 20;
 	g_viewerSettings.width = 640;
 	g_viewerSettings.height = 700;
+
+	g_viewerSettings.originAxisLength = 10.0f;
 }
 
 
@@ -578,11 +582,15 @@ bool LoadViewerSettings (const char *filename, StudioModel *pModel )
 	RegReadBool( hModelKey, "showillumpos", &g_viewerSettings.showIllumPosition );
 	RegReadBool( hModelKey, "enablenormalmapping", &g_viewerSettings.enableNormalMapping );
 	RegReadBool( hModelKey, "playsounds", &g_viewerSettings.playSounds );
+	RegReadBool( hModelKey, "showoriginaxis", &g_viewerSettings.showOriginAxis );
+	RegReadFloat( hModelKey, "originaxislength", &g_viewerSettings.originAxisLength );
 
-	RegReadString( hModelKey, "merge0", g_viewerSettings.mergeModelFile[0], sizeof( g_viewerSettings.mergeModelFile[0] ) );
-	RegReadString( hModelKey, "merge1", g_viewerSettings.mergeModelFile[1], sizeof( g_viewerSettings.mergeModelFile[1] ) );
-	RegReadString( hModelKey, "merge2", g_viewerSettings.mergeModelFile[2], sizeof( g_viewerSettings.mergeModelFile[2] ) );
-	RegReadString( hModelKey, "merge3", g_viewerSettings.mergeModelFile[3], sizeof( g_viewerSettings.mergeModelFile[3] ) );
+	char merge_buffer[32];
+	for ( int i = 0; i < HLMV_MAX_MERGED_MODELS; i++ )
+	{
+		Q_snprintf( merge_buffer, sizeof( merge_buffer ), "merge%d", i + 1 );
+		RegReadString( hModelKey, merge_buffer, g_viewerSettings.mergeModelFile[i], sizeof( g_viewerSettings.mergeModelFile[i] ) );
+	}
 	
 	return true;
 }
@@ -661,11 +669,15 @@ bool SaveViewerSettings (const char *filename, StudioModel *pModel )
 	RegWriteInt( hModelKey, "showillumpos", g_viewerSettings.showIllumPosition );
 	RegWriteInt( hModelKey, "enablenormalmapping", g_viewerSettings.enableNormalMapping );
 	RegWriteInt( hModelKey, "playsounds", g_viewerSettings.playSounds );
+	RegWriteInt( hModelKey, "showoriginaxis", g_viewerSettings.showOriginAxis );
+	RegWriteFloat( hModelKey, "originaxislength", g_viewerSettings.originAxisLength );
 
-	RegWriteString( hModelKey, "merge0", g_viewerSettings.mergeModelFile[0] );
-	RegWriteString( hModelKey, "merge1", g_viewerSettings.mergeModelFile[1] );
-	RegWriteString( hModelKey, "merge2", g_viewerSettings.mergeModelFile[2] );
-	RegWriteString( hModelKey, "merge3", g_viewerSettings.mergeModelFile[3] );
+	char merge_buffer[32];
+	for ( int i = 0; i < HLMV_MAX_MERGED_MODELS; i++ )
+	{
+		Q_snprintf( merge_buffer, sizeof( merge_buffer ), "merge%d", i + 1 );
+		RegWriteString( hModelKey, merge_buffer, g_viewerSettings.mergeModelFile[i] );
+	}
 
 	return true;
 }

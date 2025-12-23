@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,13 +7,13 @@
 
 #include "LoadCommentaryDialog.h"
 #include "EngineInterface.h"
-#include "igameuifuncs.h"
+#include "IGameUIFuncs.h"
 
 #include "vgui/ISystem.h"
 #include "vgui/IVGui.h"
 #include "tier1/KeyValues.h"
 #include "tier1/convar.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include "vgui_controls/PanelListPanel.h"
 #include "vgui_controls/Label.h"
@@ -211,7 +211,6 @@ void CLoadCommentaryDialog::OnCommand( const char *command )
 				OnClose();
 
 				engine->ClientCmd_Unrestricted( sz );
-
 			}
 		}
 	}
@@ -219,6 +218,22 @@ void CLoadCommentaryDialog::OnCommand( const char *command )
 	{
 		BaseClass::OnCommand( command );
 	}
+}
+
+void CLoadCommentaryDialog::OnKeyCodePressed( vgui::KeyCode code )
+{
+	if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+	{
+		OnCommand( "loadcommentary" );
+		return;
+	}
+	else if ( code == KEY_XBUTTON_B )
+	{
+		OnCommand( "Close" );
+		return;
+	}
+
+	BaseClass::OnKeyCodePressed(code);
 }
 
 //-----------------------------------------------------------------------------
@@ -361,6 +376,9 @@ void CLoadCommentaryDialog::ParseCommentaryFile( char const *pszFileName, char c
 		char mapname[_MAX_PATH];
 		Q_strncpy( mapname, pszFileName, sizeof(item.szMapName) );
 		char *ext = strstr( mapname, "_commentary" );
+		if ( !ext )
+			return;
+		
 		*ext = '\0';
 		Q_FileBase( mapname, item.szMapName, sizeof(item.szMapName) );
 

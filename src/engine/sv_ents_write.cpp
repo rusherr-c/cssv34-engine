@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,7 @@
 #include <eiface.h>
 #include <dt_send.h>
 #include <utllinkedlist.h>
+#include "tier0/etwprof.h"
 #include "dt_send_eng.h"
 #include "dt.h"
 #include "net_synctags.h"
@@ -17,6 +18,7 @@
 #include "LocalNetworkBackdoor.h"
 #include "ents_shared.h"
 #include "hltvserver.h"
+#include "replayserver.h"
 #include "tier0/vcrmode.h"
 #include "framesnapshot.h"
 
@@ -157,7 +159,7 @@ static inline bool SV_NeedsExplicitDestroy( int entnum, CFrameSnapshot *from, CF
 {
 	// Never on uncompressed packet
 
-	if( to->m_pEntities[entnum].m_pClass == NULL ) // doesn't exits in new
+	if( entnum >= to->m_nNumEntities || to->m_pEntities[entnum].m_pClass == NULL ) // doesn't exits in new
 	{
 		if ( entnum >= from->m_nNumEntities )
 			return false; // didn't exist in old
@@ -324,7 +326,7 @@ static inline void SV_WritePropsFromPackedEntity(
 	SendTable *pSendTable = pTo->m_pServerClass->m_pTable;
 
 	CServerDTITimer timer( pSendTable, SERVERDTI_WRITE_DELTA_PROPS );
-	if ( g_bServerDTIEnabled && !u.m_pServer->IsHLTV() )
+	if ( g_bServerDTIEnabled && !u.m_pServer->IsHLTV() && !u.m_pServer->IsReplay() )
 	{
 		ICollideable *pEnt = sv.edicts[pTo->m_nEntityIndex].GetCollideable();
 		ICollideable *pClientEnt = sv.edicts[u.m_nClientEntity].GetCollideable();
@@ -497,10 +499,17 @@ static inline void SV_DetermineUpdateType( CEntityWriteInfo &u )
 	}
 
 #ifndef _X360
+		int nBits;
+#if defined( REPLAY_ENABLED )
+	if ( !u.m_bCullProps && (hltv || replay) )
+	{
+		unsigned char *pBuffer = hltv ? hltv  ->m_DeltaCache.FindDeltaBits( u.m_nNewEntity, u.m_pFromSnapshot->m_nTickCount, nBits )
+									  : replay->m_DeltaCache.FindDeltaBits( u.m_nNewEntity, u.m_pFromSnapshot->m_nTickCount, nBits );
+#else
 	if ( !u.m_bCullProps && hltv )
 	{
-		int nBits;
 		unsigned char *pBuffer = hltv->m_DeltaCache.FindDeltaBits( u.m_nNewEntity, u.m_pFromSnapshot->m_nTickCount, nBits );
+#endif
 
 		if ( pBuffer )
 		{
@@ -511,7 +520,7 @@ static inline void SV_DetermineUpdateType( CEntityWriteInfo &u )
 
 				// just write the cached bit stream 
 				u.m_pBuf->WriteBits( pBuffer, nBits );
-				
+
 				u.m_UpdateType = DeltaEnt;
 			}
 			else
@@ -530,7 +539,7 @@ static inline void SV_DetermineUpdateType( CEntityWriteInfo &u )
 	if ( nCheckProps == -1 )
 	{
 		// check failed, we have to recalc delta props based on from & to snapshot
-		// that should happen only in HLTV demo playback mode, this code is really expensive
+		// that should happen only in HLTV/Replay demo playback mode, this code is really expensive
 
 		const void *pOldData, *pNewData;
 		int nOldBits, nNewBits;
@@ -593,10 +602,21 @@ static inline void SV_DetermineUpdateType( CEntityWriteInfo &u )
 	else
 	{
 #ifndef _X360
-		if ( !u.m_bCullProps && hltv )
+		if ( !u.m_bCullProps )
 		{
-			// no bits changed, PreserveEnt
-			hltv->m_DeltaCache.AddDeltaBits( u.m_nNewEntity, u.m_pFromSnapshot->m_nTickCount, 0, NULL );
+			if ( hltv )
+			{
+				// no bits changed, PreserveEnt
+				hltv->m_DeltaCache.AddDeltaBits( u.m_nNewEntity, u.m_pFromSnapshot->m_nTickCount, 0, NULL );
+			}
+
+#if defined( REPLAY_ENABLED )
+			if ( replay )
+			{
+				// no bits changed, PreserveEnt
+				replay->m_DeltaCache.AddDeltaBits( u.m_nNewEntity, u.m_pFromSnapshot->m_nTickCount, 0, NULL );
+			}
+#endif
 		}
 #endif
 		u.m_UpdateType = PreserveEnt;
@@ -689,7 +709,7 @@ static inline void SV_WriteEnterPVS( CEntityWriteInfo &u )
 		nToBits = u.m_pNewPack->GetNumBits();
 	}
 
-	/*if ( server->IsHLTV() )
+	/*if ( server->IsHLTV() || server->IsReplay() )
 	{*/
 	// send all changed properties when entering PVS (no SendProxy culling since we may use it as baseline
 	u.m_nFullProps +=  SendTable_WriteAllDeltaProps( pClass->m_pTable, pFromData, nFromBits,
@@ -797,46 +817,34 @@ static inline int SV_WriteDeletions( CEntityWriteInfo &u )
 
 	int nNumDeletions = 0;
 
-	CFrameSnapshot *pSnapShot = u.m_pToSnapshot;
+	CFrameSnapshot *pFromSnapShot = u.m_pFromSnapshot;
+	CFrameSnapshot *pToSnapShot = u.m_pToSnapshot;
 
-	for ( int i = 0; i < pSnapShot->m_nNumEntities; i++ )
+	int nLast = MAX( pFromSnapShot->m_nNumEntities, pToSnapShot->m_nNumEntities );
+	for ( int i = 0; i < nLast; i++ )
 	{
 		// Packet update didn't clear it out expressly
 		if ( u.m_DeletionFlags.Get( i ) ) 
 			continue;
 
+		// If the entity is marked to transmit in the u.m_pTo, then it can never be destroyed by the m_iExplicitDeleteSlots
+		// Another possible fix would be to clear any slots in the explicit deletes list that were actually occupied when a snapshot was taken
+		if ( u.m_pTo->transmit_entity.Get(i) )
+			continue;
+
 		// Looks like it should be gone
-		bool bNeedsExplicitDelete = SV_NeedsExplicitDestroy( i, u.m_pFromSnapshot, pSnapShot );
+		bool bNeedsExplicitDelete = SV_NeedsExplicitDestroy( i, pFromSnapShot, pToSnapShot );
 		if ( !bNeedsExplicitDelete && u.m_pTo )
 		{
-			bNeedsExplicitDelete = (pSnapShot->m_iExplicitDeleteSlots.Find(i) != pSnapShot->m_iExplicitDeleteSlots.InvalidIndex() );
-			if ( bNeedsExplicitDelete )
-			{
-				const CFrameSnapshotEntry *pFromEnt = &u.m_pFromSnapshot->m_pEntities[i];
-				const CFrameSnapshotEntry *pToEnt = &u.m_pToSnapshot->m_pEntities[i];
-
-				if ( pFromEnt && pToEnt )
-				{
-					bool bWillBeExplicitlyCreated = (pFromEnt->m_pClass == NULL) || pFromEnt->m_nSerialNumber != pToEnt->m_nSerialNumber;
-					if ( bWillBeExplicitlyCreated && u.m_pTo->transmit_entity.Get(i) )
-					{
-						//Warning("Entity %d is being explicitly deleted, but it will be explicitly created.\n", i );
-						bNeedsExplicitDelete = false;
-					}
-					else
-					{
-						//Warning("Entity %d is being explicitly deleted.\n", i );
-					}
-				}
-			}
+			bNeedsExplicitDelete = ( pToSnapShot->m_iExplicitDeleteSlots.Find(i) != pToSnapShot->m_iExplicitDeleteSlots.InvalidIndex() );
+			// We used to do more stuff here as a sanity check, but I don't think it was necessary since the only thing that would unset the bould would be a "recreate" in the same slot which is
+			// already implied by the u.m_pTo->transmit_entity.Get(i) check
 		}
 
 		// Check conditions
 		if ( bNeedsExplicitDelete )
 		{
 			TRACE_PACKET( ( "  SV Explicit Destroy (%d)\n", i ) );
-
-			Assert( !u.m_pTo->transmit_entity.Get(i) );
 
 			u.m_pBuf->WriteOneBit(1);
 			u.m_pBuf->WriteUBitLong( i, MAX_EDICT_BITS );
@@ -861,6 +869,7 @@ Returns the size IN BITS of the message buffer created.
 
 void CBaseServer::WriteDeltaEntities( CBaseClient *client, CClientFrame *to, CClientFrame *from, bf_write &pBuf )
 {
+	VPROF_BUDGET( "CBaseServer::WriteDeltaEntities", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	// Setup the CEntityWriteInfo structure.
 	CEntityWriteInfo u;
 	u.m_pBuf = &pBuf;
@@ -871,7 +880,7 @@ void CBaseServer::WriteDeltaEntities( CBaseClient *client, CClientFrame *to, CCl
 	u.m_pServer = this;
 	u.m_nClientEntity = client->m_nEntityIndex;
 #ifndef _XBOX
-	if ( IsHLTV() )
+	if ( IsHLTV() || IsReplay() )
 	{
 		// cull props only on master proxy
 		u.m_bCullProps = sv.IsActive();
@@ -954,6 +963,7 @@ void CBaseServer::WriteDeltaEntities( CBaseClient *client, CClientFrame *to, CCl
 		{
 			u.m_pNewPack = (u.m_nNewEntity != ENTITY_SENTINEL) ? framesnapshotmanager->GetPackedEntity( u.m_pToSnapshot, u.m_nNewEntity ) : NULL;
 			u.m_pOldPack = (u.m_nOldEntity != ENTITY_SENTINEL) ? framesnapshotmanager->GetPackedEntity( u.m_pFromSnapshot, u.m_nOldEntity ) : NULL;
+			int nEntityStartBit = pBuf.GetNumBitsWritten();
 
 			// Figure out how we want to write this entity.
 			SV_DetermineUpdateType( u  );
@@ -971,6 +981,7 @@ void CBaseServer::WriteDeltaEntities( CBaseClient *client, CClientFrame *to, CCl
 				{
 					char const *eString = sv.edicts[ u.m_pNewPack->m_nEntityIndex ].GetNetworkable()->GetClassName();
 					client->TraceNetworkData( pBuf, "enter [%s]", eString );
+					ETWMark1I( eString, pBuf.GetNumBitsWritten() - nEntityStartBit );
 				}
 				break;
 			case LeavePVS:
@@ -978,12 +989,14 @@ void CBaseServer::WriteDeltaEntities( CBaseClient *client, CClientFrame *to, CCl
 					// Note, can't use GetNetworkable() since the edict has been freed at this point
 					char const *eString = u.m_pOldPack->m_pServerClass->m_pNetworkName;
 					client->TraceNetworkData( pBuf, "leave [%s]", eString );
+					ETWMark1I( eString, pBuf.GetNumBitsWritten() - nEntityStartBit );
 				}
 				break;
 			case DeltaEnt:
 				{
 					char const *eString = sv.edicts[ u.m_pOldPack->m_nEntityIndex ].GetNetworkable()->GetClassName();
 					client->TraceNetworkData( pBuf, "delta [%s]", eString );
+					ETWMark1I( eString, pBuf.GetNumBitsWritten() - nEntityStartBit );
 				}
 				break;
 			}

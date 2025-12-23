@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Xbox
 //
@@ -46,7 +46,7 @@ static int NotificationToWindowsMessage( DWORD id )
 	case XN_FRIENDS_PRESENCE_CHANGED:		return WM_FRIENDS_PRESENCE_CHANGED;			
 	case XN_FRIENDS_FRIEND_ADDED:			return WM_FRIENDS_FRIEND_ADDED;				
 	case XN_FRIENDS_FRIEND_REMOVED:			return WM_FRIENDS_FRIEND_REMOVED;			
-	case XN_CUSTOM_GAMEBANNERPRESSED:		return WM_CUSTOM_GAMEBANNERPRESSED;			
+	//deprecated in Jun08 XDK: case XN_CUSTOM_GAMEBANNERPRESSED:		return WM_CUSTOM_GAMEBANNERPRESSED;	
 	case XN_CUSTOM_ACTIONPRESSED:			return WM_CUSTOM_ACTIONPRESSED;				
 	case XN_XMP_STATECHANGED:				return WM_XMP_STATECHANGED;					
 	case XN_XMP_PLAYBACKBEHAVIORCHANGED:	return WM_XMP_PLAYBACKBEHAVIORCHANGED;		

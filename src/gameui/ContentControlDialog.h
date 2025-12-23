@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -38,7 +38,7 @@ protected:
 	bool			CheckPassword( char const *oldPW, char const *newPW, bool enableContentControl );
 	void			UpdateContentControlStatus( void );
 
-	void			Explain( char const *fmt, ... );
+	void			Explain( PRINTF_FORMAT_STRING char const *fmt, ... );
 
     void            HashPassword(const char *newPW, char *hashBuffer, int maxlen );
     bool            EnablePassword(const char *newPW);

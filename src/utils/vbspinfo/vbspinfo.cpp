@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,8 @@
 #include "tier2/fileutils.h"
 #include "gamebspfile.h"
 #include "tier1/utlstringmap.h"
-
+#include "tools_minidump.h"
+#include "cmdlib.h"
 
 bool g_bTreeInfo = false;
 bool g_bDrawTree = false;
@@ -308,9 +309,21 @@ void PrintListStaticProps( FILE *fp )
 		printf( "%03d  %s\n", i, pName );
 	}
 }
+void PrintCommandLine( int argc, char **argv )
+{
+	Warning( "Command line: " );
+	for ( int z=0; z < argc; z++ )
+	{
+		Warning( "\"%s\" ", argv[z] );
+	}
+	Warning( "\n\n" );
+}
 
 void main (int argc, char **argv)
 {
+	// Install an exception handler.
+	SetupDefaultToolsMinidumpHandler();
+
 	int			i;
 	char		source[1024];
 	int			size;
@@ -327,6 +340,7 @@ void main (int argc, char **argv)
 	g_pFileSystem = g_pFullFileSystem;
 
 	MathLib_Init( 2.2f, 2.2f, 0.0f, 2.0f, false, false, false, false );
+	PrintCommandLine( argc, argv );
 	if (argc == 1)
 	{
 		printf( "vbspinfo:  build date(" __DATE__ ")\n" );
@@ -401,6 +415,8 @@ void main (int argc, char **argv)
 		}
 		strcpy (source, argv[i]);
 		Q_DefaultExtension (source, ".bsp", sizeof( source ) );
+		
+		strcpy( source, ExpandPath( source ) );
 		f = fopen (source, "rb");
 		if (f)
 		{
@@ -410,6 +426,12 @@ void main (int argc, char **argv)
 		}
 		else
 			size = 0;
+
+		if( !bWorldTextureStats && !bModelStats && !bListStaticProps )
+		{
+			Msg ("reading %s (%d)\n", source, size);
+		}		
+		
 
 		// If we're extracting, do that and quit.
 		if ( bHaveAnyToExtract )
@@ -435,10 +457,7 @@ void main (int argc, char **argv)
 			return;
 		}
 
-		if( !bWorldTextureStats && !bModelStats && !bListStaticProps )
-		{
-			printf ("%s: %i\n", source, size);
-		}
+
 
 		LoadBSPFile (source);		
 

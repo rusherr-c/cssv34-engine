@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -28,6 +28,7 @@ int			Key_CountBindings( void );
 void		Key_SetBinding( ButtonCode_t code, const char *pBinding );
 const char	*Key_BindingForKey( ButtonCode_t code );
 const char	*Key_NameForBinding( const char *pBinding );
+const char	*Key_NameForBindingExact( const char *pBinding );
 
 void		Key_StartTrapMode( void );
 bool		Key_CheckDoneTrapping( ButtonCode_t& key );

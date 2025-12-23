@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Entity which alters the relationships between entities via entity I/O
 //
@@ -191,7 +191,7 @@ void CAI_Relationship::ApplyRelationship( CBaseEntity *pActivator, CBaseEntity *
 	
 	// The player spawns slightly after the NPCs, meaning that if we don't wait, the
 	// player will miss any relationships placed on them.
-	if ( /*AI_IsSinglePlayer() && !*/UTIL_GetLocalPlayer() )
+	if ( AI_IsSinglePlayer() && !UTIL_GetLocalPlayer() )
 	{
 		SetThink( &CAI_Relationship::ApplyRelationshipThink );
 		SetNextThink( gpGlobals->curtime );

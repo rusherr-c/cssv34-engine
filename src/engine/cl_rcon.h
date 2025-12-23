@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -136,7 +136,9 @@ inline SocketHandle_t CRConClient::GetSocketHandle() const
 }
 
 CRConClient & RCONClient();
+#ifdef ENABLE_RPT
 CRConClient & RPTClient();		// used in remote perf testing
+#endif // ENABLE_RPT
 
 #endif // CL_RCON_H
 

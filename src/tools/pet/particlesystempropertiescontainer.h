@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Dialog used to edit properties of a particle system definition
 //
@@ -17,6 +17,7 @@
 // Forward declarations
 //-----------------------------------------------------------------------------
 class CPetDoc;
+
 
 //-----------------------------------------------------------------------------
 // Panel used to edit a particle system	definition
@@ -39,5 +40,6 @@ private:
 
 	CPetDoc *m_pDoc;
 };
+
 
 #endif // PARTICLESYSTEMPROPERTIESCONTAINER_H

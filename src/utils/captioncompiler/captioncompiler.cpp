@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: vcd_sound_check.cpp : Defines the entry point for the console application.
 //
@@ -7,7 +7,7 @@
 #include <windows.h>
 #include "tier0/dbg.h"
 #include "tier1/utldict.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "cmdlib.h"
 #include "scriplib.h"
 #include "vstdlib/random.h"
@@ -20,7 +20,7 @@
 #include "vgui/ILocalize.h"
 #include "tier1/checksum_crc.h"
 #include "tier1/UtlSortVector.h"
-#include "tier1/UtlMap.h"
+#include "tier1/utlmap.h"
 #include "captioncompiler.h"
 
 #include "tier0/fasttimer.h"
@@ -91,7 +91,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )

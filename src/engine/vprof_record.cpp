@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -211,7 +211,7 @@ public:
 
 	void Record_WriteTimings_R( const CVProfNode *pIn )
 	{
-		unsigned short curCalls = min( pIn->m_nCurFrameCalls, 0xFFFF );
+		unsigned short curCalls = min( pIn->m_nCurFrameCalls, (unsigned)0xFFFF );
 		if ( curCalls >= 255 )
 		{
 			unsigned char token = 255;
@@ -247,7 +247,9 @@ public:
 	{
 		CVProfile *pInProfile = &g_VProfCurrentProfile;
 
-		
+		// Don't record the overhead of writing in the filesystem here.
+		pInProfile->Pause();
+
 		// Record the tick count and start of frame.
 		Record_WriteToken( Token_StartFrame );
 #ifdef SWDS
@@ -262,14 +264,13 @@ public:
 		{
 			Record_MatchTree_R( GetRoot(), pInProfile->GetRoot(), pInProfile );
 		}
-
 		
 		// Now that we have a matching tree, write all the timings.
 		Record_WriteToken( Token_Timings );
 		Record_WriteTimings_R( pInProfile->GetRoot() );
-
-		
 		Record_WriteToken( Token_EndOfFrame );
+
+		pInProfile->Resume();
 	}
 
 	
@@ -543,7 +544,7 @@ public:
 
 		while ( 1 )
 		{
-			int token = Playback_ReadToken();
+			token = Playback_ReadToken();
 			if ( token == Token_EndOfFrame )
 				break;
 

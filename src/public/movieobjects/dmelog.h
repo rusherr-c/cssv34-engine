@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,6 +11,8 @@
 #endif
 
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "datamodel/dmehandle.h"
 #include "interpolatortypes.h"
 #include "movieobjects/timeutils.h"

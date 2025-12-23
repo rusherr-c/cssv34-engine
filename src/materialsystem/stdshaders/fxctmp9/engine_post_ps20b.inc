@@ -22,6 +22,48 @@ public:
 		m_bCONVERT_TO_SRGB = true;
 #endif
 	}
+private:
+	int m_nLINEAR_INPUT;
+#ifdef _DEBUG
+	bool m_bLINEAR_INPUT;
+#endif
+public:
+	void SetLINEAR_INPUT( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nLINEAR_INPUT = i;
+#ifdef _DEBUG
+		m_bLINEAR_INPUT = true;
+#endif
+	}
+	void SetLINEAR_INPUT( bool i )
+	{
+		m_nLINEAR_INPUT = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bLINEAR_INPUT = true;
+#endif
+	}
+private:
+	int m_nLINEAR_OUTPUT;
+#ifdef _DEBUG
+	bool m_bLINEAR_OUTPUT;
+#endif
+public:
+	void SetLINEAR_OUTPUT( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nLINEAR_OUTPUT = i;
+#ifdef _DEBUG
+		m_bLINEAR_OUTPUT = true;
+#endif
+	}
+	void SetLINEAR_OUTPUT( bool i )
+	{
+		m_nLINEAR_OUTPUT = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bLINEAR_OUTPUT = true;
+#endif
+	}
 public:
 	engine_post_ps20b_Static_Index( )
 	{
@@ -29,19 +71,27 @@ public:
 		m_bCONVERT_TO_SRGB = true;
 #endif // _DEBUG
 		m_nCONVERT_TO_SRGB =  g_pHardwareConfig->NeedsShaderSRGBConversion();
+#ifdef _DEBUG
+		m_bLINEAR_INPUT = false;
+#endif // _DEBUG
+		m_nLINEAR_INPUT = 0;
+#ifdef _DEBUG
+		m_bLINEAR_OUTPUT = false;
+#endif // _DEBUG
+		m_nLINEAR_OUTPUT = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bCONVERT_TO_SRGB;
+		bool bAllStaticVarsDefined = m_bCONVERT_TO_SRGB && m_bLINEAR_INPUT && m_bLINEAR_OUTPUT;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 40 * m_nCONVERT_TO_SRGB ) + 0;
+		return ( 40 * m_nCONVERT_TO_SRGB ) + ( 80 * m_nLINEAR_INPUT ) + ( 160 * m_nLINEAR_OUTPUT ) + 0;
 	}
 };
-#define shaderStaticTest_engine_post_ps20b 0
+#define shaderStaticTest_engine_post_ps20b psh_forgot_to_set_static_LINEAR_INPUT + psh_forgot_to_set_static_LINEAR_OUTPUT + 0
 class engine_post_ps20b_Dynamic_Index
 {
 private:

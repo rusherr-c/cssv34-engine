@@ -116,6 +116,28 @@ void VoiceRecord_DSound::Release()
 
 bool VoiceRecord_DSound::RecordStart()
 {
+	//When we start recording we want to make sure we don't provide any audio
+	//that occurred before now. So set m_LastReadPos to the current
+	//read position of the audio device
+	if (m_pCaptureBuffer == NULL)
+	{
+		return false;
+	}
+
+	Idle();
+
+	DWORD dwStatus;
+	HRESULT hr = m_pCaptureBuffer->GetStatus(&dwStatus);
+	if (FAILED(hr) || !(dwStatus & DSCBSTATUS_CAPTURING))
+		return false;
+
+	DWORD dwReadPos;
+	hr = m_pCaptureBuffer->GetCurrentPosition(NULL, &dwReadPos);
+	if (!FAILED(hr))
+	{
+		m_LastReadPos = dwReadPos + m_WrapOffset;
+	}
+
 	return true;
 }
 
@@ -124,6 +146,22 @@ void VoiceRecord_DSound::RecordStop()
 {
 }
 
+static bool IsRunningWindows7()
+{
+	if ( IsPC() )
+	{
+		OSVERSIONINFOEX osvi;
+		ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
+		osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
+
+		if ( GetVersionEx ((OSVERSIONINFO *)&osvi) )
+		{
+			if ( osvi.dwMajorVersion > 6 || (osvi.dwMajorVersion == 6 && osvi.dwMinorVersion >= 1) )
+				return true;
+		}
+	}
+	return false;
+}
 
 bool VoiceRecord_DSound::Init(int sampleRate)
 {
@@ -139,8 +177,8 @@ bool VoiceRecord_DSound::Init(int sampleRate)
 	{
 		WAVE_FORMAT_PCM,		// wFormatTag
 		1,						// nChannels
-		sampleRate,				// nSamplesPerSec
-		sampleRate*2,			// nAvgBytesPerSec
+		(uint32)sampleRate,				// nSamplesPerSec
+		(uint32)sampleRate*2,			// nAvgBytesPerSec
 		2,						// nBlockAlign
 		16,						// wBitsPerSample
 		sizeof(WAVEFORMATEX)	// cbSize
@@ -157,7 +195,12 @@ bool VoiceRecord_DSound::Init(int sampleRate)
 	if(!createFn)
 		goto HandleError;
 
-	hr = createFn(&DSDEVID_DefaultVoiceCapture, &m_pCapture, NULL);
+	const GUID FAR *pGuid = &DSDEVID_DefaultVoiceCapture;
+	if ( IsRunningWindows7() )
+	{
+		pGuid = NULL;
+	}
+	hr = createFn(pGuid, &m_pCapture, NULL);
 	if(FAILED(hr))
 		goto HandleError;
 
@@ -281,7 +324,7 @@ int VoiceRecord_DSound::GetRecordedData( short *pOut, int nSamples )
 	dwReadPos += m_WrapOffset;
 
 	// Read the range (dwReadPos-nSamplesWanted, dwReadPos), but don't re-read data we've already read.
-	DWORD readStart = max( dwReadPos - nBytesWanted, 0 );
+	DWORD readStart = Max( dwReadPos - nBytesWanted, (DWORD)0u );
 	if ( readStart < m_LastReadPos )
 	{
 		readStart = m_LastReadPos;
@@ -331,7 +374,7 @@ void VoiceRecord_DSound::UpdateWrapping()
 		return;
 
 	// Has the buffer wrapped?
-	if(VCRHook_WaitForSingleObject(m_hWrapEvent, 0) == WAIT_OBJECT_0)
+	if ( VCRHook_WaitForSingleObject(m_hWrapEvent, 0) == WAIT_OBJECT_0 )
 	{
 		m_WrapOffset += m_nCaptureBufferBytes;
 	}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Dialog for setting customizable game options
 //
@@ -281,9 +281,9 @@ void CSessionOptionsDialog::OnMenuItemChanged( KeyValues *pData )
 				m_pRecommendedLabel->SetVisible( bShouldWarnMaxPlayers );
 
 				// find the private slots option and repopulate it
-				for ( int i = 0; i < m_Menu.GetItemCount(); ++i )
+				for ( int iMenu = 0; iMenu < m_Menu.GetItemCount(); ++iMenu )
 				{
-					COptionsItem *pItem = dynamic_cast< COptionsItem* >( m_Menu.GetItem( i ) );
+					COptionsItem *pItem = dynamic_cast< COptionsItem* >( m_Menu.GetItem( iMenu ) );
 					if ( !pItem )
 					{                    
 						continue;
@@ -308,12 +308,12 @@ void CSessionOptionsDialog::OnMenuItemChanged( KeyValues *pData )
 
 						for ( int i = nStart; i <= nEnd; i += nInterval )
 						{
-							sessionProperty_t prop;
-							prop.nType = SESSION_PROPERTY;
-							Q_strncpy( prop.szID, baseProp.szID, sizeof( prop.szID ) );
-							Q_strncpy( prop.szValueType, baseProp.szValueType, sizeof( prop.szValueType ) );
-							itoa( i, prop.szValue, 10 );
-							pItem->AddOption( prop.szValue, prop );
+							sessionProperty_t propNew;
+							propNew.nType = SESSION_PROPERTY;
+							Q_strncpy( propNew.szID, baseProp.szID, sizeof( propNew.szID ) );
+							Q_strncpy( propNew.szValueType, baseProp.szValueType, sizeof( propNew.szValueType ) );
+							Q_snprintf( propNew.szValue, sizeof( propNew.szValue), "%d", i );
+							pItem->AddOption( propNew.szValue, propNew );
 						}
 
 						// re-set the focus
@@ -371,11 +371,11 @@ void CSessionOptionsDialog::OverrideMenuItem( KeyValues *pItemKeys )
 //-----------------------------------------------------------------
 void CSessionOptionsDialog::OnKeyCodePressed( vgui::KeyCode code )
 {
-	if ( code == KEY_XBUTTON_A )
+	if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
 	{
 		OnCommand( m_szCommand );
 	}
-	else if ( code == KEY_XBUTTON_B	&& m_bModifySession )
+	else if ( (code == KEY_XBUTTON_B || code == STEAMCONTROLLER_B) && m_bModifySession )
 	{
 		// Return to the session lobby without making any changes
 		OnCommand( "DialogClosing" );

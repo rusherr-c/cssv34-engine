@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,6 +9,8 @@
 
 #include "tier1/utlvector.h"
 #include "tier1/utlpriorityqueue.h"
+
+#include "tier0/etwprof.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -30,7 +32,7 @@ public:
 
 	virtual void ClearQueuedPacketsForChannel( INetChannel *pChan );
 	virtual void QueuePacket( INetChannel *pChan, SOCKET s, const char FAR *buf, int len, const struct sockaddr FAR * to, int tolen, uint32 msecDelay );
-
+	virtual bool HasQueuedPackets( const INetChannel *pChan ) const;
 private:
 
 	// CThread Overrides
@@ -68,6 +70,7 @@ IQueuedPacketSender *g_pQueuedPackedSender = &g_QueuedPacketSender;
 CQueuedPacketSender::CQueuedPacketSender() :
 	m_QueuedPackets( 0, 0, CQueuedPacket::LessFunc )
 {
+	SetName( "QueuedPacketSender" );
 	m_bThreadShouldExit = false;
 }
 
@@ -88,9 +91,9 @@ bool CQueuedPacketSender::Start( unsigned nBytesStack )
 	if ( CThread::Start( nBytesStack ) )
 	{
 		// Ahhh the perfect cross-platformness of the threads library.
-#ifdef _WIN32
+#ifdef IS_WINDOWS_PC
 		SetPriority( THREAD_PRIORITY_HIGHEST );
-#elif _LINUX
+#elif POSIX
 		//SetPriority( PRIORITY_MAX );
 #endif
 		m_bThreadShouldExit = false;
@@ -122,7 +125,7 @@ void CQueuedPacketSender::Shutdown()
 
 void CQueuedPacketSender::ClearQueuedPacketsForChannel( INetChannel *pChan )
 {
-	m_QueuedPacketsCS.Lock();
+	AUTO_LOCK( m_QueuedPacketsCS );
 
 	for ( int i = m_QueuedPackets.Count()-1; i >= 0; i-- )
 	{
@@ -133,13 +136,26 @@ void CQueuedPacketSender::ClearQueuedPacketsForChannel( INetChannel *pChan )
 			delete p;
 		}
 	}
-
-	m_QueuedPacketsCS.Unlock();
 }
 
+bool CQueuedPacketSender::HasQueuedPackets( const INetChannel *pChan ) const
+{
+	AUTO_LOCK( m_QueuedPacketsCS );
+
+	for ( int i = 0; i < m_QueuedPackets.Count(); ++i )
+	{
+		const CQueuedPacket *p = m_QueuedPackets.Element( i );
+		if ( p->m_pChannel == pChan )
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
 void CQueuedPacketSender::QueuePacket( INetChannel *pChan, SOCKET s, const char FAR *buf, int len, const struct sockaddr FAR * to, int tolen, uint32 msecDelay )
 {
-	m_QueuedPacketsCS.Lock();
+	AUTO_LOCK( m_QueuedPacketsCS );
 
 	// We'll pull all packets we should have sent by now and send them out right away
 	uint32 msNow = Plat_MSTime();
@@ -167,8 +183,6 @@ void CQueuedPacketSender::QueuePacket( INetChannel *pChan, SOCKET s, const char 
 
 	// Tell the thread that we have a queued packet.
 	m_hThreadEvent.Set();
-
-	m_QueuedPacketsCS.Unlock();
 }
 
 extern int NET_SendToImpl( SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen, int iGameDataLength );
@@ -192,63 +206,62 @@ int CQueuedPacketSender::Run()
 		waitInterval = waitIntervalNoPackets;
 
 		// OK, now send a packet.
-		m_QueuedPacketsCS.Lock();
-		
-		// We'll pull all packets we should have sent by now and send them out right away
-		uint32 msNow = Plat_MSTime();
-
-		bool bTrace = net_queue_trace.GetInt() == NET_QUEUED_PACKET_THREAD_DEBUG_VALUE;
-
-		while ( m_QueuedPackets.Count() > 0 )
 		{
-			CQueuedPacket *pPacket = m_QueuedPackets.ElementAtHead();
-			if ( pPacket->m_unSendTime > msNow )
-			{
-				// Sleep until next we need this packet
-				waitInterval = pPacket->m_unSendTime - msNow;
-				if ( bTrace )
-				{
-					char sz[ 256 ];
-					Q_snprintf( sz, sizeof( sz ), "SQ:  sleeping for %u msecs at %f\n", waitInterval, Plat_FloatTime() );
-					Warning( sz );
-				}
-				break;
-			}
-
-			// If it's a bot, don't do anything. Note: we DO want this code deep here because bots only
-			// try to send packets when sv_stressbots is set, in which case we want it to act as closely
-			// as a real player as possible.
-			sockaddr_in *pInternetAddr = (sockaddr_in*)pPacket->to.Base();
-		#ifdef _WIN32
-			if ( pInternetAddr->sin_addr.S_un.S_addr != 0
-		#else
-			if ( pInternetAddr->sin_addr.s_addr != 0 
-		#endif
-				&& pInternetAddr->sin_port != 0 )
-			{		
-				if ( bTrace )
-				{
-					char sz[ 256 ];
-					Q_snprintf( sz, sizeof( sz ), "SQ:  sending %d bytes at %f\n", pPacket->buf.Count(), Plat_FloatTime() );
-					Warning( sz );
-				}
-
-				NET_SendToImpl
-				( 
-					pPacket->m_Socket, 
-					pPacket->buf.Base(), 
-					pPacket->buf.Count(), 
-					(sockaddr*)pPacket->to.Base(),
-					pPacket->to.Count(), 
-					-1 
-				);
-			}	
-			
-			delete pPacket;
-			m_QueuedPackets.RemoveAtHead();
-		}
+			AUTO_LOCK( m_QueuedPacketsCS );
 		
-		m_QueuedPacketsCS.Unlock();
+			// We'll pull all packets we should have sent by now and send them out right away
+			uint32 msNow = Plat_MSTime();
+
+			bool bTrace = net_queue_trace.GetInt() == NET_QUEUED_PACKET_THREAD_DEBUG_VALUE;
+
+			while ( m_QueuedPackets.Count() > 0 )
+			{
+				CQueuedPacket *pPacket = m_QueuedPackets.ElementAtHead();
+				if ( pPacket->m_unSendTime > msNow )
+				{
+					// Sleep until next we need this packet
+					waitInterval = pPacket->m_unSendTime - msNow;
+					// Emit ETW events to help with diagnosing network throttling issues as
+					// these often have a severe effect on load times in Dota.
+					ETWMark1I( "CQueuedPacketSender::Run sleeping (ms)", waitInterval );
+					if ( bTrace )
+					{
+						Warning( "SQ:  sleeping for %u msecs at %f\n", waitInterval, Plat_FloatTime() );
+					}
+					break;
+				}
+
+				// If it's a bot, don't do anything. Note: we DO want this code deep here because bots only
+				// try to send packets when sv_stressbots is set, in which case we want it to act as closely
+				// as a real player as possible.
+				sockaddr_in *pInternetAddr = (sockaddr_in*)pPacket->to.Base();
+			#ifdef _WIN32
+				if ( pInternetAddr->sin_addr.S_un.S_addr != 0
+			#else
+				if ( pInternetAddr->sin_addr.s_addr != 0 
+			#endif
+					&& pInternetAddr->sin_port != 0 )
+				{		
+					if ( bTrace )
+					{
+						Warning( "SQ:  sending %d bytes at %f\n", pPacket->buf.Count(), Plat_FloatTime() );
+					}
+
+					NET_SendToImpl
+					( 
+						pPacket->m_Socket, 
+						pPacket->buf.Base(), 
+						pPacket->buf.Count(), 
+						(sockaddr*)pPacket->to.Base(),
+						pPacket->to.Count(), 
+						-1 
+					);
+				}	
+				
+				delete pPacket;
+				m_QueuedPackets.RemoveAtHead();
+			}
+		}
 	}
 }
 

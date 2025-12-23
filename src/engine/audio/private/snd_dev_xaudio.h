@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,8 +24,9 @@ class CXboxVoice
 public:
 
 	static const DWORD MAX_VOICE_BUFFER_TIME = 200;  // 200ms
-
+	CXboxVoice( void );
 	void		VoiceInit( void );
+	void		VoiceShutdown( void );
 	void		AddPlayerToVoiceList( CClientInfo *pClient, bool bLocal );
 	void		RemovePlayerFromVoiceList( CClientInfo *pClient, bool bLocal );
 	bool		VoiceUpdateData( void );
@@ -41,7 +42,7 @@ public:
 	void		RemoveAllTalkers( CClientInfo *pLocal );
 
 private:
-	PIXHVENGINE			m_pXHVEngine;
+	PIXHV2ENGINE			m_pXHVEngine;
 
 
 	// Local chat data
@@ -54,6 +55,7 @@ private:
 };
 
 CXboxVoice *Audio_GetXVoice( void );
+IXAudio2 *Audio_GetXAudio2( void );
 
 #endif
 

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,6 +20,7 @@ class IEngineVGui;
 class IServerTools;
 class IClientTools;
 class IFileSystem;
+class IP4;
 class IVDebugOverlay;
 class IDmSerializers;
 
@@ -32,6 +33,7 @@ extern IEngineVGui	*enginevgui;
 extern IServerTools	*servertools;
 extern IClientTools	*clienttools;
 extern IFileSystem	*g_pFileSystem;
+extern IP4			*p4;
 extern IVDebugOverlay *debugoverlay;
 extern IDmSerializers *dmserializers;
 

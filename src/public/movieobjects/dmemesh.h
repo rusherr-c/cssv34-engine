@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing a mesh
 //
@@ -13,7 +13,7 @@
 
 #include "movieobjects/dmeshape.h"
 #include "movieobjects/dmevertexdata.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "mathlib/vector.h"
 #include "tier1/utllinkedlist.h"
 #include "Color.h"
@@ -67,7 +67,9 @@ public:
 
 	virtual void GetBoundingSphere( Vector &c, float &r ) const { return GetBoundingSphere( c, r, NULL, NULL ); }
 
-	void GetBoundingBox( Vector &min, Vector &max, CDmeVertexData *pPassedBase = NULL, CDmeSingleIndexedComponent *pPassedSelection = NULL ) const;
+	void GetBoundingBox( Vector &min, Vector &max, CDmeVertexData *pPassedBase /* = NULL */, CDmeSingleIndexedComponent *pPassedSelection /* = NULL */ ) const;
+	
+	virtual void GetBoundingBox( Vector &min, Vector &max ) const { return GetBoundingBox( min, max, NULL, NULL ); }
 
 	// accessors
 	int FaceSetCount() const;
@@ -208,6 +210,21 @@ public:
 	template < class T_t >
 	bool SetBaseDataToDeltas( CDmeVertexData *pBase, CDmeVertexData::StandardFields_t nStandardField, CDmrArrayConst< T_t > &srcData, CDmrArray< T_t > &dstData, bool bDoStereo, bool bDoLag );
 
+	// Replace all instances of a material with a different material
+	void ReplaceMaterial( const char *pOldMaterialName, const char *pNewMaterialName );
+
+	// makes all the normals in the mesh unit length
+	void NormalizeNormals();
+
+	// Collapses redundant normals in the model
+	// flNormalBlend is the maximum difference in the dot product between two normals to consider them
+	// to be the same normal, a value of cos( DEG2RAD( 2.0 ) ) is the default studiomdl uses, for example
+	void CollapseRedundantNormals( float flNormalBlend );
+
+	// SWIG errors on the parsing of something in the private section of DmeMesh, it isn't exposed by SWIG anyway, so have SWIG ignore it
+#ifndef SWIG
+	template < class T_t > static int GenerateCompleteDataForDelta( const CDmeVertexDeltaData *pDelta, T_t *pFullData, int nFullData, CDmeVertexData::StandardFields_t standardField );
+
 private:
 	friend class CDmMeshComp;
 
@@ -312,8 +329,6 @@ private:
 	// Builds a list of all of the dependent delta states that do not already exist
 	bool BuildMissingDependentDeltaList( CDmeVertexDeltaData *pDeltaState, CUtlVector< int > &controlIndices, CUtlVector< CUtlVector< int > > &dependentStates ) const;
 
-	template < class T_t > static int GenerateCompleteDataForDelta( const CDmeVertexDeltaData *pDelta, T_t *pFullData, int nFullData, CDmeVertexData::StandardFields_t standardField );
-
 	static void ComputeCorrectedPositionsFromActualPositions( const CUtlVector< int > &deltaStateList, int nPositionCount, Vector *pPositions );
 
 	template < class T_t > void AddCorrectedDelta(
@@ -329,6 +344,13 @@ private:
 		const CUtlVector< int > &baseIndices,
 		const DeltaComputation_t &deltaComputation,
 		const char *pFieldName,
+		float weight = 1.0f,
+		const CDmeSingleIndexedComponent *pMask = NULL );
+
+	// Add the delta into the vertex data state weighted by the weight and masked by the weight map
+	bool AddCorrectedMaskedDelta(
+		CDmeVertexDeltaData *pDelta,
+		CDmeVertexData *pDst = NULL,
 		float weight = 1.0f,
 		const CDmeSingleIndexedComponent *pMask = NULL );
 
@@ -445,6 +467,8 @@ private:
 	static CMaterialReference s_WireframeOnShadedMaterial;
 
 	friend class CRenderInfo;
+
+#endif // ndef SWIG
 };
 
 

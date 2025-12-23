@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,8 +8,8 @@
 #include "BaseVSShader.h"
 
 #include "screenspaceeffect_vs20.inc"
-#include "bloom_ps20.inc"
-#include "bloom_ps20b.inc"
+#include "Bloom_ps20.inc"
+#include "Bloom_ps20b.inc"
 
 BEGIN_VS_SHADER_FLAGS( Bloom, "Help for Bloom", SHADER_NOT_EDITABLE )
 	BEGIN_SHADER_PARAMS

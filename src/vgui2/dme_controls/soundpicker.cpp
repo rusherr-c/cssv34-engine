@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,13 +9,13 @@
 
 #include "filesystem.h"
 #include "dme_controls/soundpicker.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui_controls/ListPanel.h"
 #include "vgui_controls/Button.h"
 #include "vgui_controls/PropertySheet.h"
 #include "vgui_controls/PropertyPage.h"
 #include "dme_controls/filtercombobox.h"
-#include "vgui/isurface.h"
+#include "vgui/ISurface.h"
 #include "vgui/iinput.h"
 #include "dme_controls/dmecontrols.h"
 #include "soundemittersystem/isoundemittersystembase.h"
@@ -158,20 +158,20 @@ void CSoundPicker::SetSelectedSound( PickType_t type, const char *pSoundName )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CSoundPicker::OnKeyCodeTyped( KeyCode code )
+void CSoundPicker::OnKeyCodePressed( KeyCode code )
 {
 	if ( m_pGameSoundPage && ( m_pViewsSheet->GetActivePage() == m_pGameSoundPage ) )
 	{
 		if (( code == KEY_UP ) || ( code == KEY_DOWN ) || ( code == KEY_PAGEUP ) || ( code == KEY_PAGEDOWN ))
 		{
-			KeyValues *pMsg = new KeyValues( "KeyCodeTyped", "code", code );
+			KeyValues *pMsg = new KeyValues( "KeyCodePressed", "code", code );
 			vgui::ipanel()->SendMessage( m_pGameSoundList->GetVPanel(), pMsg, GetVPanel() );
 			pMsg->deleteThis();
 			return;
 		}
 	}
 
-	BaseClass::OnKeyCodeTyped( code );
+	BaseClass::OnKeyCodePressed( code );
 }
 
 
@@ -578,14 +578,15 @@ void CSoundPickerFrame::OnCommand( const char *pCommand )
 				{
 					char pBuf[32];
 					Q_snprintf( pBuf, sizeof(pBuf), "%d", i );
-					const char *pSoundName = pPicker->GetSelectedSoundName( i );
+					pSoundName = pPicker->GetSelectedSoundName( i );
 
-					int len = V_strlen( pSoundName );
-					char *soundname = ( char* )stackalloc( len + 2 );
+					len = V_strlen( pSoundName );
+					soundname = ( char* )malloc( len + 2 );
 					soundname[ 0 ] = '#'; // mark sound to bypass the dsp
 					V_strncpy( soundname + 1, pSoundName, len + 1 );
 
 					pSoundList->SetString( pBuf, soundname );
+					free( soundname );
 				}
 			}
 

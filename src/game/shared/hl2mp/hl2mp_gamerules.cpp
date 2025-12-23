@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -205,6 +205,7 @@ CHL2MPRules::CHL2MPRules()
 	m_bCompleteReset = false;
 	m_bHeardAllPlayersReady = false;
 	m_bAwaitingReadyRestart = false;
+	m_bChangelevelDone = false;
 
 #endif
 }
@@ -239,7 +240,7 @@ void CHL2MPRules::CreateStandardEntities( void )
 	g_pLastCombineSpawn = NULL;
 	g_pLastRebelSpawn = NULL;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	CBaseEntity *pEnt = 
 #endif
 	CBaseEntity::Create( "hl2mp_gamerules", vec3_origin, vec3_angle );
@@ -301,7 +302,11 @@ void CHL2MPRules::Think( void )
 		// check to see if we should change levels now
 		if ( m_flIntermissionEndTime < gpGlobals->curtime )
 		{
-			ChangeLevel(); // intermission is over
+			if ( !m_bChangelevelDone )
+			{
+				ChangeLevel(); // intermission is over
+				m_bChangelevelDone = true;
+			}
 		}
 
 		return;
@@ -839,7 +844,11 @@ const char *CHL2MPRules::GetGameDescription( void )
 	return "Deathmatch"; 
 } 
 
-
+bool CHL2MPRules::IsConnectedUserInfoChangeAllowed( CBasePlayer *pPlayer )
+{
+	return true;
+}
+ 
 float CHL2MPRules::GetMapRemainingTime()
 {
 	// if timelimit is disabled, return 0
@@ -915,40 +924,18 @@ CAmmoDef *GetAmmoDef()
 	{
 		bInitted = true;
 
-		def.AddAmmoType("AR2",				DMG_BULLET,					TRACER_LINE_AND_WHIZ,	8,			3,			60,			BULLET_IMPULSE(200, 1225),	0 );
+		def.AddAmmoType("AR2",				DMG_BULLET,					TRACER_LINE_AND_WHIZ,	0,			0,			60,			BULLET_IMPULSE(200, 1225),	0 );
 		def.AddAmmoType("AR2AltFire",		DMG_DISSOLVE,				TRACER_NONE,			0,			0,			3,			0,							0 );
-		def.AddAmmoType("AlyxGun",			DMG_BULLET,					TRACER_LINE,			0,			0,			150,		BULLET_IMPULSE(200, 1225),	0 );
 		def.AddAmmoType("Pistol",			DMG_BULLET,					TRACER_LINE_AND_WHIZ,	0,			0,			150,		BULLET_IMPULSE(200, 1225),	0 );
 		def.AddAmmoType("SMG1",				DMG_BULLET,					TRACER_LINE_AND_WHIZ,	0,			0,			225,		BULLET_IMPULSE(200, 1225),	0 );
 		def.AddAmmoType("357",				DMG_BULLET,					TRACER_LINE_AND_WHIZ,	0,			0,			12,			BULLET_IMPULSE(800, 5000),	0 );
 		def.AddAmmoType("XBowBolt",			DMG_BULLET,					TRACER_LINE,			0,			0,			10,			BULLET_IMPULSE(800, 8000),	0 );
-		def.AddAmmoType("FlareRound",		DMG_BURN,					TRACER_LINE,			0,			0,			30,			BULLET_IMPULSE(1500, 600),	0 );
 		def.AddAmmoType("Buckshot",			DMG_BULLET | DMG_BUCKSHOT,	TRACER_LINE,			0,			0,			30,			BULLET_IMPULSE(400, 1200),	0 );
 		def.AddAmmoType("RPG_Round",		DMG_BURN,					TRACER_NONE,			0,			0,			3,			0,							0 );
 		def.AddAmmoType("SMG1_Grenade",		DMG_BURN,					TRACER_NONE,			0,			0,			3,			0,							0 );
-		def.AddAmmoType("ML_Grenade",		DMG_BURN,					TRACER_NONE,			0,			0,			3,			0,							0 );
-		def.AddAmmoType("AR2_Grenade",		DMG_BURN,					TRACER_NONE,			0,			0,			0,			0,							0 );
 		def.AddAmmoType("Grenade",			DMG_BURN,					TRACER_NONE,			0,			0,			5,			0,							0 );
 		def.AddAmmoType("slam",				DMG_BURN,					TRACER_NONE,			0,			0,			5,			0,							0 );
-		def.AddAmmoType("SmallRound",		DMG_BULLET,					TRACER_LINE,			5,			5,			150,		BULLET_IMPULSE(125, 1325),	0 );
-		def.AddAmmoType("MediumRound",		DMG_BULLET,					TRACER_LINE,			8,			7,			150,		BULLET_IMPULSE(200, 1225),	0 );
-		def.AddAmmoType("LargeRound",		DMG_BULLET,					TRACER_LINE,			15,			10,			60,			BULLET_IMPULSE(250, 1180),	0 );
-		def.AddAmmoType("Molotov",			DMG_BURN,					TRACER_NONE,			0,			0,			5,			0,							0 );
-		def.AddAmmoType("Brickbat",			DMG_CLUB,					TRACER_NONE,			0,			0,			8,			0,							0 );
-		def.AddAmmoType("Rock",				DMG_CLUB,					TRACER_NONE,			0,			0,			8,			0,							0 );
-		def.AddAmmoType("Tripwire",			DMG_BURN,					TRACER_NONE,			NULL,		NULL,		3,			0,							0 );
-		def.AddAmmoType("Thumper",			DMG_SONIC,					TRACER_NONE,			10,			10,			2,			0,							0 );
-		def.AddAmmoType("Gravity",			DMG_CLUB,					TRACER_NONE,			0,			0,			8,			0,							0 );
-		def.AddAmmoType("Extinguisher",		DMG_BURN,					TRACER_NONE,			0,			0,			100,		0,							0 );
-		def.AddAmmoType("Battery",			DMG_CLUB,					TRACER_NONE,			NULL,		NULL,		NULL,		0,							0 );
-		def.AddAmmoType("GaussEnergy",		DMG_SHOCK,					TRACER_NONE,			0,			0,			60,			BULLET_IMPULSE(650, 8000),	0 ); // hit like a 10kg weight at 400 in/s
-		def.AddAmmoType("CombineCannon",	DMG_BULLET,					TRACER_LINE,			3,			40,			NULL,		1.5 * 750 * 12,				0 ); // hit like a 1.5kg weight at 750 ft/s
-		def.AddAmmoType("HelicopterGun",	DMG_BULLET,					TRACER_LINE_AND_WHIZ,	3,			6,			225,		BULLET_IMPULSE(400, 1225),	AMMO_FORCE_DROP_IF_CARRIED | AMMO_INTERPRET_PLRDAMAGE_AS_DAMAGE_TO_PLAYER );
-		def.AddAmmoType("Hopwire",			DMG_BLAST,					TRACER_NONE,			1,			1,			5,			0,							0 );
-		def.AddAmmoType("StriderMinigun",	DMG_BULLET,					TRACER_LINE,			5,			15,			15,			1.0 * 750 * 12,				AMMO_FORCE_DROP_IF_CARRIED ); // hit like a 1.0kg weight at 750 ft/s
-		def.AddAmmoType("StriderMinigunDirect",	DMG_BULLET,				TRACER_LINE,			2,			2,			15,			1.0 * 750 * 12,				AMMO_FORCE_DROP_IF_CARRIED ); // hit like a 1.0kg weight at 750 ft/s
-
-		}
+	}
 
 	return &def;
 }

@@ -1,18 +1,18 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
 //===========================================================================//
-#include "materialsystem/IMaterialSystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "materialsystem/MaterialSystem_Config.h"
 #include "tier0/dbg.h"
 #include <windows.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "FileSystem_Tools.h"
 #include "../materialsystem/ishadersystem.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "tier0/icommandline.h"
 #include "tier2/tier2.h"
 
@@ -121,9 +121,9 @@ int main( int argc, char **argv )
 	CommandLine()->CreateCmdLine( argc, argv );
 	FileSystem_Init( "" );
 	PrintHeader();
-	/*LoadShaderDLL( "stdshader_dx6.dll" );
+	LoadShaderDLL( "stdshader_dx6.dll" );
 	LoadShaderDLL( "stdshader_dx7.dll" );
-	LoadShaderDLL( "stdshader_dx8.dll" );*/
+	LoadShaderDLL( "stdshader_dx8.dll" );
 	LoadShaderDLL( "stdshader_dx9.dll" );
 	int i;
 	for( i = 0; i < g_ShaderDLLs.Count(); i++ )

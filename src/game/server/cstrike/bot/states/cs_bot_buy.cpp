@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -209,7 +209,7 @@ struct BuyInfo
 {
 	WeaponType type;
 	bool preferred;			///< more challenging bots prefer these weapons
-	char *buyAlias;			///< the buy alias for this equipment
+	const char *buyAlias;			///< the buy alias for this equipment
 };
 
 #define PRIMARY_WEAPON_BUY_COUNT 13

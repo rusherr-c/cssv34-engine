@@ -1,19 +1,19 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A blood spray effect to expose successful hits.
 //
 //=============================================================================//
 
 #include "cbase.h"
-#include "ClientEffectPrecacheSystem.h"
-#include "FX_Sparks.h"
+#include "clienteffectprecachesystem.h"
+#include "fx_sparks.h"
 #include "iefx.h"
 #include "c_te_effect_dispatch.h"
 #include "particles_ez.h"
 #include "decals.h"
 #include "engine/IEngineSound.h"
 #include "fx_quad.h"
-#include "engine/IVDebugOverlay.h"
+#include "engine/ivdebugoverlay.h"
 #include "shareddefs.h"
 #include "fx_blood.h"
 #include "view.h"
@@ -129,9 +129,9 @@ void FX_HitEffectSmoke(
 
 		float colorRamp = random->RandomFloat( 0.5f, 1.25f );
 
-		newParticle.m_uchColor[0] = min( 1.0f, colorRamp ) * 255.0f;
-		newParticle.m_uchColor[1] = min( 1.0f, colorRamp ) * 255.0f;
-		newParticle.m_uchColor[2] = min( 1.0f, colorRamp ) * 255.0f;
+		newParticle.m_uchColor[0] = MIN( 1.0f, colorRamp ) * 255.0f;
+		newParticle.m_uchColor[1] = MIN( 1.0f, colorRamp ) * 255.0f;
+		newParticle.m_uchColor[2] = MIN( 1.0f, colorRamp ) * 255.0f;
 	}	
 }
 
@@ -211,9 +211,9 @@ void FX_HitEffectBloodSpray(
 
 			float colorRamp = random->RandomFloat( 0.5f, 0.75f ) + flLODDistance;
 			
-			pParticle->m_uchColor[0]	= min( 1.0f, color[0] * colorRamp ) * 255.0f;
-			pParticle->m_uchColor[1]	= min( 1.0f, whiteness * colorRamp ) * 255.0f;
-			pParticle->m_uchColor[2]	= min( 1.0f, whiteness * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[0]	= MIN( 1.0f, color[0] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[1]	= MIN( 1.0f, whiteness * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[2]	= MIN( 1.0f, whiteness * colorRamp ) * 255.0f;
 			
 			pParticle->m_uchStartSize	= random->RandomFloat( interpolatedRamp.m_flMinSize, interpolatedRamp.m_flMaxSize ) * flDistanceScale;
 			pParticle->m_uchEndSize		= pParticle->m_uchStartSize * 4 * flDistanceScale;
@@ -365,9 +365,9 @@ void FX_CS_BloodSpray( const Vector &origin, const Vector &normal, float flDamag
 
 		colorRamp = random->RandomFloat( 0.75f, 2.0f );
 
-		pParticle->m_uchColor[0]	= min( 1.0f, color[0] * colorRamp ) * 255.0f;
-		pParticle->m_uchColor[1]	= min( 1.0f, color[1] * colorRamp ) * 255.0f;
-		pParticle->m_uchColor[2]	= min( 1.0f, color[2] * colorRamp ) * 255.0f;
+		pParticle->m_uchColor[0]	= MIN( 1.0f, color[0] * colorRamp ) * 255.0f;
+		pParticle->m_uchColor[1]	= MIN( 1.0f, color[1] * colorRamp ) * 255.0f;
+		pParticle->m_uchColor[2]	= MIN( 1.0f, color[2] * colorRamp ) * 255.0f;
 		
 		pParticle->m_uchStartSize	= 8;
 		pParticle->m_uchEndSize		= 32;
@@ -397,9 +397,9 @@ void FX_CS_BloodSpray( const Vector &origin, const Vector &normal, float flDamag
 
 			colorRamp = random->RandomFloat( 0.75f, 2.0f );
 
-			pParticle->m_uchColor[0]	= min( 1.0f, color[0] * colorRamp ) * 255.0f;
-			pParticle->m_uchColor[1]	= min( 1.0f, color[1] * colorRamp ) * 255.0f;
-			pParticle->m_uchColor[2]	= min( 1.0f, color[2] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[0]	= MIN( 1.0f, color[0] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[1]	= MIN( 1.0f, color[1] * colorRamp ) * 255.0f;
+			pParticle->m_uchColor[2]	= MIN( 1.0f, color[2] * colorRamp ) * 255.0f;
 			
 			pParticle->m_uchStartSize	= scale * random->RandomInt( 4, 8 );
 			pParticle->m_uchEndSize		= pParticle->m_uchStartSize * 4;

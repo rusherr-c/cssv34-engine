@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,12 +13,17 @@
 #include "vgui_controls/Frame.h"
 #include "vgui/MouseCode.h"
 #include "KeyValues.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 
 
 #define SAVEGAME_MAPNAME_LEN 32
 #define SAVEGAME_COMMENT_LEN 80
 #define SAVEGAME_ELAPSED_LEN 32
+
+namespace vgui
+{
+	class Button;
+};
 
 
 struct SaveGameDescription_t
@@ -35,7 +40,7 @@ struct SaveGameDescription_t
 };
 
 
-int SaveReadNameAndComment( FileHandle_t f, char *name, char *comment );
+int SaveReadNameAndComment( FileHandle_t f, OUT_Z_CAP(nameSize) char *name, int nameSize, OUT_Z_CAP(commentSize) char *comment, int commentSize );
 
 
 //-----------------------------------------------------------------------------
@@ -63,8 +68,13 @@ protected:
 
 	bool ParseSaveData( char const *pszFileName, char const *pszShortName, SaveGameDescription_t &save );
 
+	void OnKeyCodeTyped( vgui::KeyCode code );
+	void OnKeyCodePressed( vgui::KeyCode code );
+
 private:
 	MESSAGE_FUNC( OnPanelSelected, "PanelSelected" );
+
+	vgui::Button *m_pLoadButton;
 };
 
 

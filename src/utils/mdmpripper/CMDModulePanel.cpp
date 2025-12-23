@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include <windows.h>
 #include "mdmpRipper.h"
 #include <vgui/IVGui.h>
@@ -5,14 +6,14 @@
 #include "vgui_controls/MenuBar.h"
 #include "vgui_controls/Menu.h"
 #include "vgui_controls/MessageBox.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui/ISurface.h"
 #include <vgui/ILocalize.h>
 #include "vgui_controls/Frame.h"
 #include "CMDModulePanel.h"
 #include "vgui_controls/ListPanel.h"
 #include <vgui_controls/RichText.h>
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "vgui/ISystem.h"
 #include "vgui_controls/FileOpenDialog.h"
 #include "isqlwrapper.h"

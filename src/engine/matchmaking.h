@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -164,6 +164,10 @@ public:
 	PROCESS_CLC_MESSAGE( ListenEvents ) { return true; }
 	PROCESS_CLC_MESSAGE( RespondCvarValue ) { return true; }
 	PROCESS_CLC_MESSAGE( FileCRCCheck ) { return true; }
+	PROCESS_CLC_MESSAGE( FileMD5Check ) { return true; }
+	PROCESS_CLC_MESSAGE( SaveReplay ) { return true; }
+	PROCESS_CLC_MESSAGE( CmdKeyValues ) { return true; }
+
 
 	PROCESS_MM_MESSAGE( JoinResponse );
 	PROCESS_MM_MESSAGE( ClientInfo );
@@ -177,9 +181,10 @@ public:
 	virtual void ConnectionClosing(const char *reason) {};							// network channel is being closed by remote site
 	virtual void ConnectionCrashed(const char *reason) {};							// network error occurred
 	virtual void PacketStart(int incoming_sequence, int outgoing_acknowledged) {};	// called each time a new packet arrived
-	virtual void FileRequested(const char *fileName, unsigned int transferID) {};	// other side request a file for download
-	virtual void FileReceived(const char *fileName, unsigned int transferID) {};	// we received a file
-	virtual void FileDenied(const char *fileName, unsigned int transferID) {};		// a file request was denied by other side
+	virtual void FileRequested(const char *fileName, unsigned int transferID ) {};	// other side request a file for download
+	virtual void FileReceived(const char *fileName, unsigned int transferID ) {};	// we received a file
+	virtual void FileDenied(const char *fileName, unsigned int transferID ) {};		// a file request was denied by other side
+	virtual void FileSent(const char *fileName, unsigned int transferID ) {};		// a file was sent
 
 	// Debugging helpers
 	void	ShowSessionInfo();
@@ -286,7 +291,7 @@ private:
 
 	void		UpdateVoiceStatus( void );
 
-	void		SetPreventFullServerStartup( bool bState, char const *fmt, ... );
+	void		SetPreventFullServerStartup( bool bState, PRINTF_FORMAT_STRING char const *fmt, ... );
 
 private:
 

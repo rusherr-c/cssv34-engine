@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,12 +7,15 @@
 
 
 #include "server_pch.h"
-#include "filter.h"
+#include "vfilter.h" // Renamed to avoid conflict with Microsoft's filter.h
 #include "sv_filter.h"
 #include "sv_steamauth.h"
 #include "GameEventManager.h"
 #include "proto_oob.h"
 #include "tier1/CommandBuffer.h"
+#ifndef DEDICATED
+#include "cl_steamauth.h"
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -470,16 +473,36 @@ USERID_t *Filter_StringToUserID( const char *str )
 		{
 			Q_strncpy( szTemp, str + Q_strlen( STEAM_PREFIX ), sizeof( szTemp ) - 1 );
 			id.idtype = IDTYPE_STEAM;
-		} 
 
-		szTemp[ sizeof( szTemp ) - 1 ] = '\0';
+			szTemp[ sizeof( szTemp ) - 1 ] = '\0';
 
-		CCommand args;
-		args.Tokenize( szTemp );
-		if ( args.ArgC() >= 5 )
-		{
-			id.steamid.SetAccountInstance(atoi( args[ 0 ] ));
+			CCommand args;
+			args.Tokenize( szTemp );
+			if ( args.ArgC() >= 5 )
+			{
+				// allow settings from old style steam2 format
+				TSteamGlobalUserID steam2ID;
+
+				steam2ID.m_SteamInstanceID = (SteamInstanceID_t)atoi( args[ 0 ] );
+				steam2ID.m_SteamLocalUserID.Split.High32bits = (int)atoi( args[ 2 ] );
+				steam2ID.m_SteamLocalUserID.Split.Low32bits = (int)atoi( args[ 4 ] );
+				EUniverse eUniverse = k_EUniversePublic;
+				if ( Steam3Server().GetGSSteamID().IsValid() )
+					eUniverse = Steam3Server().GetGSSteamID().GetEUniverse();
+#ifndef DEDICATED
+				else if ( Steam3Client().SteamUser() )
+					eUniverse = Steam3Client().SteamUser()->GetSteamID().GetEUniverse();
+#endif
+				id.steamid.SetFromSteam2( &steam2ID, eUniverse );
+			}
 		}
+		else
+		{
+			id.steamid.SetFromString( str, k_EUniversePublic );
+			if ( id.steamid.IsValid() )
+				id.idtype = IDTYPE_STEAM;
+		}
+
 	}
 	return &id;
 }
@@ -544,22 +567,44 @@ CON_COMMAND( removeid, "Remove a user ID from the ban list." )
 	if ( !Q_strncmp( pszArg1, "#", 1 ) )
 	{
 		ConMsg( "Usage:  removeid < userid | uniqueid >\n" );
-		ConMsg( "No # necessary\n");
+		ConMsg( "No # necessary\n" );
 		return;
 	}
 
-	// if the first letter is a charcter then
+	// if the first letter is a character then
 	// we're searching for a uniqueid ( e.g. STEAM_ )
-	if ( *pszArg1 < '0' || *pszArg1 > '9' )
+	if ( *pszArg1 < '0' || *pszArg1 > '9' || V_atoi64( pszArg1 ) > ( (uint32)~0 ) )
 	{
-		// SteamID (need to reassemble it)
+		bool bValid = false;
+
+		// SteamID ( need to reassemble it )
 		if ( !Q_strnicmp( pszArg1, STEAM_PREFIX, Q_strlen( STEAM_PREFIX ) ) && Q_strstr( args[2], ":" ) )
 		{
 			Q_snprintf( szSearchString, sizeof( szSearchString ), "%s:%s:%s", pszArg1, args[3], args[5] );
+			
+			USERID_t *id = Filter_StringToUserID( szSearchString );
+			if ( id )
+			{
+				bValid = id->steamid.IsValid();
+				if ( bValid )
+					V_sprintf_safe( szSearchString, "%s", id->steamid.Render() );
+			}
+		}
+		else
+		{
+			CSteamID cSteamIDCheck;
+			const char *pchUUID = args.ArgS();
+			if ( pchUUID )
+			{
+				cSteamIDCheck.SetFromString( pchUUID, k_EUniversePublic );
+				bValid = cSteamIDCheck.IsValid();
+				if ( bValid )
+					V_sprintf_safe( szSearchString, "%s", cSteamIDCheck.Render() );
+			}
 		}
 		// some other ID (e.g. "UNKNOWN", "STEAM_ID_PENDING", "STEAM_ID_LAN")
 		// NOTE: assumed to be one argument
-		else
+		if ( !bValid )
 		{
 			ConMsg( "removeid:  invalid ban ID \"%s\"\n", pszArg1 );
 			return;
@@ -712,28 +757,46 @@ CON_COMMAND( banid, "Add a user ID to the ban list." )
 		return;
 	}
 
-	bKick = ( args.ArgC() >= 4 && Q_strcasecmp( args[ args.ArgC() - 1 ], "kick" ) == 0 );
+	bKick = ( args.ArgC() >= 3 && Q_strcasecmp( args[ args.ArgC() - 1 ], "kick" ) == 0 );
 
-	// if the first letter is a charcter then
+
+	// if the first letter is a character then
 	// we're searching for a uniqueid ( e.g. STEAM_ )
-	if ( *pszArg2 < '0' || *pszArg2 > '9' )
+	if ( *pszArg2 < '0' || *pszArg2 > '9' || V_atoi64( pszArg2 ) > ((uint32)~0) )
 	{
+		bool bValid = false;
+		iSearchIndex = -1;
+
 		// SteamID (need to reassemble it)
 		if ( !Q_strnicmp( pszArg2, STEAM_PREFIX, strlen( STEAM_PREFIX ) ) && Q_strstr( args[3], ":" ) )
 		{
 			Q_snprintf( szSearchString, sizeof( szSearchString ), "%s:%s:%s", pszArg2, args[4], args[6] );
+			bValid = true;
+		}
+		else
+		{
+			CSteamID cSteamIDCheck;
+			const char *pchArgs = args.ArgS();
+			const char *pchUUID = strchr( pchArgs, ' ' );
+			if ( pchUUID )
+			{
+				cSteamIDCheck.SetFromString( pchUUID + 1, k_EUniversePublic );
+				bValid = cSteamIDCheck.IsValid();
+				if ( bValid )
+					V_sprintf_safe( szSearchString, "%s", cSteamIDCheck.Render() );
+			}
 		}
 		// some other ID (e.g. "UNKNOWN", "STEAM_ID_PENDING", "STEAM_ID_LAN")
 		// NOTE: assumed to be one argument
-		else
+		if ( !bValid )
 		{
 			ConMsg( "Can't ban users with ID \"%s\"\n", pszArg2 );
 			return;
 		}
 	}
-	// this is a userid
 	else
 	{
+		// see if it is a userid
 		iSearchIndex = Q_atoi( pszArg2 );
 	}
 

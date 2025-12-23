@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,10 +20,10 @@
 #include "vgui_controls/ListPanel.h"
 #include "vgui_controls/Image.h"
 #include "vgui_controls/TextImage.h"
-#include "vgui/isurface.h"
+#include "vgui/ISurface.h"
 #include "vgui/ischeme.h"
 #include "vgui/iinput.h"
-#include "vgui/ivgui.h"
+#include "vgui/IVGui.h"
 #include "vgui/cursor.h"
 #include "movieobjects/dmemakefile.h"
 #include "movieobjects/dmemdlmakefile.h"
@@ -34,7 +34,7 @@
 #include "movieobjects/dmecombinationoperator.h"
 #include "movieobjects/dmeanimationset.h"
 
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "materialsystem/imesh.h"
 #include "dme_controls/BaseAnimationSetEditor.h"
 #include "dme_controls/BaseAnimSetAttributeSliderPanel.h"

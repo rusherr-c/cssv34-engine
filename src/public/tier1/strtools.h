@@ -24,6 +24,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+class CUtlBuffer;
+class CUtlString;
+
 #ifdef _WIN64
 #define str_size unsigned int
 #else
@@ -57,6 +60,26 @@ char *V_strlower( char *start );
 int V_stricmp( const char *s1, const char *s2 );
 int	V_strncmp( const char *s1, const char *s2, int count );
 int V_strnicmp( const char *s1, const char *s2, int n );
+
+//-----------------------------------------------------------------------------
+// Purpose: Slightly modified strtok. Does not modify the input string. Does
+//			not skip over more than one separator at a time. This allows parsing
+//			strings where tokens between separators may or may not be present:
+//
+//			Door01,,,0 would be parsed as "Door01"  ""  ""  "0"
+//			Door01,Open,,0 would be parsed as "Door01"  "Open"  ""  "0"
+//
+// Input  : token - Returns with a token, or zero length if the token was missing.
+//			str - String to parse.
+//			sep - Character to use as separator. UNDONE: allow multiple separator chars
+// Output : Returns a pointer to the next token to be parsed.
+//-----------------------------------------------------------------------------
+const char *nexttoken(char *token, size_t nMaxTokenLen, const char *str, char sep);
+template <size_t maxLenInChars> inline const char *nexttoken( OUT_Z_ARRAY char (&pToken)[maxLenInChars], const char *str, char sep)
+{
+	return nexttoken( pToken, maxLenInChars, str, sep );
+}
+
 
 #ifdef POSIX
 
@@ -133,7 +156,9 @@ inline wchar_t*	V_wcsupr (wchar_t *start)							{ return _wcsupr( start ); }
 int			V_atoi (const char *str);
 int64 		V_atoi64(const char *str);
 uint64 		V_atoui64(const char *str);
-float		V_atof (const char *str);
+int64		V_strtoi64( const char *nptr, char **endptr, int base );
+uint64		V_strtoui64( const char *nptr, char **endptr, int base );
+float		V_atof(const char *str);
 char*		V_stristr( char* pStr, const char* pSearch );
 const char*	V_stristr( const char* pStr, const char* pSearch );
 const char*	V_strnistr( const char* pStr, const char* pSearch, int n );
@@ -182,6 +207,13 @@ inline bool V_isdigit( char c )
 	return c >= '0' && c <= '9';
 }
 
+inline bool V_iswdigit( int c ) 
+{ 
+	return ( ( (uint)( c - '0' ) ) < 10 ); 
+}
+
+inline bool V_isempty( const char* pszString ) { return !pszString || !pszString[ 0 ]; }
+
 // The islower/isdigit/etc. functions all expect a parameter that is either
 // 0-0xFF or EOF. It is easy to violate this constraint simply by passing
 // 'char' to these functions instead of unsigned char.
@@ -224,6 +256,53 @@ inline bool V_iscntrl(char c) { return iscntrl( (unsigned char)c ) != 0; }
 inline bool V_isspace(char c) { return isspace( (unsigned char)c ) != 0; }
 //#undef isspace
 //#define isspace use_V_isspace_instead_of_isspace
+
+
+//-----------------------------------------------------------------------------
+// Purpose: returns true if it's a valid hex string
+//-----------------------------------------------------------------------------
+inline bool V_isvalidhex( char const *in, int inputchars )
+{
+	if ( inputchars < 2 )
+		return false;
+	if ( inputchars % 2 == 1 )
+		return false;
+
+	for ( int i = 0; i < inputchars; i++ )
+	{
+		char c = in[i];
+		if ( !(
+			(c >= '0' && c <= '9') ||
+			(c >= 'a' && c <= 'f') ||
+			(c >= 'A' && c <= 'F')
+			) )
+		{
+			return false;
+		}
+
+	}
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Checks if the string is lower case
+// NOTE:	Only works with ASCII strings
+//-----------------------------------------------------------------------------
+inline bool V_isstrlower( const char *pch )
+{
+	const char *pCurrent = pch;
+	while ( *pCurrent != '\0' )
+	{
+		if ( *pCurrent >= 'A' && *pCurrent <= 'Z' )
+			return false;
+
+		pCurrent++;
+	}
+
+	return true;
+}
+
 
 
 // These are versions of functions that guarantee NULL termination.
@@ -486,6 +565,23 @@ template <size_t maxLenInChars> int V_sprintf_safe( OUT_Z_ARRAY char (&pDest)[ma
 	return result;
 }
 
+// gcc insists on only having format annotations on declarations, not definitions, which is why I have both.
+// Append formatted text to an array in a safe manner -- always null-terminated, truncation rather than buffer overrun.
+template <size_t maxLenInChars> int V_sprintfcat_safe( INOUT_Z_ARRAY char (&pDest)[maxLenInChars], PRINTF_FORMAT_STRING const char *pFormat, ... ) FMTFUNCTION( 2, 3 );
+template <size_t maxLenInChars> int V_sprintfcat_safe( INOUT_Z_ARRAY char (&pDest)[maxLenInChars], PRINTF_FORMAT_STRING const char *pFormat, ... )
+{
+	va_list params;
+	va_start( params, pFormat );
+	size_t usedLength = V_strlen(pDest);
+	// This code is here to check against buffer overruns when uninitialized arrays are passed in.
+	// It should never be executed. Unfortunately we can't assert in this header file.
+	if ( usedLength >= maxLenInChars )
+		usedLength = 0;
+	int result = V_vsnprintf( pDest + usedLength, maxLenInChars - usedLength, pFormat, params );
+	va_end( params );
+	return result;
+}
+
 int V_vsnwprintf( OUT_Z_CAP(maxLenInCharacters) wchar_t *pDest, int maxLenInCharacters, PRINTF_FORMAT_STRING const wchar_t *pFormat, va_list params );
 template <size_t maxLenInCharacters> int V_vswprintf_safe( OUT_Z_ARRAY wchar_t (&pDest)[maxLenInCharacters], PRINTF_FORMAT_STRING const wchar_t *pFormat, va_list params ) { return V_vsnwprintf( pDest, maxLenInCharacters, pFormat, params ); }
 int V_vsnprintfRet( OUT_Z_CAP(maxLenInCharacters) char *pDest, int maxLenInCharacters, PRINTF_FORMAT_STRING const char *pFormat, va_list params, bool *pbTruncated );
@@ -561,6 +657,16 @@ void V_binarytohex( const byte *in, int inputbytes, char *out, int outsize );
 void V_FileBase( const char *in, char *out,int maxlen );
 // Remove the final characters of ppath if it's '\' or '/'.
 void V_StripTrailingSlash( char *ppath );
+
+// Remove the final characters of ppline if they are whitespace (uses V_isspace)
+void V_StripTrailingWhitespace( char *ppline );
+
+// Remove the initial characters of ppline if they are whitespace (uses V_isspace)
+void V_StripLeadingWhitespace( char *ppline );
+
+// Remove the initial/final characters of ppline if they are " quotes
+void V_StripSurroundingQuotes( char *ppline );
+
 // Remove any extension from in and return resulting string in out
 void V_StripExtension( const char *in, char *out, int outLen );
 // Make path end with extension if it doesn't already have an extension
@@ -597,6 +703,15 @@ bool V_RemoveDotSlashes( char *pFilename, char separator = CORRECT_PATH_SEPARATO
 // using the current working directory as the base, or pStartingDir if it's non-NULL.
 // Returns false if it runs out of room in the string, or if pPath tries to ".." past the root directory.
 void V_MakeAbsolutePath( char *pOut, int outLen, const char *pPath, const char *pStartingDir = NULL );
+inline void V_MakeAbsolutePath( char *pOut, int outLen, const char *pPath, const char *pStartingDir, bool bLowercaseName )
+{
+	V_MakeAbsolutePath( pOut, outLen, pPath, pStartingDir );
+	if ( bLowercaseName )
+	{
+		V_strlower( pOut );
+	}
+}
+
 
 // Creates a relative path given two full paths
 // The first is the full path of the file to make a relative path for.
@@ -624,6 +739,8 @@ bool V_StrSubst( IN_Z const char *pIn, IN_Z const char *pMatch, const char *pRep
 // Returns a list of strings separated by pSeparator.
 // You are responsible for freeing the contents of outStrings (call outStrings.PurgeAndDeleteElements).
 void V_SplitString( IN_Z const char *pString, IN_Z const char *pSeparator, CUtlVector<char*, CUtlMemory<char*, int> > &outStrings );
+
+void V_SplitString( const char *pString, const char *pSeparator, CUtlVector< CUtlString, CUtlMemory<CUtlString, int> > &outStrings, bool bIncludeEmptyStrings = false );
 
 // Just like V_SplitString, but it can use multiple possible separators.
 void V_SplitString2( IN_Z const char *pString, const char **pSeparators, int nSeparators, CUtlVector<char*, CUtlMemory<char*, int> > &outStrings );
@@ -673,6 +790,50 @@ inline void V_wcscat( INOUT_Z_CAP(cchDest) wchar_t *dest, const wchar_t *src, in
 {
 	V_wcsncat( dest, src, cchDest, COPY_ALL_CHARACTERS );
 }
+
+// Encode a string for display as HTML -- this only encodes ' " & < >, which are the important ones to encode for 
+// security and ensuring HTML display doesn't break.  Other special chars like the ? sign and so forth will not
+// be encoded
+//
+// Returns false if there was not enough room in pDest to encode the entire source string, otherwise true
+bool V_BasicHtmlEntityEncode( OUT_Z_CAP( nDestSize ) char *pDest, const int nDestSize, char const *pIn, const int nInSize, bool bPreserveWhitespace = false );
+
+// Decode a string with htmlentities HTML -- this should handle all special chars, not just the ones Q_BasicHtmlEntityEncode uses.
+//
+// Returns false if there was not enough room in pDest to decode the entire source string, otherwise true
+bool V_HtmlEntityDecodeToUTF8( OUT_Z_CAP( nDestSize ) char *pDest, const int nDestSize, char const *pIn, const int nInSize );
+
+// strips HTML from a string.  Should call Q_HTMLEntityDecodeToUTF8 afterward.
+void V_StripAndPreserveHTML( CUtlBuffer *pbuffer, const char *pchHTML, const char **rgszPreserveTags, uint cPreserveTags, uint cMaxResultSize );
+void V_StripAndPreserveHTMLCore( CUtlBuffer *pbuffer, const char *pchHTML, const char **rgszPreserveTags, uint cPreserveTags, const char **rgszNoCloseTags, uint cNoCloseTags, uint cMaxResultSize );
+
+// Extracts the domain from a URL
+bool V_ExtractDomainFromURL( const char *pchURL, OUT_Z_CAP( cchDomain ) char *pchDomain, int cchDomain );
+
+// returns true if the url passed in is on the specified domain
+bool V_URLContainsDomain( const char *pchURL, const char *pchDomain );
+
+//-----------------------------------------------------------------------------
+// returns true if the character is allowed in a URL, false otherwise
+//-----------------------------------------------------------------------------
+bool V_IsValidURLCharacter( const char *pch, int *pAdvanceBytes );
+
+//-----------------------------------------------------------------------------
+// returns true if the character is allowed in a DNS doman name, false otherwise
+//-----------------------------------------------------------------------------
+bool V_IsValidDomainNameCharacter( const char *pch, int *pAdvanceBytes );
+
+ // Converts BBCode tags to HTML tags
+bool V_BBCodeToHTML( OUT_Z_CAP( nDestSize ) char *pDest, const int nDestSize, char const *pIn, const int nInSize );
+
+
+// helper to identify "mean" spaces, which we don't like in visible identifiers
+// such as player Name
+bool V_IsMeanSpaceW( wchar_t wch );
+
+// helper to identify characters which are deprecated in Unicode,
+// and we simply don't accept
+bool V_IsDeprecatedW( wchar_t wch );
 
 //-----------------------------------------------------------------------------
 // generic unique name helper functions
@@ -990,6 +1151,34 @@ void Q_URLEncodeRaw( OUT_Z_CAP(nDestLen) char *pchDest, int nDestLen, const char
 // Returns the amount of space actually used in the output buffer.  
 size_t Q_URLDecodeRaw( OUT_CAP(nDecodeDestLen) char *pchDecodeDest, int nDecodeDestLen, const char *pchEncodedSource, int nEncodedSourceLen );
 
+// trim right whitespace
+inline char* TrimRight( char *pString )
+{
+	char *pEnd = pString + V_strlen( pString );
+	// trim
+	while ( pString < ( pEnd-- ) )
+	{
+		if ( uint( *pEnd ) <= uint( ' ' ) )
+		{
+			*pEnd = '\0';
+		}
+		else
+			break;
+	}
+	return pString;
+}
+
+inline const char * SkipBlanks( const char *pString )
+{
+	const char *p = pString;
+	while ( *p && uint( *p ) <= uint( ' ' ) )
+	{
+		p++;
+	}
+	return p;
+}
+
+inline int	V_strcspn( const char *s1, const char *search )		{ return (int)( strcspn( s1, search ) ); }
 // Encodes a string (or binary data) in URL encoding format, this isn't the strict rfc1738 format, but instead uses + for spaces.  
 // This is for historical reasons and HTML spec foolishness that lead to + becoming a de facto standard for spaces when encoding form data.
 // Dest buffer should be 3 times the size of source buffer to guarantee it has room to encode.
@@ -1086,6 +1275,11 @@ size_t Q_URLDecode( OUT_CAP(nDecodeDestLen) char *pchDecodeDest, int nDecodeDest
 #else
 #define FMT_WS L"%s"
 #endif
+
+
+
+// Strip white space at the beginning and end of a string
+int V_StrTrim( char *pStr );
 
 
 #endif	// TIER1_STRTOOLS_H

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,6 +11,7 @@
 #include "choreoactor.h"
 #include "choreochannel.h"
 #include "choreoevent.h"
+#include "tier2/p4helpers.h"
 #include "tier1/utlbuffer.h"
 #include "tier3/tier3.h"
 #include "datacache/imdlcache.h"
@@ -857,5 +858,6 @@ bool ImportLogsIntoVCD( const char *pFacFullPath, const char *pVCDInFullPath, co
 		}
 	}
 
+	CP4AutoEditFile checkout( pVCDOutPath );
 	return pScene->SaveToFile( pVCDOutPath );
 }

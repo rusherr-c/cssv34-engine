@@ -7,15 +7,20 @@
 // $SHADER_SPECIFIC_CONST_5	 = glint projection V		
 //=============================================================================
 
-//	STATIC: "INTRO"					"0..1"
-//  STATIC: "HALFLAMBERT"			"0..1"
+//	STATIC: "INTRO"						"0..1"
+//  STATIC: "HALFLAMBERT"				"0..1"
+//  STATIC: "USE_STATIC_CONTROL_FLOW"	"0..1" [vs20]
 
-//	DYNAMIC: "COMPRESSED_VERTS"		"0..1"
-//	DYNAMIC: "SKINNING"				"0..1"
-//	DYNAMIC: "DOWATERFOG"			"0..1"
-//	DYNAMIC: "DYNAMIC_LIGHT"		"0..1"
-//	DYNAMIC: "STATIC_LIGHT"			"0..1"
-//  DYNAMIC: "MORPHING"				"0..1" [vs30]
+//	DYNAMIC: "COMPRESSED_VERTS"			"0..1"
+//	DYNAMIC: "SKINNING"					"0..1"
+//	DYNAMIC: "DOWATERFOG"				"0..1"
+//	DYNAMIC: "DYNAMIC_LIGHT"			"0..1"
+//	DYNAMIC: "STATIC_LIGHT"				"0..1"
+//  DYNAMIC: "MORPHING"					"0..1" [vs30]
+//  DYNAMIC: "NUM_LIGHTS"				"0..2" [vs20]
+
+// If using static control flow on Direct3D, we should use the NUM_LIGHTS=0 combo
+//  SKIP: $USE_STATIC_CONTROL_FLOW && ( $NUM_LIGHTS > 0 ) [vs20]
 
 #include "vortwarp_vs20_helper.h"
 
@@ -41,7 +46,7 @@ const float4 const4							:  register( SHADER_SPECIFIC_CONST_6 );
 const float3 cMorphTargetTextureDim			: register( SHADER_SPECIFIC_CONST_7 );
 const float4 cMorphSubrect					: register( SHADER_SPECIFIC_CONST_8 );
 
-sampler2D morphSampler						: register( s0 );
+sampler2D morphSampler						: register( D3DVERTEXTEXTURESAMPLER0, s0 );
 #endif
 
 struct VS_INPUT
@@ -101,12 +106,14 @@ VS_OUTPUT main( const VS_INPUT v )
 #endif
 
 	// Transform into projection space
-	o.projPos = mul( float4( worldPos, 1 ), cViewProj );
-	o.worldPos_projPosZ = float4( worldPos.xyz, o.projPos.z );
+	float4 vProjPos = mul( float4( worldPos, 1 ), cViewProj );
+	o.projPos = vProjPos;
+	vProjPos.z = dot( float4( worldPos, 1 ), cViewProjZ );
+	o.worldPos_projPosZ = float4( worldPos.xyz, vProjPos.z );
 
 #if !defined( _X360 )
 	// Set fixed-function fog factor
-	o.fog = CalcFog( worldPos, o.projPos, g_FogType );
+	o.fog = CalcFog( worldPos, vProjPos, g_FogType );
 #endif
 
 	// Normal = (Pos - Eye origin) - just step on dummy normal created above
@@ -116,8 +123,12 @@ VS_OUTPUT main( const VS_INPUT v )
 	float normalDotUp = -dot( worldNormal, cHalfEyeballUp) * 0.5f;
 	worldNormal = normalize(normalDotUp * cHalfEyeballUp + worldNormal);
 
-	// Compute vertex lighting
+	// Vertex lighting
+#if ( USE_STATIC_CONTROL_FLOW || defined ( SHADER_MODEL_VS_3_0 ) )
 	o.vColor = DoLighting( worldPos, worldNormal, float3(0.0f, 0.0f, 0.0f), bStaticLight, bDynamicLight, g_bHalfLambert );
+#else
+	o.vColor = DoLightingUnrolled( worldPos, worldNormal, float3(0.0f, 0.0f, 0.0f), bStaticLight, bDynamicLight, g_bHalfLambert, NUM_LIGHTS );
+#endif
 
 	// Texture 0 is the base texture
 	// Texture 1 is a planar projection used for the iris

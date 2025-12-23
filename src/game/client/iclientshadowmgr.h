@@ -1,4 +1,4 @@
-//========= Copyright � 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,11 +13,11 @@
 #pragma once
 #endif
 
-#include "IGameSystem.h"
-#include "IClientEntityInternal.h"
+#include "igamesystem.h"
+#include "icliententityinternal.h"
 #include "engine/ishadowmgr.h"
-#include "IVRenderView.h"
-#include "toolframework/IToolEntity.h"
+#include "ivrenderview.h"
+#include "toolframework/itoolentity.h"
 
 //-----------------------------------------------------------------------------
 // Forward decls
@@ -100,16 +100,6 @@ public:
 	virtual void SetShadowsDisabled( bool bDisabled ) = 0;
 
 	virtual void ComputeShadowDepthTextures( const CViewSetup &pView ) = 0;
-
-	virtual void GetFrustumExtents( ClientShadowHandle_t handle, Vector &vecMin, Vector &vecMax ) = 0;
-
-	//virtual ShadowType_t GetActualShadowCastType( ClientShadowHandle_t handle ) const = 0;
-	//virtual ShadowHandle_t GetShadowHandle( ClientShadowHandle_t clienthandle ) = 0;
-	//virtual int GetNumShadowDepthtextures() = 0;
-	//virtual CTextureReference GetShadowDepthTex( int num ) = 0;
-	
-	//virtual ShadowHandle_t GetShadowDepthHandle( int num ) = 0;
-	//virtual ShadowHandle_t GetActiveDepthTextureHandle() = 0;
 
 };
 

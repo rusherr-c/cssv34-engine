@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,7 +36,7 @@ public:
 
 	virtual void					RestoreClientState( char const *fileName, bool adjacent ) = 0;
 	virtual void					RestoreAdjacenClientState( char const *map ) = 0;
-	virtual int						SaveReadNameAndComment( FileHandle_t f, char *name, char *comment ) = 0;
+	virtual int						SaveReadNameAndComment( FileHandle_t f, OUT_Z_CAP(nameSize) char *name, int nameSize, OUT_Z_CAP(commentSize) char *comment, int commentSize ) = 0;
 	virtual int						GetMostRecentElapsedMinutes( void ) = 0;
 	virtual int						GetMostRecentElapsedSeconds( void ) = 0;
 	virtual int						GetMostRecentElapsedTimeSet( void ) = 0;

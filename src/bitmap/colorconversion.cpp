@@ -1,4 +1,4 @@
-//======= Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,12 +19,15 @@
 #include "mathlib/compressed_vector.h"
 #include "nvtc.h"
 
-#ifdef _LINUX
+#ifdef POSIX
 typedef int32 *DWORD_PTR;
 #endif
 
 #include "ATI_Compress.h"
 #include "bitmap/float_bm.h"
+
+#define STB_DXT_IMPLEMENTATION
+#include "stb_dxt.h"
 
 // Should be last include
 #include "tier0/memdbgon.h"
@@ -270,16 +273,18 @@ static inline void GetColorBlockColorsBGRA8888( DXTColBlock *pBlock, BGRA8888_t 
 	WORD color0 = LittleShort( pBlock->col0 );
 	WORD color1 = LittleShort( pBlock->col1 );
 
-	// shift to full precision
+	// convert to full precision correctly.
+	// If this was a perf problem, we could optimize it. But this isn't used in any hotpaths 
+	// (now) so let's just do the correct but slow fp math.
 	col_0->a = 0xff;
-	col_0->r = ((BGR565_t*)&color0)->r << 3;
-	col_0->g = ((BGR565_t*)&color0)->g << 2;
-	col_0->b = ((BGR565_t*)&color0)->b << 3;
+	col_0->r = ( uint8 ) round( ( ( BGR565_t* ) &color0 )->r * 255.0f / 31.0f );
+	col_0->g = ( uint8 ) round( ( ( BGR565_t* ) &color0 )->g * 255.0f / 63.0f );
+	col_0->b = ( uint8 ) round( ( ( BGR565_t* ) &color0 )->b * 255.0f / 31.0f );
 
 	col_1->a = 0xff;
-	col_1->r = ((BGR565_t*)&color1)->r << 3;
-	col_1->g = ((BGR565_t*)&color1)->g << 2;
-	col_1->b = ((BGR565_t*)&color1)->b << 3;
+	col_1->r = ( uint8 ) round( ( ( BGR565_t* ) &color1 )->r * 255.0f / 31.0f );
+	col_1->g = ( uint8 ) round( ( ( BGR565_t* ) &color1 )->g * 255.0f / 63.0f );
+	col_1->b = ( uint8 ) round( ( ( BGR565_t* ) &color1 )->b * 255.0f / 31.0f );
 
 	if ( color0 > color1 )
 	{
@@ -823,7 +828,7 @@ bool ConvertToATIxN(  const uint8 *src, ImageFormat srcImageFormat,
 					  uint8 *dst, ImageFormat dstImageFormat,
 					  int width, int height, int srcStride, int dstStride )
 {
-#if !defined( _X360 ) && !defined( _LINUX )
+#if !defined( _X360 ) && !defined( POSIX )
 
 	// from rgb(a) to ATIxN
 	if( srcStride != 0 || dstStride != 0 )
@@ -868,11 +873,11 @@ bool ConvertToATIxN(  const uint8 *src, ImageFormat srcImageFormat,
 }
 
 
-bool ConvertToDXT(  const uint8 *src, ImageFormat srcImageFormat,
- 					uint8 *dst, ImageFormat dstImageFormat, 
-					int width, int height, int srcStride, int dstStride )
+bool ConvertToDXTLegacy(  const uint8 *src, ImageFormat srcImageFormat,
+ 						  uint8 *dst, ImageFormat dstImageFormat, 
+					      int width, int height, int srcStride, int dstStride )
 {
-#if !defined( _X360 ) && !defined( _LINUX )
+#if !defined( _X360 ) && !defined( POSIX )
 	// from rgb(a) to dxtN
 	if( srcStride != 0 || dstStride != 0 )
 		return false;
@@ -944,6 +949,103 @@ bool ConvertToDXT(  const uint8 *src, ImageFormat srcImageFormat,
 	Assert( 0 );
 	return false;
 #endif
+}
+
+template < typename SrcPixel_t >
+void CompressSTB( uint8 *pDstBytes, ImageFormat dstFmt, const uint8 *pSrcBytes, int nWidth, int nHeight )
+{
+	const bool cbWriteAlpha = ( dstFmt == IMAGE_FORMAT_DXT5 );
+	const uint32 cDstStride = ( dstFmt == IMAGE_FORMAT_DXT1 ) ? 8 : 16;
+
+	const uint32 cPixX = (uint32) nWidth;
+	const uint32 cPixY = (uint32) nHeight;
+	const uint32 cSrcPitch = cPixX * sizeof( SrcPixel_t );
+	const uint32 cLastX = cPixX - 1;
+	const uint32 cLastY = cPixY - 1;
+
+	// STB always takes blocks as 4x4 of RGBA8888_t
+	RGBA8888_t srcBlock[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	SrcPixel_t* pSrcs[4] = { 0, 0, 0, 0 };
+
+	for ( uint32 y = 0; y < cPixY; y += 4 ) 
+	{
+		// This handles clamping for cPixY % 4 != 0
+		pSrcs[ 0 ] = ( SrcPixel_t* ) ( pSrcBytes + cSrcPitch * Min( y + 0, cLastY ) );
+		pSrcs[ 1 ] = ( SrcPixel_t* ) ( pSrcBytes + cSrcPitch * Min( y + 1, cLastY ) );
+		pSrcs[ 2 ] = ( SrcPixel_t* ) ( pSrcBytes + cSrcPitch * Min( y + 2, cLastY ) );
+		pSrcs[ 3 ] = ( SrcPixel_t* ) ( pSrcBytes + cSrcPitch * Min( y + 3, cLastY ) );
+
+		for ( uint x = 0; x < cPixX; x += 4 ) 
+		{
+			for ( uint i = 0; i < 4; ++i )
+			{
+				uint32 offsetX = Min( x + i, cLastX );
+				srcBlock[ 0 + i ] =  pSrcs[ 0 ][ offsetX ];
+				srcBlock[ 4 + i ] =  pSrcs[ 1 ][ offsetX ];
+				srcBlock[ 8 + i ] =  pSrcs[ 2 ][ offsetX ];
+				srcBlock[ 12 + i ] = pSrcs[ 3 ][ offsetX ];
+			}
+
+			stb_compress_dxt_block( pDstBytes, ( const uint8* ) srcBlock, cbWriteAlpha, STB_DXT_NORMAL );
+			pDstBytes += cDstStride;
+		}
+	}
+}
+
+inline ImageFormat GetTrueImageFormat( ImageFormat fmt )
+{
+	switch ( fmt )
+	{
+	case IMAGE_FORMAT_DXT1_RUNTIME:
+		return IMAGE_FORMAT_DXT1;
+	case IMAGE_FORMAT_DXT5_RUNTIME:
+		return IMAGE_FORMAT_DXT5;
+	default: /* expected */
+		break;
+	}
+
+	return fmt;
+}
+
+bool ConvertToDXTRuntime( const uint8 *src, ImageFormat srcImageFormat,
+						  uint8 *dst, ImageFormat dstImageFormat,
+						  int width, int height, int srcStride, int dstStride )
+{
+	if ( srcStride != 0 || dstStride != 0 )
+		return false;
+
+	dstImageFormat = GetTrueImageFormat( dstImageFormat );
+
+	switch ( srcImageFormat )
+	{
+		case IMAGE_FORMAT_RGBA8888: CompressSTB<RGBA8888_t>( dst, dstImageFormat, src, width, height ); return true;
+		case IMAGE_FORMAT_RGB888:   CompressSTB<RGB888_t>  ( dst, dstImageFormat, src, width, height ); return true;
+		case IMAGE_FORMAT_BGRA8888: CompressSTB<BGRA8888_t>( dst, dstImageFormat, src, width, height ); return true;
+		case IMAGE_FORMAT_BGRX8888: CompressSTB<BGRX8888_t>( dst, dstImageFormat, src, width, height ); return true;
+		default:
+			Assert( !"Unexpected format here, wtf." );
+			break;
+	};
+
+	return false;
+}
+
+bool ConvertToDXT( const uint8 *src, ImageFormat srcImageFormat,
+ 				   uint8 *dst, ImageFormat dstImageFormat, 
+				   int width, int height, int srcStride, int dstStride )
+{
+	// The STB compressor (the new compressor) is faster and higher quality in most cases, and has less error overall
+	// than the S3TC compressor. So use it by default, unless we're working with a format that STB doesn't support.
+	bool bUseNewCompressor = dstImageFormat != IMAGE_FORMAT_DXT1_ONEBITALPHA 
+		                  && dstImageFormat != IMAGE_FORMAT_DXT3;
+
+//	bool bUseNewCompressor = dstImageFormat == IMAGE_FORMAT_DXT1_RUNTIME 
+//		                  || dstImageFormat == IMAGE_FORMAT_DXT5_RUNTIME;
+
+	if ( bUseNewCompressor )
+		return ConvertToDXTRuntime( src, srcImageFormat, dst, dstImageFormat, width, height, srcStride, dstStride );
+
+	return ConvertToDXTLegacy( src, srcImageFormat, dst, dstImageFormat, width, height, srcStride, dstStride );
 }
 
 // HDRFIXME: This assumes that the 16-bit integer values are 4.12 fixed-point.
@@ -1142,7 +1244,7 @@ void ConvertImageFormat_RGBA16161616F_To_RGBA16161616( float16 *pSrcImage, unsig
 			float val;
 			val = pSrcScan[i].GetFloat();
 			val *= ( float )( 1 << 12 );
-			val = max( val, 0 );
+			val = max( val, 0.f );
 			val = min( val, 65535.0f );
 			pDstScan[i] = ( unsigned short )val;
 		}
@@ -1219,9 +1321,15 @@ bool ConvertImageFormat( const uint8 *src, ImageFormat srcImageFormat,
 	}
 	
 	// Fast path for just copying a compressed texture
-	if ( ( dstImageFormat == IMAGE_FORMAT_DXT1 || dstImageFormat == IMAGE_FORMAT_DXT3 ||
-		   dstImageFormat == IMAGE_FORMAT_DXT5 || dstImageFormat == IMAGE_FORMAT_ATI1N ||
-		   dstImageFormat == IMAGE_FORMAT_ATI2N ) && ( srcImageFormat == dstImageFormat ) )
+	if ( ( ( dstImageFormat == IMAGE_FORMAT_DXT1 || dstImageFormat == IMAGE_FORMAT_DXT1_RUNTIME ||
+		     dstImageFormat == IMAGE_FORMAT_DXT3 ||
+		     dstImageFormat == IMAGE_FORMAT_DXT5 || dstImageFormat == IMAGE_FORMAT_DXT5_RUNTIME ||
+		     dstImageFormat == IMAGE_FORMAT_ATI1N ||
+		     dstImageFormat == IMAGE_FORMAT_ATI2N ) && ( srcImageFormat == dstImageFormat ) ) ||
+		 ( dstImageFormat == IMAGE_FORMAT_DXT5 && srcImageFormat == IMAGE_FORMAT_DXT5_RUNTIME ) ||
+		 ( dstImageFormat == IMAGE_FORMAT_DXT1 && srcImageFormat == IMAGE_FORMAT_DXT1_RUNTIME ) ||
+		 ( dstImageFormat == IMAGE_FORMAT_DXT5_RUNTIME && srcImageFormat == IMAGE_FORMAT_DXT5 ) ||
+		 ( dstImageFormat == IMAGE_FORMAT_DXT1_RUNTIME && srcImageFormat == IMAGE_FORMAT_DXT1 ) )
 	{
 		// Fast path for compressed textures . . stride doesn't make as much sense.
 //		Assert( srcStride == 0 && dstStride == 0 );
@@ -1237,7 +1345,9 @@ bool ConvertImageFormat( const uint8 *src, ImageFormat srcImageFormat,
 			   srcImageFormat == IMAGE_FORMAT_BGRX8888 ) &&	   													// and
 			 ( dstImageFormat == IMAGE_FORMAT_DXT1  ||															//
 			   dstImageFormat == IMAGE_FORMAT_DXT3  ||	   														// DXT compressed dest
-			   dstImageFormat == IMAGE_FORMAT_DXT5  ) )
+			   dstImageFormat == IMAGE_FORMAT_DXT5  ||
+			   dstImageFormat == IMAGE_FORMAT_DXT1_RUNTIME ||
+			   dstImageFormat == IMAGE_FORMAT_DXT5_RUNTIME ) )
 	{
 		return ConvertToDXT( src, srcImageFormat, dst, dstImageFormat, width, height, srcStride, dstStride );
 	}
@@ -1462,6 +1572,7 @@ void ConvertIA88ImageToNormalMapRGBA8888( const uint8 *src, int width,
 			cx = src[( t * width + ((s+1)%width) ) * 2];
 			cy = src[( ((t+1)%height) * width + s ) * 2];
 
+			/*
 			// \Z (out of screen)
 			//  \
 			//   \
@@ -1473,6 +1584,7 @@ void ConvertIA88ImageToNormalMapRGBA8888( const uint8 *src, int width,
 			//     |
 			//     |
 			//     Y
+			*/
 			
 			Vector xVect, yVect, normal;
 			xVect[0] = ooMaxDim;

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,22 +8,18 @@
 #include "pch_tier0.h"
 #include <time.h>
 
-#ifdef _LINUX
-#include "platform_linux.cpp"
-#else
 #if defined(_WIN32) && !defined(_X360)
-#define WINDOWS_LEAN_AND_MEAN
-#define _WIN32_WINNT 0x0502
-#include <windows.h>
+#include <errno.h>
 #endif
 #include <assert.h>
 #include "tier0/platform.h"
+#include "tier0/minidump.h"
 #ifdef _X360
 #include "xbox/xbox_console.h"
-#endif // _X360
-#ifndef _X360
+#include "xbox/xbox_win32stubs.h"
+#else
 #include "tier0/vcrmode.h"
-#endif // _X360
+#endif
 #if !defined(STEAM) && !defined(NO_MALLOC_OVERRIDE)
 #include "tier0/memalloc.h"
 
@@ -31,51 +27,100 @@
 #include "tier0/memdbgon.h"
 #endif
 
+//our global error callback function. Note that this is not initialized, but static space guarantees this is NULL at app start.
+//If you initialize, it will set to zero again when the CPP runs its static initializers, which could stomp the value if another
+//CPP sets this value while initializing its static space
+static ExitProcessWithErrorCBFn g_pfnExitProcessWithErrorCB; //= NULL
+
 #ifndef _X360
 extern VCRMode_t g_VCRMode;
 #endif
 static LARGE_INTEGER g_PerformanceFrequency;
-static LARGE_INTEGER g_MSPerformanceFrequency;
+static double g_PerformanceCounterToS;
+static double g_PerformanceCounterToMS;
+static double g_PerformanceCounterToUS;
 static LARGE_INTEGER g_ClockStart;
+static bool s_bTimeInitted;
+
+// Benchmark mode uses this heavy-handed method 
+static bool g_bBenchmarkMode = false;
+static double g_FakeBenchmarkTime = 0;
+static double g_FakeBenchmarkTimeInc = 1.0 / 66.0;
 
 static void InitTime()
 {
-	if( !g_PerformanceFrequency.QuadPart )
+	if( !s_bTimeInitted )
 	{
+		s_bTimeInitted = true;
 		QueryPerformanceFrequency(&g_PerformanceFrequency);
-		g_MSPerformanceFrequency.QuadPart = g_PerformanceFrequency.QuadPart / 1000;
+		g_PerformanceCounterToS = 1.0 / g_PerformanceFrequency.QuadPart;
+		g_PerformanceCounterToMS = 1e3 / g_PerformanceFrequency.QuadPart;
+		g_PerformanceCounterToUS = 1e6 / g_PerformanceFrequency.QuadPart;
 		QueryPerformanceCounter(&g_ClockStart);
 	}
 }
 
+bool Plat_IsInBenchmarkMode()
+{
+	return g_bBenchmarkMode;
+}
+
+void Plat_SetBenchmarkMode( bool bBenchmark )
+{
+	g_bBenchmarkMode = bBenchmark;
+}
+
 double Plat_FloatTime()
 {
-	InitTime();
+	if (! s_bTimeInitted )
+		InitTime();
+	if ( g_bBenchmarkMode )
+	{
+		g_FakeBenchmarkTime += g_FakeBenchmarkTimeInc;
+		return g_FakeBenchmarkTime;
+	}
 
 	LARGE_INTEGER CurrentTime;
 
 	QueryPerformanceCounter( &CurrentTime );
 
-	double fRawSeconds = (double)( CurrentTime.QuadPart - g_ClockStart.QuadPart ) / (double)(g_PerformanceFrequency.QuadPart);
+	double fRawSeconds = (double)( CurrentTime.QuadPart - g_ClockStart.QuadPart ) * g_PerformanceCounterToS;
 
 	return fRawSeconds;
 }
 
-unsigned int Plat_MSTime()
+uint32 Plat_MSTime()
 {
-	InitTime();
+	if (! s_bTimeInitted )
+		InitTime();
+	if ( g_bBenchmarkMode )
+	{
+		g_FakeBenchmarkTime += g_FakeBenchmarkTimeInc;
+		return (uint32)(g_FakeBenchmarkTime * 1000.0);
+	}
 
 	LARGE_INTEGER CurrentTime;
 
 	QueryPerformanceCounter( &CurrentTime );
 
-	return (unsigned long) ( ( CurrentTime.QuadPart - g_ClockStart.QuadPart ) / g_MSPerformanceFrequency.QuadPart);
+	return (uint32) ( ( CurrentTime.QuadPart - g_ClockStart.QuadPart ) * g_PerformanceCounterToMS );
 }
 
-struct tm * Plat_localtime( const time_t *timep, struct tm *result )
+uint64 Plat_USTime()
 {
-	result = localtime( timep );
-	return result;
+	if (! s_bTimeInitted )
+		InitTime();
+	if ( g_bBenchmarkMode )
+	{
+		g_FakeBenchmarkTime += g_FakeBenchmarkTimeInc;
+		return (uint64)(g_FakeBenchmarkTime * 1e6);
+	}
+
+	LARGE_INTEGER CurrentTime;
+
+	QueryPerformanceCounter( &CurrentTime );
+
+	return (uint64) ( ( CurrentTime.QuadPart - g_ClockStart.QuadPart ) * g_PerformanceCounterToUS );
 }
 
 void GetCurrentDate( int *pDay, int *pMonth, int *pYear )
@@ -90,6 +135,105 @@ void GetCurrentDate( int *pDay, int *pMonth, int *pYear )
 	*pMonth = pNewTime->tm_mon + 1;
 	*pYear = pNewTime->tm_year + 1900;
 }
+
+
+// Wraps the thread-safe versions of ctime. buf must be at least 26 bytes 
+char *Plat_ctime( const time_t *timep, char *buf, size_t bufsize )
+{
+	if ( EINVAL == ctime_s( buf, bufsize, timep ) )
+		return NULL;
+	else
+		return buf;
+}
+
+void Plat_GetModuleFilename( char *pOut, int nMaxBytes )
+{
+#ifdef PLATFORM_WINDOWS_PC
+	SetLastError( ERROR_SUCCESS ); // clear the error code
+	GetModuleFileName( NULL, pOut, nMaxBytes );
+	if ( GetLastError() != ERROR_SUCCESS )
+		Error( "Plat_GetModuleFilename: The buffer given is too small (%d bytes).", nMaxBytes );
+#elif PLATFORM_X360
+	pOut[0] = 0x00;		// return null string on Xbox 360
+#else
+	// We shouldn't need this on POSIX.
+	Assert( false );
+	pOut[0] = 0x00;    // Null the returned string in release builds
+#endif
+}
+
+void Plat_ExitProcess( int nCode )
+{
+#if defined( _WIN32 ) && !defined( _X360 )
+	// We don't want global destructors in our process OR in any DLL to get executed.
+	// _exit() avoids calling global destructors in our module, but not in other DLLs.
+	const char *pchCmdLineA = Plat_GetCommandLineA();
+	if ( nCode || ( strstr( pchCmdLineA, "gc.exe" ) && strstr( pchCmdLineA, "gc.dll" ) && strstr( pchCmdLineA, "-gc" ) ) )
+	{
+		int *x = NULL; *x = 1; // cause a hard crash, GC is not allowed to exit voluntarily from gc.dll
+	}
+	TerminateProcess( GetCurrentProcess(), nCode );
+#elif defined(_PS3)
+	// We do not use this path to exit on PS3 (naturally), rather we want a clear crash:
+	int *x = NULL; *x = 1;
+#else	
+	_exit( nCode );
+#endif
+}
+
+void Plat_ExitProcessWithError( int nCode, bool bGenerateMinidump )
+{
+	//try to delegate out if they have registered a callback
+	if( g_pfnExitProcessWithErrorCB )
+	{
+		if( g_pfnExitProcessWithErrorCB( nCode ) )
+			return;
+	}
+
+	//handle default behavior
+	if( bGenerateMinidump )
+	{
+		//don't generate mini dumps in the debugger
+		if( !Plat_IsInDebugSession() )
+		{
+			WriteMiniDump();
+		}
+	}
+
+	//and exit our process
+	Plat_ExitProcess( nCode );
+}
+
+void Plat_SetExitProcessWithErrorCB( ExitProcessWithErrorCBFn pfnCB )
+{
+	g_pfnExitProcessWithErrorCB = pfnCB;	
+}
+
+// Wraps the thread-safe versions of gmtime
+struct tm *Plat_gmtime( const time_t *timep, struct tm *result )
+{
+	if ( EINVAL == gmtime_s( result, timep ) )
+		return NULL;
+	else
+		return result;
+}
+
+
+time_t Plat_timegm( struct tm *timeptr )
+{
+	return _mkgmtime( timeptr );
+}
+
+
+// Wraps the thread-safe versions of localtime
+struct tm *Plat_localtime( const time_t *timep, struct tm *result )
+{
+	if ( EINVAL == localtime_s( result, timep ) )
+		return NULL;
+	else
+		return result;
+}
+
 
 bool vtune( bool resume )
 {
@@ -134,6 +278,8 @@ bool Plat_IsInDebugSession()
 	return (IsDebuggerPresent() != 0);
 #elif defined( _WIN32 ) && defined( _X360 )
 	return (XBX_IsDebuggerPresent() != 0);
+#elif defined( LINUX )
+	#error This code is implemented in platform_posix.cpp
 #else
 	return false;
 #endif
@@ -158,10 +304,76 @@ const tchar *Plat_GetCommandLine()
 #endif
 }
 
+bool GetMemoryInformation( MemoryInformation *pOutMemoryInfo )
+{
+	if ( !pOutMemoryInfo ) 
+		return false;
+
+	MEMORYSTATUSEX	memStat;
+	ZeroMemory( &memStat, sizeof( MEMORYSTATUSEX ) );
+	memStat.dwLength = sizeof( MEMORYSTATUSEX );
+
+	if ( !GlobalMemoryStatusEx( &memStat ) ) 
+		return false;
+
+	const uint cOneMb = 1024 * 1024;
+
+	switch ( pOutMemoryInfo->m_nStructVersion )
+	{
+	case 0:
+		( *pOutMemoryInfo ).m_nPhysicalRamMbTotal     = memStat.ullTotalPhys / cOneMb;
+		( *pOutMemoryInfo ).m_nPhysicalRamMbAvailable = memStat.ullAvailPhys / cOneMb;
+
+		( *pOutMemoryInfo ).m_nVirtualRamMbTotal      = memStat.ullTotalVirtual / cOneMb;
+		( *pOutMemoryInfo ).m_nVirtualRamMbAvailable  = memStat.ullAvailVirtual / cOneMb;
+		break;
+
+	default:
+		return false;
+	};
+
+	return true;
+}
+
+
 const char *Plat_GetCommandLineA()
 {
 	return GetCommandLineA();
 }
+
+//--------------------------------------------------------------------------------------------------
+// Watchdog timer
+//--------------------------------------------------------------------------------------------------
+void Plat_BeginWatchdogTimer( int nSecs )
+{
+}
+void Plat_EndWatchdogTimer( void )
+{
+}
+int Plat_GetWatchdogTime( void )
+{
+	return 0;
+}
+void Plat_SetWatchdogHandlerFunction( Plat_WatchDogHandlerFunction_t function )
+{
+}
+
+bool Is64BitOS()
+{
+	typedef BOOL (WINAPI *LPFN_ISWOW64PROCESS) (HANDLE, PBOOL);
+	static LPFN_ISWOW64PROCESS pfnIsWow64Process = (LPFN_ISWOW64PROCESS)GetProcAddress( GetModuleHandle("kernel32"), "IsWow64Process" );
+
+	static BOOL bIs64bit = FALSE;
+	static bool bInitialized = false;
+	if ( bInitialized ) 
+		return bIs64bit == (BOOL)TRUE;
+	else
+	{
+		bInitialized = true;
+		return pfnIsWow64Process && pfnIsWow64Process(GetCurrentProcess(), &bIs64bit) && bIs64bit;
+	}
+}
+
 
 // -------------------------------------------------------------------------------------------------- //
 // Memory stuff. 
@@ -264,5 +476,3 @@ PLATFORM_INTERFACE void Plat_SetAllocErrorFn( Plat_AllocErrorFn fn )
 #endif
 
 #endif
-
-#endif // _LINUX

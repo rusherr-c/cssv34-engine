@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,10 +36,16 @@
 #include "r_decal.h"
 #include "materialsystem/imaterial.h"
 #include "EngineSoundInternal.h"
-#include "master.h"
 #include "ivideomode.h"
 #include "download.h"
 #include "GameUI/IGameUI.h"
+#include "cl_demo.h"
+#include "cdll_engine_int.h"
+
+#if defined( REPLAY_ENABLED )
+#include "replay/ienginereplay.h"
+#include "replay_internal.h"
+#endif
 
 #include "audio_pch.h"
 
@@ -57,6 +63,9 @@ extern CNetworkStringTableContainer *networkStringTableContainerServer;
 
 static ConVar cl_allowupload ( "cl_allowupload", "1", FCVAR_ARCHIVE, "Client uploads customization files" );
 static ConVar cl_voice_filter( "cl_voice_filter", "", 0, "Filter voice by name substring" ); // filter incoming voice data
+
+static ConVar *replay_voice_during_playback = NULL;
+
 extern ConCommand quit;
 
 void CClientState::ConnectionClosing( const char * reason )
@@ -65,11 +74,12 @@ void CClientState::ConnectionClosing( const char * reason )
 	if ( m_nSignonState > SIGNONSTATE_NONE )
 	{
 		ConMsg( "Disconnect: %s.\n", reason );
-		if ( !Q_stricmp( reason, INVALID_STEAM_TICKET ) )
+		if ( !Q_stricmp( reason, INVALID_STEAM_TICKET )
+			|| !Q_stricmp( reason, INVALID_STEAM_LOGON_TICKET_CANCELED ) )
 		{
 			g_eSteamLoginFailure = STEAMLOGINFAILURE_BADTICKET;
 		}
-		else if ( !Q_stricmp( reason, INVALID_STEAM_LOGON ) )
+		else if ( !Q_stricmp( reason, INVALID_STEAM_LOGON_NOT_CONNECTED ) )
 		{
 			g_eSteamLoginFailure = STEAMLOGINFAILURE_NOSTEAMLOGIN;
 		}
@@ -85,9 +95,17 @@ void CClientState::ConnectionClosing( const char * reason )
 		{
 			g_eSteamLoginFailure = STEAMLOGINFAILURE_NONE;
 		}
-		COM_ExplainDisconnection( true, "Disconnect: %s.\n", reason );
+
+		if ( reason && reason[0] == '#' )
+		{
+			COM_ExplainDisconnection( true, reason );
+		}
+		else
+		{
+			COM_ExplainDisconnection( true, "Disconnect: %s.\n", reason );
+		}
 		SCR_EndLoadingPlaque();
-		Host_Disconnect(true);
+		Host_Disconnect( true, reason );
 	}
 }
 
@@ -97,14 +115,16 @@ void CClientState::ConnectionCrashed( const char * reason )
 	// if connected, shut down host
 	if ( m_nSignonState > SIGNONSTATE_NONE )
 	{
+		DebuggerBreakIfDebugging_StagingOnly();
+
 		COM_ExplainDisconnection( true, "Disconnect: %s.\n", reason );
 		SCR_EndLoadingPlaque();
-		Host_EndGame ( true, reason );
+		Host_EndGame ( true, "%s", reason );
 	}
 }
 
 
-void CClientState::FileRequested(const char *fileName, unsigned int transferID )
+void CClientState::FileRequested(const char *fileName, unsigned int transferID)
 {
 	ConMsg( "File '%s' requested from server %s.\n", fileName, m_NetChannel->GetAddress() );
 
@@ -124,6 +144,11 @@ void CClientState::FileReceived( const char * fileName, unsigned int transferID 
 #ifndef _XBOX
 	// check if the client donwload manager requested this file
 	CL_FileReceived( fileName, transferID );
+	// notify client dll
+	if ( g_ClientDLL )
+	{
+		g_ClientDLL->FileReceived( fileName, transferID );
+	}
 #endif
 }
 
@@ -135,6 +160,9 @@ void CClientState::FileDenied(const char *fileName, unsigned int transferID )
 #endif
 }
 
+void CClientState::FileSent( const char *fileName, unsigned int transferID )
+{
+}
 
 void CClientState::PacketStart( int incoming_sequence, int outgoing_acknowledged	)
 {
@@ -180,16 +208,35 @@ void CClientState::PacketEnd()
 #endif
 }
 
-
-void CClientState::Disconnect(bool bShowMainMenu)
+#undef CreateEvent
+void CClientState::Disconnect( const char *pszReason, bool bShowMainMenu )
 {
-	CBaseClientState::Disconnect(bShowMainMenu);
+#if defined( REPLAY_ENABLED )
+	if ( g_pClientReplayContext && IsConnected() )
+	{
+		g_pClientReplayContext->OnClientSideDisconnect();
+	}
+#endif
+
+	CBaseClientState::Disconnect( pszReason, bShowMainMenu );
+
+#ifndef _X360
+	IGameEvent *event = g_GameEventManager.CreateEvent( "client_disconnect" );
+	if ( event )
+	{
+		if ( !pszReason )
+			pszReason = "";
+		event->SetString( "message", pszReason );
+		g_GameEventManager.FireEventClientSide( event );
+	}
+#endif
 
 	// stop any demo activities
 #ifndef _XBOX
 	demoplayer->StopPlayback();
 	demorecorder->StopRecording();
 #endif
+
 	S_StopAllSounds( true );
 	
 	R_DecalTermAll();
@@ -204,6 +251,7 @@ void CClientState::Disconnect(bool bShowMainMenu)
 	}
 
 	CL_ClearState();
+
 #ifndef _XBOX
 	// End any in-progress downloads
 	CL_HTTPStop_f();
@@ -247,7 +295,7 @@ bool CClientState::ProcessTick( NET_Tick *msg )
 
 	// Remember this for GetLastTimeStamp().
 	m_flLastServerTickTime = tick * host_state.interval_per_tick;
-	
+
 	// Use the server tick while reading network data (used for interpolation samples, etc).
 	g_ClientGlobalVariables.tickcount = tick;	
 	g_ClientGlobalVariables.curtime = tick * host_state.interval_per_tick;
@@ -260,9 +308,7 @@ bool CClientState::ProcessTick( NET_Tick *msg )
 
 bool CClientState::ProcessStringCmd( NET_StringCmd *msg )
 {
-	// If we're connect to an HLTV server and it's giving us a connect command, then just do it.
-	// Otherwise, use the base class version, which performs filtering.
-	return InternalProcessStringCmd( msg, ishltv );
+	return CBaseClientState::ProcessStringCmd( msg );
 }
 
 
@@ -273,7 +319,7 @@ bool CClientState::ProcessServerInfo( SVC_ServerInfo *msg )
 
 	if ( !CBaseClientState::ProcessServerInfo( msg ) )
 	{
-		Disconnect(true);
+		Disconnect( "CBaseClientState::ProcessServerInfo failed", true );
 		return false;
 	}
 #ifndef _XBOX
@@ -293,11 +339,14 @@ bool CClientState::ProcessServerInfo( SVC_ServerInfo *msg )
 	// is server a HLTV proxy ?
 	ishltv = msg->m_bIsHLTV;		
 
-	// The CRC of the server map must match the CRC of the client map. or else
+#if defined( REPLAY_ENABLED )
+	// is server a replay proxy ?
+	isreplay = msg->m_bIsReplay;
+#endif
+
+	// The MD5 of the server map must match the MD5 of the client map. or else
 	//  the client is probably cheating.
-	serverCRC = msg->m_nMapCRC;
-	// The client side DLL CRC check.
-	serverClientSideDllCRC = msg->m_nClientCRC;
+	V_memcpy( serverMD5.bits, msg->m_nMapMD5.bits, MD5_DIGEST_LENGTH );
 
 	// Multiplayer game?
 	if ( m_nMaxClients > 1 )	
@@ -377,7 +426,13 @@ bool CClientState::ProcessClassInfo( SVC_ClassInfo *msg )
 		CBaseClientState::ProcessClassInfo( msg );
 	}
 	
-	if ( !RecvTable_CreateDecoders( serverGameDLL->GetStandardSendProxies() ) ) // create receive table decoders
+#ifdef DEDICATED
+	bool bAllowMismatches = false;
+#else
+	bool bAllowMismatches = ( demoplayer && demoplayer->IsPlayingBack() );
+#endif // DEDICATED
+
+	if ( !RecvTable_CreateDecoders( serverGameDLL->GetStandardSendProxies(), bAllowMismatches ) ) // create receive table decoders
 	{
 		Host_EndGame( true, "CL_ParseClassInfo_EndClasses: CreateDecoders failed.\n" );
 		return false;
@@ -400,18 +455,23 @@ bool CClientState::ProcessSetPause( SVC_SetPause *msg )
 	return true;
 }
 
+bool CClientState::ProcessSetPauseTimed( SVC_SetPauseTimed *msg )
+{
+	CBaseClientState::ProcessSetPauseTimed( msg );
 
+	return true;
+}
 
 bool CClientState::ProcessVoiceInit( SVC_VoiceInit *msg )
 {
 #if !defined( NO_VOICE )//#ifndef _XBOX
-	if( msg->m_szVoiceCodec[0] == 0 )
+	if ( msg->m_szVoiceCodec[0] == 0 )
 	{
 		Voice_Deinit();
 	}
 	else
 	{
-		Voice_Init( msg->m_szVoiceCodec );
+		Voice_Init( msg->m_szVoiceCodec, msg->m_nSampleRate );
 	}
 #endif
 	return true;
@@ -422,9 +482,7 @@ ConVar voice_debugfeedback( "voice_debugfeedback", "0" );
 bool CClientState::ProcessVoiceData( SVC_VoiceData *msg )
 {
 	char chReceived[4096];
-	int nBytes = Bits2Bytes( msg->m_nLength );
-	nBytes = min( nBytes, sizeof( chReceived ) );
-	msg->m_DataIn.ReadBits( chReceived, msg->m_nLength );
+	int bitsRead = msg->m_DataIn.ReadBitsClamped( chReceived, msg->m_nLength );
 
 #if defined ( _X360 )
 	DWORD dwLength = msg->m_nLength;
@@ -452,8 +510,23 @@ bool CClientState::ProcessVoiceData( SVC_VoiceData *msg )
 	if ( Q_strlen( cl_voice_filter.GetString() ) > 0 && Q_strstr( playerinfo.name, cl_voice_filter.GetString() ) == NULL )
 		return true;
 
+#if defined( REPLAY_ENABLED )
+	extern IEngineClientReplay *g_pEngineClientReplay;
+	bool bInReplay = engineClient->IsPlayingDemo() && g_pEngineClientReplay && g_pEngineClientReplay->IsPlayingReplayDemo();
+
+	if ( replay_voice_during_playback == NULL )
+	{
+		replay_voice_during_playback = g_pCVar->FindVar( "replay_voice_during_playback" );
+		Assert( replay_voice_during_playback != NULL );
+	}
+
+	// Don't play back voice data during replay unless the client specified it to.
+	if ( bInReplay && replay_voice_during_playback && !replay_voice_during_playback->GetBool() )
+		return true;
+#endif
+
 	// Data length can be zero when the server is just acking a client's voice data.
-	if ( nBytes == 0 )
+	if ( bitsRead == 0 )
 		return true;
 
 	if ( !Voice_Enabled() )
@@ -478,7 +551,7 @@ bool CClientState::ProcessVoiceData( SVC_VoiceData *msg )
 	}
 
 	// Give the voice engine the data (it in turn gives it to the mixer for the sound engine).
-	Voice_AddIncomingData( nChannel, chReceived, nBytes, m_nCurrentSequence );
+	Voice_AddIncomingData( nChannel, chReceived, Bits2Bytes( bitsRead ), m_nCurrentSequence );
 #endif
 	return true;
 };
@@ -493,35 +566,103 @@ bool CClientState::ProcessPrefetch( SVC_Prefetch *msg )
 	return true;
 }
 
-bool CClientState::ProcessSounds( SVC_Sounds *msg )	
+void CClientState::ProcessSoundsWithProtoVersion( SVC_Sounds *msg, CUtlVector< SoundInfo_t > &sounds, int nProtoVersion )
 {
 	SoundInfo_t defaultSound; defaultSound.SetDefault();
 	SoundInfo_t *pDeltaSound = &defaultSound;
-	SoundInfo_t sound;
 
-	int startbit = msg->m_DataIn.GetNumBitsRead();
-
-	for ( int i=0; i<msg->m_nNumSounds; i++ )
+	// Max is 32 in multiplayer and 255 in singleplayer
+	// Reserve this memory up front so it doesn't realloc under pDeltaSound pointing at it
+	sounds.EnsureCapacity( 256 );
+	
+	for ( int i = 0; i < msg->m_nNumSounds; i++ )
 	{
-		sound.ReadDelta( pDeltaSound, msg->m_DataIn );
+		int nSound = sounds.AddToTail();
+		SoundInfo_t *pSound = &(sounds[ nSound ]);
 
-		pDeltaSound = &sound;	// copy delta values
+		pSound->ReadDelta( pDeltaSound, msg->m_DataIn, nProtoVersion );
+
+		pDeltaSound = pSound;	// copy delta values
 
 		if ( msg->m_bReliableSound )
 		{
 			// client is incrementing the reliable sequence numbers itself
 			m_nSoundSequence = ( m_nSoundSequence + 1 ) & SOUND_SEQNUMBER_MASK;
-			Assert ( sound.nSequenceNumber == 0 );
-			sound.nSequenceNumber = m_nSoundSequence;
+			Assert ( pSound->nSequenceNumber == 0 );
+			pSound->nSequenceNumber = m_nSoundSequence;
 		}
+	}
+}
 
-		// Add all received sounds to sorted queue (sounds may arrive in multiple messages), 
-		//  will be processed after all packets have been completely parsed
-		CL_AddSound( sound );
+bool CClientState::ProcessSounds( SVC_Sounds *msg )	
+{
+	if ( msg->m_DataIn.IsOverflowed() )
+	{
+		// Overflowed before we even started! There's nothing we can do with this buffer.
+		return false;
 	}
 
-	// check given length against read bits
-	return ( msg->m_nLength == (msg->m_DataIn.GetNumBitsRead()-startbit) );
+	CUtlVector< SoundInfo_t > sounds;
+
+	int startbit = msg->m_DataIn.GetNumBitsRead();
+
+	// Process with the reported proto version
+	ProcessSoundsWithProtoVersion( msg, sounds, g_ClientGlobalVariables.network_protocol );
+
+	int nRelativeBitsRead = msg->m_DataIn.GetNumBitsRead() - startbit;
+
+	if ( msg->m_nLength != nRelativeBitsRead || msg->m_DataIn.IsOverflowed() )
+	{
+		// The number of bits read is not what we expect!
+		sounds.RemoveAll();
+		
+		int nFallbackProtocol = 0;
+
+		// If the demo file thinks it's version 18 or 19, it might actually be the other.
+		// This is a work around for when we broke compatibility Halloween 2011.
+		// -Jeep
+		if ( g_ClientGlobalVariables.network_protocol == PROTOCOL_VERSION_18 )
+		{
+			nFallbackProtocol = PROTOCOL_VERSION_19;
+		}
+		else if ( g_ClientGlobalVariables.network_protocol == PROTOCOL_VERSION_19 )
+		{
+			nFallbackProtocol = PROTOCOL_VERSION_18;
+		}
+
+		if ( nFallbackProtocol != 0 )
+		{
+			// Roll back our buffer to before we read those bits and wipe the overflow flag
+			msg->m_DataIn.Reset();
+			msg->m_DataIn.Seek( startbit );
+
+			// Try again with the fallback version
+			ProcessSoundsWithProtoVersion( msg, sounds, nFallbackProtocol );
+
+			nRelativeBitsRead = msg->m_DataIn.GetNumBitsRead() - startbit;
+		}
+	}
+
+	if ( msg->m_nLength == nRelativeBitsRead )
+	{
+		// Now that we know the bits were read correctly, add all the sounds
+		for ( int i = 0; i < sounds.Count(); ++i )
+		{
+			// Add all received sounds to sorted queue (sounds may arrive in multiple messages), 
+			//  will be processed after all packets have been completely parsed
+			CL_AddSound( sounds[ i ] );
+		}
+
+		// read the correct number of bits
+		return true;
+	}
+
+	// Wipe the overflow flag and set the buffer to how much we expected to read
+	msg->m_DataIn.Reset();
+	msg->m_DataIn.Seek( startbit + msg->m_nLength );
+
+	// didn't read the correct number of bits with either proto version attempt
+	return false;
 }
 
 
@@ -617,6 +758,8 @@ bool CClientState::ProcessBSPDecal( SVC_BSPDecal *msg )
 
 bool CClientState::ProcessGameEvent(SVC_GameEvent *msg)
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	int startbit = msg->m_DataIn.GetNumBitsRead();
 
 	IGameEvent *event = g_GameEventManager.UnserializeEvent( &msg->m_DataIn );
@@ -644,10 +787,10 @@ bool CClientState::ProcessGameEvent(SVC_GameEvent *msg)
 bool CClientState::ProcessUserMessage(SVC_UserMessage *msg)
 {
 	// buffer for incoming user message
-	byte userdata[ MAX_USER_MSG_DATA ] = { 0 };
+	ALIGN4 byte userdata[ MAX_USER_MSG_DATA ] ALIGN4_POST = { 0 };
 	bf_read userMsg( "UserMessage(read)", userdata, sizeof( userdata ) );
-	msg->m_DataIn.ReadBits( userdata, msg->m_nLength );
-	userMsg.StartReading( userdata, Bits2Bytes( msg->m_nLength ) );
+	int bitsRead = msg->m_DataIn.ReadBitsClamped( userdata, msg->m_nLength );
+	userMsg.StartReading( userdata, Bits2Bytes( bitsRead ) );
 
 	// dispatch message to client.dll
 	if ( !g_ClientDLL->DispatchUserMessage( msg->m_nMsgType, userMsg ) )
@@ -675,10 +818,10 @@ bool CClientState::ProcessEntityMessage(SVC_EntityMessage *msg)
 	MDLCACHE_CRITICAL_SECTION_( g_pMDLCache );
 
 	// buffer for incoming user message
-	byte entityData[ MAX_ENTITY_MSG_DATA ] = { 0 };
+	ALIGN4 byte entityData[ MAX_ENTITY_MSG_DATA ] ALIGN4_POST = { 0 };
 	bf_read entMsg( "EntityMessage(read)", entityData, sizeof( entityData ) );
-	msg->m_DataIn.ReadBits( entityData, msg->m_nLength );
-	entMsg.StartReading( entityData, Bits2Bytes( msg->m_nLength ) );
+	int bitsRead = msg->m_DataIn.ReadBitsClamped( entityData, msg->m_nLength );
+	entMsg.StartReading( entityData, Bits2Bytes( bitsRead ) );
 
 	entity->ReceiveMessage( msg->m_nClassID, entMsg );
 
@@ -688,8 +831,6 @@ bool CClientState::ProcessEntityMessage(SVC_EntityMessage *msg)
 
 bool CClientState::ProcessPacketEntities( SVC_PacketEntities *msg )
 {
-	CL_PreprocessEntities(); // setup client prediction
-
 	if ( !msg->m_bIsDelta )
 	{
 		// Delta too old or is initial message
@@ -710,6 +851,10 @@ bool CClientState::ProcessPacketEntities( SVC_PacketEntities *msg )
 			// we requested a full update but still got a delta compressed packet. ignore it.
 			return true;
 		}
+
+		// Preprocessing primarily does client prediction. So if we're processing deltas--do it
+		// otherwise, we're about to be told exactly what the state of everything is--so skip it.
+		CL_PreprocessEntities(); // setup client prediction
 	}
 	
 	TRACE_PACKET(( "CL Receive (%d <-%d)\n", m_nCurrentSequence, msg->m_nDeltaFrom ));
@@ -771,7 +916,7 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 	void *from = NULL;
 	C_ServerClassInfo *pServerClass = NULL;
 	ClientClass *pClientClass = NULL;
-	unsigned char data[CEventInfo::MAX_EVENT_DATA];
+	ALIGN4 unsigned char data[CEventInfo::MAX_EVENT_DATA] ALIGN4_POST;
 	bf_write toBuf( data, sizeof(data) );
 	CEventInfo *ei = NULL;
 	
@@ -818,7 +963,8 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 		{
 			Assert( ei );
 
-			bf_read fromBuf( ei->pData, Bits2Bytes(ei->bits) );
+			unsigned int buffer_size = PAD_NUMBER( Bits2Bytes( ei->bits ), 4 );
+			bf_read fromBuf( ei->pData, buffer_size );
 		
 			RecvTable_MergeDeltas( pClientClass->m_pRecvTable, &fromBuf, &buffer, &toBuf );
 		}
@@ -835,8 +981,9 @@ bool CClientState::ProcessTempEntities( SVC_TempEntities *msg )
 		ei->flags			= flags;
 		ei->pClientClass	= pClientClass;
 		ei->bits			= toBuf.GetNumBitsWritten();
-		
-		ei->pData			= new byte[size]; // copy raw data
+
+		// deltaBitsReader.ReadNextPropIndex reads uint32s, so make sure we alloc in 4-byte chunks.
+		ei->pData			= new byte[ ALIGN_VALUE( size, 4 ) ]; // copy raw data
 		Q_memcpy( ei->pData, data, size );
 	}
 

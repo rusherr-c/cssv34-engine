@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -160,7 +160,9 @@ bool BuildGeneralMapList( CUtlVector<maplist_map_t> *aMaps, bool bUseMapListFile
 		if ( CommandLine()->CheckParm( "+map", &pMapName ) && pMapName )
 		{
 			// ensure validity
-			if (g_pVEngineServer->IsMapValid(pMapName))
+			char szMapFile[64] = { 0 };
+			V_snprintf( szMapFile, sizeof( szMapFile ), "maps/%s.bsp", pMapName );
+			if (g_pVEngineServer->IsMapValid( szMapFile ))
 			{
 				// add to list
 				maplist_map_t newMap;
@@ -198,7 +200,9 @@ bool BuildGeneralMapList( CUtlVector<maplist_map_t> *aMaps, bool bUseMapListFile
 				findfn = Sys_FindNext( NULL, 0  );
 
 				// ensure validity
-				if (!g_pVEngineServer->IsMapValid(sz))
+				char szMapFile[64] = { 0 };
+				V_snprintf( szMapFile, sizeof( szMapFile ), "maps/%s.bsp", sz );
+				if (!g_pVEngineServer->IsMapValid( szMapFile ))
 					continue;
 
 				// add to list
@@ -241,7 +245,9 @@ bool BuildGeneralMapList( CUtlVector<maplist_map_t> *aMaps, bool bUseMapListFile
 							Q_strncpy(szMap, com_token, sizeof(szMap));
 
 							// ensure validity
-							if (!g_pVEngineServer->IsMapValid(szMap))
+							char szMapFile[64] = { 0 };
+							V_snprintf( szMapFile, sizeof( szMapFile ), "maps/%s.bsp", szMap );
+							if (!g_pVEngineServer->IsMapValid( szMapFile ))
 								continue;
 
 							// Any more tokens on this line?
@@ -646,7 +652,7 @@ void CMapReslistGenerator::OnModelPrecached(const char *relativePathFileName)
 void CMapReslistGenerator::OnSoundPrecached(const char *relativePathFileName)
 {
 	// skip any special characters
-	if (!isalnum(relativePathFileName[0]))
+	if (!V_isalnum(relativePathFileName[0]))
 	{
 		++relativePathFileName;
 	}

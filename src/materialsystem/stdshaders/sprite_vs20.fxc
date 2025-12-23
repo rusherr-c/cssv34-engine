@@ -39,6 +39,7 @@ VS_OUTPUT main( const VS_INPUT v )
 	// Transform into projection space
 	float4 projPos = mul( float4( worldPos, 1 ), cViewProj );
 	o.projPos = projPos;
+	projPos.z = dot( float4( worldPos, 1 ), cViewProjZ );
 	
 	o.worldPos_projPosZ = float4( worldPos.xyz, projPos.z );
 	

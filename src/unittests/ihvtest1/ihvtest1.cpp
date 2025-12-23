@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -16,7 +16,7 @@
 #include <windows.h>
 #endif
 #include <time.h>
-#include "materialsystem/IMaterialSystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "materialsystem/IMaterialSystemHardwareConfig.h"
 #include "materialsystem/imaterialproxyfactory.h"
 #include "materialsystem/MaterialSystem_Config.h"
@@ -24,7 +24,7 @@
 #include "datacache\idatacache.h"
 #include "datacache\imdlcache.h"
 #include "vphysics_interface.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "IStudioRender.h"
 #include "studio.h"
 #include "clientstats.h"
@@ -760,16 +760,13 @@ const studiohdr_t *virtualgroup_t::GetStudioHdr( void ) const
 //-----------------------------------------------------------------------------
 matrix3x4_t* CIHVTestApp::SetUpBones( studiohdr_t *pStudioHdr, const matrix3x4_t &shapeToWorld, int iRun, int model, int boneMask )
 {
-	// Default to middle of the pose parameter range
-	float pPoseParameter[MAXSTUDIOPOSEPARAM];
-	for ( int i = 0; i < MAXSTUDIOPOSEPARAM; ++i )
-	{
-		pPoseParameter[i] = 0.5f;
-	}
-
 	CStudioHdr studioHdr( pStudioHdr, g_pMDLCache );
 
-	int nFrameCount = Studio_MaxFrame( &studioHdr, g_BenchRuns[iRun].sequence1[model], pPoseParameter );
+	// Default to middle of the pose parameter range
+	float flPoseParameter[MAXSTUDIOPOSEPARAM];
+	Studio_CalcDefaultPoseParameters( &studioHdr, flPoseParameter, MAXSTUDIOPOSEPARAM );
+
+	int nFrameCount = Studio_MaxFrame( &studioHdr, g_BenchRuns[iRun].sequence1[model], flPoseParameter );
 	if ( nFrameCount == 0 )
 	{
 		nFrameCount = 1;
@@ -778,11 +775,12 @@ matrix3x4_t* CIHVTestApp::SetUpBones( studiohdr_t *pStudioHdr, const matrix3x4_t
 	Vector		pos[MAXSTUDIOBONES];
 	Quaternion	q[MAXSTUDIOBONES];
 
-	InitPose( &studioHdr, pos, q, boneMask );
-	AccumulatePose( &studioHdr, NULL, pos, q, g_BenchRuns[iRun].sequence1[model], s_Cycle[model], pPoseParameter, boneMask, 1.0f, 0.0 );
+	IBoneSetup boneSetup( &studioHdr, boneMask, flPoseParameter );
+	boneSetup.InitPose( pos, q );
+	boneSetup.AccumulatePose( pos, q, g_BenchRuns[iRun].sequence1[model], s_Cycle[model], 1.0f, 0.0, NULL );
 
 	// FIXME: Try enabling this?
-//	CalcAutoplaySequences( pStudioHdr, NULL, pos, q, pPoseParameter, BoneMask( ), flTime );
+//	CalcAutoplaySequences( pStudioHdr, NULL, pos, q, flPoseParameter, BoneMask( ), flTime );
 
 	// Root transform
 	matrix3x4_t rootToWorld, temp;

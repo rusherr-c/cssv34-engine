@@ -1,11 +1,11 @@
-//===== Copyright © 1996-2007, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: tracks VB allocations (and compressed/uncompressed vertex memory usage)
 //
 //===========================================================================//
 
 #include "materialsystem/imaterial.h"
-#include "IMeshDX8.h"
+#include "imeshdx8.h"
 #include "convar.h"
 #include "tier1/utlhash.h"
 #include "tier1/utlstack.h"
@@ -88,7 +88,7 @@ class CVBAllocTracker : public IVBAllocTracker
 public:
 	virtual void			CountVB( void * buffer, bool isDynamic, int bufferSize, int vertexSize, VertexFormat_t fmt );
 	virtual void			UnCountVB( void * buffer );
-	virtual void			TrackMeshAllocations( const char * allocatorName );
+	virtual bool			TrackMeshAllocations( const char * allocatorName );
 
 	void					DumpVBAllocs();
 
@@ -222,9 +222,9 @@ static ConVar mem_vballocspew( "mem_vballocspew", "0", FCVAR_CHEAT, "How often t
 // Singleton instance exposed to the engine
 //-----------------------------------------------------------------------------
 
-CVBAllocTracker g_VBAllocTracker;
+CVBAllocTracker g_VBAllocTrackerShaderAPI;
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CVBAllocTracker, IVBAllocTracker, 
-						VB_ALLOC_TRACKER_INTERFACE_VERSION, g_VBAllocTracker );
+						VB_ALLOC_TRACKER_INTERFACE_VERSION, g_VBAllocTrackerShaderAPI );
 
 //-----------------------------------------------------------------------------
 //
@@ -720,10 +720,15 @@ void CVBAllocTracker::UnCountVB( void * buffer )
 #endif // ENABLE_VB_ALLOC_TRACKER
 }
 
-void CVBAllocTracker::TrackMeshAllocations( const char * allocatorName )
+bool CVBAllocTracker::TrackMeshAllocations( const char * allocatorName )
 {
 #if ENABLE_VB_ALLOC_TRACKER
 	// Tracks mesh allocations by name (set this before an alloc, clear it after)
+
+	if ( m_MeshAllocatorName[ 0 ] )
+	{
+		return true;
+	}
 
 	m_VBAllocMutex.Lock();
 
@@ -739,6 +744,8 @@ void CVBAllocTracker::TrackMeshAllocations( const char * allocatorName )
 
 	m_VBAllocMutex.Unlock();
 #endif // ENABLE_VB_ALLOC_TRACKER
+
+	return false;
 }
 
 #ifndef RETAIL
@@ -748,7 +755,7 @@ static void CC_DumpVBMemAllocs()
 #if ( ENABLE_VB_ALLOC_TRACKER == 0 )
 	Warning( "ENABLE_VB_ALLOC_TRACKER must be 1 to enable VB mem alloc tracking\n");
 #else
-	g_VBAllocTracker.DumpVBAllocs();
+	g_VBAllocTrackerShaderAPI.DumpVBAllocs();
 #endif
 }
 

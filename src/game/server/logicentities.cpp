@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ====
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implements many of the entities that control logic flow within a map.
 //
@@ -586,6 +586,7 @@ void CLogicLineToEntity::Think(void)
 // Purpose: Remaps a given input range to an output range.
 //-----------------------------------------------------------------------------
 const int SF_MATH_REMAP_IGNORE_OUT_OF_RANGE = 1;
+const int SF_MATH_REMAP_CLAMP_OUTPUT_TO_RANGE = 2;
 
 class CMathRemap : public CLogicalEntity
 {
@@ -699,6 +700,11 @@ void CMathRemap::InputValue( inputdata_t &inputdata )
 		// Remap the input value to the desired output range and update the output.
 		//
 		float flRemappedValue = m_flOut1 + (((flValue - m_flInMin) * (m_flOut2 - m_flOut1)) / (m_flInMax - m_flInMin));
+
+		if ( FBitSet( m_spawnflags, SF_MATH_REMAP_CLAMP_OUTPUT_TO_RANGE ) )
+		{
+			flRemappedValue = clamp( flRemappedValue, m_flOut1, m_flOut2 );
+		}
 
 		if ( m_bEnabled == true )
 		{
@@ -2731,7 +2737,7 @@ int CLogicBranchList::DrawDebugTextOverlays( void )
 			CLogicBranch *pBranch = (CLogicBranch *)m_LogicBranchList.Element( i ).Get();
 			if ( pBranch )
 			{
-				Q_snprintf( tempstr, sizeof(tempstr), "Branch (%s): %s", pBranch->GetEntityName(), (pBranch->GetLogicBranchState()) ? "TRUE" : "FALSE" );
+				Q_snprintf( tempstr, sizeof(tempstr), "Branch (%s): %s", STRING(pBranch->GetEntityName()), (pBranch->GetLogicBranchState()) ? "TRUE" : "FALSE" );
 				EntityText( text_offset, tempstr, 0 );
 				text_offset++;
 			}

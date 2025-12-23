@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,7 +17,7 @@
 #include "bugreporter/bugreporter.h"
 #include "trktool.h"
 #include "filesystem_tools.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 
 #define SCR_TYPE 1
 

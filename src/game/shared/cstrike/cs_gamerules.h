@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: The TF Game rules object
 //
@@ -25,6 +25,7 @@
 	#include "networkstringtable_clientdll.h"
 #else
 	#include "cs_player.h"
+	#include "funfactmgr_cs.h"
 #endif
 
 #include "cs_urlretrieveprices.h"
@@ -33,28 +34,21 @@
 
 #define CS_GAMERULES_BLACKMARKET_TABLE_NAME "BlackMarketTable"
 
-// used for EndRoundMessage() logged messages
-#define Target_Bombed							1
-#define VIP_Escaped								2
-#define VIP_Assassinated						3
-#define Terrorists_Escaped						4
-#define CTs_PreventEscape						5
-#define Escaping_Terrorists_Neutralized			6
-#define Bomb_Defused							7
-#define CTs_Win									8
-#define Terrorists_Win							9
-#define Round_Draw								10
-#define All_Hostages_Rescued					11
-#define Target_Saved							12
-#define Hostages_Not_Rescued					13
-#define Terrorists_Not_Escaped					14
-#define VIP_Not_Escaped							15
-#define Game_Commencing							16
-
 #define	WINNER_NONE		0
 #define WINNER_DRAW		1
 #define WINNER_TER		TEAM_TERRORIST
-#define WINNER_CT		TEAM_CT	
+#define WINNER_CT		TEAM_CT
+
+//=============================================================================
+// HPE_BEGIN:
+// [tj] Forward declaration so we can track bot suicides in the game rules.
+//=============================================================================
+
+class CCSBot;
+
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 extern ConVar mp_startmoney;
 extern ConVar mp_tkpunish;
@@ -73,6 +67,14 @@ extern ConVar mp_playerid;
 	#define CCSGameRulesProxy C_CSGameRulesProxy
 #endif
 
+#ifndef CLIENT_DLL
+	struct playerscore_t
+	{
+		int iPlayerIndex;
+		int iScore;
+	};
+#endif
+
 
 class CCSGameRulesProxy : public CGameRulesProxy
 {
@@ -89,7 +91,6 @@ public:
 
 	// Stuff that is shared between client and server.
 	bool IsFreezePeriod();
-
 
 	virtual bool ShouldCollide( int collisionGroup0, int collisionGroup1 );
 
@@ -111,7 +112,7 @@ public:
 	bool IsSpawnPointValid( CBaseEntity *pSpot, CBasePlayer *pPlayer );
 
 	bool IsBuyTimeElapsed();
-	
+
 	virtual int	DefaultFOV();
 
 	// Get the view vectors for this mod.
@@ -120,6 +121,8 @@ public:
 	void UploadGameStats( void );
 	int  GetStartMoney( void );
 
+	virtual bool IsConnectedUserInfoChangeAllowed( CBasePlayer *pPlayer );
+
 private:
 
 	float GetExplosionDamageAdjustment(Vector & vecSrc, Vector & vecEnd, CBaseEntity *pEntityToIgnore); // returns multiplier between 0.0 and 1.0 that is the percentage of any damage done from vecSrc to vecEnd that actually makes it.
@@ -127,7 +130,7 @@ private:
 
 	CNetworkVar( bool, m_bFreezePeriod );	 // TRUE at beginning of round, set to FALSE when the period expires
 	CNetworkVar( int, m_iRoundTime );		 // (From mp_roundtime) - How many seconds long this round is.
-	CNetworkVar( float, m_fRoundStartTime ); // time round has started		
+	CNetworkVar( float, m_fRoundStartTime ); // time round has started
 	CNetworkVar( float, m_flGameStartTime );
 	CNetworkVar( int, m_iHostagesRemaining );
 	CNetworkVar( bool, m_bMapHasBombTarget );
@@ -136,7 +139,7 @@ private:
 	CNetworkVar( bool, m_bBlackMarket );
 
 	bool		m_bDontUploadStats;
-	
+
 public:
 
 	bool IsBlackMarket( void ) { return m_bBlackMarket; }
@@ -154,7 +157,7 @@ public:
 #else
 
 	DECLARE_SERVERCLASS_NOBASE(); // This makes datatables able to access our private vars.
-	
+
 	CCSGameRules();
 	virtual ~CCSGameRules();
 
@@ -177,6 +180,40 @@ public:
 	virtual void PlayerSpawn( CBasePlayer *pPlayer );
 			void ShowSpawnPoints();
 
+	virtual void ClientCommandKeyValues( edict_t *pEntity, KeyValues *pKeyValues );
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Set up anything for all players that changes based on new players spawning mid-game
+	//				Find and return fun fact data
+	// [pfreese] Tracking of "pistol" round
+	//=============================================================================
+	virtual void SpawningLatePlayer(CCSPlayer* pLatePlayer);
+
+	bool IsPistolRound();
+
+	void HostageKilled() { m_hostageWasKilled = true; }
+	void HostageInjured() { m_hostageWasInjured = true; }
+
+	bool WasHostageKilled() { return m_hostageWasKilled; }
+	bool WasHostageInjured() { return m_hostageWasInjured; }
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj] So game rules can react to damage taken
+    //=============================================================================
+
+    void PlayerTookDamage(CCSPlayer* player, const CTakeDamageInfo &damageInfo);
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+
 	virtual bool PlayTextureSounds( void ) { return true; }
 	// Let the game rules specify if fall death should fade screen to black
 	virtual bool  FlPlayerFallDeathDoesScreenFade( CBasePlayer *pl ) { return FALSE; }
@@ -185,7 +222,7 @@ public:
 	void RadiusDamage( const CTakeDamageInfo &info, const Vector &vecSrcIn, float flRadius, int iClassIgnore, bool bIgnoreWorld );
 
 	virtual void UpdateClientData( CBasePlayer *pl );
-	
+
 	// Death notices
 	virtual void		DeathNotice( CBasePlayer *pVictim, const CTakeDamageInfo &info );
 
@@ -218,9 +255,19 @@ public:
 
 	// check if the scenario has been won/lost
 	// return true if the scenario is over, false if the scenario is still in progress
-	bool CheckWinConditions( void );	
+	bool CheckWinConditions( void );
 
 	void TerminateRound( float tmDelay, int reason );
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] A place to check achievements that occur at the end of the round
+	//=============================================================================
+	void ProcessEndOfRoundAchievements(int iWinnerTeam, int iReason);
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
 	void RestartRound( void );
 	void BalanceTeams( void );
 	void MoveHumansToHumanTeam( void );
@@ -239,7 +286,7 @@ public:
 
 	void CheckLevelInitialized();
 	void CheckRestartRound();
-	
+
 
 	// Checks if it still needs players to start a round, or if it has enough players to start rounds.
 	// Starts a round and returns true if there are enough players.
@@ -287,14 +334,14 @@ public:
 	// HOSTAGE MAP FUNCTIONS
 	void HostageTouched();
 
-	
+
 	// Sets up g_pPlayerResource.
 	virtual void CreateStandardEntities();
 	virtual const char *GetChatPrefix( bool bTeamOnly, CBasePlayer *pPlayer );
 	virtual const char *GetChatLocation( bool bTeamOnly, CBasePlayer *pPlayer );
 	virtual const char *GetChatFormat( bool bTeamOnly, CBasePlayer *pPlayer );
 	void ClientSettingsChanged( CBasePlayer *pPlayer );
-	
+
 	bool IsCareer( void ) const		{ return false; }		// returns true if this is a CZ "career" game
 
 	virtual bool FAllowNPCs( void );
@@ -310,11 +357,11 @@ public:
 	virtual bool	GetAllowWeaponSwitch( void );
 
 	// VARIABLES FOR ALL TYPES OF MAPS
-	bool m_bLevelInitialized;	
+	bool m_bLevelInitialized;
 	int m_iRoundWinStatus;		// 1 == CT's won last round, 2 == Terrorists did, 3 == Draw, no winner
 	int m_iTotalRoundsPlayed;
 	int m_iUnBalancedRounds;	// keeps track of the # of consecutive rounds that have gone by where one team outnumbers the other team by more than 2
-	
+
 	// GAME TIMES
 	int m_iFreezeTime;		// (From mp_freezetime) - How many seconds long the intro round (when players are frozen) is.
 	float m_flRestartRoundTime;	// the global time when the round is supposed to end, if this is not 0
@@ -345,21 +392,74 @@ public:
 
 	int m_iLoserBonus;			// SupraFiend: the amount of money the losing team gets. This scales up as they lose more rounds in a row
 	float m_tmNextPeriodicThink;
-	
-	
+
+
 	// HOSTAGE RESCUE VARIABLES
 	int		m_iHostagesRescued;
 	int		m_iHostagesTouched;
 	float	m_flNextHostageAnnouncement;
 
+    //=============================================================================
+    // HPE_BEGIN
+    //=============================================================================
+
+    // [tj] Accessor for weapons donation ability
+    bool GetCanDonateWeapon() { return m_bCanDonateWeapons; }
+
+    // [tj] flawless and lossless round related flags
+    bool m_bNoTerroristsKilled;
+    bool m_bNoCTsKilled;
+    bool m_bNoTerroristsDamaged;
+    bool m_bNoCTsDamaged;
+
+    // [tj] Find out if dropped weapons count as donations
+    bool m_bCanDonateWeapons;
+
+	// [tj] Keep track of first kill
+	CHandle<CCSPlayer> m_pFirstKill;
+	float m_firstKillTime;
+
+	// [menglish] Keep track of first blood
+	CHandle<CCSPlayer> m_pFirstBlood;
+	float m_firstBloodTime;
+
+
+    // [dwenger] Rescue-related achievement values
+    CHandle<CCSPlayer> m_pLastRescuer;
+    int     m_iNumRescuers;
+
+	bool m_hostageWasInjured;
+	bool m_hostageWasKilled;
+
+	// [menglish] Fun Fact Manager
+	CCSFunFactMgr *m_pFunFactManager;
+
+	// [tj] To avoid rewriting the same piece of code, we can get all the information
+	//		we want from one call that fills in an array of structures.
+	struct TeamPlayerCounts
+	{
+		int totalPlayers;
+		int totalAlivePlayers;
+		int totalDeadPlayers; //sum of killedPlayers + suicidedPlayers + unenteredPlayers
+		int killedPlayers;
+		int suicidedPlayers;
+		int unenteredPlayers;
+	};
+
+	void GetPlayerCounts(TeamPlayerCounts teamCounts[TEAM_MAXCOUNT]);
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
 
 	// PRISON ESCAPE VARIABLES
 	int		m_iHaveEscaped;
 	bool	m_bMapHasEscapeZone;
-	int		m_iNumEscapers;			
+	int		m_iNumEscapers;
 	int		m_iNumEscapeRounds;		// keeps track of the # of consecutive rounds of escape played.. Teams will be swapped after 8 rounds
 
-	
+
 	// VIP VARIABLES
 	int		m_iMapHasVIPSafetyZone;	// 0 = uninitialized;   1 = has VIP safety zone;   2 = DOES not have VIP safetyzone
 	CHandle<CCSPlayer> m_pVIP;
@@ -380,14 +480,18 @@ private:
 	bool			m_bAllowWeaponSwitch;
 
 public:
-	
-#ifndef CLIENT_DLL
+
+
+
 	void AddPricesToTable( weeklyprice_t prices );
 	virtual void CreateCustomNetworkStringTables( void );
+
 #endif
-	
 
 
+#ifdef GAME_DLL
+public:
+	virtual void	GetTaggedConVarList( KeyValues *pCvarTagList );
 #endif
 
 public:
@@ -423,7 +527,7 @@ int UTIL_HumansInGame( bool ignoreSpectators = false );
 #ifdef CLIENT_DLL
 
 #else
-	
+
 	class CTFTeam;
 	CTFTeam *GetOpposingTeam( CTeam *pTeam );
 	bool EntityPlacementTest( CBaseEntity *pMainEnt, const Vector &vOrigin, Vector &outPos, bool bDropToGround );

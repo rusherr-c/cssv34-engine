@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -825,7 +825,7 @@ bool FindStringResourceEx( HINSTANCE hinst, UINT uId, UINT langId, char *pStr, i
 				}
 				
 				// First word in the resource is the length and the rest is the data.
-				int nChars = min( pwsz[0], outLen-1 );
+				int nChars = min( (int)pwsz[0], outLen-1 );
 				++pwsz;
 				V_wcstostr( pwsz, nChars, pStr, outLen );
 				pStr[nChars] = 0;
@@ -1024,7 +1024,7 @@ void CServicesDlg::OnDblclkServicesList(NMHDR* pNMHDR, LRESULT* pResult)
 			{
 				// Launch vmpi_browser_job_search and have it auto-select this worker.
 				char cmdLine[1024];
-				Q_snprintf( cmdLine, sizeof( cmdLine ), "vmpi_job_search -SelectWorker %s", pInfo->m_ComputerName.GetString() );
+				Q_snprintf( cmdLine, sizeof( cmdLine ), "vmpi_job_search -SelectWorker %s", (const char*)pInfo->m_ComputerName );
 
 				STARTUPINFO si;
 				memset( &si, 0, sizeof( si ) );
@@ -1074,7 +1074,7 @@ BOOL CServicesDlg::OnNotify(WPARAM wParam, LPARAM lParam, LRESULT* pResult)
 			LPNMLISTVIEW pListView = (LPNMLISTVIEW)lParam;
 
 			// Now sort by this column.
-			int iSortColumn = max( 0, min( pListView->iSubItem, ARRAYSIZE( g_ColumnInfos ) - 1 ) );
+			int iSortColumn = max( 0, min( pListView->iSubItem, (int)ARRAYSIZE( g_ColumnInfos ) - 1 ) );
 			PushSortColumn( iSortColumn );
 			ResortItems();
 		}

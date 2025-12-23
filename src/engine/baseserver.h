@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -35,13 +35,8 @@ enum server_state_t
 // See baseserver.cpp for #define which controls this
 bool AllowDebugDedicatedServerOutsideSteam();
 
-// MAX_CHALLENGES is made large to prevent a denial
-//  of service attack that could cycle all of them
-//  out before legitimate users connected
-#define MAX_CHALLENGES 16384
-
-// time a challenge is valid for, in seconds
-#define CHALLENGE_LIFETIME 60*60.0f
+// time a challenge nonce is valid for, in seconds
+#define CHALLENGE_NONCE_LIFETIME 6.0f
 
 // MAX_DELTA_TICKS defines the maximum delta difference allowed 
 // for delta compression, if clients request on older tick as
@@ -58,8 +53,6 @@ typedef struct
 
 class CBaseServer  : public IServer
 {
-friend class CMaster;
-
 public:
 	CBaseServer();
 	virtual ~CBaseServer();
@@ -95,10 +88,11 @@ public: // IServer implementation
 	virtual bool	IsMultiplayer( void ) const { return m_nMaxclients > 1; }
 	virtual bool	IsPausable( void ) const { return false; }
 	virtual bool	IsHLTV( void ) const { return false; }
+	virtual bool	IsReplay( void ) const { return false; }
 
 	virtual void	BroadcastMessage( INetMessage &msg, bool onlyActive = false, bool reliable = false );
 	virtual void	BroadcastMessage( INetMessage &msg, IRecipientFilter &filter );
-	virtual void	BroadcastPrintf (const char *fmt, ...);
+	virtual void	BroadcastPrintf ( PRINTF_FORMAT_STRING const char *fmt, ...) FMTFUNCTION( 2, 3 );
 
 	virtual const char * GetPassword() const;
 
@@ -118,7 +112,7 @@ public: // IConnectionlessPacketHandler implementation
 	virtual void	Init( bool isDedicated );
 	virtual void	Clear( void );
 	virtual void	Shutdown( void );
-	virtual CBaseClient *CreateFakeClient(const char *name);
+	virtual CBaseClient *CreateFakeClient( const char *name );
 	virtual void 	RemoveClientFromGame( CBaseClient *client ) {};
 	virtual void	SendClientMessages ( bool bSendSnapshots );
 	virtual void	FillServerInfo(SVC_ServerInfo &serverinfo);
@@ -139,7 +133,7 @@ public: // IConnectionlessPacketHandler implementation
 	INetworkStringTable *GetLightStyleTable( void );
 	INetworkStringTable *GetUserInfoTable( void );
 
-	virtual void	RejectConnection(const netadr_t &adr, char *fmt, ... );
+	virtual void	RejectConnection(const netadr_t &adr, int clientChallenge, const char *s );
 
 	float	GetFinalTickTime( void ) const;
 
@@ -152,28 +146,34 @@ public: // IConnectionlessPacketHandler implementation
 	void	AddTag( const char *pszTag );
 	void	RemoveTag( const char *pszTag );
 
+	int		GetNumConnections( ) { return m_nNumConnections; }
+
+	void	SetReportNewFakeClients( bool bReportNewFakeClients ) { m_bReportNewFakeClients = bReportNewFakeClients; }
+
+	void	SetPausedForced( bool bPaused, float flDuration = -1.f );
+
 protected:
 
-	virtual IClient *ConnectClient ( netadr_t &adr, int protocol, int challenge, int authProtocol, 
-					    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen, CSteamID steamid );
+	virtual IClient *ConnectClient ( netadr_t &adr, int protocol, int challenge, int clientChallenge, int authProtocol, 
+					    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen );
 	
 	virtual CBaseClient *GetFreeClient( netadr_t &adr );
 
-	virtual CBaseClient *CreateNewClient( int slot ) { return NULL; }; // must be derived
+	virtual CBaseClient *CreateNewClient( int slot ) { AssertMsg( 0, "CBaseServer::CreateNewClient() being called - must be implemented in derived class!" ); return NULL; }; // must be derived
 
 	
-	virtual bool	FinishCertificateCheck( netadr_t &adr, int nAuthProtocol, const char *szRawCertificate ) { return true; };
+	virtual bool	FinishCertificateCheck( netadr_t &adr, int nAuthProtocol, const char *szRawCertificate, int clientChallenge ) { return true; };
 	
 	virtual int		GetChallengeNr ( netadr_t &adr );
 	virtual int		GetChallengeType ( netadr_t &adr );
 
-	virtual bool	CheckProtocol( netadr_t &adr, int nProtocol );
+	virtual bool	CheckProtocol( netadr_t &adr, int nProtocol, int clientChallenge );
 	virtual bool	CheckChallengeNr( netadr_t &adr, int nChallengeValue );
-	virtual bool	CheckChallengeType( CBaseClient *client, int nNewUserID, netadr_t & adr, int nAuthProtocol, const char *pchLogonCookie, int cbCookie );
+	virtual bool	CheckChallengeType( CBaseClient *client, int nNewUserID, netadr_t & adr, int nAuthProtocol, const char *pchLogonCookie, int cbCookie, int clientChallenge );
 	virtual bool	CheckPassword( netadr_t &adr, const char *password, const char *name );
 	virtual bool	CheckIPConnectionReuse( netadr_t &adr );
 
-	virtual void	ReplyChallenge(netadr_t &adr);
+	virtual void	ReplyChallenge(netadr_t &adr, int clientChallenge);
 	virtual void	ReplyServerChallenge(netadr_t &adr);
 
 	virtual void	CalculateCPUUsage();
@@ -199,12 +199,13 @@ public:
 	server_state_t	m_State;		// some actions are only valid during load
 	int				m_Socket;		// network socket 
 	int				m_nTickCount;	// current server tick
-	char			m_szMapname[64];		// map name without path and extension
+	bool			m_bSimulatingTicks;		// whether or not the server is currently simulating ticks
+	char			m_szMapname[64];		// map name
+	char			m_szMapFilename[64];	// map filename, may bear no resemblance to map name
 	char			m_szSkyname[64];		// skybox name
 	char			m_Password[32];		// server password
 
-	CRC32_t			worldmapCRC;      // For detecting that client has a hacked local copy of map, the client will be dropped if this occurs.
-	CRC32_t			clientDllCRC; // The dll that this server is expecting clients to be using.
+	MD5Value_t		worldmapMD5;		// For detecting that client has a hacked local copy of map, the client will be dropped if this occurs.
 	
 	CNetworkStringTableContainer *m_StringTables;	// newtork string table container
 
@@ -242,8 +243,9 @@ protected:
 	
 	bool		m_bIsDedicated;
 
-	CUtlVector<challenge_t> m_ServerQueryChallenges; // prevent spoofed IP's from server queries/connecting
-
+	uint32		m_CurrentRandomNonce;
+	uint32		m_LastRandomNonce;
+	float		m_flLastRandomNumberGenerationTime;
 	float		m_fCPUPercent;
 	float		m_fStartTime;
 	float		m_fLastCPUCheckTime;
@@ -253,8 +255,13 @@ protected:
 	
 	bool		m_bMasterServerRulesDirty;
 	double		m_flLastMasterServerUpdateTime;
+
+	int			m_nNumConnections;		//Number of successful client connections.
+
+	bool		m_bReportNewFakeClients; // Whether or not newly created fake clients should be included in server browser totals
+	float		m_flPausedTimeEnd;
 };
 
-
+extern CThreadFastMutex g_svInstanceBaselineMutex;
 
 #endif // BASESERVER_H

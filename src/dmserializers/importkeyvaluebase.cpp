@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -244,8 +244,8 @@ void CImportKeyValueBase::RecursivelyResolveElement( CDmElement* pElement )
 		{
 		case AT_ELEMENT:
 			{
-				CDmElement *pElement = pAttribute->GetValueElement<CDmElement>();
-				RecursivelyResolveElement( pElement );
+				CDmElement *pElementAt = pAttribute->GetValueElement<CDmElement>();
+				RecursivelyResolveElement( pElementAt );
 			}
 			break;
 
@@ -255,8 +255,8 @@ void CImportKeyValueBase::RecursivelyResolveElement( CDmElement* pElement )
 				int nCount = array.Count();
 				for ( int i = 0; i < nCount; ++i )
 				{
-					CDmElement *pElement = array[ i ];
-					RecursivelyResolveElement( pElement );
+					CDmElement *pElementAt = array[ i ];
+					RecursivelyResolveElement( pElementAt );
 				}
 			}
 			break;

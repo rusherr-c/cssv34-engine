@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -897,11 +897,11 @@ public:
 	bool operator() ( CNavArea *area )
 	{
 		// collect all the hiding spots in this area
-		const HidingSpotList *list = area->GetHidingSpotList();
+		const HidingSpotVector *pSpots = area->GetHidingSpots();
 
-		FOR_EACH_LL( (*list), it )
+		FOR_EACH_VEC( (*pSpots), it )
 		{
-			const HidingSpot *spot = (*list)[ it ];
+			const HidingSpot *spot = (*pSpots)[ it ];
 
 			if (m_count >= MAX_SPOTS)
 				break;
@@ -1017,7 +1017,7 @@ float CCSBot::GetRangeToFarthestEscortedHostage( void ) const
  */
 const char *CCSBot::GetTaskName( void ) const
 {
-	static char *name[ NUM_TASKS ] = 
+	static const char *name[ NUM_TASKS ] = 
 	{
 		"SEEK_AND_DESTROY",
 		"PLANT_BOMB",
@@ -1053,7 +1053,7 @@ const char *CCSBot::GetTaskName( void ) const
  */
 const char *CCSBot::GetDispositionName( void ) const
 {
-	static char *name[ NUM_DISPOSITIONS ] = 
+	static const char *name[ NUM_DISPOSITIONS ] = 
 	{
 		"ENGAGE_AND_INVESTIGATE",
 		"OPPORTUNITY_FIRE",
@@ -1072,7 +1072,7 @@ const char *CCSBot::GetDispositionName( void ) const
  */
 const char *CCSBot::GetMoraleName( void ) const
 {
-	static char *name[ EXCELLENT - TERRIBLE + 1 ] = 
+	static const char *name[ EXCELLENT - TERRIBLE + 1 ] = 
 	{
 		"TERRIBLE",
 		"BAD",

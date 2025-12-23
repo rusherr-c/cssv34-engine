@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2007, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -60,5 +60,7 @@
 #include "snd_wave_mixer_xma.h"
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
-#include <xhv.h>
+#include <xhv2.h>
+#elif POSIX
+#include "audio/private/posix_stubs.h"
 #endif

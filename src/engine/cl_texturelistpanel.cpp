@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -44,6 +44,11 @@
 
 #include "client.h"
 
+#include "tier2/p4helpers.h"
+#include "p4lib/ip4.h"
+#include "ivtex.h"
+#include "tier2/fileutils.h"
+
 // For character manipulations isupper/tolower
 #include <ctype.h>
 
@@ -51,6 +56,7 @@
 #include "tier0/memdbgon.h"
 
 #define KEYNAME_NAME			"Name"
+#define KEYNAME_PATH			"Path"
 #define KEYNAME_BINDS_MAX		"BindsMax"
 #define KEYNAME_BINDS_FRAME		"BindsFrame"
 #define KEYNAME_SIZE			"Size"
@@ -69,7 +75,7 @@ CON_COMMAND( mat_get_textures, "VXConsole command" )
 }
 #endif
 
-static ConVar mat_texture_list( "mat_texture_list", "0", 0, "For debugging, show a list of used textures per frame" );
+static ConVar mat_texture_list( "mat_texture_list", "0", FCVAR_CHEAT, "For debugging, show a list of used textures per frame" );
 
 static enum TxListPanelRequest
 {
@@ -79,6 +85,11 @@ static enum TxListPanelRequest
 	TXR_HIDE
 } s_eTxListPanelRequest = TXR_NONE;
 
+IVTex* VTex_Load( CSysModule** pModule );
+void VTex_Unload( CSysModule *pModule );
+void* CubemapsFSFactory( const char *pName, int *pReturnCode );
+bool StripDirName( char *pFilename );
+
 // These are here so you can bind a key to +mat_texture_list and toggle it on and off.
 void mat_texture_list_on_f();
 void mat_texture_list_off_f();
@@ -86,9 +97,9 @@ void mat_texture_list_off_f();
 ConCommand mat_texture_list_on( "+mat_texture_list", mat_texture_list_on_f );
 ConCommand mat_texture_list_off( "-mat_texture_list", mat_texture_list_off_f );
 
-ConVar mat_texture_list_all( "mat_texture_list_all", "0", FCVAR_NEVER_AS_STRING, "If this is nonzero, then the texture list panel will show all currently-loaded textures." );
+ConVar mat_texture_list_all( "mat_texture_list_all", "0", FCVAR_NEVER_AS_STRING|FCVAR_CHEAT, "If this is nonzero, then the texture list panel will show all currently-loaded textures." );
 
-ConVar mat_texture_list_view( "mat_texture_list_view", "1", FCVAR_NEVER_AS_STRING, "If this is nonzero, then the texture list panel will render thumbnails of currently-loaded textures." );
+ConVar mat_texture_list_view( "mat_texture_list_view", "1", FCVAR_NEVER_AS_STRING|FCVAR_CHEAT, "If this is nonzero, then the texture list panel will render thumbnails of currently-loaded textures." );
 
 ConVar mat_show_texture_memory_usage( "mat_show_texture_memory_usage", "0", FCVAR_NEVER_AS_STRING|FCVAR_CHEAT, "Display the texture memory usage on the HUD." );
 
@@ -96,10 +107,12 @@ ConVar mat_show_texture_memory_usage( "mat_show_texture_memory_usage", "0", FCVA
 static int g_warn_texkbytes = 1499;
 static int g_warn_texdimensions = 1024;
 static bool g_warn_enable = true;
+static bool g_cursorset = false;
 
 class CTextureListPanel;
 static CTextureListPanel *g_pTextureListPanel = NULL;
 static bool g_bRecursiveRequestToShowTextureList = false;
+static int g_nSaveQueueState = INT_MIN;
 
 
 //
@@ -507,7 +520,8 @@ static bool ShallWarnTx( KeyValues *kv, ITexture *tx )
  		return true;
 
 	if ( stricmp( "DXT1", kv->GetString( KEYNAME_FORMAT ) )  && stricmp( "DXT5", kv->GetString( KEYNAME_FORMAT ) ) &&
-		 stricmp( "ATI1N", kv->GetString( KEYNAME_FORMAT ) ) && stricmp( "ATI2N", kv->GetString( KEYNAME_FORMAT ) ) )
+		 stricmp( "ATI1N", kv->GetString( KEYNAME_FORMAT ) ) && stricmp( "ATI2N", kv->GetString( KEYNAME_FORMAT ) ) &&
+		 stricmp( "DXT5_RUNTIME", kv->GetString( KEYNAME_FORMAT ) ) )
 		return true;
 
 	if ( kv->GetInt( KEYNAME_SIZE ) > g_warn_texkbytes )
@@ -601,6 +615,27 @@ CON_COMMAND_F( mat_texture_list_txlod, "Adjust LOD of the last viewed texture +1
 	Warning( "Usage: 'mat_texture_list_txlod +1' to inc lod | 'mat_texture_list_txlod -1' to dec lod\n" );
 }
 
+static bool SaveTextureImage( char const *szTextureName )
+{
+	bool bRet;
+	char fileName[ MAX_PATH ];
+	char baseName[ MAX_PATH ];
+	ITexture *pMatTexture = materials->FindTexture( szTextureName, "", false );
+
+	if ( !pMatTexture )
+	{
+		Msg( "materials->FindTexture( '%s' ) failed.\n", szTextureName );
+		return false;
+	}
+
+	V_FileBase( szTextureName, baseName, ARRAYSIZE( baseName ) );
+	Q_snprintf( fileName, ARRAYSIZE( fileName ), "//MOD/tex_%s.tga", baseName );
+
+	bRet = pMatTexture->SaveToFile( fileName );
+
+	Msg( "SaveTextureImage( '%s' ): %s\n", fileName, bRet ? "succeeded" : "failed" );
+	return bRet;
+}
 
 namespace MatViewOverride
 {
@@ -848,6 +883,140 @@ void CVmtTextEntry::OpenVmtSelected()
 	}
 }
 
+#ifdef IS_WINDOWS_PC
+bool IsSpaceOrQuote( char val )
+{
+	return (isspace(val) || val == '\"');
+}
+
+static bool SetBufferValue( char *chTxtFileBuffer, char const *szLookupKey, char const *szNewValue )
+{
+	bool bResult = false;
+
+	size_t lenTmp = strlen( szNewValue );
+	size_t nTxtFileBufferLen = strlen( chTxtFileBuffer );
+
+	for ( char *pch = chTxtFileBuffer;
+		( NULL != ( pch = strstr( pch, szLookupKey ) ) );
+		++ pch )
+	{
+		char *val = pch + strlen( szLookupKey );
+		if ( !IsSpaceOrQuote( *val ) )
+			continue;
+		else
+			++ val;
+
+		// Skip over the whitespace and quotes
+		while ( *val && IsSpaceOrQuote( *val ) )
+			++ val;
+		char *pValStart = val;
+
+		// Okay, here comes the value
+		while ( *val && IsSpaceOrQuote( *val ) )
+			++ val;
+		while ( *val && !IsSpaceOrQuote( *val ) )
+			++ val;
+
+		char *pValEnd = val; // Okay, here ends the value
+
+		memmove( pValStart + lenTmp, pValEnd, chTxtFileBuffer + nTxtFileBufferLen + 1 - pValEnd );
+		memcpy( pValStart, szNewValue, lenTmp );
+
+		nTxtFileBufferLen += ( lenTmp - ( pValEnd - pValStart ) );
+		bResult = true;
+	}
+
+	if ( !bResult )
+	{
+		char *pchAdd = chTxtFileBuffer + nTxtFileBufferLen;
+		strcpy( pchAdd + strlen( pchAdd ), "\n" );
+		strcpy( pchAdd + strlen( pchAdd ), szLookupKey );
+		strcpy( pchAdd + strlen( pchAdd ), " " );
+		strcpy( pchAdd + strlen( pchAdd ), szNewValue );
+		strcpy( pchAdd + strlen( pchAdd ), "\n" );
+		bResult = true;
+	}
+
+	return bResult;
+}
+
+// Replaces the first occurrence of "szFindData" with "szNewData"
+// Returns the remaining buffer past the replaced data or NULL if
+// no replacement occurred.
+static char * BufferReplace( char *buf, char const *szFindData, char const *szNewData )
+{
+	size_t len = strlen( buf ), lFind = strlen( szFindData ), lNew = strlen( szNewData );
+	if ( char *pBegin = strstr( buf, szFindData ) )
+	{
+		memmove( pBegin + lNew, pBegin + lFind, buf + len - ( pBegin + lFind ) );
+		memmove( pBegin, szNewData, lNew );
+		return pBegin + lNew;
+	}
+	return NULL;
+}
+
+class CP4Requirement
+{
+public:
+	CP4Requirement();
+	~CP4Requirement();
+
+protected:
+	bool m_bLoadedModule;
+	CSysModule *m_pP4Module;
+};
+
+CP4Requirement::CP4Requirement() :
+	m_bLoadedModule( false ),
+	m_pP4Module( NULL )
+{
+#ifdef STAGING_ONLY
+	if ( p4 )
+		return;
+
+	// load the p4 lib
+	m_pP4Module = Sys_LoadModule( "p4lib" );
+	m_bLoadedModule = true;
+		
+	if ( m_pP4Module )
+	{
+		CreateInterfaceFn factory = Sys_GetFactory( m_pP4Module );
+		if ( factory )
+		{
+			p4 = ( IP4 * )factory( P4_INTERFACE_VERSION, NULL );
+
+			if ( p4 )
+			{
+				extern CreateInterfaceFn g_AppSystemFactory;
+				p4->Connect( g_AppSystemFactory );
+				p4->Init();
+			}
+		}
+	}
+#endif // STAGING_ONLY
+
+	if ( !p4 )
+	{
+		Warning( "Can't load p4lib.dll\n" );
+	}
+}
+
+CP4Requirement::~CP4Requirement()
+{
+	if ( m_bLoadedModule && m_pP4Module )
+	{
+		if ( p4 )
+		{
+			p4->Shutdown();
+			p4->Disconnect();
+		}
+
+		Sys_UnloadModule( m_pP4Module );
+		m_pP4Module = NULL;
+		p4 = NULL;
+	}
+}
+#endif // #ifdef IS_WINDOWS_PC
 
 //////////////////////////////////////////////////////////////////////////
 //
@@ -896,7 +1065,13 @@ protected:
 	CVmtTextEntry		*m_pMaterials;
 	vgui::Button		*m_pExplore;
 	vgui::Button		*m_pReload;
-	vgui::Button		*m_pCopyTxt, *m_pCopyImg;
+	vgui::Button		*m_pRebuild;
+	vgui::Button		*m_pToggleNoMip;
+	vgui::Button		*m_pCopyTxt;
+#ifndef POSIX
+	vgui::Button		*m_pCopyImg;
+#endif
+	vgui::Button		*m_pSaveImg;
 	vgui::Button		*m_pSizeControls[2];
 	vgui::Button		*m_pFlashBtn;
 	KeyValues			*m_pInfo;
@@ -925,11 +1100,22 @@ CRenderTextureEditor::CRenderTextureEditor( vgui::Panel *parent, char const *szN
 	m_pReload = vgui::SETUP_PANEL( new vgui::Button( this, "Reload", "Reload", this, "Reload" ) );
 	m_pReload->SetVisible( true );
 
+	m_pRebuild = vgui::SETUP_PANEL( new vgui::Button( this, "RebuildVTF", "Rebuild VTF", this, "RebuildVTF" ) );
+	m_pRebuild->SetVisible( true );
+
+	m_pToggleNoMip = vgui::SETUP_PANEL( new vgui::Button( this, "ToggleNoMip", "ToggleNoMip", this, "ToggleNoMip" ) );
+	m_pToggleNoMip->SetVisible( true );
+
 	m_pCopyTxt = vgui::SETUP_PANEL( new vgui::Button( this, "CopyTxt", "Copy Text", this, "CopyTxt" ) );
 	m_pCopyTxt->SetVisible( true );
 
+#ifndef POSIX
 	m_pCopyImg = vgui::SETUP_PANEL( new vgui::Button( this, "CopyImg", "Copy Image", this, "CopyImg" ) );
 	m_pCopyImg->SetVisible( true );
+#endif
+
+	m_pSaveImg = vgui::SETUP_PANEL( new vgui::Button( this, "SaveImg", "Save Image", this, "SaveImg" ) );
+	m_pSaveImg->SetVisible( true );
 
 	m_pFlashBtn = vgui::SETUP_PANEL( new vgui::Button( this, "FlashBtn", "Flash in Game", this, "FlashBtn" ) );
 	m_pFlashBtn->SetVisible( true );
@@ -1042,9 +1228,26 @@ void CRenderTextureEditor::SetDispInfo( KeyValues *kv, int iHint )
 		bufText.Printf( "\n%s", arrMaterials.String( k ) );
 	}
 
+	m_pSaveImg->SetVisible( false );
+
 	// Set text except for the cases when m_pInfo and no materials found
 	if ( !( m_pInfo && !arrMaterials.GetNumStrings() ) )
 	{
+		if ( kv )
+		{
+			int iTxWidth = kv->GetInt( KEYNAME_WIDTH );
+			int iTxHeight = kv->GetInt( KEYNAME_HEIGHT );
+			char const *szTxFormat = kv->GetString( KEYNAME_FORMAT );
+
+			bufText.Printf( "\n%dx%d Format:%s", iTxWidth, iTxHeight, szTxFormat );
+
+			// We support saving the 8888 formats right now: "RGBA8888", "ABGR8888", "ARGB8888", "BGRA8888", "BGRX8888"
+			if( Q_strstr( szTxFormat, "8888" ) )
+			{
+				m_pSaveImg->SetVisible( true );
+			}
+		}
+
 		m_pMaterials->SetText( ( char const * ) bufText.Base() );
 
 		m_lstMaterials.RemoveAll();
@@ -1091,6 +1294,14 @@ void CRenderTextureEditor::PerformLayout()
 	m_pReload->SetWide( 60 );
 	m_pReload->SetVisible( m_lstMaterials.Count() > 0 );
 
+	m_pRebuild->SetPos( 2 * TILE_BORDER + TILE_SIZE - 50 - 65 - 95, 2 * TILE_BORDER );
+	m_pRebuild->SetWide( 90 );
+	m_pRebuild->SetVisible( m_lstMaterials.Count() > 0 );
+
+	m_pToggleNoMip->SetPos( 2 * TILE_BORDER + TILE_SIZE - 50 - 95, (2 * TILE_BORDER) + m_pReload->GetTall() + 1 );
+	m_pToggleNoMip->SetWide( 90 );
+	m_pToggleNoMip->SetVisible( m_lstMaterials.Count() > 0 );
+
 	m_pExplore->SetVisible( false );
 	m_pSizeControls[0]->SetVisible( false );
 	m_pSizeControls[1]->SetVisible( false );
@@ -1129,8 +1340,14 @@ void CRenderTextureEditor::PerformLayout()
 		posX += m_pExplore->GetWide();
 
 		posX -= 80;
+		m_pSaveImg->SetPos( posX, posY );
+		m_pSaveImg->SetWide( 80 );
+
+#ifndef POSIX
+		posX -= 80 + 5;
 		m_pCopyImg->SetPos( posX, posY );
 		m_pCopyImg->SetWide( 80 );
+#endif
 
 		posX -= 80 + 5;
 		m_pCopyTxt->SetPos( posX, posY );
@@ -1141,6 +1358,41 @@ void CRenderTextureEditor::PerformLayout()
 		m_pFlashBtn->SetWide( 95 );
 	}
 }
+
+#ifdef IS_WINDOWS_PC
+bool GetTextureContentPath( const char *pszVTF, char *szTextureContentPath, int nBufSize )
+{
+	char vhRelVTF[MAX_PATH];
+	Q_snprintf( vhRelVTF, sizeof( vhRelVTF ) - 1, "materials/%s.vtf", pszVTF );
+
+	ConVarRef mat_texture_list_content_path( "mat_texture_list_content_path" );
+	if ( !mat_texture_list_content_path.GetString()[0] )
+	{
+		szTextureContentPath = const_cast< char * >( g_pFileSystem->RelativePathToFullPath( vhRelVTF, "game", szTextureContentPath, nBufSize - 1 ) );
+
+		if ( !szTextureContentPath )
+		{
+			Warning( " texture '%s' is not loaded from file system.\n", pszVTF );
+			return false;
+		}
+		if ( !BufferReplace( szTextureContentPath, "\\game\\", "\\content\\" ) ||
+			!BufferReplace( szTextureContentPath, "\\materials\\", "\\materialsrc\\" ) )
+		{
+			Warning( " texture '%s' cannot be mapped to content directory.\n", pszVTF );
+			return false;
+		}
+	}
+	else
+	{
+		V_strncpy( szTextureContentPath, mat_texture_list_content_path.GetString(), MAX_PATH );
+		V_strncat( szTextureContentPath, "/", MAX_PATH );
+		V_strncat( szTextureContentPath, pszVTF, MAX_PATH );
+		V_strncat( szTextureContentPath, ".vtf", MAX_PATH );
+	}
+
+	return true;
+}
+#endif // #ifdef IS_WINDOWS_PC
 
 void CRenderTextureEditor::OnCommand( const char *command )
 {
@@ -1214,6 +1466,11 @@ void CRenderTextureEditor::OnCommand( const char *command )
 		vgui::system()->SetClipboardImage( pMainWnd, x, y, x + GetWide(), y + GetTall() );
 	}
 
+	if ( !stricmp( command, "SaveImg" ) )
+	{
+		SaveTextureImage( m_pInfo->GetString( KEYNAME_NAME ) );
+	}
+
 	if ( !stricmp( command, "FlashBtn" ) )
 	{
 		MatViewOverride::RequestSelectNone();
@@ -1232,6 +1489,172 @@ void CRenderTextureEditor::OnCommand( const char *command )
 		}
 
 		InvalidateLayout();
+	}
+
+	if ( !stricmp( command, "ToggleNoMip" ) )
+	{
+#ifdef IS_WINDOWS_PC
+		CP4Requirement p4req;
+		if ( !p4 )
+			g_p4factory->SetDummyMode( true );
+
+		char const *szTextureFile = m_pInfo->GetString( KEYNAME_NAME );
+		char const *szTextureGroup = m_pInfo->GetString( KEYNAME_TEXTURE_GROUP );
+
+		ITexture *pMatTexture = NULL;
+		if ( *szTextureFile )
+			pMatTexture = materials->FindTexture( szTextureFile, szTextureGroup, false );
+		if ( !pMatTexture )
+			pMatTexture = materials->FindTexture( "debugempty", "", false );
+
+		bool bNewNoMip = !(pMatTexture->GetFlags() & TEXTUREFLAGS_NOMIP);
+
+		char szFileName[MAX_PATH];
+		if ( !GetTextureContentPath( szTextureFile, szFileName, sizeof(szFileName) ) )
+			return;
+
+		// Figure out what kind of source content is there:
+		// 1. look for TGA - if found, get the txt file (if txt file missing, create one)
+		// 2. otherwise look for PSD - affecting psdinfo
+		// 3. else error
+		char *pExtPut = szFileName + strlen( szFileName ) - strlen( ".vtf" ); // compensating the TEXTURE_FNAME_EXTENSION(.vtf) extension
+
+		// 1.tga
+		sprintf( pExtPut, ".tga" );
+		if ( g_pFullFileSystem->FileExists( szFileName ) )
+		{
+			// Have tga - pump in the txt file
+			sprintf( pExtPut, ".txt" );
+
+			CUtlBuffer bufTxtFileBuffer( 0, 0, CUtlBuffer::TEXT_BUFFER );
+			g_pFullFileSystem->ReadFile( szFileName, 0, bufTxtFileBuffer );
+			for ( int k = 0; k < 1024; ++ k ) bufTxtFileBuffer.PutChar( 0 );
+
+			// Now fix maxwidth/maxheight settings
+			SetBufferValue( ( char * ) bufTxtFileBuffer.Base(), "nomip", bNewNoMip ? "1" : "0" );
+			bufTxtFileBuffer.SeekPut( CUtlBuffer::SEEK_HEAD, strlen( ( char * ) bufTxtFileBuffer.Base() ) );
+
+			// Check out or add the file
+			g_p4factory->SetOpenFileChangeList( "Texture LOD Autocheckout" );
+			CP4AutoEditFile autop4_edit( szFileName );
+
+			// Save the file contents
+			if ( g_pFullFileSystem->WriteFile( szFileName, 0, bufTxtFileBuffer ) )
+			{
+				Msg(" '%s' : saved.\n", szFileName );
+				CP4AutoAddFile autop4_add( szFileName );
+			}
+			else
+			{
+				Warning( " '%s' : failed to save - toggle \"nomip\" manually.\n",
+					szFileName );
+			}
+		}
+		else
+		{
+			// 2.psd
+			sprintf( pExtPut, ".psd" );
+			if ( g_pFullFileSystem->FileExists( szFileName ) )
+			{
+				char chCommand[MAX_PATH];
+				char szTxtFileName[MAX_PATH] = {0};
+				GetModSubdirectory( "tmp_lod_psdinfo.txt", szTxtFileName, sizeof( szTxtFileName ) );
+				sprintf( chCommand, "/C psdinfo \"%s\" > \"%s\"", szFileName, szTxtFileName);
+				vgui::system()->ShellExecuteEx( "open", "cmd.exe", chCommand );
+				Sys_Sleep( 200 );
+
+				CUtlBuffer bufTxtFileBuffer( 0, 0, CUtlBuffer::TEXT_BUFFER );
+				g_pFullFileSystem->ReadFile( szTxtFileName, 0, bufTxtFileBuffer );
+				for ( int k = 0; k < 1024; ++ k ) bufTxtFileBuffer.PutChar( 0 );
+
+				// Now fix maxwidth/maxheight settings
+				SetBufferValue( ( char * ) bufTxtFileBuffer.Base(), "nomip", bNewNoMip ? "1" : "0" );
+				bufTxtFileBuffer.SeekPut( CUtlBuffer::SEEK_HEAD, strlen( ( char * ) bufTxtFileBuffer.Base() ) );
+
+				// Check out or add the file
+				// Save the file contents
+				if ( g_pFullFileSystem->WriteFile( szTxtFileName, 0, bufTxtFileBuffer ) )
+				{
+					g_p4factory->SetOpenFileChangeList( "Texture LOD Autocheckout" );
+					CP4AutoEditFile autop4_edit( szFileName );
+
+					sprintf( chCommand, "/C psdinfo -write \"%s\" < \"%s\"", szFileName, szTxtFileName );
+					Sys_Sleep( 200 );
+					vgui::system()->ShellExecuteEx( "open", "cmd.exe", chCommand );
+					Sys_Sleep( 200 );
+
+					Msg(" '%s' : saved.\n", szFileName );
+					CP4AutoAddFile autop4_add( szFileName );
+				}
+				else
+				{
+					Warning( " '%s' : failed to save - toggle \"nomip\" manually.\n",
+						szFileName );
+				}
+			}
+			else
+			{
+				// 3. - error
+				sprintf( pExtPut, "" );
+				Warning( " '%s' : doesn't specify a valid TGA or PSD file!\n", szFileName );
+				return;
+			}
+		}
+
+		// Now reload the texture
+		OnCommand( "RebuildVTF" );
+#endif // #ifdef IS_WINDOWS_PC
+	}
+	
+	if ( !stricmp( command, "RebuildVTF" ) )
+	{
+#ifdef IS_WINDOWS_PC
+		CP4Requirement p4req;
+		if ( !p4 )
+			g_p4factory->SetDummyMode( true );
+
+		CSysModule *pModule;
+		IVTex *pIVTex = VTex_Load( &pModule );
+		if ( !pIVTex )
+			return;
+
+		char const *szTextureFile = m_pInfo->GetString( KEYNAME_NAME );
+
+		char szContentFilename[MAX_PATH];
+		if ( !GetTextureContentPath( szTextureFile, szContentFilename, sizeof(szContentFilename) ) )
+			return;
+
+		char pGameDir[MAX_OSPATH];
+		COM_GetGameDir( pGameDir, sizeof( pGameDir ) );
+
+		// Check out the VTF
+		char szVTFFilename[MAX_PATH];
+		Q_snprintf( szVTFFilename, sizeof( szVTFFilename ) - 1, "%s/materials/%s.vtf", pGameDir, szTextureFile );
+		g_p4factory->SetOpenFileChangeList( "Texture LOD Autocheckout" );
+		CP4AutoEditFile autop4_edit( szVTFFilename );
+
+		// Get the directory for the outdir
+		StripDirName( szVTFFilename );
+
+		// Now we've modified the source, rebuild the texture
+		char *argv[64];
+		int iArg = 0;
+		argv[iArg++] = "";
+		argv[iArg++] = "-quiet";
+		argv[iArg++] = "-UseStandardError";	// These are only here for the -currently released- version of vtex.dll.
+		argv[iArg++] = "-WarningsAsErrors";
+		argv[iArg++] = "-outdir";
+		argv[iArg++] = szVTFFilename;
+		argv[iArg++] = szContentFilename;
+		pIVTex->VTex( CubemapsFSFactory, pGameDir, iArg, argv );
+
+		VTex_Unload( pModule );
+
+		Sys_Sleep( 200 );
+
+		// Now reload the texture
+		OnCommand( "Reload" );
+#endif // #ifdef IS_WINDOWS_PC
 	}
 }
 
@@ -1432,7 +1855,7 @@ void CRenderTextureEditor::Paint()
 		if ( chLine1[0] )
 		{
 			g_pMatSystemSurface->DrawSetColor( 200, 0, 0, 255 );
-			g_pMatSystemSurface->DrawFilledRect( x - TILE_BORDER/2, y + TILE_TEXT/2, x + TILE_BORDER/2 + TILE_SIZE, y + TILE_TEXT/2 + TILE_TEXT/4 );
+			g_pMatSystemSurface->DrawFilledRect( x - TILE_BORDER/2, y + TILE_TEXT/2, x + TILE_BORDER/2 + (TILE_SIZE * 0.5), y + TILE_TEXT/2 + TILE_TEXT/4 );
 			g_pMatSystemSurface->DrawColoredTextRect( GetFont(), x, y + TILE_TEXT/2, TILE_SIZE, TILE_TEXT / 4,
 				255, 255, 255, 255,
 				"%s", chLine1 );
@@ -1503,11 +1926,11 @@ void CRenderTextureEditor::Paint()
 		{
 			orgTxX += orgTxXA;
 			orgTxY += orgTxYA;
-			if ( IMaterial *pMaterial = UseDebugMaterial( "debug/debugtexturealpha", pMatTexture, &auto_matsysdebugmode ) )
+			if ( IMaterial *pMaterialDebug = UseDebugMaterial( "debug/debugtexturealpha", pMatTexture, &auto_matsysdebugmode ) )
 			{
 				g_pMatSystemSurface->DrawOutlinedRect( x + orgTxX + ( extTxWidth - iDrawWidth ) / 2 - IMG_FRAME_OFF, y + orgTxY + ( extTxHeight - iDrawHeight ) / 2 - IMG_FRAME_OFF,
 					x + orgTxX + ( extTxWidth + iDrawWidth ) / 2 + IMG_FRAME_OFF, y + orgTxY + ( extTxHeight + iDrawHeight ) / 2 + IMG_FRAME_OFF );
-				RenderTexturedRect( this, pMaterial,
+				RenderTexturedRect( this, pMaterialDebug,
 					x + orgTxX + ( extTxWidth - iDrawWidth ) / 2, y + orgTxY + ( extTxHeight - iDrawHeight ) / 2,
 					x + orgTxX + ( extTxWidth + iDrawWidth ) / 2, y + orgTxY + ( extTxHeight + iDrawHeight ) / 2 );
 			}
@@ -1915,11 +2338,11 @@ fmtlenreduce:
 		{
 			orgTxX += orgTxXA;
 			orgTxY += orgTxYA;
-			if ( IMaterial *pMaterial = UseDebugMaterial( "debug/debugtexturealpha", pMatTexture, &auto_matsysdebugmode ) )
+			if ( IMaterial *pMaterialDebug = UseDebugMaterial( "debug/debugtexturealpha", pMatTexture, &auto_matsysdebugmode ) )
 			{
 				g_pMatSystemSurface->DrawOutlinedRect( x + orgTxX + ( extTxWidth - iDrawWidth ) / 2 - IMG_FRAME_OFF, y + orgTxY + ( extTxHeight - iDrawHeight ) / 2 - IMG_FRAME_OFF,
 					x + orgTxX + ( extTxWidth + iDrawWidth ) / 2 + IMG_FRAME_OFF, y + orgTxY + ( extTxHeight + iDrawHeight ) / 2 + IMG_FRAME_OFF );
-				RenderTexturedRect( this, pMaterial,
+				RenderTexturedRect( this, pMaterialDebug,
 					x + orgTxX + ( extTxWidth - iDrawWidth ) / 2, y + orgTxY + ( extTxHeight - iDrawHeight ) / 2,
 					x + orgTxX + ( extTxWidth + iDrawWidth ) / 2, y + orgTxY + ( extTxHeight + iDrawHeight ) / 2,
 					2, 1 );
@@ -1992,6 +2415,7 @@ private:
 	CRenderTexturesListViewPanel *m_pViewPanel;
 
 	vgui::CheckButton *m_pSpecialTexs;
+	vgui::CheckButton *m_pResolveTexturePath;
 	CConVarCheckButton *m_pShowTextureMemoryUsageOption;
 	CConVarCheckButton *m_pAllTextures;
 	CConVarCheckButton *m_pViewTextures;
@@ -2000,9 +2424,14 @@ private:
 	vgui::CheckButton *m_pAlpha;
 	vgui::CheckButton *m_pThumbWarnings;
 	
+	vgui::CheckButton *m_pHideMipped;
 	vgui::CheckButton *m_pFilteringChk;
 	vgui::TextEntry *m_pFilteringText;
 	int				m_numDisplayedSizeKB;
+
+	vgui::Button	*m_pReloadAllMaterialsButton;
+	vgui::Button	*m_pCommitChangesButton;
+	vgui::Button	*m_pDiscardChangesButton;
 
 	vgui::Label *m_pCVarListLabel;
 	vgui::Label *m_pTotalUsageLabel;
@@ -2058,7 +2487,7 @@ CTextureListPanel::CTextureListPanel( vgui::Panel *parent ) :
 {
 	// Need parent here, before loading up textures, so getSurfaceBase 
 	//  will work on this panel ( it's null otherwise )
-	SetSize( videomode->GetModeWidth() - 20, videomode->GetModeHeight() - 20 );
+	SetSize( videomode->GetModeStereoWidth() - 20, videomode->GetModeStereoHeight() - 20 );
 	SetPos( 10, 10 );
 	SetVisible( true );
 	SetCursor( null );
@@ -2083,6 +2512,11 @@ CTextureListPanel::CTextureListPanel( vgui::Panel *parent ) :
 	m_pSpecialTexs->SetVisible( true );
 	m_pSpecialTexs->AddActionSignalTarget( this );
 	m_pSpecialTexs->SetCommand( "service" );
+
+	m_pResolveTexturePath = vgui::SETUP_PANEL( new vgui::CheckButton( this, "resolvepath", "Resolve Full Texture Path" ) );
+	m_pResolveTexturePath->SetVisible( true );
+	m_pResolveTexturePath->AddActionSignalTarget( this );
+	m_pResolveTexturePath->SetCommand( "resolvepath" );
 
 	m_pShowTextureMemoryUsageOption = vgui::SETUP_PANEL( new CConVarCheckButton( this, "m_pShowTextureMemoryUsageOption", "Show Memory Usage on HUD" ) );
 	m_pShowTextureMemoryUsageOption->SetVisible( true );
@@ -2124,6 +2558,12 @@ CTextureListPanel::CTextureListPanel( vgui::Panel *parent ) :
 	m_pThumbWarnings->SetSelected( g_warn_enable );
 
 	// Filtering
+	m_pHideMipped = vgui::SETUP_PANEL( new vgui::CheckButton( this, "HideMipped", "Hide Mipped" ) );
+	m_pHideMipped->AddActionSignalTarget( this );
+	m_pHideMipped->SetCommand( "HideMipped" );
+	m_pHideMipped->SetSelected( false );
+
+	// Filtering
 	m_pFilteringChk = vgui::SETUP_PANEL( new vgui::CheckButton( this, "FilteringChk", "Filter: " ) );
 	m_pFilteringChk->AddActionSignalTarget( this );
 	m_pFilteringChk->SetCommand( "FilteringChk" );
@@ -2132,24 +2572,45 @@ CTextureListPanel::CTextureListPanel( vgui::Panel *parent ) :
 	m_pFilteringText = vgui::SETUP_PANEL( new vgui::TextEntry( this, "FilteringTxt" ) );
 	m_pFilteringText->AddActionSignalTarget( this );
 
+	m_pReloadAllMaterialsButton = vgui::SETUP_PANEL( new vgui::Button( this, "ReloadAllMaterials", "Reload All Materials" ) );
+	if ( m_pReloadAllMaterialsButton )
+	{
+		m_pReloadAllMaterialsButton->AddActionSignalTarget( this );
+		m_pReloadAllMaterialsButton->SetCommand( "ReloadAllMaterials" );
+	}
+	m_pCommitChangesButton = vgui::SETUP_PANEL( new vgui::Button( this, "CommitChanges", "Commit Changes" ) );
+	if ( m_pCommitChangesButton )
+	{
+		m_pCommitChangesButton->AddActionSignalTarget( this );
+		m_pCommitChangesButton->SetCommand( "CommitChanges" );
+	}
+	m_pDiscardChangesButton = vgui::SETUP_PANEL( new vgui::Button( this, "DiscardChanges", "Discard Changes" ) );
+	if ( m_pDiscardChangesButton )
+	{
+		m_pDiscardChangesButton->AddActionSignalTarget( this );
+		m_pDiscardChangesButton->SetCommand( "DiscardChanges" );
+	}
+
 	// Create the tree control itself.
 	m_pListPanel = vgui::SETUP_PANEL( new vgui::ListPanel( this, "List Panel" ) );
 	m_pListPanel->SetVisible( !mat_texture_list_view.GetBool() );
 	
-	m_pListPanel->AddColumnHeader( 0, KEYNAME_NAME, "Texture Name", 200, 100, 700, vgui::ListPanel::COLUMN_RESIZEWITHWINDOW );
-	m_pListPanel->AddColumnHeader( 1, KEYNAME_SIZE, "Kilobytes", 50, 50, 50, 0 );
-	m_pListPanel->AddColumnHeader( 2, KEYNAME_TEXTURE_GROUP, "Group", 100, 100, 300, 0 );
-	m_pListPanel->AddColumnHeader( 3, KEYNAME_FORMAT, "Format", 250, 50, 300, 0 );
-	m_pListPanel->AddColumnHeader( 4, KEYNAME_WIDTH, "Width", 50, 50, 50, 0 );
-	m_pListPanel->AddColumnHeader( 5, KEYNAME_HEIGHT, "Height", 50, 50, 50, 0 );
-	m_pListPanel->AddColumnHeader( 6, KEYNAME_BINDS_FRAME, "# Binds", 50, 50, 50, 0 );
-	m_pListPanel->AddColumnHeader( 7, KEYNAME_BINDS_MAX, "BindsMax", 50, 50, 50, 0 );
+	int col = -1;
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_NAME, "Texture Name", 200, 100, 700, vgui::ListPanel::COLUMN_RESIZEWITHWINDOW );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_PATH, "Path", 50, 50, 300, 0 );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_SIZE, "Kilobytes", 50, 50, 50, 0 );
+		m_pListPanel->SetSortFunc( col, KilobytesSortFunc );
+		m_pListPanel->SetSortColumnEx( col, 0, true );	// advanced sorting setup
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_TEXTURE_GROUP, "Group", 100, 100, 300, 0 );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_FORMAT, "Format", 250, 50, 300, 0 );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_WIDTH, "Width", 50, 50, 50, 0 );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_HEIGHT, "Height", 50, 50, 50, 0 );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_BINDS_FRAME, "# Binds", 50, 50, 50, 0 );
+	m_pListPanel->AddColumnHeader( ++ col, KEYNAME_BINDS_MAX, "BindsMax", 50, 50, 50, 0 );
 
 	SetBgColor( Color( 0, 0, 0, 100 ) );
 
 	m_pListPanel->SetBgColor( Color( 0, 0, 0, 100 ) );
-	m_pListPanel->SetSortFunc( 1, KilobytesSortFunc );
-	m_pListPanel->SetSortColumnEx( 1, 0, true );	// advanced sorting setup
 
 	// Create the view control itself
 	m_pViewPanel = vgui::SETUP_PANEL( new CRenderTexturesListViewPanel( this, "View Panel" ) );
@@ -2230,6 +2691,8 @@ void CTextureListPanel::PerformLayout()
 		m_pAllTextures,
 		m_pViewTextures,
 		m_pFilteringChk,
+		m_pHideMipped,
+		m_pResolveTexturePath,
 		m_pCopyToClipboardButton };
 
 	for ( int i=0; i < ARRAYSIZE( buttons ); i++ )
@@ -2278,8 +2741,12 @@ void CTextureListPanel::PerformLayout()
 			{ m_pViewTextures, 170 },
 			{ m_pAlpha, 60 },
 			{ m_pAllTextures, 135 },
+			{ m_pHideMipped, 100 },
 			{ m_pFilteringChk, 60 },
-			{ m_pFilteringText, 130 }
+			{ m_pFilteringText, 130 },
+			{ m_pReloadAllMaterialsButton, 130 },
+			{ m_pCommitChangesButton, 130 },
+			{ m_pDiscardChangesButton, 130 },
 		};
 
 		for ( int k = 0; k < ARRAYSIZE( layout ); ++ k )
@@ -2344,7 +2811,7 @@ static inline void ToLowerInplace( char *chBuffer )
 {
 	for ( char *pch = chBuffer; *pch; ++ pch )
 	{
-		if ( isupper( *pch ) )
+		if ( V_isupper( *pch ) )
 			*pch = tolower( *pch );
 	}
 }
@@ -2352,7 +2819,8 @@ static inline void ToLowerInplace( char *chBuffer )
 void KeepSpecialKeys( KeyValues *textureList, bool bServiceKeys )
 {
 	KeyValues *pNext;
-	for ( KeyValues *pCur=textureList->GetFirstSubKey(); pCur; pCur=pNext )
+
+	for ( KeyValues *pCur = textureList->GetFirstSubKey(); pCur; pCur=pNext )
 	{
 		pNext = pCur->GetNextKey();
 
@@ -2405,6 +2873,26 @@ void KeepKeysMatchingFilter( KeyValues *textureList, char const *szFilter )
 		if ( !strstr( chName, chFilter ) )
 		{
 			textureList->RemoveSubKey( pCur );
+		}
+	}
+}
+
+void KeepKeysMarkedNoMip( KeyValues *textureList )
+{
+	KeyValues *pNext;
+	for ( KeyValues *pCur=textureList->GetFirstSubKey(); pCur; pCur=pNext )
+	{
+		pNext = pCur->GetNextKey();
+
+		char const *szTextureFile = pCur->GetString( KEYNAME_NAME );
+		char const *szTextureGroup = pCur->GetString( KEYNAME_TEXTURE_GROUP );
+		if ( *szTextureFile )
+		{
+			ITexture *pMatTexture = materials->FindTexture( szTextureFile, szTextureGroup, false );
+			if ( pMatTexture && !(pMatTexture->GetFlags() & TEXTUREFLAGS_NOMIP) )
+			{
+				textureList->RemoveSubKey( pCur );
+			}
 		}
 	}
 }
@@ -2479,6 +2967,27 @@ void CTextureListPanel::OnCommand( const char *command )
 		return;
 	}
 
+	if ( !Q_stricmp( command, "ReloadAllMaterials" ) )
+	{
+		Cbuf_AddText( "mat_reloadallmaterials" );
+		Cbuf_Execute();
+		return;
+	}
+
+	if ( !Q_stricmp( command, "CommitChanges" ) )
+	{
+		Cbuf_AddText( "mat_texture_list_txlod_sync save" );
+		Cbuf_Execute();
+		return;
+	}
+
+	if ( !Q_stricmp( command, "DiscardChanges" ) )
+	{
+		Cbuf_AddText( "mat_texture_list_txlod_sync reset" );
+		Cbuf_Execute();
+		return;
+	}
+
 	mat_texture_list_on_f();
 	InvalidateLayout();
 }
@@ -2506,12 +3015,14 @@ bool CTextureListPanel::UpdateDisplayedItem( KeyValues *pDispData, KeyValues *kv
 		pDispData->GetInt( KEYNAME_WIDTH ) != kv->GetInt( KEYNAME_WIDTH ) ||
 		pDispData->GetInt( KEYNAME_HEIGHT ) != kv->GetInt( KEYNAME_HEIGHT ) ||
 		Q_stricmp( pDispData->GetString( KEYNAME_FORMAT ), kv->GetString( KEYNAME_FORMAT ) ) != 0 ||
+		Q_stricmp( pDispData->GetString( KEYNAME_PATH ), kv->GetString( KEYNAME_PATH ) ) != 0 ||
 		Q_stricmp( pDispData->GetString( KEYNAME_TEXTURE_GROUP ), kv->GetString( KEYNAME_TEXTURE_GROUP ) ) != 0 )
 	{
 		pDispData->SetInt( KEYNAME_SIZE, kv->GetInt( KEYNAME_SIZE ) );
 		pDispData->SetInt( KEYNAME_WIDTH, kv->GetInt( KEYNAME_WIDTH ) );
 		pDispData->SetInt( KEYNAME_HEIGHT, kv->GetInt( KEYNAME_HEIGHT ) );
 		pDispData->SetString( KEYNAME_FORMAT, kv->GetString( KEYNAME_FORMAT ) );
+		pDispData->SetString( KEYNAME_PATH, kv->GetString( KEYNAME_PATH ) );
 		pDispData->SetString( KEYNAME_TEXTURE_GROUP, kv->GetString( KEYNAME_TEXTURE_GROUP ) );
 		bUpdate = true;
 	}
@@ -2561,6 +3072,9 @@ void CTextureListPanel::OnTurnedOn()
 
 	if ( CRenderTextureEditor *pRe = m_pViewPanel->GetRenderTxEditor() )
 		pRe->Close();
+
+	MakePopup( false, false );
+	MoveToFront();
 }
 
 void CTextureListPanel::Close()
@@ -2671,10 +3185,16 @@ void CTextureListPanel::Paint()
 		KeepKeysMatchingFilter( textureList.Get(), chFilterString );
 	}
 
+	// If we're to hide mipped, remove anything that isn't marked nomip
+	if ( m_pHideMipped->IsSelected() )
+	{
+		KeepKeysMarkedNoMip( textureList.Get() );
+	}
+
 	// Compute the total size of the displayed textures
 	int cbTotalDisplayedSizeInBytes = 0;
 	
-	for ( KeyValues *pCur=textureList.Get()->GetFirstSubKey(); pCur; pCur=pCur->GetNextKey() )
+	for ( KeyValues *pCur = textureList.Get()->GetFirstSubKey(); pCur; pCur=pCur->GetNextKey() )
 	{
 		int sizeInBytes = pCur->GetInt( KEYNAME_SIZE );
 
@@ -2689,6 +3209,17 @@ void CTextureListPanel::Paint()
 		// Size is in kilobytes.
 		int sizeInKilo = ( sizeInBytes + 511 ) / 1024;
 		pCur->SetInt( KEYNAME_SIZE, sizeInKilo );
+
+		if ( m_pResolveTexturePath->IsSelected() )
+		{
+			char chResolveName[ 256 ] = {0}, chResolveNameArg[ 256 ] = {0};
+			Q_snprintf( chResolveNameArg, sizeof( chResolveNameArg ) - 1, "materials/%s.vtf", pCur->GetString( KEYNAME_NAME ) );
+			char const *szResolvedName = g_pFileSystem->RelativePathToFullPath( chResolveNameArg, "game", chResolveName, sizeof( chResolveName ) - 1 );
+			if ( szResolvedName )
+			{
+				pCur->SetString( KEYNAME_PATH, szResolvedName );
+			}
+		}
 
 		int iItem = AddListItem( pCur );
 
@@ -2776,20 +3307,74 @@ void CL_CreateTextureListPanel( vgui::Panel *parent )
 	g_pTextureListPanel = new CTextureListPanel( parent );
 }
 
+CON_COMMAND( mat_texture_save_fonts, "Save all font textures" )
+{
+	for( int i = 0; i < 8192; i++ )
+	{
+		char szTextureName[ MAX_PATH ];
+
+		Q_snprintf( szTextureName, ARRAYSIZE( szTextureName ), "__font_page_%d.tga", i );
+
+		if( !materials->IsTextureLoaded( szTextureName ) )
+			break;
+
+		ITexture *pMatTexture = materials->FindTexture( szTextureName, "", false );
+		if( pMatTexture && !pMatTexture->IsError() )
+		{
+			bool bRet = SaveTextureImage( szTextureName );
+			Msg( "SaveTextureImage( '%s' ): %s\n", szTextureName, bRet ? "succeeded" : "failed" );
+		}
+	}
+}
 
 void mat_texture_list_on_f()
 {
+	ConVarRef sv_cheats( "sv_cheats" );
+	if ( sv_cheats.IsValid() && !sv_cheats.GetBool() )
+		return;
+
+	ConVarRef mat_queue_mode( "mat_queue_mode" );
+
+	if( mat_queue_mode.IsValid() && ( g_nSaveQueueState == INT_MIN ) )
+	{
+		g_nSaveQueueState = mat_queue_mode.GetInt();
+		mat_queue_mode.SetValue( 0 );
+	}
+
 	mat_texture_list.SetValue( 1 );
 	s_eTxListPanelRequest = TXR_SHOW;
 
 	g_pTextureListPanel->OnTurnedOn();
 
 	MatViewOverride::RequestSelectNone();
+
+	// On Linux, the mouse gets recentered when it's hidden. So if you bring up the texture list
+	//	dialog while the game is running, we need to make sure the mouse is shown. Otherwise it's
+	//	very tough to use when your mouse keeps getting recentered.
+	if( !g_cursorset && g_pVGuiSurface )
+	{
+		g_pVGuiSurface->SetCursorAlwaysVisible( true );
+		g_cursorset = true;
+	}
 }
 void mat_texture_list_off_f()
 {
 	mat_texture_list.SetValue( 0 );
 	s_eTxListPanelRequest = TXR_HIDE;
+
+	if( g_cursorset )
+	{
+		g_pVGuiSurface->SetCursorAlwaysVisible( false );
+		g_cursorset = false;
+	}
+
+	if( g_nSaveQueueState != INT_MIN )
+	{
+		ConVarRef mat_queue_mode( "mat_queue_mode" );
+
+		mat_queue_mode.SetValue( g_nSaveQueueState );
+		g_nSaveQueueState = INT_MIN;
+	}
 }
 
 

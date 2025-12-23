@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -54,6 +54,7 @@ struct VertexLitGeneric_DX9_Vars_t
 	int m_nFlashlightNoLambert;
 	int m_nFlashlightTexture;
 	int m_nFlashlightTextureFrame;
+	int m_nLightmap;
 
 	int m_nSelfIllumTint;
 	int m_nSelfIllumFresnel;
@@ -66,8 +67,8 @@ struct VertexLitGeneric_DX9_Vars_t
 	int m_nDiffuseWarpTexture;
 	int m_nPhongWarpTexture;	
 	int m_nPhongBoost;
-	int m_nPhongExponentFactor;
 	int m_nPhongFresnelRanges;
+	int m_nPhongExponentFactor;
 	int m_nSelfIllumEnvMapMask_Alpha;
 	int m_nAmbientOnly;
 	int m_nHDRColorScale;
@@ -128,40 +129,16 @@ struct VertexLitGeneric_DX9_Vars_t
 	int m_nSelfIllumMask;
 	int m_nReceiveFlashlight;
 
-// new --------------------------------
-
 	int m_nBlendTintByBaseAlpha;
 
 	int m_nTintReplacesBaseColor;
-
-	/*int m_nSelfIllumTwoTexture;
-	int m_nSelfIllumTwoTexture_Amount;
-	int m_nSelfIllumTwoTexture_Texture;*/
-
-	int m_nTwoSidedLighting;
-
-	/*int m_nTreeSway;
-	int m_nTreeSwayHeight;
-	int m_nTreeSwayStartHeight;
-	int m_nTreeSwayRadius;
-	int m_nTreeSwayStartRadius;
-	int m_nTreeSwaySpeed;
-	int m_nTreeSwaySpeedHighWindMultiplier;
-	int m_nTreeSwayStrength;
-	int m_nTreeSwayScrumbleSpeed;
-	int m_nTreeSwayScrumbleStrength;
-	int m_nTreeSwayScrumbleFrequency;
-	int m_nTreeSwayFalloffExp;
-	int m_nTreeSwayScrumbleFalloffExp;
-	int m_nTreeSwaySpeedLerpStart;
-	int m_nTreeSwaySpeedLerpEnd;*/
 };
 
 void InitParamsVertexLitGeneric_DX9( CBaseVSShader *pShader, IMaterialVar** params, const char *pMaterialName, bool bVertexLitGeneric, VertexLitGeneric_DX9_Vars_t &info );
 void InitVertexLitGeneric_DX9( CBaseVSShader *pShader, IMaterialVar** params, bool bVertexLitGeneric, VertexLitGeneric_DX9_Vars_t &info );
 void DrawVertexLitGeneric_DX9( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynamicAPI *pShaderAPI, IShaderShadow* pShaderShadow,
 							   bool bVertexLitGeneric, VertexLitGeneric_DX9_Vars_t &info, VertexCompressionType_t vertexCompression,
-							   CBasePerMaterialContextData **pContextDataPtr, bool bForceFlashlight = false
+							   CBasePerMaterialContextData **pContextDataPtr
 	);
 
 

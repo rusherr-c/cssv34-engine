@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -241,11 +241,6 @@ CRadioStatus::CRadioStatus()
 	m_pHeadLabelMaterial = NULL;
 	Q_memset(m_radioUntil, 0, sizeof(m_radioUntil));
 	Q_memset(m_voiceUntil, 0, sizeof(m_voiceUntil));
-}
-
-CRadioStatus::~CRadioStatus()
-{
-	Shutdown();
 }
 
 bool CRadioStatus::Init()

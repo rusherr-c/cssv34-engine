@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #include "IAdminServer.h"
 #include "IVGuiModule.h"
 
-#include <UtlVector.h>
+#include <utlvector.h>
 
 class CServerPage;
 

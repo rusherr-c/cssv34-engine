@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 
 #include "datamodel/idatamodel.h"
 #include "vgui_controls/listpanel.h"
-#include "vgui_controls/frame.h"
+#include "vgui_controls/Frame.h"
 #include "vgui/KeyCode.h"
 
 
@@ -48,10 +48,12 @@ protected:
 	MESSAGE_FUNC_PARAMS( OnUnloadFiles, "unload", pParams );
 	MESSAGE_FUNC_PARAMS( OnSaveFiles, "save", pParams );
 	MESSAGE_FUNC_PARAMS( OnSaveFileAs, "saveas", pParams );
+	MESSAGE_FUNC_PARAMS( OnAddToPerforce, "p4add", pParams );
+	MESSAGE_FUNC_PARAMS( OnOpenForEdit, "p4edit", pParams );
 	MESSAGE_FUNC_PARAMS( OnFileSelected, "FileSelected", pParams );
 	MESSAGE_FUNC_PARAMS( OnDataChanged, "DataChanged", pParams );
 
-	int AddItem( DmFileId_t fileid, const char *pFilename, const char *pPath, bool bLoaded, int nElements, bool bChanged );
+	int AddItem( DmFileId_t fileid, const char *pFilename, const char *pPath, bool bLoaded, int nElements, bool bChanged, bool bInPerforce, bool bOpenForEdit );
 	void SetLoaded( DmFileId_t fileid, bool bLoaded );
 
 	vgui::CheckButtonList *m_pFileList;

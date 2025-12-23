@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -39,7 +39,7 @@ static StudioModel *g_pActiveModel;
 
 // Expose it to the rest of the app
 StudioModel *g_pStudioModel = &g_studioModel;
-StudioModel *g_pStudioExtraModel[4];
+StudioModel *g_pStudioExtraModel[HLMV_MAX_MERGED_MODELS];
 
 StudioModel::StudioModel()
 {
@@ -125,13 +125,6 @@ void *StudioModel::operator new( size_t stAllocateBlock )
 	return calloc( 1, stAllocateBlock );
 }
 
-void *StudioModel::operator new( size_t stAllocateBlock, int nBlockUse, const char *pFileName, int nLine )
-{
-	// call into engine to get memory
-	Assert( stAllocateBlock != 0 );
-	return calloc( 1, stAllocateBlock );
-}
-
 void StudioModel::operator delete( void *pMem )
 {
 #ifdef _DEBUG
@@ -144,6 +137,13 @@ void StudioModel::operator delete( void *pMem )
 	free( pMem );
 }
 
+void *StudioModel::operator new( size_t stAllocateBlock, int nBlockUse, const char *pFileName, int nLine )
+{
+	// call into engine to get memory
+	Assert( stAllocateBlock != 0 );
+	return calloc( 1, stAllocateBlock );
+}
+
 void StudioModel::operator delete( void *pMem, int nBlockUse, const char *pFileName, int nLine )
 {
 #ifdef _DEBUG
@@ -151,7 +151,6 @@ void StudioModel::operator delete( void *pMem, int nBlockUse, const char *pFileN
 	int size = _msize( pMem );
 	memset( pMem, 0xcd, size );
 #endif
-
 	// get the engine to free the memory
 	free( pMem );
 }
@@ -197,22 +196,26 @@ bool StudioModel::LoadModel( const char *pModelName )
 	int i;
 	for ( int s = 0; s < pStudioHdr->numhitboxsets(); s++ )
 	{
-		mstudiohitboxset_t *set = pStudioHdr->pHitboxSet( s );
-		if ( !set )
+		mstudiohitboxset_t *pSrcSet = pStudioHdr->pHitboxSet( s );
+		if ( !pSrcSet )
 			continue;
 
-		m_HitboxSets.AddToTail();
+		int j = m_HitboxSets.AddToTail();
+		HitboxSet_t &set = m_HitboxSets[j];
+		set.m_Name = pSrcSet->pszName();
 
-		for ( i = 0; i < set->numhitboxes; ++i )
+		for ( i = 0; i < pSrcSet->numhitboxes; ++i )
 		{
-			mstudiobbox_t *pHit = set->pHitbox(i);
-			int nIndex = m_HitboxSets[ s ].AddToTail( );
-			m_HitboxSets[s][nIndex] = *pHit;
-		}
+			mstudiobbox_t *pHit = pSrcSet->pHitbox(i);
+			int nIndex = set.m_Hitboxes.AddToTail( );
+			HitboxInfo_t &hitbox = set.m_Hitboxes[nIndex];
 
-		// Set the name
-		hbsetname_s *n = &m_HitboxSetNames[ m_HitboxSetNames.AddToTail() ];
-		strcpy( n->name, set->pszName() );
+			hitbox.m_Name = pHit->pszHitboxName();
+			hitbox.m_BBox = *pHit;
+
+			// Blat out bbox name index so we don't use it by mistake...
+			hitbox.m_BBox.szhitboxnameindex = 0;
+		}
 	}
 
 	// Copy over all of the surface props; we may change them...
@@ -345,6 +348,21 @@ int StudioModel::SetSequence( int iSequence )
 	m_sequencetime = 0.0;
 
 	return m_sequence;
+}
+
+const char* StudioModel::GetSequenceName( int iSequence )
+{
+	CStudioHdr *pStudioHdr = GetStudioHdr();
+	if ( !pStudioHdr )
+		return NULL;
+
+	if (iSequence < 0)
+		return NULL;
+
+	if (iSequence > pStudioHdr->GetNumSeq())
+		return NULL;
+
+	return pStudioHdr->pSeqdesc( iSequence ).pszLabel();
 }
 
 void StudioModel::ClearOverlaysSequences( void )
@@ -977,7 +995,7 @@ int StudioModel::LookupAttachment( char const *szName )
 
 
 
-int StudioModel::SetBodygroup( int iGroup, int iValue )
+int StudioModel::SetBodygroup( int iGroup, int iValue /*= -1*/ )
 {
 	CStudioHdr *pStudioHdr = GetStudioHdr();
 	if (!pStudioHdr)
@@ -990,7 +1008,8 @@ int StudioModel::SetBodygroup( int iGroup, int iValue )
 
 	int iCurrent = (m_bodynum / pbodypart->base) % pbodypart->nummodels;
 
-	if (iValue >= pbodypart->nummodels)
+	// if the submodel index is not specified or out of range, just use the current value
+	if ( iValue < 0 || iValue >= pbodypart->nummodels )
 		return iCurrent;
 
 	m_bodynum = (m_bodynum - (iCurrent * pbodypart->base) + (iValue * pbodypart->base));

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -440,7 +440,7 @@ void UTIL_DrawBeamPoints( Vector vecStart, Vector vecEnd, int iLifetime, byte bR
 
 
 //------------------------------------------------------------------------------------------------------------
-void CONSOLE_ECHO( char * pszMsg, ... )
+void CONSOLE_ECHO( const char * pszMsg, ... )
 {
 	va_list     argptr;
 	static char szStr[1024];

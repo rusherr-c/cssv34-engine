@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -162,9 +162,7 @@ void CDmxKeyValues2ErrorStack::ReportError( const char *pFmt, ... )
 	Q_vsnprintf( temp, sizeof( temp ), pFmt, args );
 	va_end( args );
 
-	char temp2[2048];
-	Q_snprintf( temp2, sizeof( temp2 ), "%s(%d) : %s\n", m_pFilename, m_nFileLine, temp );
-	Warning( temp2 );
+	Warning( "%s(%d) : %s\n", m_pFilename, m_nFileLine, temp );
 
 	for ( int i = 0; i < m_maxErrorIndex; i++ )
 	{
@@ -765,7 +763,7 @@ void CDmxSerializerKeyValues2::EatWhitespacesAndComments( CUtlBuffer &buf )
 	{
 		// Eat whitespaces, keep track of line count
 		const char *pPeek = NULL;
-		while ( pPeek = (const char *)buf.PeekGet( sizeof(char), nOffset ) )
+		while ( (pPeek = (const char *)buf.PeekGet( sizeof(char), nOffset ) ) )
 		{
 			if ( !isspace( *pPeek ) )
 				break;
@@ -787,7 +785,7 @@ void CDmxSerializerKeyValues2::EatWhitespacesAndComments( CUtlBuffer &buf )
 		nOffset += 2;
 
 		// read complete line
-		while ( pPeek = (const char *)buf.PeekGet( sizeof(char), nOffset ) )
+		while ( ( pPeek = (const char *)buf.PeekGet( sizeof(char), nOffset ) ) )
 		{
 			if ( *pPeek == '\n' )
 				break;

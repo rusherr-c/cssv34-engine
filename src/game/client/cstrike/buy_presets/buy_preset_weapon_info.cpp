@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: BuyPresetWeapon implementation, and misc knowledge relating to weapons
 //
@@ -145,7 +145,7 @@ int CalcClipsNeeded( const BuyPresetWeapon *pWeapon, const CCSWeaponInfo *pInfo,
 			{
 				numClips = ceil(maxRounds/(float)buySize);
 			}
-			numClips = min( ceil(maxRounds/(float)buySize), numClips );
+			numClips = MIN( ceil(maxRounds/(float)buySize), numClips );
 
 			numClips -= ammo[pInfo->iAmmoType]/buySize;
 			if ( numClips < 0 || ammo[pInfo->iAmmoType] == maxRounds )
@@ -313,7 +313,7 @@ void FillClientAmmo( int ammo[MAX_AMMO_TYPES] )
 		int clientAmmoCount = localPlayer->GetAmmoCount( clientAmmoType );
 		if ( clientAmmoCount > 0 )
 		{
-			ammo[ clientAmmoType ] = max( ammo[ clientAmmoType ], clientAmmoCount );
+			ammo[ clientAmmoType ] = MAX( ammo[ clientAmmoType ], clientAmmoCount );
 		}
 	}
 }

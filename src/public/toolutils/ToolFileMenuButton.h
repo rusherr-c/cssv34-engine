@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Standard file menu
 //
@@ -13,6 +13,7 @@
 #endif
 
 #include "toolutils/toolmenubutton.h"
+
 
 //-----------------------------------------------------------------------------
 // forward declarations
@@ -52,6 +53,9 @@ public:
 	// Add recent files to the menu passed in
 	virtual void AddRecentFilesToMenu( vgui::Menu *menu ) = 0;
 
+	// Get the perforce file name (to set the various perforce menu options)
+	virtual bool GetPerforceFileName( char *pFileName, int nMaxLen ) = 0;
+
 	// Gets the root vgui panel
 	virtual vgui::Panel *GetRootPanel() = 0;
 };
@@ -69,10 +73,23 @@ public:
 	virtual void OnShowMenu( vgui::Menu *menu );
 
 private:
+	MESSAGE_FUNC( OnPerforceAdd, "OnPerforceAdd" );
+	MESSAGE_FUNC( OnPerforceOpen, "OnPerforceOpen" );
+	MESSAGE_FUNC( OnPerforceRevert, "OnPerforceRevert" );
+	MESSAGE_FUNC( OnPerforceSubmit, "OnPerforceSubmit" );
+	MESSAGE_FUNC( OnPerforceP4Win, "OnPerforceP4Win" );
+	MESSAGE_FUNC( OnPerforceListOpenFiles, "OnPerforceListOpenFiles" );
 
 	vgui::Menu			*m_pRecentFiles;
+	vgui::Menu			*m_pPerforce;
 	int					m_nRecentFiles;
 	IFileMenuCallbacks *m_pFileMenuCallback;
+	int					m_nPerforceAdd;
+	int					m_nPerforceOpen;
+	int					m_nPerforceRevert;
+	int					m_nPerforceSubmit;
+	int					m_nPerforceP4Win;
+	int					m_nPerforceListOpenFiles;
 };
 
 
@@ -82,4 +99,6 @@ private:
 CToolMenuButton* CreateToolFileMenuButton( vgui::Panel *parent, const char *panelName, 
 	const char *text, vgui::Panel *pActionTarget, IFileMenuCallbacks *pCallbacks );
 
+
 #endif // TOOLFILEMENUBUTTON_H
+

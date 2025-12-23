@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -220,7 +220,7 @@ int Load_OBJ( s_source_t *psource )
 		
 		if ( !Q_strncmp( g_szLine, "mtllib ", 7 ) )
 		{
-			sscanf( g_szLine, "mtllib %s", &cmd );
+			sscanf( g_szLine, "mtllib %s", &cmd[0] );
 			CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
 
 			char pFullMtlLibPath[MAX_PATH];
@@ -234,7 +234,7 @@ int Load_OBJ( s_source_t *psource )
 
 		if (strncmp( g_szLine, "usemtl ", 7 ) == 0)
 		{
-			sscanf( g_szLine, "usemtl %s", &cmd );
+			sscanf( g_szLine, "usemtl %s", &cmd[0] );
 
 			const char *pTexture = FindMtlEntry( cmd );
 			int texture = LookupTexture( pTexture );
@@ -352,7 +352,7 @@ int AppendVTAtoOBJ( s_source_t *psource, char *filename, int frame )
 		}
 		else if (strncmp( g_szLine, "usemtl ", 7 ) == 0)
 		{
-			sscanf( g_szLine, "usemtl %s", &cmd );
+			sscanf( g_szLine, "usemtl %s", &cmd[0] );
 
 			int texture = LookupTexture( cmd );
 			psource->texmap[texture] = texture;	// hack, make it 1:1

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -98,6 +98,8 @@ public:
 	virtual ~CHLTVServer();
 
 public: // CBaseServer interface:
+	bool	ProcessConnectionlessPacket( netpacket_t * packet );
+
 	void	Init (bool bIsDedicated);
 	void	Shutdown( void );
 	void	Clear( void );
@@ -108,7 +110,7 @@ public: // CBaseServer interface:
 	int		GetChallengeType ( netadr_t &adr );
 	const char *GetName( void ) const;
 	const char *GetPassword() const;
-	IClient *ConnectClient ( netadr_t &adr, int protocol, int challenge, int authProtocol, 
+	IClient *ConnectClient ( netadr_t &adr, int protocol, int challenge, int clientChallenge, int authProtocol, 
 		const char *name, const char *password, const char *hashedCDkey, int cdKeyLen );
 
 public:
@@ -133,6 +135,7 @@ public: // IHLTVServer interface:
 
 public: // IDemoPlayer interface
 	CDemoFile *GetDemoFile();
+	int		GetPlaybackStartTick( void );
 	int		GetPlaybackTick( void );
 	int		GetTotalTicks( void );
 	
@@ -147,15 +150,21 @@ public: // IDemoPlayer interface
 	void	SetPlaybackTimeScale( float timescale ); // sets playback timescale
 	float	GetPlaybackTimeScale( void ); // get playback timescale
 
-	void	PausePlayback( float seconds ) {}; 
-	void	SkipToTick( int tick, bool bRelative, bool bPause ) {};  
-	void	ResumePlayback( void ) {}; 
-	void	StopPlayback( void ) {};	
-	void	InterpolateViewpoint() {};
+	void	PausePlayback( float seconds ) {}
+	void	SkipToTick( int tick, bool bRelative, bool bPause ) {}
+	void	SetEndTick( int tick) {}
+	void	ResumePlayback( void ) {}
+	void	StopPlayback( void ) {}
+	void	InterpolateViewpoint() {}
 	netpacket_t *ReadPacket( void ) { return NULL; }
 
-	void	ResetDemoInterpolation( void ) {};
+	void	ResetDemoInterpolation( void ) {}
+	int		GetProtocolVersion();
 
+	bool	ShouldLoopDemos() { return true; }
+	void	OnLastDemoInLoopPlayed() {}
+
+	bool	IsLoading( void ) { return false; } // true if demo is currently loading
 
 public:
 	void	StartMaster(CGameClient *client); // start HLTV server as master proxy
@@ -194,8 +203,12 @@ private:
 	void		EntityPVSCheck( CClientFrame *pFrame );
 	void		InitClientRecvTables();
 	void		FreeClientRecvTables();
-	void		ReadCompeleteDemoFile();
+	void		ReadCompleteDemoFile();
 	void		ResyncDemoClock();
+
+#ifndef NO_STEAM
+	void		ReplyInfo( const netadr_t &adr );
+#endif
 		
 
 	// Vector		GetOriginFromPackedEntity(PackedEntity* pe);

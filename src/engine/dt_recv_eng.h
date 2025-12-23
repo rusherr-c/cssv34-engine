@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,7 +36,10 @@ bool		RecvTable_RecvClassInfos( bf_read *pBuf, bool bNeedsDecoder, int nDemoProt
 // After ALL the SendTables have been received, call this and it will create CRecvDecoders
 // for all the SendTable->RecvTable matches it finds.
 // Returns false if there is an unrecoverable error.
-bool		RecvTable_CreateDecoders( const CStandardSendProxies *pSendProxies );
+//
+// bAllowMismatches is true when playing demos back so we can change datatables without breaking demos.
+// If pAnyMisMatches is non-null, it will be set to true if the client's recv tables mismatched the server's ones.
+bool		RecvTable_CreateDecoders( const CStandardSendProxies *pSendProxies, bool bAllowMismatches, bool *pAnyMismatches=NULL );
 
 // objectID gets passed into proxies and can be used to track data on particular objects.
 // NOTE: this function can ONLY decode a buffer outputted from RecvTable_MergeDeltas
@@ -45,7 +48,8 @@ bool		RecvTable_Decode(
 	RecvTable *pTable, 
 	void *pStruct, 
 	bf_read *pIn, 
-	int objectID
+	int objectID,
+	bool updateDTI = true
 	);
 
 // This acts like a RecvTable_Decode() call where all properties are written and all their values are zero.
@@ -65,9 +69,9 @@ int RecvTable_MergeDeltas(
 
 	int objectID = - 1,
 	
-	bool bDebugWatchInfo = false,
+	int	*pChangedProps = NULL,
 
-	int	*pChangedProps = NULL
+	bool updateDTI = false // enclude merge from newState in the DTI reports
 	);
 
 

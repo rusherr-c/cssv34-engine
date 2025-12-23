@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@ class IMaterial;
 int			Draw_DecalIndex				( int id );
 int			Draw_DecalIndexFromName		( char *name, bool *found );
 void		R_DecalShoot				( int textureIndex, int entity, const model_t *model, 
-										  const Vector& position, const Vector *saxis, int flags, const color32 &rgbaColor );
+										 const Vector& position, const Vector *saxis, int flags, const color32 &rgbaColor, const Vector *pNormal );
 void		R_PlayerDecalShoot			( IMaterial *material, void *userdata, int entity, const model_t *model, 
 										  const Vector& position, const Vector *saxis, int flags, const color32 &rgbaColor );
 dlight_t	*CL_AllocDlight				( int key );

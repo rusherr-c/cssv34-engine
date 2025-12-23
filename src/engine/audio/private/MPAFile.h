@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Uses mp3 code from:  http://www.codeproject.com/audio/MPEGAudioInfo.asp
 //
@@ -35,9 +35,9 @@ statically linked.
 
 #pragma once
 
-#include "vbrheader.h"
-#include "mpaheader.h"
-#include "FileSystem.h"
+#include "VBRHeader.h"
+#include "MPAHeader.h"
+#include "filesystem.h"
 
 // exception class
 class CMPAException
@@ -56,7 +56,7 @@ public:
 		NoFrame
 	};
 
-	CMPAException(ErrorIDs ErrorID, LPCTSTR szFile, LPCTSTR szFunction = NULL, bool bGetLastError=false );
+	CMPAException( ErrorIDs ErrorID, const char *szFile, const char *szFunction = NULL, bool bGetLastError=false );
 	// copy constructor (necessary because of LPSTR members)
 	CMPAException(const CMPAException& Source);
 	~CMPAException(void);
@@ -68,58 +68,58 @@ public:
 private:
 	ErrorIDs m_ErrorID;
 	bool m_bGetLastError;
-	LPTSTR m_szFunction;
-	LPTSTR m_szFile;
+	const char *m_szFunction;
+	const char *m_szFile;
 };
 
 
 class CMPAFile
 {
 public:
-	CMPAFile(LPCTSTR szFile, DWORD dwFileOffset, FileHandle_t hFile = FILESYSTEM_INVALID_HANDLE );
+	CMPAFile( const char *szFile, uint32 dwFileOffset, FileHandle_t hFile = FILESYSTEM_INVALID_HANDLE );
 	~CMPAFile(void);
 
-	DWORD CMPAFile::ExtractBytes( DWORD& dwOffset, DWORD dwNumBytes, bool bMoveOffset = true );
-	LPCTSTR GetFilename() const { return m_szFile; };
+	uint32 ExtractBytes( uint32 &dwOffset, uint32 dwNumBytes, bool bMoveOffset = true );
+	const char *GetFilename() const { return m_szFile; };
 
-	bool CMPAFile::GetNextFrame();
-	bool CMPAFile::GetPrevFrame();
-	bool CMPAFile::GetFirstFrame();
-	bool CMPAFile::GetLastFrame();
+	bool GetNextFrame();
+	bool GetPrevFrame();
+	bool GetFirstFrame();
+	bool GetLastFrame();
 
 private:
-	static const DWORD m_dwInitBufferSize;
+	static const uint32 m_dwInitBufferSize;
 
 	// methods for file access
-	void Open( LPCTSTR szFilename );
+	void Open( const char *szFilename );
 	void SetPosition( int offset );
-	DWORD Read( LPVOID pData, DWORD dwSize, DWORD dwOffset );
+	uint32 Read( void *pData, uint32 dwSize, uint32 dwOffset );
 
-	void FillBuffer( DWORD dwOffsetToRead );
+	void FillBuffer( uint32 dwOffsetToRead );
 
-	static DWORD m_dwBufferSizes[MAXTIMESREAD];
+	static uint32 m_dwBufferSizes[MAXTIMESREAD];
 
 	// concerning file itself
 	FileHandle_t m_hFile;
-	LPTSTR m_szFile;
+	const char *m_szFile;
 	bool m_bMustReleaseFile;
 
 public:	
-	DWORD m_dwBegin;	// offset of first MPEG Audio frame
-	DWORD m_dwEnd;		// offset of last MPEG Audio frame (estimated)
+	uint32 m_dwBegin;	// offset of first MPEG Audio frame
+	uint32 m_dwEnd;		// offset of last MPEG Audio frame (estimated)
 	bool m_bVBRFile;
 
-	DWORD m_dwBytesPerSec;
+	uint32 m_dwBytesPerSec;
 
 	CMPAHeader* m_pMPAHeader;
-	DWORD m_dwFrameNo;
+	uint32 m_dwFrameNo;
 
 	CVBRHeader* m_pVBRHeader;		// XING or VBRI
 
 	// concerning read-buffer
-	DWORD m_dwNumTimesRead;
-	BYTE* m_pBuffer;
-	DWORD m_dwBufferSize;
+	uint32 m_dwNumTimesRead;
+	char *m_pBuffer;
+	uint32 m_dwBufferSize;
 };
 
 #endif // MPAFILE_H

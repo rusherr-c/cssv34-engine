@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -13,8 +13,8 @@
 #include <windows.h>
 #include "vstdlib/cvar.h"
 #include "appframework/vguimatsysapp.h"
-#include "FileSystem.h"
-#include "materialsystem/IMaterialSystem.h"
+#include "filesystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "vgui/IVGui.h"
 #include "vgui_controls/Panel.h"
 #include "vgui/ISurface.h"
@@ -34,6 +34,7 @@
 #include "vstdlib/iprocessutils.h"
 #include "dmserializers/idmserializers.h"
 #include "dme_controls/dmecontrols.h"
+#include "p4lib/ip4.h"
 #include "tier3/tier3.h"
 
 //-----------------------------------------------------------------------------
@@ -101,6 +102,7 @@ bool CElementViewerApp::Create()
 	AppSystemInfo_t appSystems[] = 
 	{
 		{ "vstdlib.dll",			PROCESS_UTILS_INTERFACE_VERSION },
+		{ "p4lib.dll",				P4_INTERFACE_VERSION },
 		{ "", "" }	// Required to terminate the list
 	};
 
@@ -125,7 +127,7 @@ bool CElementViewerApp::PreInit( )
 	if ( !BaseClass::PreInit() )
 		return false;
 
-	if ( !g_pFullFileSystem || !g_pMaterialSystem || !g_pVGui || !g_pVGuiSurface || !g_pDataModel || !g_pMatSystemSurface )
+	if ( !g_pFullFileSystem || !g_pMaterialSystem || !g_pVGui || !g_pVGuiSurface || !g_pDataModel || !g_pMatSystemSurface || !p4 )
 	{
 		Error( "Element viewer is missing required interfaces!\n" );
 		return false;
@@ -214,7 +216,7 @@ void VGui_DrawPopups( void )
 
 		//Con_NPrintf( i, 
 		Msg( 
-			"%i:  %s : %p, %s pos(%i,%i) w(%i) h(%i)\n",
+			"%i:  %s : %x, %s pos(%i,%i) w(%i) h(%i)\n",
 			i,
 			p,
 			popup,

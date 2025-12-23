@@ -25,7 +25,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock.h>
 #endif
-#if defined(LINUX) || defined(PLATFORM_BSD)
+#ifdef LINUX
 #include <arpa/inet.h>
 #endif
 
@@ -154,10 +154,9 @@ CServerBrowserDialog::~CServerBrowserDialog()
 	SaveUserData();
 
   	if (m_pSavedData)
+  	{
   		m_pSavedData->deleteThis();
-
-	if( m_pFilterData )
-		m_pFilterData->deleteThis();
+  	}
 }
 
 
@@ -771,12 +770,12 @@ void CServerBrowserDialog::OnKeyCodePressed( vgui::KeyCode code )
 	// Handle close here, CBasePanel parent doesn't support "DialogClosing" command
 	ButtonCode_t nButtonCode = GetBaseButtonCode( code );
 
-	if ( nButtonCode == KEY_XBUTTON_B )
+	if ( nButtonCode == KEY_XBUTTON_B || nButtonCode == STEAMCONTROLLER_B )
 	{
 		OnCommand( "Close" );
 		return;
 	}
-	else if ( nButtonCode == KEY_XBUTTON_A  )
+	else if ( nButtonCode == KEY_XBUTTON_A || nButtonCode == STEAMCONTROLLER_A )
 	{
 		//OnOK( false );
 		//return;
@@ -784,10 +783,12 @@ void CServerBrowserDialog::OnKeyCodePressed( vgui::KeyCode code )
 	else if ( nButtonCode == KEY_XBUTTON_UP || 
 			  nButtonCode == KEY_XSTICK1_UP ||
 			  nButtonCode == KEY_XSTICK2_UP || 
+			  nButtonCode == STEAMCONTROLLER_DPAD_UP ||
 			  nButtonCode == KEY_UP ||
 			  nButtonCode == KEY_XBUTTON_DOWN || 
 			  nButtonCode == KEY_XSTICK1_DOWN ||
 			  nButtonCode == KEY_XSTICK2_DOWN || 
+			  nButtonCode == STEAMCONTROLLER_DPAD_DOWN ||
 			  nButtonCode == KEY_DOWN )
 	{
 		CBaseGamesPage *pGamesPage = dynamic_cast< CBaseGamesPage* >( m_pTabPanel->GetActivePage() );

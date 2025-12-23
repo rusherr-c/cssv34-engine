@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,6 +6,10 @@
 //===========================================================================//
 #ifdef _WIN32
 #include <windows.h> 
+#elif POSIX
+#include <unistd.h>
+#else
+#error
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,23 +96,26 @@ ProcessConsoleInput
 
 ==============
 */
-void ProcessConsoleInput( void )
+int ProcessConsoleInput(void)
 {
 	char *s;
+	int count = 0;
 
-	if ( !engine )
-		return;
-
-	do
+	if ( engine )
 	{
-		s = sys->ConsoleInput();
-		if (s)
+		do
 		{
 			char szBuf[ 256 ];
-			Q_snprintf( szBuf, sizeof( szBuf ), "%s\n", s );
-			engine->AddConsoleText ( szBuf );
-		}
-	} while (s);
+			s = sys->ConsoleInput( count++, szBuf, sizeof( szBuf ) );
+			if (s && s[0] )
+			{
+				V_strcat_safe( szBuf, "\n" );
+				engine->AddConsoleText ( szBuf );
+			}
+		} while (s);
+	}
+
+	return count;
 }
 
 void RunServer( void );
@@ -133,12 +140,48 @@ public:
 
 EXPOSE_SINGLE_INTERFACE( CDedicatedExports, IDedicatedExports, VENGINE_DEDICATEDEXPORTS_API_VERSION );
 
+static const char *get_consolelog_filename()
+{
+	static bool s_bInited = false;
+	static char s_consolelog[ MAX_PATH ];
+
+	if ( !s_bInited )
+	{
+		s_bInited = true;
+
+		// Don't do the -consolelog thing if -consoledebug is present.
+		//  CTextConsoleUnix::Print() looks for -consoledebug.
+		const char *filename = NULL;
+		if ( !CommandLine()->FindParm( "-consoledebug" ) &&
+			  CommandLine()->CheckParm( "-consolelog", &filename ) &&
+			  filename )
+		{
+			V_strcpy_safe( s_consolelog, filename );
+		}
+	}
+
+	return s_consolelog;
+}
 
 SpewRetval_t DedicatedSpewOutputFunc( SpewType_t spewType, char const *pMsg )
 {
 	if ( sys )
 	{
 		sys->Printf( "%s", pMsg );
+
+		// If they have specified -consolelog, log this message there. Otherwise these
+		//	wind up being lost because Sys_InitGame hasn't been called yet, and 
+		//  Sys_SpewFunc is the thing that logs stuff to -consolelog, etc.
+		const char *filename = get_consolelog_filename();
+		if ( filename[ 0 ] && pMsg[ 0 ] )
+		{
+			FileHandle_t fh = g_pFullFileSystem->Open( filename, "a" );
+			if ( fh != FILESYSTEM_INVALID_HANDLE )
+			{
+				g_pFullFileSystem->Write( pMsg, V_strlen( pMsg ), fh );
+				g_pFullFileSystem->Close( fh );
+			}
+		}
 	}
 #ifdef _WIN32
 	Plat_DebugString( pMsg );
@@ -154,7 +197,7 @@ SpewRetval_t DedicatedSpewOutputFunc( SpewType_t spewType, char const *pMsg )
 			MessageBox( NULL, pMsg, "Error", MB_OK | MB_TASKMODAL );
 		}
 		TerminateProcess( GetCurrentProcess(), 1 );
-#elif _LINUX
+#elif POSIX
 		fflush(stdout);
 		_exit(1);
 #else
@@ -181,7 +224,6 @@ int Sys_GetExecutableName( char *out )
 		return 0;
 	}
 #else
-	extern char g_szEXEName[ 256 ];
 	strcpy( out, g_szEXEName );
 #endif
 	return 1;

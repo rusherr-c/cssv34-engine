@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -383,8 +383,12 @@ void CWin32Font::GetCharRGBA(wchar_t ch, int rgbaWide, int rgbaTall, unsigned ch
 		
 		if (s_bSupportsUnicode)
 		{
+			// clear the background first
+			RECT rect = { 0, 0, wide, tall};
+			::ExtTextOutW( m_hDC, 0, 0, ETO_OPAQUE, &rect, NULL, 0, NULL );
+
 			// just use the unicode renderer
-			::ExtTextOutW(m_hDC, 0, 0, 0, NULL, &wch, 1, NULL);
+			::ExtTextOutW( m_hDC, 0, 0, 0, NULL, &wch, 1, NULL );
 		}
 		else
 		{
@@ -578,6 +582,15 @@ int CWin32Font::GetHeight()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: returns the requested height of the font
+//-----------------------------------------------------------------------------
+int CWin32Font::GetHeightRequested()
+{
+	assert(IsValid());
+	return m_iTall;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: returns the ascent of the font, in pixels (ascent=units above the base line)
 //-----------------------------------------------------------------------------
 int CWin32Font::GetAscent()
@@ -610,3 +623,16 @@ bool CWin32Font::ExtendedABCWidthsCacheLessFunc(const abc_cache_t &lhs, const ab
 {
 	return lhs.wch < rhs.wch;
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: Get the kerned size of a char, for win32 just pass thru for now
+//-----------------------------------------------------------------------------
+void CWin32Font::GetKernedCharWidth( wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &abcA )
+{
+	int a,b,c;
+	GetCharABCWidths(ch, a, b, c );
+	wide = ( a + b + c);
+	abcA = a;
+}
+
+

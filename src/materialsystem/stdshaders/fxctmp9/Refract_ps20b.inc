@@ -190,6 +190,27 @@ public:
 		m_bNORMAL_DECODE_MODE = true;
 #endif
 	}
+private:
+	int m_nSHADER_SRGB_READ;
+#ifdef _DEBUG
+	bool m_bSHADER_SRGB_READ;
+#endif
+public:
+	void SetSHADER_SRGB_READ( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nSHADER_SRGB_READ = i;
+#ifdef _DEBUG
+		m_bSHADER_SRGB_READ = true;
+#endif
+	}
+	void SetSHADER_SRGB_READ( bool i )
+	{
+		m_nSHADER_SRGB_READ = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bSHADER_SRGB_READ = true;
+#endif
+	}
 public:
 	refract_ps20b_Static_Index( )
 	{
@@ -229,19 +250,23 @@ public:
 		m_bNORMAL_DECODE_MODE = false;
 #endif // _DEBUG
 		m_nNORMAL_DECODE_MODE = 0;
+#ifdef _DEBUG
+		m_bSHADER_SRGB_READ = false;
+#endif // _DEBUG
+		m_nSHADER_SRGB_READ = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bCONVERT_TO_SRGB && m_bBLUR && m_bFADEOUTONSILHOUETTE && m_bCUBEMAP && m_bREFRACTTINTTEXTURE && m_bMASKED && m_bCOLORMODULATE && m_bSECONDARY_NORMAL && m_bNORMAL_DECODE_MODE;
+		bool bAllStaticVarsDefined = m_bCONVERT_TO_SRGB && m_bBLUR && m_bFADEOUTONSILHOUETTE && m_bCUBEMAP && m_bREFRACTTINTTEXTURE && m_bMASKED && m_bCOLORMODULATE && m_bSECONDARY_NORMAL && m_bNORMAL_DECODE_MODE && m_bSHADER_SRGB_READ;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 4 * m_nCONVERT_TO_SRGB ) + ( 8 * m_nBLUR ) + ( 16 * m_nFADEOUTONSILHOUETTE ) + ( 32 * m_nCUBEMAP ) + ( 64 * m_nREFRACTTINTTEXTURE ) + ( 128 * m_nMASKED ) + ( 256 * m_nCOLORMODULATE ) + ( 512 * m_nSECONDARY_NORMAL ) + ( 1024 * m_nNORMAL_DECODE_MODE ) + 0;
+		return ( 4 * m_nCONVERT_TO_SRGB ) + ( 8 * m_nBLUR ) + ( 16 * m_nFADEOUTONSILHOUETTE ) + ( 32 * m_nCUBEMAP ) + ( 64 * m_nREFRACTTINTTEXTURE ) + ( 128 * m_nMASKED ) + ( 256 * m_nCOLORMODULATE ) + ( 512 * m_nSECONDARY_NORMAL ) + ( 1024 * m_nNORMAL_DECODE_MODE ) + ( 1024 * m_nSHADER_SRGB_READ ) + 0;
 	}
 };
-#define shaderStaticTest_refract_ps20b psh_forgot_to_set_static_BLUR + psh_forgot_to_set_static_FADEOUTONSILHOUETTE + psh_forgot_to_set_static_CUBEMAP + psh_forgot_to_set_static_REFRACTTINTTEXTURE + psh_forgot_to_set_static_MASKED + psh_forgot_to_set_static_COLORMODULATE + psh_forgot_to_set_static_SECONDARY_NORMAL + psh_forgot_to_set_static_NORMAL_DECODE_MODE + 0
+#define shaderStaticTest_refract_ps20b psh_forgot_to_set_static_BLUR + psh_forgot_to_set_static_FADEOUTONSILHOUETTE + psh_forgot_to_set_static_CUBEMAP + psh_forgot_to_set_static_REFRACTTINTTEXTURE + psh_forgot_to_set_static_MASKED + psh_forgot_to_set_static_COLORMODULATE + psh_forgot_to_set_static_SECONDARY_NORMAL + psh_forgot_to_set_static_NORMAL_DECODE_MODE + psh_forgot_to_set_static_SHADER_SRGB_READ + 0
 class refract_ps20b_Dynamic_Index
 {
 private:

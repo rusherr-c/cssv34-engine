@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -852,6 +852,14 @@ void CShaderAPIDx10::OverrideDepthEnable( bool bEnable, bool bDepthEnable )
 {
 }
 
+void CShaderAPIDx10::OverrideAlphaWriteEnable( bool bOverrideEnable, bool bAlphaWriteEnable )
+{
+}
+
+void CShaderAPIDx10::OverrideColorWriteEnable( bool bOverrideEnable, bool bColorWriteEnable )
+{
+}
+
 
 //legacy fast clipping linkage
 void CShaderAPIDx10::SetHeightClipZ( float z )
@@ -1164,7 +1172,7 @@ void CShaderAPIDx10::SetLinearToGammaConversionTextures( ShaderAPITextureHandle_
 
 
 // Returns the nearest supported format
-ImageFormat CShaderAPIDx10::GetNearestSupportedFormat( ImageFormat fmt ) const
+ImageFormat CShaderAPIDx10::GetNearestSupportedFormat( ImageFormat fmt, bool bFilteringRequired /* = true */ ) const
 {
 	return fmt;
 }
@@ -1194,6 +1202,10 @@ void CShaderAPIDx10::TexImage2D( int level, int cubeFace, ImageFormat dstFormat,
 
 void CShaderAPIDx10::TexSubImage2D( int level, int cubeFace, int xOffset, int yOffset, int zOffset, int width, int height,
 									ImageFormat srcFormat, int srcStride, bool bSrcIsTiled, void *imageData )
+{
+}
+
+void CShaderAPIDx10::TexImageFromVTF( IVTFTexture *pVTF, int iVTFFrame )
 {
 }
 
@@ -1281,6 +1293,10 @@ bool CShaderAPIDx10::IsTextureResident( ShaderAPITextureHandle_t textureHandle )
 
 // stuff that isn't to be used from within a shader
 void CShaderAPIDx10::ClearBuffersObeyStencil( bool bClearColor, bool bClearDepth )
+{
+}
+
+void CShaderAPIDx10::ClearBuffersObeyStencilEx( bool bClearColor, bool bClearAlpha, bool bClearDepth )
 {
 }
 

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // CWMPEventDispatch.cpp : Implementation of the event dispatcher
 //
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,7 +10,7 @@
 #pragma once
 #endif
 
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "utlvector.h"
 #include "filesystem_init.h"
 
@@ -27,7 +27,6 @@ struct defaultConfigInfo_t
 	char	gameName[MAX_PATH];
 	char	gameDir[MAX_PATH];
 	char	FGD[MAX_PATH];
-	char	steamPath[MAX_PATH];
 	char	defaultPointEntity[MAX_PATH];
 	char	exeName[MAX_PATH];
 	int		steamAppID;
@@ -37,7 +36,9 @@ enum eSDKEpochs
 {
 	HL2 = 1,
 	EP1 = 2,
-	EP2 = 3
+	EP2 = 3,
+	SP2009 = 4,
+	MP2009 = 5,
 };
 
 extern defaultConfigInfo_t *gDefaultConfigs[];
@@ -78,7 +79,7 @@ public:
 
 	void	SetBaseDirectory( const char *pDirectory );
 
-	void	GetRootGameDirectory( char *out, size_t outLen, const char *rootDir, const char *steamDir );
+	void	GetRootGameDirectory( char *out, size_t outLen, const char *rootDir );
 
 	const char *GetRootDirectory( void );
 	void	SetSDKEpoch( eSDKEpochs epoch ) { m_eSDKEpoch = epoch; };

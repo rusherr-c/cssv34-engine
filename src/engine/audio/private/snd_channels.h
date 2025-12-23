@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -54,6 +54,7 @@ struct channel_t
 	float		fvolume[CCHANVOLUMES];			// 0.0-255.0 current output volumes
 	float		fvolume_target[CCHANVOLUMES];	// 0.0-255.0 target output volumes
 	float		fvolume_inc[CCHANVOLUMES];		// volume increment, per frame, moves volume[i] to vol_target[i] (per spatialization)		
+	uint		nFreeChannelAtSampleTime;
 
 	SoundSource	soundsource;	// see iclientsound.h for description.
 	int			entchannel;		// sound channel (CHAN_STREAM, CHAN_VOICE, etc.)
@@ -91,6 +92,8 @@ struct channel_t
 
 	int			initialStreamPosition;
 
+	int			special_dsp;
+
 	union
 	{
 		unsigned int flagsword;
@@ -124,7 +127,7 @@ struct channel_t
 //-----------------------------------------------------------------------------
 
 #define	MAX_CHANNELS			128
-#define	MAX_DYNAMIC_CHANNELS	24
+#define	MAX_DYNAMIC_CHANNELS	64
 
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
@@ -147,6 +150,9 @@ public:
 	int		m_count;
 	short	m_list[MAX_CHANNELS];
 	bool	m_quashed[MAX_CHANNELS]; // if true, the channel should be advanced, but not mixed, because it's been heuristically suppressed
+
+	CUtlVector< int >	m_nSpecialDSPs;
+
 	bool	m_hasSpeakerChannels : 1;
 	bool	m_hasDryChannels : 1;
 	bool	m_has11kChannels : 1;

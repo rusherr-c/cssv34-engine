@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,6 +34,7 @@ struct MeshDesc_t;
 enum MaterialCullMode_t;
 class IDataCache;   
 struct MorphWeight_t;
+class IVTFTexture;
 
 
 //-----------------------------------------------------------------------------
@@ -81,44 +82,15 @@ enum CreateTextureFlags_t
 	TEXTURE_CREATE_VERTEXTEXTURE       = 0x0040,	// for internal use only	
 	TEXTURE_CREATE_FALLBACK            = 0x0080,	// 360 only
 	TEXTURE_CREATE_NOD3DMEMORY         = 0x0100,	// 360 only
-	TEXTURE_CREATE_UNUSED3             = 0x0200,	// Dead
+	TEXTURE_CREATE_SYSMEM              = 0x0200,	// This texture should be alloc'd in the sysmem pool
 	TEXTURE_CREATE_UNUSED4             = 0x0400,	// Dead
 	TEXTURE_CREATE_UNUSED5		       = 0x0800,	// Dead
 	TEXTURE_CREATE_UNFILTERABLE_OK     = 0x1000,
 	TEXTURE_CREATE_CANCONVERTFORMAT    = 0x2000,	// 360 only, allow format conversions at load
+	TEXTURE_CREATE_SRGB                = 0x4000,	// Posix/GL only, for textures which are SRGB-readable
+
 };
 
-
-//-----------------------------------------------------------------------------
-// Viewport structure
-//-----------------------------------------------------------------------------
-#define SHADER_VIEWPORT_VERSION 1
-struct ShaderViewport_t
-{
-	int m_nVersion;
-	int m_nTopLeftX;
-	int m_nTopLeftY;
-	int m_nWidth;
-	int m_nHeight;
-	float m_flMinZ;
-	float m_flMaxZ;
-
-	ShaderViewport_t() : m_nVersion( SHADER_VIEWPORT_VERSION ) {}
-
-	void Init()
-	{
-		memset( this, 0, sizeof(ShaderViewport_t) );
-		m_nVersion = SHADER_VIEWPORT_VERSION;
-	}
-
-	void Init( int x, int y, int nWidth, int nHeight, float flMinZ = 0.0f, float flMaxZ = 1.0f )
-	{
-		m_nVersion = SHADER_VIEWPORT_VERSION;
-		m_nTopLeftX = x; m_nTopLeftY = y; m_nWidth = nWidth; m_nHeight = nHeight;
-		m_flMinZ = flMinZ;
-		m_flMaxZ = flMaxZ;
-	}
-};
 
 
 //-----------------------------------------------------------------------------
@@ -162,7 +134,7 @@ enum ShaderAPIOcclusionQueryResult_t
 //-----------------------------------------------------------------------------
 // This is what the material system gets to see.
 //-----------------------------------------------------------------------------
-#define SHADERAPI_INTERFACE_VERSION		"ShaderApi029"
+#define SHADERAPI_INTERFACE_VERSION		"ShaderApi030"
 abstract_class IShaderAPI : public IShaderDynamicAPI
 {
 public:
@@ -272,7 +244,7 @@ public:
 	virtual void SetSkinningMatrices() = 0;
 
 	// Returns the nearest supported format
-	virtual ImageFormat GetNearestSupportedFormat( ImageFormat fmt ) const = 0;
+	virtual ImageFormat GetNearestSupportedFormat( ImageFormat fmt, bool bFilteringRequired = true ) const = 0;
 	virtual ImageFormat GetNearestRenderTargetFormat( ImageFormat fmt ) const = 0;
 
 	// When AA is enabled, render targets are not AA and require a separate
@@ -333,6 +305,8 @@ public:
 		bool bSrcIsTiled,		// NOTE: for X360 only
 		void *imageData ) = 0;
 	
+	virtual void TexImageFromVTF( IVTFTexture* pVTF, int iVTFFrame ) = 0;
+
 	// An alternate (and faster) way of writing image data
 	// (locks the current Modify Texture). Use the pixel writer to write the data
 	// after Lock is called
@@ -461,6 +435,7 @@ public:
 		ShaderAPITextureHandle_t depthTextureHandle = SHADER_RENDERTARGET_DEPTHBUFFER ) = 0;
 
 	virtual void CopyRenderTargetToTextureEx( ShaderAPITextureHandle_t textureHandle, int nRenderTargetID, Rect_t *pSrcRect = NULL, Rect_t *pDstRect = NULL ) = 0;
+	virtual void CopyTextureToRenderTargetEx( int nRenderTargetID, ShaderAPITextureHandle_t textureHandle, Rect_t *pSrcRect = NULL, Rect_t *pDstRect = NULL ) = 0;
 
 	// For dealing with device lost in cases where SwapBuffers isn't called all the time (Hammer)
 	virtual void HandleDeviceLost() = 0;
@@ -618,12 +593,40 @@ public:
 	virtual void AcquireThreadOwnership() = 0;
 	virtual void ReleaseThreadOwnership() = 0;
 
-	virtual bool SupportsNormalMapCompression() const = 0;
+	virtual bool SupportsNormalMapCompression() const { Assert( !"This has all been removed." ); return false; }
 
 	// Only does anything on XBox360. This is useful to eliminate stalls
 	virtual void EnableBuffer2FramesAhead( bool bEnable ) = 0;
 
 	virtual void SetDepthFeatheringPixelShaderConstant( int iConstant, float fDepthBlendScale ) = 0;
+
+	// debug logging
+	// only implemented in some subclasses
+	virtual void PrintfVA( char *fmt, va_list vargs ) = 0;
+	virtual void Printf( PRINTF_FORMAT_STRING const char *fmt, ... ) = 0;
+	virtual float Knob( char *knobname, float *setvalue = NULL ) = 0;
+	// Allows us to override the alpha write setting of a material
+	virtual void OverrideAlphaWriteEnable( bool bEnable, bool bAlphaWriteEnable ) = 0;
+	virtual void OverrideColorWriteEnable( bool bOverrideEnable, bool bColorWriteEnable ) = 0;
+
+	//extended clear buffers function with alpha independent from color
+	virtual void ClearBuffersObeyStencilEx( bool bClearColor, bool bClearAlpha, bool bClearDepth ) = 0;
+
+	// Allows copying a render target to another texture by specifying them both.
+	virtual void CopyRenderTargetToScratchTexture( ShaderAPITextureHandle_t srcRt, ShaderAPITextureHandle_t dstTex, Rect_t *pSrcRect = NULL, Rect_t *pDstRect = NULL ) = 0;
+
+	// Allows locking and unlocking of very specific surface types.
+	virtual void LockRect( void** pOutBits, int* pOutPitch, ShaderAPITextureHandle_t texHandle, int mipmap, int x, int y, int w, int h, bool bWrite, bool bRead ) = 0;
+	virtual void UnlockRect( ShaderAPITextureHandle_t texHandle, int mipmap ) = 0;
+
+	// Set the finest mipmap that can be used for the texture which is currently being modified. 
+	virtual void TexLodClamp( int finest ) = 0;
+
+	// Set the Lod Bias for the texture which is currently being modified. 
+	virtual void TexLodBias( float bias ) = 0;
+	
+	virtual void CopyTextureToTexture( ShaderAPITextureHandle_t srcTex, ShaderAPITextureHandle_t dstTex ) = 0;
+	
 };
 
 

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #if 0
 
 #include "particlelitgeneric_dx9_helper.h"
-#include "basevsshader.h"
+#include "BaseVSShader.h"
 #include "particlelit_generic_vs30.inc"
 #include "particlelit_generic_ps30.inc"
 #include "convar.h"
@@ -62,12 +62,12 @@ void InitParamsParticleLitGeneric_DX9( CBaseVSShader *pShader, IMaterialVar** pa
 void InitParticleLitGeneric_DX9( CBaseVSShader *pShader, IMaterialVar** params, ParticleLitGeneric_DX9_Vars_t &info )
 {
 	Assert( info.m_nFlashlightTexture >= 0 );
-	pShader->LoadTexture( info.m_nFlashlightTexture );
+	pShader->LoadTexture( info.m_nFlashlightTexture, TEXTUREFLAGS_SRGB );
 	
 	bool bIsBaseTextureTranslucent = false;
 	if ( params[info.m_nBaseTexture]->IsDefined() )
 	{
-		pShader->LoadTexture( info.m_nBaseTexture );
+		pShader->LoadTexture( info.m_nBaseTexture, TEXTUREFLAGS_SRGB );
 		
 		if ( params[info.m_nBaseTexture]->GetTextureValue()->IsTranslucent() )
 		{
@@ -158,6 +158,7 @@ void DrawParticleLitGeneric_DX9( CBaseVSShader *pShader, IMaterialVar** params,
 		if( hasFlashlight )
 		{
 			pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER7, true );
 			userDataSize = 4; // tangent S
 		}
 		if( hasBump )

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Engine system for loading and managing tools
 //
@@ -576,9 +576,14 @@ void CToolFrameworkInternal::LoadTools()
 {
 	m_bInToolMode = true;
 
+	// Load rootdir/bin/enginetools.txt
 	KeyValues *kv = new KeyValues( "enginetools" );
 	Assert( kv );
-	if ( kv && kv->LoadFromFile( g_pFileSystem, "enginetools.txt", "BASEBIN" ) )
+
+	// We don't ship enginetools.txt to Steam public, so we'll need to load sdkenginetools.txt if enginetools.txt isn't present
+	bool bLoadSDKFile = !g_pFileSystem->FileExists( "enginetools.txt", "EXECUTABLE_PATH" );
+
+	if ( kv && kv->LoadFromFile( g_pFileSystem, bLoadSDKFile ? "sdkenginetools.txt" : "enginetools.txt", "EXECUTABLE_PATH" ) )
 	{
 		for ( KeyValues *tool = kv->GetFirstSubKey();
 				tool != NULL;
@@ -586,9 +591,8 @@ void CToolFrameworkInternal::LoadTools()
 		{
 			if ( !Q_stricmp( tool->GetName(),  "library" ) )
 			{
-				char str[MAX_PATH];
-				sprintf(str, "%s/%s", PLATFORM_SUBDIR, tool->GetString());
-				LoadToolsFromLibrary( str );
+				// CHECK both bin/tools and gamedir/bin/tools
+				LoadToolsFromLibrary( tool->GetString() );
 			}
 		}
 

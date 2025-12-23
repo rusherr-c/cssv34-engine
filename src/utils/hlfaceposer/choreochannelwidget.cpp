@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -325,7 +325,7 @@ void CChoreoChannelWidget::redraw( CChoreoWidgetDrawHelper& drawHelper )
 
 	rcName.left += 20;
 	char n[ 512 ];
-	strcpy( n, channel->GetName() );
+	V_strcpy_safe( n, channel->GetName() );
 
 	drawHelper.DrawColoredText( "Arial", 
 		m_pView->GetFontSize() + 2, 

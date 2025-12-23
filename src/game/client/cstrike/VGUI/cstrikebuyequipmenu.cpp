@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "cstrikebuyequipmenu.h"
 #include "cs_shareddefs.h"
 #include "cstrikebuysubmenu.h"
-#include "BackgroundPanel.h"
+#include "backgroundpanel.h"
 
 using namespace vgui;
 

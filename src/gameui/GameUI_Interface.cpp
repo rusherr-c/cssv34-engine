@@ -1,25 +1,31 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implements all the functions exported by the GameUI dll
 //
 // $NoKeywords: $
 //===========================================================================//
 
+#ifdef WIN32
 #if !defined( _X360 )
 #include <windows.h>
+#endif
+#include <io.h>
+#include <direct.h>
+#elif defined( POSIX )
+#include <sys/time.h>
+#else
+#error
 #endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h>
-#include <io.h>
 #include <tier0/dbg.h>
-#include <direct.h>
 
 #ifdef SendMessage
 #undef SendMessage
 #endif
 																
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "GameUI_Interface.h"
 #include "Sys_Utils.h"
 #include "string.h"
@@ -28,8 +34,11 @@
 // interface to engine
 #include "EngineInterface.h"
 
+#include "replay/ienginereplay.h"
+#include "replay/ireplaysystem.h"
+
 #include "VGuiSystemModuleLoader.h"
-#include "bitmap/TGALoader.h"
+#include "bitmap/tgaloader.h"
 
 #include "GameConsole.h"
 #include "LoadingDialog.h"
@@ -41,10 +50,11 @@
 #include "ixboxsystem.h"
 #include "iachievementmgr.h"
 #include "IGameUIFuncs.h"
-#include <IEngineVGUI.h>
+#include <ienginevgui.h>
 #include "steam/steam_api.h"
 #include "BonusMapsDatabase.h"
 #include "BonusMapsDialog.h"
+#include "sourcevr/isourcevirtualreality.h"
 
 // vgui2 interface
 // note that GameUI project uses ..\vgui2\include, not ..\utils\vgui\include
@@ -62,6 +72,8 @@
 #include <vgui_controls/PHandle.h>
 #include "tier3/tier3.h"
 #include "tier0/vcrmode.h"
+#include "matsys_controls/matsyscontrols.h"
+#include "steam/steam_api.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
@@ -81,6 +93,11 @@ vgui::ISurface *enginesurfacefuncs = NULL;
 IVEngineClient *engine = NULL;
 IEngineSound *enginesound = NULL;
 IAchievementMgr *achievementmgr = NULL;
+IEngineClientReplay *g_pEngineClientReplay = NULL;
+ISourceVirtualReality *g_pSourceVR = NULL;
+
+static CSteamAPIContext g_SteamAPIContext;
+CSteamAPIContext *steamapicontext = &g_SteamAPIContext;
 
 static CBasePanel *staticPanel = NULL;
 
@@ -151,10 +168,13 @@ void CGameUI::Initialize( CreateInterfaceFn factory )
 	enginesound = (IEngineSound *)factory(IENGINESOUND_CLIENT_INTERFACE_VERSION, NULL);
 	engine = (IVEngineClient *)factory( VENGINE_CLIENT_INTERFACE_VERSION, NULL );
 
+	steamapicontext->Init();
+
 	ConVarRef var( "gameui_xbox" );
 	m_bIsConsoleUI = var.IsValid() && var.GetBool();
 
 	vgui::VGui_InitInterfacesList( "GameUI", &factory, 1 );
+	vgui::VGui_InitMatSysInterfacesList( "GameUI", &factory, 1 );
 
 	// load localization file
 	g_pVGuiLocalize->AddFile( "Resource/gameui_%language%.txt", "GAME", true );
@@ -170,7 +190,14 @@ void CGameUI::Initialize( CreateInterfaceFn factory )
 	gameuifuncs = (IGameUIFuncs *)factory( VENGINE_GAMEUIFUNCS_VERSION, NULL );
 	matchmaking = (IMatchmaking *)factory( VENGINE_MATCHMAKING_VERSION, NULL );
 	xboxsystem = (IXboxSystem *)factory( XBOXSYSTEM_INTERFACE_VERSION, NULL );
+	g_pEngineClientReplay = (IEngineClientReplay *)factory( ENGINE_REPLAY_CLIENT_INTERFACE_VERSION, NULL );
 
+	if ( ModInfo().SupportsVR() && CommandLine()->CheckParm( "-vr" ) )
+	{
+		g_pSourceVR = (ISourceVirtualReality *)factory( SOURCE_VIRTUAL_REALITY_INTERFACE_VERSION, NULL );
+	}
+
+	// NOTE: g_pEngineReplay intentionally not checked here
 	if ( !enginesurfacefuncs || !gameuifuncs || !enginevguifuncs || !xboxsystem || (IsX360() && !matchmaking) )
 	{
 		Error( "CGameUI::Initialize() failed to get necessary interfaces\n" );
@@ -368,10 +395,42 @@ void CGameUI::PlayGameStartupSound()
 	FileFindHandle_t fh;
 
 	CUtlVector<char *> fileNames;
-
 	char path[ 512 ];
-	Q_snprintf( path, sizeof( path ), "sound/ui/gamestartup*.mp3" );
-	Q_FixSlashes( path );
+
+	bool bHolidayFound = false;
+
+	// only want to run the holiday check for TF2
+	const char *pGameName = CommandLine()->ParmValue( "-game", "hl2" );
+	if ( ( Q_stricmp( pGameName, "tf" ) == 0 ) || ( Q_stricmp( pGameName, "tf_beta" ) == 0 ) )
+	{
+		// check for a holiday sound file
+		const char *pszHoliday = NULL;
+	
+		if ( GameClientExports() )
+		{
+			pszHoliday = GameClientExports()->GetHolidayString();
+			if ( pszHoliday && pszHoliday[0] )
+			{
+				Q_snprintf( path, sizeof( path ), "sound/ui/holiday/gamestartup_%s*.mp3", pszHoliday );
+				Q_FixSlashes( path );
+
+				char const *fn = g_pFullFileSystem->FindFirstEx( path, "MOD", &fh );
+				{
+					if ( fn )
+					{
+						bHolidayFound = true;
+					}
+				}
+			}
+		}
+	}
+
+	// only want to do this if we haven't found a holiday file
+	if ( !bHolidayFound )
+	{
+		Q_snprintf( path, sizeof( path ), "sound/ui/gamestartup*.mp3" );
+		Q_FixSlashes( path );
+	}
 
 	char const *fn = g_pFullFileSystem->FindFirstEx( path, "MOD", &fh );
 	if ( fn )
@@ -384,7 +443,14 @@ void CGameUI::PlayGameStartupSound()
 			if ( !Q_stricmp( ext, "mp3" ) )
 			{
 				char temp[ 512 ];
-				Q_snprintf( temp, sizeof( temp ), "ui/%s", fn );
+				if ( bHolidayFound )
+				{
+					Q_snprintf( temp, sizeof( temp ), "ui/holiday/%s", fn );
+				}
+				else
+				{
+					Q_snprintf( temp, sizeof( temp ), "ui/%s", fn );
+				}
 
 				char *found = new char[ strlen( temp ) + 1 ];
 				Q_strncpy( found, temp, strlen( temp ) + 1 );
@@ -403,16 +469,40 @@ void CGameUI::PlayGameStartupSound()
 	// did we find any?
 	if ( fileNames.Count() > 0 )
 	{
+#ifdef WIN32
 		SYSTEMTIME SystemTime;
 		GetSystemTime( &SystemTime );
 		int index = SystemTime.wMilliseconds % fileNames.Count();
+#else
+		struct timeval tm;
+		gettimeofday( &tm, NULL );
+		int index = tm.tv_usec/1000 % fileNames.Count();
+#endif
 
 		if ( fileNames.IsValidIndex( index ) && fileNames[index] )
 		{
-			char found[ 512 ];
+			// Play the Saxxy music if we're in saxxy mode.
+#if defined( SAXXYMAINMENU_ENABLED )
+			bool bIsTF = false;
+			const char *pGameDir = engine->GetGameDirectory();
+			if ( pGameDir )
+			{
+				// Is the game TF?
+				const int nStrLen = V_strlen( pGameDir );
+				bIsTF = nStrLen
+					&& nStrLen >= 2 &&
+					pGameDir[nStrLen-2] == 't' &&
+					pGameDir[nStrLen-1] == 'f';
+			}
 
 			// escape chars "*#" make it stream, and be affected by snd_musicvolume
-			Q_snprintf( found, sizeof( found ), "play *#%s", fileNames[index] );
+			const char *pSoundFile = bIsTF ? "ui/holiday/gamestartup_saxxy.mp3" : fileNames[index];
+#else
+			const char *pSoundFile = fileNames[index];
+#endif
+
+			char found[ 512 ];
+			Q_snprintf( found, sizeof( found ), "play *#%s", pSoundFile );
 
 			engine->ClientCmd_Unrestricted( found );
 		}
@@ -456,36 +546,45 @@ void CGameUI::Start()
 
 	if ( IsPC() )
 	{
-		g_hMutex = Sys_CreateMutex( "ValvePlatformUIMutex" );
-		g_hWaitMutex = Sys_CreateMutex( "ValvePlatformWaitMutex" );
-		if ( g_hMutex == NULL || g_hWaitMutex == NULL || Sys_GetLastError() == SYS_ERROR_INVALID_HANDLE )
+		if ( !IsPosix() )
 		{
-			// error, can't get handle to mutex
-			if (g_hMutex)
-			{
-				Sys_ReleaseMutex(g_hMutex);
-			}
-			if (g_hWaitMutex)
-			{
-				Sys_ReleaseMutex(g_hWaitMutex);
-			}
-			g_hMutex = NULL;
-			g_hWaitMutex = NULL;
-			Error("Steam Error: Could not access Steam, bad mutex\n");
-			return;
-		}
-		unsigned int waitResult = Sys_WaitForSingleObject(g_hMutex, 0);
-		if (!(waitResult == SYS_WAIT_OBJECT_0 || waitResult == SYS_WAIT_ABANDONED))
-		{
-			// mutex locked, need to deactivate Steam (so we have the Friends/ServerBrowser data files)
-			// get the wait mutex, so that Steam.exe knows that we're trying to acquire ValveTrackerMutex
-			waitResult = Sys_WaitForSingleObject(g_hWaitMutex, 0);
-			if (waitResult == SYS_WAIT_OBJECT_0 || waitResult == SYS_WAIT_ABANDONED)
-			{
-				Sys_EnumWindows(SendShutdownMsgFunc, 1);
-			}
-		}
+			// Alfred says this is really, really old code that does some wacky crap that only
+			//  happened in the first version of HL and it's the only game that does this and
+			//  it was a steam testing type thing and we don't need to do it on Posix, etc.
 
+			g_hMutex = Sys_CreateMutex( "ValvePlatformUIMutex" );
+			g_hWaitMutex = Sys_CreateMutex( "ValvePlatformWaitMutex" );
+			if ( g_hMutex == 0 || g_hWaitMutex == 0 || Sys_GetLastError() == SYS_ERROR_INVALID_HANDLE )
+			{
+				// error, can't get handle to mutex
+				if (g_hMutex)
+				{
+					Sys_ReleaseMutex(g_hMutex);
+				}
+				if (g_hWaitMutex)
+				{
+					Sys_ReleaseMutex(g_hWaitMutex);
+				}
+				g_hMutex = NULL;
+				g_hWaitMutex = NULL;
+				Error("Steam Error: Could not access Steam, bad mutex\n");
+				return;
+			}
+			unsigned int waitResult = Sys_WaitForSingleObject(g_hMutex, 0);
+			if (!(waitResult == SYS_WAIT_OBJECT_0 || waitResult == SYS_WAIT_ABANDONED))
+			{
+				// mutex locked, need to deactivate Steam (so we have the Friends/ServerBrowser data files)
+				// get the wait mutex, so that Steam.exe knows that we're trying to acquire ValveTrackerMutex
+				waitResult = Sys_WaitForSingleObject(g_hWaitMutex, 0);
+#ifdef WIN32
+				if (waitResult == SYS_WAIT_OBJECT_0 || waitResult == SYS_WAIT_ABANDONED)
+				{
+					Sys_EnumWindows(SendShutdownMsgFunc, 1);
+				}
+#endif
+			}
+		}
+			
 		// Delay playing the startup music until the first frame
 		m_bPlayGameStartupSound = true;
 
@@ -528,6 +627,7 @@ bool CGameUI::FindPlatformDirectory(char *platformDir, int bufferSize)
 		// we're not under steam, so setup using path relative to game
 		if ( IsPC() )
 		{
+#ifdef WIN32
 			if ( ::GetModuleFileName( ( HINSTANCE )GetModuleHandle( NULL ), platformDir, bufferSize ) )
 			{
 				char *lastslash = strrchr(platformDir, '\\'); // this should be just before the filename
@@ -538,6 +638,15 @@ bool CGameUI::FindPlatformDirectory(char *platformDir, int bufferSize)
 					return true;
 				}
 			}
+#else
+			if ( getcwd( platformDir, bufferSize ) )
+			{
+				V_AppendSlash( platformDir, bufferSize );
+				Q_strncat(platformDir, "platform", bufferSize, COPY_ALL_CHARACTERS );
+				V_AppendSlash( platformDir, bufferSize );
+				return true;
+			}
+#endif			
 		}
 		else
 		{
@@ -571,9 +680,6 @@ void CGameUI::Shutdown()
 	g_VModuleLoader.UnloadPlatformModules();
 
 	ModInfo().FreeModInfo();
-#if !defined( NO_STEAM )
-	SteamAPI_Shutdown();
-#endif
 	
 	// release platform mutex
 	// close the mutex
@@ -585,6 +691,11 @@ void CGameUI::Shutdown()
 	{
 		Sys_ReleaseMutex(g_hWaitMutex);
 	}
+	
+	BonusMapsDatabase()->WriteSaveData();
+
+	steamapicontext->Clear();
+	
 
 	ConVar_Unregister();
 	DisconnectTier3Libraries();
@@ -644,6 +755,16 @@ void CGameUI::OnGameUIActivated()
 
 	// notify taskbar
 	BasePanel()->OnGameUIActivated();
+
+	if ( GameClientExports() )
+	{
+		const char *pGameName = CommandLine()->ParmValue( "-game", "hl2" );
+		// only want to run this for TF2
+		if ( ( Q_stricmp( pGameName, "tf" ) == 0 ) || ( Q_stricmp( pGameName, "tf_beta" ) == 0 ) )
+		{
+			GameClientExports()->OnGameUIActivated();
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -651,6 +772,16 @@ void CGameUI::OnGameUIActivated()
 //-----------------------------------------------------------------------------
 void CGameUI::OnGameUIHidden()
 {
+	if ( GameClientExports() )
+	{
+		const char *pGameName = CommandLine()->ParmValue( "-game", "hl2" );
+		// only want to run this for TF2
+		if ( ( Q_stricmp( pGameName, "tf" ) == 0 ) || ( Q_stricmp( pGameName, "tf_beta" ) == 0 ) )
+		{
+			GameClientExports()->OnGameUIHidden();
+		}
+	}
+
 	// unpause the game when leaving the UI
 	if ( engine->GetMaxClients() <= 1 )
 	{
@@ -687,11 +818,12 @@ void CGameUI::RunFrame()
 		m_bPlayGameStartupSound = false;
 	}
 
-	if ( IsPC() && m_bTryingToLoadFriends && m_iFriendsLoadPauseFrames-- < 1 && g_hMutex && g_hWaitMutex )
+	if ( IsPC() && ( ( IsPosix() && m_bTryingToLoadFriends ) || 
+					( m_bTryingToLoadFriends && m_iFriendsLoadPauseFrames-- < 1 && g_hMutex && g_hWaitMutex ) ) )
 	{
 		// try and load Steam platform files
 		unsigned int waitResult = Sys_WaitForSingleObject(g_hMutex, 0);
-		if (waitResult == SYS_WAIT_OBJECT_0 || waitResult == SYS_WAIT_ABANDONED)
+		if ( IsPosix() || ( waitResult == SYS_WAIT_OBJECT_0 || waitResult == SYS_WAIT_ABANDONED ))
 		{
 			// we got the mutex, so load Friends/Serverbrowser
 			// clear the loading flag
@@ -699,7 +831,8 @@ void CGameUI::RunFrame()
 			g_VModuleLoader.LoadPlatformModules(&m_GameFactory, 1, false);
 
 			// release the wait mutex
-			Sys_ReleaseMutex(g_hWaitMutex);
+			if ( !IsPosix() )
+				Sys_ReleaseMutex(g_hWaitMutex);
 
 			// notify the game of our game name
 			const char *fullGamePath = engine->GetGameDirectory();
@@ -777,11 +910,7 @@ void CGameUI::OnDisconnectFromServer( uint8 eSteamLoginFailure )
 
 	g_VModuleLoader.PostMessageToAllModules(new KeyValues("DisconnectedFromGame"));
 
-	if ( eSteamLoginFailure == STEAMLOGINFAILURE_BADTICKET )
-	{
-		RefreshSteamLogin();
-	}
-	else if ( eSteamLoginFailure == STEAMLOGINFAILURE_NOSTEAMLOGIN )
+	if ( eSteamLoginFailure == STEAMLOGINFAILURE_NOSTEAMLOGIN )
 	{
 		if ( g_hLoadingDialog )
 		{
@@ -970,15 +1099,6 @@ bool CGameUI::SetShowProgressText( bool show )
 	return g_hLoadingDialog->SetShowProgressText( show );
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: brings up a login prompt
-//-----------------------------------------------------------------------------
-void CGameUI::RefreshSteamLogin() 
-{
-#ifndef NO_STEAM
-//	SteamUser()->RefreshSteam2Login();
-#endif
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: returns true if we're currently playing the game
@@ -1012,6 +1132,14 @@ bool CGameUI::IsInBackgroundLevel()
 bool CGameUI::IsInMultiplayer()
 {
 	return (IsInLevel() && engine->GetMaxClients() > 1);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns true if we're playing back a replay
+//-----------------------------------------------------------------------------
+bool CGameUI::IsInReplay()
+{
+	return g_pEngineClientReplay && g_pEngineClientReplay->IsPlayingReplayDemo();
 }
 
 //-----------------------------------------------------------------------------
@@ -1079,7 +1207,7 @@ void CGameUI::HideLoadingBackgroundDialog()
 //-----------------------------------------------------------------------------
 bool CGameUI::HasLoadingBackgroundDialog()
 {
-	return ( NULL != g_hLoadingBackgroundDialog );
+	return ( 0 != g_hLoadingBackgroundDialog );
 }
 
 //-----------------------------------------------------------------------------
@@ -1121,4 +1249,37 @@ bool CGameUI::ValidateStorageDevice( int *pStorageDeviceValidated )
 void CGameUI::SetProgressOnStart()
 {
 	m_bOpenProgressOnStart = true;
+}
+
+void CGameUI::OnConfirmQuit( void )
+{
+	BasePanel()->OnOpenQuitConfirmationDialog();
+}
+
+bool CGameUI::IsMainMenuVisible( void )
+{
+	CBasePanel *pBasePanel = BasePanel();
+	if ( pBasePanel )
+		return (pBasePanel->IsVisible() && pBasePanel->GetMenuAlpha() > 0 );
+	return false;
+}
+
+// Client DLL is providing us with a panel that it wants to replace the main menu with
+void CGameUI::SetMainMenuOverride( vgui::VPANEL panel )
+{
+	CBasePanel *pBasePanel = BasePanel();
+	if ( pBasePanel )
+	{
+		pBasePanel->SetMainMenuOverride( panel );
+	}
+}
+
+// Client DLL is telling us that a main menu command was issued, probably from its custom main menu panel
+void CGameUI::SendMainMenuCommand( const char *pszCommand )
+{
+	CBasePanel *pBasePanel = BasePanel();
+	if ( pBasePanel )
+	{
+		pBasePanel->RunMenuCommand( pszCommand );
+	}
 }

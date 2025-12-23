@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,12 +12,15 @@
 #include "vgui_controls/messagebox.h"
 #include "datamodel/idatamodel.h"
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "vgui/ISurface.h"
 #include <vgui/IInput.h>
 #include "vgui/mousecode.h"
 #include "tier1/strtools.h"
 #include "tier1/KeyValues.h"
 #include "tier2/tier2.h"
+#include "p4lib/ip4.h"
 #include "filesystem.h"
 #include "dme_controls/INotifyUI.h"
 
@@ -112,12 +115,14 @@ CFileListManager::CFileListManager( vgui::Panel *parent ) : BaseClass( parent, "
 //	LoadControlSettings( "resource/BxFileListManager.res" );
 }
 
-int CFileListManager::AddItem( DmFileId_t fileid, const char *pFilename, const char *pPath, bool bLoaded, int nElements, bool bChanged )
+int CFileListManager::AddItem( DmFileId_t fileid, const char *pFilename, const char *pPath, bool bLoaded, int nElements, bool bChanged, bool bInPerforce, bool bOpenForEdit )
 {
 	KeyValues *kv = new KeyValues( "", GetKey( CI_FILENAME ), pFilename, GetKey( CI_PATH ), pPath );
 	kv->SetInt   ( GetKey( CI_NUMELEMENTS ), nElements );
 	kv->SetString( GetKey( CI_LOADED ),		 bLoaded	  ? "Y" : "N" );
 	kv->SetString( GetKey( CI_CHANGED ),	 bChanged	  ? "Y" : "N" );
+	kv->SetString( GetKey( CI_INPERFORCE ),  bInPerforce  ? "Y" : "N" );
+	kv->SetString( GetKey( CI_OPENFOREDIT ), bOpenForEdit ? "Y" : "N" );
 	int itemID = BaseClass::AddItem( kv, fileid, false, false );
 	kv->deleteThis();
 	return itemID;
@@ -218,6 +223,7 @@ void CFileListManager::OnOpenContextMenu( KeyValues *pParams )
 	}
 	else
 	{
+		bool bP4Connected = p4->IsConnectedToServer();
 
 		int nSelected = GetSelectedItemsCount();
 		int nLoaded = 0;
@@ -238,6 +244,18 @@ void CFileListManager::OnOpenContextMenu( KeyValues *pParams )
 			if ( g_pFullFileSystem->FileExists( pFilename ) )
 			{
 				++nOnDisk;
+			}
+
+			if ( bP4Connected )
+			{
+				if ( p4->IsFileInPerforce( pFilename ) )
+				{
+					++nInPerforce;
+					if ( p4->GetFileState( pFilename ) != P4FILE_UNOPENED )
+					{
+						++nOpenForEdit;
+					}
+				}
 			}
 		}
 
@@ -399,6 +417,64 @@ void CFileListManager::OnFileSelected( KeyValues *pParams )
 	}
 }
 
+void CFileListManager::OnAddToPerforce( KeyValues *pParams )
+{
+	int nFileCount = 0;
+	int nSelected = GetSelectedItemsCount();
+	const char **ppFileNames = ( const char** )_alloca( nSelected * sizeof( char* ) );
+	for ( int i = 0; i < nSelected; ++i )
+	{
+		int itemId = GetSelectedItem( i );
+		DmFileId_t fileid = ( DmFileId_t )GetItemUserData( itemId );
+		const char *pFilename = g_pDataModel->GetFileName( fileid );
+		Assert( pFilename );
+		if ( !pFilename )
+			continue;
+
+		++nFileCount;
+		ppFileNames[ i ] = pFilename;
+	}
+
+	bool bSuccess = p4->OpenFilesForAdd( nFileCount, ppFileNames );
+	if ( !bSuccess )
+	{
+		vgui::MessageBox *pError = new vgui::MessageBox( "Perforce Error!", p4->GetLastError(), GetParent() );
+		pError->SetSmallCaption( true );
+		pError->DoModal();
+	}
+
+	Refresh();
+}
+
+void CFileListManager::OnOpenForEdit( KeyValues *pParams )
+{
+	int nFileCount = 0;
+	int nSelected = GetSelectedItemsCount();
+	const char **ppFileNames = ( const char** )_alloca( nSelected * sizeof( char* ) );
+	for ( int i = 0; i < nSelected; ++i )
+	{
+		int itemId = GetSelectedItem( i );
+		DmFileId_t fileid = ( DmFileId_t )GetItemUserData( itemId );
+		const char *pFilename = g_pDataModel->GetFileName( fileid );
+		Assert( pFilename );
+		if ( !pFilename )
+			continue;
+
+		++nFileCount;
+		ppFileNames[ i ] = pFilename;
+	}
+
+	bool bSuccess = p4->OpenFilesForEdit( nFileCount, ppFileNames );
+	if ( !bSuccess )
+	{
+		vgui::MessageBox *pError = new vgui::MessageBox( "Perforce Error!", p4->GetLastError(), GetParent() );
+		pError->SetSmallCaption( true );
+		pError->DoModal();
+	}
+
+	Refresh();
+}
+
 void CFileListManager::OnDataChanged( KeyValues *pParams )
 {
 	int nNotifyFlags = pParams->GetInt( "notifyFlags" );
@@ -414,12 +490,50 @@ void CFileListManager::OnDataChanged( KeyValues *pParams )
 		m_bRefreshRequired = true;
 		return;
 	}
+
+	int nCount = GetItemCount();
+	int nFiles = g_pDataModel->NumFileIds();
+	bool bPerformFullRefresh = ( nCount != nFiles );
+	if ( !bPerformFullRefresh )
+	{
+		const char *pNameKey = GetKey( CI_FILENAME );
+
+		for ( int i = 0; i < nCount; ++i )
+		{
+			DmFileId_t fileid = g_pDataModel->GetFileId( i );
+			const char *pFileName = g_pDataModel->GetFileName( fileid );
+			if ( !pFileName || !*pFileName )
+			{
+				bPerformFullRefresh = true;
+				break;
+			}
+			pFileName = V_UnqualifiedFileName( pFileName );
+
+			KeyValues *pKeyValues = GetItem( i );
+			bPerformFullRefresh = ( fileid != (DmFileId_t)GetItemUserData(i) ) || Q_stricmp( pFileName, pKeyValues->GetString( pNameKey ) );
+			if ( bPerformFullRefresh )
+				break;
+
+			pKeyValues->SetInt   ( GetKey( CI_NUMELEMENTS ), g_pDataModel->NumElementsInFile( fileid ) );
+			pKeyValues->SetString( GetKey( CI_LOADED ),		 g_pDataModel->IsFileLoaded( fileid )	  ? "Y" : "N" );
+			pKeyValues->SetString( GetKey( CI_CHANGED ),	 false									  ? "Y" : "N" );
+			ApplyItemChanges( i );
+		}
+	}
+
+	if ( bPerformFullRefresh )
+	{
+		Refresh();
+		return;
+	}
 }
 
 void CFileListManager::Refresh()
 {
 	m_bRefreshRequired = false;
 	RemoveAll();
+
+	const bool bP4Connected = p4 ? p4->IsConnectedToServer() : false;
 
 	int nFiles = g_pDataModel->NumFileIds();
 	for ( int i = 0; i < nFiles; ++i )
@@ -432,11 +546,13 @@ void CFileListManager::Refresh()
 		bool bLoaded = g_pDataModel->IsFileLoaded( fileid );
 		int nElements = g_pDataModel->NumElementsInFile( fileid );
 		bool bChanged = false; // TODO - find out for real
+		bool bInPerforce = bP4Connected && p4->IsFileInPerforce( pFileName );
+		bool bOpenForEdit = bInPerforce && p4->GetFileState( pFileName ) != P4FILE_UNOPENED;
 
 		char path[ 256 ];
 		V_ExtractFilePath( pFileName, path, sizeof( path ) );
 
-		AddItem( fileid, V_UnqualifiedFileName( pFileName ), path, bLoaded, nElements, bChanged );
+		AddItem( fileid, V_UnqualifiedFileName( pFileName ), path, bLoaded, nElements, bChanged, bInPerforce, bOpenForEdit );
 	}
 }
 

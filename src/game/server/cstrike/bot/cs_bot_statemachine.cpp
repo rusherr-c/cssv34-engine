@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 
 #include "cbase.h"
 #include "cs_bot.h"
-#include "nav_path.h"
+#include "cs_nav_path.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -640,7 +640,7 @@ bool CCSBot::MoveToInitialEncounter( void )
 	}
 
 	// build a path from us to the enemy spawn
-	CNavPath path;
+	CCSNavPath path;
 	PathCost cost( this, FASTEST_ROUTE );
 	path.Compute( WorldSpaceCenter(), enemySpawn->GetAbsOrigin(), cost );
 

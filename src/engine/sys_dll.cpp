@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,19 @@
 
 #if defined(_WIN32) && !defined(_X360)
 #include "winlite.h"
+#elif defined(OSX)
+#include <Carbon/Carbon.h>
+#include <sys/sysctl.h>
 #endif
+#if defined(LINUX)
+#include <unistd.h>
+#include <fcntl.h>
+#endif
+
+#if defined( USE_SDL )
+#include "SDL.h"
+#endif
+
 #include "quakedef.h"
 #include "igame.h"
 #include "errno.h"
@@ -33,17 +45,21 @@
 #include "tier0/icommandline.h"
 #include "cmd.h"
 #include <ihltvdirector.h>
+#if defined( REPLAY_ENABLED )
+#include "replay/ireplaysystem.h"
+#endif
 #include "MapReslistGenerator.h"
 #include "DevShotGenerator.h"
 #include "cdll_engine_int.h"
 #include "dt_send.h"
 #include "idedicatedexports.h"
-#include "eifaceV21.h"
-#include "steam/steam_api.h"
+#include "eifacev21.h"
+#include "cl_steamauth.h"
+#include "tier0/etwprof.h"
 
-#ifdef _WIN32
 #include "vgui_baseui_interface.h"
 #include "tier0/systeminformation.h"
+#ifdef _WIN32
 #if !defined( _X360 )
 #include <io.h>
 #endif
@@ -58,9 +74,9 @@
 
 #define ONE_HUNDRED_TWENTY_EIGHT_MB	(128 * 1024 * 1024)
 
-ConVar mem_min_heapsize( "mem_min_heapsize", "48", 0, "Minimum amount of memory to dedicate to engine hunk and datacache (in mb)" );
-ConVar mem_max_heapsize( "mem_max_heapsize", "256", 0, "Maximum amount of memory to dedicate to engine hunk and datacache (in mb)" );
-ConVar mem_max_heapsize_dedicated( "mem_max_heapsize_dedicated", "64", 0, "Maximum amount of memory to dedicate to engine hunk and datacache, for dedicated server (in mb)" );
+ConVar mem_min_heapsize( "mem_min_heapsize", "48", FCVAR_INTERNAL_USE, "Minimum amount of memory to dedicate to engine hunk and datacache (in mb)" );
+ConVar mem_max_heapsize( "mem_max_heapsize", "256", FCVAR_INTERNAL_USE, "Maximum amount of memory to dedicate to engine hunk and datacache (in mb)" );
+ConVar mem_max_heapsize_dedicated( "mem_max_heapsize_dedicated", "64", FCVAR_INTERNAL_USE, "Maximum amount of memory to dedicate to engine hunk and datacache, for dedicated server (in mb)" );
 
 #define MINIMUM_WIN_MEMORY			(unsigned)(mem_min_heapsize.GetInt()*1024*1024)
 #define MAXIMUM_WIN_MEMORY			max( (unsigned)(mem_max_heapsize.GetInt()*1024*1024), MINIMUM_WIN_MEMORY )
@@ -69,16 +85,17 @@ ConVar mem_max_heapsize_dedicated( "mem_max_heapsize_dedicated", "64", 0, "Maxim
 
 char *CheckParm(const char *psz, char **ppszValue = NULL);
 void SeedRandomNumberGenerator( bool random_invariant );
-void Con_ColorPrintf( const Color& clr, const char *fmt, ... );
+void Con_ColorPrintf( const Color& clr, PRINTF_FORMAT_STRING const char *fmt, ... ) FMTFUNCTION( 2, 3 );
 
 void COM_ShutdownFileSystem( void );
 void COM_InitFilesystem( const char *pFullModPath );
 
 modinfo_t			gmodinfo;
 
-#ifdef _WIN32
-extern HWND			*pmainwindow;
+#ifdef PLATFORM_WINDOWS
+HWND				*pmainwindow = NULL;
 #endif
+
 char				gszDisconnectReason[256];
 char				gszExtendedDisconnectReason[256];
 bool				gfExtendedError = false;
@@ -105,14 +122,15 @@ CSysModule *g_GameDLL = NULL;
 typedef void (DLLEXPORT * PFN_GlobalMethod)( edict_t *pEntity );
 
 IServerGameDLL	*serverGameDLL = NULL;
-bool g_bServerGameDLLGreaterThanV4;
-bool g_bServerGameDLLGreaterThanV5;
+int g_iServerGameDLLVersion = 0;
 IServerGameEnts *serverGameEnts = NULL;
 
 IServerGameClients *serverGameClients = NULL;
 int g_iServerGameClientsVersion = 0;	// This matches the number at the end of the interface name (so for "ServerGameClients004", this would be 4).
 
 IHLTVDirector	*serverGameDirector = NULL;
+
+IServerGameTags *serverGameTags = NULL;
 
 void Sys_InitArgv( char *lpCmdLine );
 void Sys_ShutdownArgv( void );
@@ -299,12 +317,14 @@ void Sys_Printf(char *fmt, ...)
 		unicode[(sizeof( unicode ) / sizeof(wchar_t)) - 1] = L'\0';
 		OutputDebugStringW( unicode );
 		Sleep( 0 );
+#else
+		fprintf( stderr, "%s", text );
 #endif
 	}
 
 	if ( s_bIsDedicated )
 	{
-		printf( text );
+		printf( "%s", text );
 	}
 }
 
@@ -312,38 +332,51 @@ void Sys_Printf(char *fmt, ...)
 bool Sys_MessageBox(const char *title, const char *info, bool bShowOkAndCancel)
 {
 #ifdef _WIN32
-	if (IDOK == ::MessageBox(NULL, title, info, MB_ICONEXCLAMATION | (bShowOkAndCancel ? MB_OKCANCEL : MB_OK)))
+
+	if ( IDOK == ::MessageBox( NULL, title, info, MB_ICONEXCLAMATION | ( bShowOkAndCancel ? MB_OKCANCEL : MB_OK ) ) )
 	{
 		return true;
 	}
 	return false;
-#elif _LINUX
+
+#elif defined( USE_SDL )
+
+	int buttonid = 0;
+	SDL_MessageBoxData messageboxdata = { 0 };
+	SDL_MessageBoxButtonData buttondata[] =
+	{
+		{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,	1,	"OK"		},
+		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,	0,	"Cancel"	},
+	};
+
+	messageboxdata.window = GetAssertDialogParent();
+	messageboxdata.title = title;
+	messageboxdata.message = info;
+	messageboxdata.numbuttons = bShowOkAndCancel ? 2 : 1;
+	messageboxdata.buttons = buttondata;
+
+	SDL_ShowMessageBox( &messageboxdata, &buttonid );
+	return ( buttonid == 1 );
+
+#elif defined( POSIX )
+
 	Warning( "%s\n", info );
 	return true;
+
 #else
 #error "implement me"
 #endif
 }
 
 bool g_bUpdateMinidumpComment = true;
+void BuildMinidumpComment( char const *pchSysErrorText, bool bRealCrash );
 
-//-----------------------------------------------------------------------------
-// Purpose: Exit engine with error
-// Input  : *error - 
-//			... - 
-// Output : void Sys_Error
-//-----------------------------------------------------------------------------
-void Sys_Error(const char *error, ...)
+void Sys_Error_Internal( bool bMinidump, const char *error, va_list argsList )
 {
-	extern char g_minidumpinfo[4096];
-
-	va_list		argptr;
 	char		text[1024];
 	static      bool bReentry = false; // Don't meltdown
 
-	va_start( argptr, error );
-	Q_vsnprintf( text, sizeof( text ), error, argptr );
-	va_end( argptr );
+	Q_vsnprintf( text, sizeof( text ), error, argsList );
 
 	if ( bReentry )
 	{
@@ -362,19 +395,27 @@ void Sys_Error(const char *error, ...)
 		Sys_Printf( "%s\n", text );
 	}
 
+	// Write the error to the log and ensure the log contents get written to disk
+	g_Log.Printf( "Engine error: %s\n", text );
+	g_Log.Flush();
+
 	g_bInErrorExit = true;
-	
+
 #if !defined( SWDS )
 	if ( IsPC() && videomode )
 		videomode->Shutdown();
 #endif
 
-#ifdef _WIN32
 	if ( IsPC() &&
-		 !CommandLine()->FindParm( "-makereslists" ) &&
-		 !CommandLine()->FindParm( "-nomessagebox" ) )
+		!CommandLine()->FindParm( "-makereslists" ) &&
+		!CommandLine()->FindParm( "-nomessagebox" ) &&
+		!CommandLine()->FindParm( "-nocrashdialog" ) )
 	{
+#ifdef _WIN32
 		::MessageBox( NULL, text, "Engine Error", MB_OK | MB_TOPMOST );
+#elif defined( USE_SDL )
+		Sys_MessageBox( "Engine Error", text, false );
+#endif
 	}
 
 	if ( IsPC() )
@@ -388,27 +429,12 @@ void Sys_Error(const char *error, ...)
 
 #if !defined( _X360 )
 
-#if !defined(NO_STEAM) && !defined(SWDS) && !defined(LINUX)
-	char errorText[4096];
-	V_strcpy(errorText,"Sys_Error: ");
-	V_strncat( errorText, text, sizeof(errorText) );
-	V_strncat( errorText, "\n", sizeof(errorText) );
-	PAGED_POOL_INFO_t info;
-	if ( SYSCALL_SUCCESS == Plat_GetPagedPoolInfo( &info ) )
-	{
-		V_snprintf( text, sizeof(text), "PP PAGES: used: %d, free %d\n", info.numPagesUsed, info.numPagesFree );
-		V_strncat( errorText, text, sizeof(errorText) );
-	}
-
-	V_strncat( errorText, g_minidumpinfo, sizeof(errorText) );
-
+	BuildMinidumpComment( text, true );
 	g_bUpdateMinidumpComment = false;
-	SteamAPI_SetMiniDumpComment( errorText );
-#endif
 
-	if ( !Plat_IsInDebugSession() && !CommandLine()->FindParm( "-nominidumps") )
+	if ( bMinidump && !Plat_IsInDebugSession() && !CommandLine()->FindParm( "-nominidumps") )
 	{
-#ifndef NO_STEAM
+#if defined( WIN32 )
 		// MiniDumpWrite() has problems capturing the calling thread's context 
 		// unless it is called with an exception context.  So fake an exception.
 		__try
@@ -425,16 +451,32 @@ void Sys_Error(const char *error, ...)
 		}
 		// Write the minidump from inside the filter (GetExceptionInformation() is only 
 		// valid in the filter)
-
 		__except ( SteamAPI_WriteMiniDump( 0, GetExceptionInformation(), build_number() ), EXCEPTION_EXECUTE_HANDLER )
 		{
-			
+
 			// We always get here because the above filter evaluates to EXCEPTION_EXECUTE_HANDLER
 		}
+#elif defined( OSX )
+		// Doing this doesn't quite work the way we want because there is no "crashing" thread
+		// and we see "No thread was identified as the cause of the crash; No signature could be created because we do not know which thread crashed" on the back end
+		//SteamAPI_WriteMiniDump( 0, NULL, build_number() );
+		printf("\n ##### Sys_Error: %s", text );
+		fflush(stdout );
+
+		int *p = 0;
+		*p = 0xdeadbeef;
+#elif defined( LINUX )
+		// Doing this doesn't quite work the way we want because there is no "crashing" thread
+		// and we see "No thread was identified as the cause of the crash; No signature could be created because we do not know which thread crashed" on the back end
+		//SteamAPI_WriteMiniDump( 0, NULL, build_number() );
+		int *p = 0;
+		*p = 0xdeadbeef;
+#else
+#warning "need minidump impl on sys_error"
 #endif
 	}
-#endif
-#endif
+
+#endif // _X360
 
 	host_initialized = false;
 #if defined(_WIN32) && !defined( _X360 )
@@ -445,6 +487,40 @@ void Sys_Error(const char *error, ...)
 	_exit( 100 );
 #endif
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: Exit engine with error
+// Input  : *error - 
+//			... - 
+// Output : void Sys_Error
+//-----------------------------------------------------------------------------
+void Sys_Error(const char *error, ...)
+{
+	va_list		argptr;
+
+	va_start( argptr, error );
+	Sys_Error_Internal( true, error, argptr );
+	va_end( argptr );
+
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Exit engine with error
+// Input  : *error - 
+//			... - 
+// Output : void Sys_Error
+//-----------------------------------------------------------------------------
+void Sys_Exit(const char *error, ...)
+{
+	va_list		argptr;
+
+	va_start( argptr, error );
+	Sys_Error_Internal( false, error, argptr );
+	va_end( argptr );
+
+}
+
 
 bool IsInErrorExit()
 {
@@ -460,8 +536,8 @@ void Sys_Sleep( int msec )
 {
 #ifdef _WIN32
 	Sleep ( msec );
-#elif _LINUX
-	usleep( msec );
+#elif POSIX
+	usleep( msec * 1000 );
 #endif
 }
 
@@ -494,15 +570,7 @@ BOOL WINAPI DllMain(HANDLE hInst, ULONG ulInit, LPVOID lpReserved)
 //-----------------------------------------------------------------------------
 void Sys_InitMemory( void )
 {
-#ifdef _WIN32
 	// Allow overrides
-	int nHeapSize = CommandLine()->ParmValue( "-heapsize", 0 ); 
-	if ( nHeapSize )
-	{
-		host_parms.memsize = nHeapSize * 1024;
-		return;
-	}
-
 	if ( CommandLine()->FindParm( "-minmemory" ) )
 	{
 		host_parms.memsize = MINIMUM_WIN_MEMORY;
@@ -511,6 +579,7 @@ void Sys_InitMemory( void )
 
 	host_parms.memsize = 0;
 
+#ifdef _WIN32
 #if (_MSC_VER > 1200)
 	// MSVC 6.0 doesn't support GlobalMemoryStatusEx()
 	if ( IsPC() )
@@ -599,12 +668,104 @@ void Sys_InitMemory( void )
 	{
 		host_parms.memsize = 128*1024*1024;
 	}
-#else
-	//FILE *meminfo=fopen("/proc/meminfo","r"); // read in meminfo file?
-	// sysinfo() system call??
+#elif defined(POSIX)
+	uint64_t memsize = ONE_HUNDRED_TWENTY_EIGHT_MB;
 
-	// hard code 32 mb for dedicated servers
-	host_parms.memsize = MAXIMUM_DEDICATED_MEMORY;
+#if defined(OSX)
+	int mib[2] = { CTL_HW, HW_MEMSIZE };
+	u_int namelen = sizeof(mib) / sizeof(mib[0]);
+	size_t len = sizeof(memsize);
+
+	if (sysctl(mib, namelen, &memsize, &len, NULL, 0) < 0) 
+	{
+		memsize = ONE_HUNDRED_TWENTY_EIGHT_MB;
+	}
+#elif defined(LINUX)
+	const int fd = open("/proc/meminfo", O_RDONLY);
+	if (fd < 0)
+	{
+		Sys_Error( "Can't open /proc/meminfo (%s)!\n", strerror(errno) );
+	}
+
+	char buf[1024 * 16];
+	const ssize_t br = read(fd, buf, sizeof (buf));
+	close(fd);
+	if (br < 0)
+	{
+		Sys_Error( "Can't read /proc/meminfo (%s)!\n", strerror(errno) );
+	}
+	buf[br] = '\0';
+
+	// Split up the buffer by lines...
+	char *line = buf;
+	for (char *ptr = buf; *ptr; ptr++)
+	{
+		if (*ptr == '\n')
+		{
+			// we've got a complete line.
+			*ptr = '\0';
+			unsigned long long ull = 0;
+			if (sscanf(line, "MemTotal: %llu kB", &ull) == 1)
+			{
+				// found it!
+				memsize = ((uint64_t) ull) * 1024;
+				break;
+			}
+			line = ptr;
+		}
+	}
+
+#else
+#error Write me.
+#endif
+
+	if ( memsize > 0xFFFFFFFFUL )
+	{
+		host_parms.memsize = 0xFFFFFFFFUL;
+	}
+	else
+	{
+		host_parms.memsize = memsize;
+	}
+
+	if ( host_parms.memsize < ONE_HUNDRED_TWENTY_EIGHT_MB )
+	{
+		Sys_Error( "Available memory less than 128MB!!! %i\n", host_parms.memsize );
+	}
+
+	// take one quarter the physical memory
+	if ( host_parms.memsize <= 512*1024*1024)
+	{
+		host_parms.memsize >>= 2;
+		// Apply cap of 64MB for 512MB systems
+		// this keeps the code the same as HL2 gold
+		// but allows us to use more memory on 1GB+ systems
+		if (host_parms.memsize > MAXIMUM_DEDICATED_MEMORY)
+		{
+			host_parms.memsize = MAXIMUM_DEDICATED_MEMORY;
+		}
+	}
+	else
+	{
+		// just take one quarter, no cap
+		host_parms.memsize >>= 2;
+	}
+
+	// At least MINIMUM_WIN_MEMORY mb, even if we have to swap a lot.
+	if (host_parms.memsize < MINIMUM_WIN_MEMORY)
+	{
+		host_parms.memsize = MINIMUM_WIN_MEMORY;
+	}
+
+	// Apply cap
+	if (host_parms.memsize > MAXIMUM_WIN_MEMORY)
+	{
+		host_parms.memsize = MAXIMUM_WIN_MEMORY;
+	}
+
+#else
+#error Write me.
+
 #endif
 }
 
@@ -638,24 +799,80 @@ void Sys_ShutdownAuthentication( void )
 //-----------------------------------------------------------------------------
 CThreadLocalInt<> g_bInSpew;
 
+#include "tier1/fmtstr.h"
+
+static ConVar sys_minidumpspewlines( "sys_minidumpspewlines", "500", 0, "Lines of crash dump console spew to keep." );
+
+static CUtlLinkedList< CUtlString > g_SpewHistory;
+static int g_nSpewLines = 1;
+static CThreadFastMutex g_SpewMutex;
+
+static void AddSpewRecord( char const *pMsg )
+{
+#if !defined( _X360 )
+	AUTO_LOCK( g_SpewMutex );
+
+	static bool s_bReentrancyGuard = false;
+	if ( s_bReentrancyGuard )
+		return;
+	s_bReentrancyGuard = true;
+
+	if ( g_SpewHistory.Count() > sys_minidumpspewlines.GetInt() )
+	{
+		g_SpewHistory.Remove( g_SpewHistory.Head() );
+	}
+
+	int i = g_SpewHistory.AddToTail();
+	g_SpewHistory[ i ].Format( "%d(%f):  %s", g_nSpewLines++, Plat_FloatTime(), pMsg );
+
+	s_bReentrancyGuard = false;
+#endif
+}
+
+void GetSpew( char *buf, size_t buflen )
+{
+	AUTO_LOCK( g_SpewMutex );
+
+	// Walk list backward
+	char *pcur = buf;
+	int remainder = (int)buflen - 1;
+
+	// Walk backward(
+	for ( int i = g_SpewHistory.Tail(); i != g_SpewHistory.InvalidIndex(); i = g_SpewHistory.Previous( i ) )
+	{
+		const CUtlString &rec = g_SpewHistory[ i ];
+		int len = rec.Length();
+		int tocopy = MIN( len, remainder );
+
+		if ( tocopy <= 0 )
+			break;
+		
+		Q_memcpy( pcur, rec.String(), tocopy );
+		remainder -= tocopy;
+		pcur += tocopy;
+
+		if ( remainder <= 0 )
+			break;
+	}
+	*pcur = 0;
+}
+
+ConVar spew_consolelog_to_debugstring( "spew_consolelog_to_debugstring", "0", 0, "Send console log to PLAT_DebugString()" );
+
 SpewRetval_t Sys_SpewFunc( SpewType_t spewType, const char *pMsg )
 {
 	bool suppress = g_bInSpew;
 
 	g_bInSpew = true;
 
-	char temp[8192];
-	char *pFrom = (char *)pMsg;
-	char *pTo = temp;
-	char *pLimit = &temp[sizeof(temp) - 2]; // always space for 2 chars plus null (ie %%)
+	AddSpewRecord( pMsg );
 
-	while ( *pFrom && pTo < pLimit )
-	{
-		*pTo = *pFrom++;
-		if ( *pTo++ == '%' )
-			*pTo++ = '%';
-	}
-	*pTo = 0;
+	// Text output shows up on dedicated server profiles, both as consuming CPU
+	// time and causing IPC delays. Sending the messages to ETW will help us
+	// understand why, and save us time when server operators are triggering
+	// excessive spew. Having the output in traces is also generically useful
+	// for understanding slowdowns.
+	ETWMark1I( pMsg, spewType );
 
 	if ( !suppress )
 	{
@@ -663,6 +880,11 @@ SpewRetval_t Sys_SpewFunc( SpewType_t spewType, const char *pMsg )
 		// want its vgui console to show the spew, so pass it into the dedicated server.
 		if ( dedicated )
 			dedicated->Sys_Printf( (char*)pMsg );
+
+		if( spew_consolelog_to_debugstring.GetBool() )
+		{
+			Plat_DebugString( pMsg );
+		}
 
 		if ( g_bTextMode )
 		{
@@ -697,12 +919,12 @@ SpewRetval_t Sys_SpewFunc( SpewType_t spewType, const char *pMsg )
 				}
 				break;
 			}
-			Con_ColorPrintf( color, temp );
+			Con_ColorPrintf( color, "%s", pMsg );
 
 		}
 		else
 		{
-			g_Log.Printf( temp );
+			g_Log.Printf( "%s", pMsg );
 		}
 	}
 
@@ -710,7 +932,7 @@ SpewRetval_t Sys_SpewFunc( SpewType_t spewType, const char *pMsg )
 
 	if (spewType == SPEW_ERROR)
 	{
-		Sys_Error( temp );
+		Sys_Error( "%s", pMsg );
 		return SPEW_ABORT;
 	}
 	if (spewType == SPEW_ASSERT)
@@ -748,7 +970,6 @@ void *GameFactory( const char *pName, int *pReturnCode )
 
 #ifndef SWDS
 	// now ask the client dll
-#ifdef _WIN32
 	if (ClientDLL_GetFactory())
 	{
 		pRetVal = ClientDLL_GetFactory()( pName, pReturnCode );
@@ -763,7 +984,6 @@ void *GameFactory( const char *pName, int *pReturnCode )
 		if (pRetVal)
 			return pRetVal;
 	}
-#endif
 #endif	
 	// server dll factory access would go here when needed
 
@@ -807,10 +1027,12 @@ int Sys_InitGame( CreateInterfaceFn appSystemFactory, const char* pBaseDir, void
 	
 	// Assume failure
 	host_initialized = false;
-#ifdef _WIN32
+
+#ifdef PLATFORM_WINDOWS
 	// Grab main window pointer
 	pmainwindow = (HWND *)pwnd;
 #endif
+
 	// Remember that this is a dedicated server
 	s_bIsDedicated = bIsDedicated ? true : false;
 
@@ -822,14 +1044,12 @@ int Sys_InitGame( CreateInterfaceFn appSystemFactory, const char* pBaseDir, void
 	Q_FixSlashes( s_pBaseDir );
 	host_parms.basedir = s_pBaseDir;
 
-#ifdef _LINUX
+#ifndef _X360
 	if ( CommandLine()->FindParm ( "-pidfile" ) )
 	{	
-		FILE *pidFile = g_pFileSystem->Open( CommandLine()->ParmValue ( "-pidfile", "srcds.pid" ), "w+" );
+		FileHandle_t pidFile = g_pFileSystem->Open( CommandLine()->ParmValue ( "-pidfile", "srcds.pid" ), "w+" );
 		if ( pidFile )
 		{
-			char dir[MAX_PATH];
-			getcwd( dir, sizeof(dir) );
 			g_pFileSystem->FPrintf( pidFile, "%i\n", getpid() );
 			g_pFileSystem->Close(pidFile);
 		}
@@ -839,7 +1059,6 @@ int Sys_InitGame( CreateInterfaceFn appSystemFactory, const char* pBaseDir, void
 		}
 	}
 #endif
-
 
 	// Initialize clock
 	TRACEINIT( Sys_Init(), Sys_Shutdown() );
@@ -870,6 +1089,7 @@ int Sys_InitGame( CreateInterfaceFn appSystemFactory, const char* pBaseDir, void
 
 	MapReslistGenerator_BuildMapList();
 
+	BuildMinidumpComment( NULL, false );
 	return 1;
 }
 
@@ -893,216 +1113,6 @@ void Sys_ShutdownGame( void )
 	SpewOutputFunc( 0 );
 }
 
-
-//-----------------------------------------------------------------------------
-//
-// Backward compatibility
-//
-//-----------------------------------------------------------------------------
-#ifndef _XBOX
-class CServerGameDLLV3 : public IServerGameDLL
-{
-public:
-	CServerGameDLLV3( ServerGameDLLV3::IServerGameDLL *pServerGameDLL ) : 
-		m_pServerGameDLL( pServerGameDLL ) 
-	{
-		m_bInittedSendProxies = false;
-	}
-
-	virtual bool DLLInit( CreateInterfaceFn engineFactory, CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory, CGlobalVars *pGlobals )
-	{
-		return m_pServerGameDLL->DLLInit( engineFactory, physicsFactory, fileSystemFactory, pGlobals );
-	}
-
-	virtual bool GameInit( void )
-	{
-		return m_pServerGameDLL->GameInit( );
-	}
-
-	virtual bool LevelInit( char const *pMapName, char const *pMapEntities, char const *pOldLevel, char const *pLandmarkName, bool loadGame, bool background )
-	{
-		return m_pServerGameDLL->LevelInit( pMapName, pMapEntities, pOldLevel, pLandmarkName, loadGame, background );
-	}
-
-	virtual void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )
-	{
-		m_pServerGameDLL->ServerActivate( pEdictList, edictCount, clientMax );
-	}
-
-	virtual void GameFrame( bool simulating )
-	{
-		m_pServerGameDLL->GameFrame( simulating );
-	}
-
-	virtual void PreClientUpdate( bool simulating )
-	{
-		m_pServerGameDLL->PreClientUpdate( simulating );
-	}
-
-	virtual void LevelShutdown( void )
-	{
-		m_pServerGameDLL->LevelShutdown( );
-	}
-
-	virtual void GameShutdown( void )
-	{
-		m_pServerGameDLL->GameShutdown( );
-	}
-
-	virtual void DLLShutdown( void )
-	{
-		m_pServerGameDLL->DLLShutdown( );
-	}
-
-	virtual float GetTickInterval( void ) const
-	{
-		return m_pServerGameDLL->GetTickInterval( );
-	}
-
-	virtual ServerClass* GetAllServerClasses( void )
-	{
-		return m_pServerGameDLL->GetAllServerClasses( );
-	}
-
-	virtual const char *GetGameDescription( void )      
-	{
-		return m_pServerGameDLL->GetGameDescription( );
-	}
-
-	virtual void CreateNetworkStringTables( void )
-	{
-		return m_pServerGameDLL->CreateNetworkStringTables( );
-	}
-
-	virtual CSaveRestoreData *SaveInit( int size )
-	{
-		return m_pServerGameDLL->SaveInit( size );
-	}
-
-	virtual void SaveWriteFields( CSaveRestoreData *s, const char *c, void *v, datamap_t *d, typedescription_t *t, int i )
-	{
-		return m_pServerGameDLL->SaveWriteFields( s, c, v, d, t, i );
-	}
-
-	virtual void SaveReadFields( CSaveRestoreData *s, const char *c, void *v, datamap_t *d, typedescription_t *t, int i )
-	{
-		return m_pServerGameDLL->SaveReadFields( s, c, v, d, t, i );
-	}
-
-	virtual void SaveGlobalState( CSaveRestoreData *s )
-	{
-		m_pServerGameDLL->SaveGlobalState( s );
-	}
-
-	virtual void RestoreGlobalState( CSaveRestoreData *s )
-	{
-		m_pServerGameDLL->RestoreGlobalState( s );
-	}
-
-	virtual void PreSave( CSaveRestoreData *s )
-	{
-		m_pServerGameDLL->PreSave( s );
-	}
-
-	virtual void Save( CSaveRestoreData *s )
-	{
-		m_pServerGameDLL->Save( s );
-	}
-
-	virtual void GetSaveComment( char *comment, int maxlength, float flMinutes, float flSeconds, bool bNoTime = false )
-	{
-		m_pServerGameDLL->GetSaveComment( comment, maxlength );
-	}
-
-	virtual void PreSaveGameLoaded( char const *pSaveName, bool bCurrentlyInGame )
-	{
-	}
-
-	virtual bool ShouldHideServer( void )
-	{
-		return false;
-	}
-
-	virtual void			InvalidateMdlCache()
-	{
-	}
-
-	virtual void GetSaveCommentEx( char *comment, int maxlength, float flMinutes, float flSeconds )
-	{
-		m_pServerGameDLL->GetSaveComment( comment, maxlength );
-	}
-
-	virtual void WriteSaveHeaders( CSaveRestoreData *s )
-	{
-		m_pServerGameDLL->WriteSaveHeaders( s );
-	}
-
-	virtual void ReadRestoreHeaders( CSaveRestoreData *s )
-	{
-		m_pServerGameDLL->ReadRestoreHeaders( s );
-	}
-
-	virtual void Restore( CSaveRestoreData *s, bool b )
-	{
-		m_pServerGameDLL->Restore( s, b );
-	}
-
-	virtual bool IsRestoring()
-	{
-		return m_pServerGameDLL->IsRestoring( );
-	}
-
-	virtual int CreateEntityTransitionList( CSaveRestoreData *s, int i )
-	{
-		return m_pServerGameDLL->CreateEntityTransitionList( s, i );
-	}
-
-	virtual void BuildAdjacentMapList( void )
-	{
-		m_pServerGameDLL->BuildAdjacentMapList( );
-	}
-
-	virtual bool GetUserMessageInfo( int msg_type, char *name, int maxnamelength, int& size )
-	{
-		return m_pServerGameDLL->GetUserMessageInfo( msg_type, name, maxnamelength, size );
-	}
-
-	virtual CStandardSendProxies *GetStandardSendProxies()
-	{
-		if ( !m_bInittedSendProxies )
-		{
-			memset( &m_SendProxies, 0, sizeof( m_SendProxies ) );
-			
-			// Copy the version 1 info into the structure we export from here.
-			CStandardSendProxiesV1 &out = m_SendProxies;
-			const CStandardSendProxiesV1 &in = *m_pServerGameDLL->GetStandardSendProxies();
-			out = in;
-			
-			m_bInittedSendProxies = true;
-		}
-		return &m_SendProxies;
-	}
-
-	virtual void PostInit()
-	{
-	}
-
-	virtual void Think( bool finalTick )
-	{
-	}
-
-	virtual void OnQueryCvarValueFinished( QueryCvarCookie_t iCookie, edict_t *pPlayerEntity, EQueryCvarValueStatus eStatus, const char *pCvarName, const char *pCvarValue )
-	{
-	}
-
-private:
-	ServerGameDLLV3::IServerGameDLL *m_pServerGameDLL;
-	bool m_bInittedSendProxies;
-	CStandardSendProxies m_SendProxies;
-};
-#endif
-
-
 //
 // Try to load a single DLL.  If it conforms to spec, keep it loaded, and add relevant
 // info to the DLL directory.  If not, ignore it entirely.
@@ -1112,10 +1122,17 @@ CreateInterfaceFn g_ServerFactory;
 
 
 #pragma optimize( "g", off )
-static bool LoadThisDll( char *szDllFilename )
+static bool LoadThisDll( char *szDllFilename, bool bIsServerOnly )
 {
 	CSysModule *pDLL = NULL;
 
+	// check signature, don't let users with modified binaries connect to secure servers, they will get VAC banned
+	if ( !Host_AllowLoadModule( szDllFilename, "GAMEBIN", true, bIsServerOnly ) )
+	{
+		// not supposed to load this but we will anyway
+		Host_DisallowSecureServers();
+		Host_AllowLoadModule( szDllFilename, "GAMEBIN", true, bIsServerOnly );
+	}
 	// Load DLL, ignore if cannot
 	// ensures that the game.dll is running under Steam
 	// this will have to be undone when we want mods to be able to run
@@ -1126,42 +1143,29 @@ static bool LoadThisDll( char *szDllFilename )
 	}
 
 	// Load interface factory and any interfaces exported by the game .dll
+	g_iServerGameDLLVersion = 0;
 	g_ServerFactory = Sys_GetFactory( pDLL );
 	if ( g_ServerFactory )
 	{
-		g_bServerGameDLLGreaterThanV5 = true;
-		g_bServerGameDLLGreaterThanV4 = true;			
-		serverGameDLL = (IServerGameDLL*)g_ServerFactory(INTERFACEVERSION_SERVERGAMEDLL, NULL);
-		if ( !serverGameDLL )
-		{
-#ifdef REL_TO_STAGING_MERGE_TODO
-			// Need to merge eiface for this.
-			g_bServerGameDLLGreaterThanV5 = false;
-			serverGameDLL = (IServerGameDLL*)g_ServerFactory(INTERFACEVERSION_SERVERGAMEDLL_VERSION_5, NULL);
-#endif			
-			if ( !serverGameDLL )
-			{
-				g_bServerGameDLLGreaterThanV4 = false;
-				serverGameDLL = (IServerGameDLL*)g_ServerFactory(INTERFACEVERSION_SERVERGAMEDLL_VERSION_4, NULL);
+		// Figure out latest version we understand
+		g_iServerGameDLLVersion = INTERFACEVERSION_SERVERGAMEDLL_INT;
 
-				if ( !serverGameDLL )
-				{
-#ifndef _XBOX
-					ServerGameDLLV3::IServerGameDLL* pServerGameDLLV3 = (ServerGameDLLV3::IServerGameDLL*)g_ServerFactory( SERVERGAMEDLL_INTERFACEVERSION_3, NULL );
-					if ( !pServerGameDLLV3 )
-					{
-						ConMsg( "Could not get IServerGameDLL interface from library %s", szDllFilename );
-						goto IgnoreThisDLL;
-					}
-					serverGameDLL = new CServerGameDLLV3( pServerGameDLLV3 );				
-#else
-					Con_Printf( "Could not get IServerGameDLL interface from library %s", szDllFilename );
-					goto IgnoreThisDLL;
-#endif
-				}
+		// Scan for most recent version the game DLL understands.
+		for (;;)
+		{
+			char archVersion[64];
+			V_sprintf_safe( archVersion, "ServerGameDLL%03d", g_iServerGameDLLVersion );
+			serverGameDLL = (IServerGameDLL*)g_ServerFactory(archVersion, NULL);
+			if ( serverGameDLL )
+				break;
+			--g_iServerGameDLLVersion;
+			if ( g_iServerGameDLLVersion < 4 )
+			{
+				g_iServerGameDLLVersion = 0;
+				Msg( "Could not get IServerGameDLL interface from library %s", szDllFilename );
+				goto IgnoreThisDLL;
 			}
 		}
-
 
 		serverGameEnts = (IServerGameEnts*)g_ServerFactory(INTERFACEVERSION_SERVERGAMEENTS, NULL);
 		if ( !serverGameEnts )
@@ -1196,6 +1200,9 @@ static bool LoadThisDll( char *szDllFilename )
 			ConMsg( "Could not get IHLTVDirector interface from library %s", szDllFilename );
 			// this is not a critical 
 		}
+
+		serverGameTags = (IServerGameTags*)g_ServerFactory(INTERFACEVERSION_SERVERGAMETAGS, NULL);
+		// Possible that this is NULL - optional interface
 	}
 	else
 	{
@@ -1221,7 +1228,7 @@ IgnoreThisDLL:
 //
 // Scan DLL directory, load all DLLs that conform to spec.
 //
-void LoadEntityDLLs( const char *szBaseDir )
+void LoadEntityDLLs( const char *szBaseDir, bool bIsServerOnly )
 {
 	memset( &gmodinfo, 0, sizeof( modinfo_t ) );
 	gmodinfo.version = 1;
@@ -1233,6 +1240,7 @@ void LoadEntityDLLs( const char *szBaseDir )
 
 	// Listing file for this game.
 	KeyValues *modinfo = new KeyValues("modinfo");
+	MEM_ALLOC_CREDIT();
 	if (modinfo->LoadFromFile(g_pFileSystem, "gameinfo.txt"))
 	{
 		Q_strncpy( gmodinfo.szInfo, modinfo->GetString("url_info"), sizeof( gmodinfo.szInfo ) );
@@ -1246,21 +1254,11 @@ void LoadEntityDLLs( const char *szBaseDir )
 	modinfo->deleteThis();
 	
 	// Load the game .dll
-	char szDllFilename[ MAX_PATH ];
-#ifdef _WIN32
-	// !!! THIS METHOD STINKS, JUST AUTO-ADD SUBDIRS TO THE GAMEBIN PATH
-	Q_snprintf( szDllFilename, sizeof( szDllFilename ), "\\server.dll" );
-#elif _LINUX
-	Q_snprintf( szDllFilename, sizeof( szDllFilename ), "server_i486.so" );
-#else
-#error "define server.dll type"
-#endif
-
-	LoadThisDll( szDllFilename );
+	LoadThisDll( "server" DLL_EXT_STRING, bIsServerOnly );
 
 	if ( serverGameDLL )
 	{
-		Msg("Game.dll loaded for \"%s\"\n", (char *)serverGameDLL->GetGameDescription());
+		Msg("server%s loaded for \"%s\"\n", DLL_EXT_STRING, (char *)serverGameDLL->GetGameDescription());
 	}
 }
 
@@ -1268,7 +1266,7 @@ void LoadEntityDLLs( const char *szBaseDir )
 // Purpose: Retrieves a string value from the registry
 //-----------------------------------------------------------------------------
 #if defined(_WIN32)
-void Sys_GetRegKeyValueUnderRoot( HKEY rootKey, const char *pszSubKey, const char *pszElement, char *pszReturnString, int nReturnLength, const char *pszDefaultValue )
+void Sys_GetRegKeyValueUnderRoot( HKEY rootKey, const char *pszSubKey, const char *pszElement, OUT_Z_CAP(nReturnLength) char *pszReturnString, int nReturnLength, const char *pszDefaultValue )
 {
 	LONG lResult;           // Registry function result code
 	HKEY hKey;              // Handle of opened/created key
@@ -1277,8 +1275,14 @@ void Sys_GetRegKeyValueUnderRoot( HKEY rootKey, const char *pszSubKey, const cha
 	DWORD dwType;           // Type of key
 	DWORD dwSize;           // Size of element data
 
-	// Assume the worst
-	Q_strncpy(pszReturnString, pszDefaultValue, nReturnLength );
+	// Copying a string to itself is both unnecessary and illegal.
+	// Address sanitizer prohibits this so we have to fix this in order
+	// to continue testing with it.
+	if ( pszReturnString != pszDefaultValue )
+	{
+		// Assume the worst
+		Q_strncpy(pszReturnString, pszDefaultValue, nReturnLength );
+	}
 
 	// Create it if it doesn't exist.  (Create opens the key otherwise)
 	lResult = VCRHook_RegCreateKeyEx(
@@ -1450,24 +1454,36 @@ void Sys_SetRegKeyValueUnderRoot( HKEY rootKey, const char *pszSubKey, const cha
 }
 #endif
 
-void Sys_GetRegKeyValue( char *pszSubKey, char *pszElement,	char *pszReturnString, int nReturnLength, char *pszDefaultValue )
+void Sys_GetRegKeyValue( const char *pszSubKey, const char *pszElement, OUT_Z_CAP(nReturnLength) char *pszReturnString, int nReturnLength, const char *pszDefaultValue )
 {
 #if defined(_WIN32)
 	Sys_GetRegKeyValueUnderRoot( HKEY_CURRENT_USER, pszSubKey, pszElement, pszReturnString, nReturnLength, pszDefaultValue );
+#else
+	//hushed Assert( !"Impl me" );
+	// Copying a string to itself is both unnecessary and illegal.
+	if ( pszReturnString != pszDefaultValue )
+	{
+		Q_strncpy( pszReturnString, pszDefaultValue, nReturnLength );
+	}
 #endif
 }
 
-void Sys_GetRegKeyValueInt( char *pszSubKey, char *pszElement, long *plReturnValue, long lDefaultValue)
+void Sys_GetRegKeyValueInt( const char *pszSubKey, const char *pszElement, long *plReturnValue, long lDefaultValue)
 {
 #if defined(_WIN32)
 	Sys_GetRegKeyValueUnderRootInt( HKEY_CURRENT_USER, pszSubKey, pszElement, plReturnValue, lDefaultValue );
+#else
+	//hushed Assert( !"Impl me" );
+	*plReturnValue = lDefaultValue;
 #endif
 }
 
-void Sys_SetRegKeyValue( char *pszSubKey, char *pszElement,	const char *pszValue )
+void Sys_SetRegKeyValue( const char *pszSubKey, const char *pszElement,	const char *pszValue )
 {
 #if defined(_WIN32)
 	Sys_SetRegKeyValueUnderRoot( HKEY_CURRENT_USER, pszSubKey, pszElement, pszValue );
+#else
+	//hushed Assert( !"Impl me" );
 #endif
 }
 
@@ -1521,7 +1537,7 @@ void Sys_NoCrashDialog()
 
 void Sys_TestSendKey( const char *pKey )
 {
-#if defined(_WIN32) && !defined(_XBOX)
+#if defined(_WIN32) && !defined(USE_SDL) && !defined(_XBOX)
 	int key = pKey[0];
 	if ( pKey[0] == '\\' && pKey[1] == 'r' )
 	{
@@ -1565,10 +1581,14 @@ CON_COMMAND( star_memory, "Dump memory stats" )
 {
 	// get a current stat of available memory
 	// 32 MB is reserved and fixed by OS, so not reporting to allow memory loggers sync
-#ifdef _LINUX
+#ifdef LINUX
 	struct mallinfo memstats = mallinfo( );
 	Msg( "sbrk size: %.2f MB, Used: %.2f MB, #mallocs = %d\n",
 		 memstats.arena / ( 1024.0 * 1024.0), memstats.uordblks / ( 1024.0 * 1024.0 ), memstats.hblks );
+#elif OSX
+	struct mstats memstats = mstats( );
+	Msg( "Available %.2f MB, Used: %.2f MB, #mallocs = %lu\n",
+		 memstats.bytes_free / ( 1024.0 * 1024.0), memstats.bytes_used / ( 1024.0 * 1024.0 ), memstats.chunks_used );
 #else
 	MEMORYSTATUS stat;
 	GlobalMemoryStatus( &stat );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,9 +20,10 @@
 #include "vgui_controls/InputDialog.h"
 #include "vgui_controls/TextEntry.h"
 #include "vgui_controls/FileOpenDialog.h"
+#include "vgui_controls/perforcefilelistframe.h"
 #include "vgui/MouseCode.h"
 #include "vgui/IInput.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier2/fileutils.h"
 
 
@@ -41,7 +42,7 @@ class CDmeCombinationControlsPanel;
 //-----------------------------------------------------------------------------
 // Import combination rules from this operator
 //-----------------------------------------------------------------------------
-static void ImportCombinationControls( CDmeCombinationOperator *pDestComboOp, CDmeCombinationOperator *pSrcComboOp )
+static void ImportCombinationControls( CDmeCombinationOperator *pDestComboOp, CDmeCombinationOperator *pSrcComboOp, COperationFileListFrame *pStatusFrame )
 {
 	pDestComboOp->RemoveAllControls();
 
@@ -63,7 +64,15 @@ static void ImportCombinationControls( CDmeCombinationOperator *pDestComboOp, CD
 			nMatchCount += pFoundMatch[j];
 		}
 
-		//bool bPartialMatch = ( nMatchCount != nRawControls );
+		// No match? Don't import
+		if ( nMatchCount == 0 )
+		{
+			pStatusFrame->AddOperation( pControlName, "No raw controls found!" ); 
+			continue;
+		}
+
+		bool bPartialMatch = ( nMatchCount != nRawControls );
+		pStatusFrame->AddOperation( pControlName, bPartialMatch ? "Partial rule match" : "Successful" ); 
 
 		// Found a match! Let's create the control and potentially raw control
 		bool bIsStereo = pSrcComboOp->IsStereoControl( i );
@@ -88,7 +97,7 @@ static void ImportCombinationControls( CDmeCombinationOperator *pDestComboOp, CD
 //-----------------------------------------------------------------------------
 // Import dominance rules from this operator
 //-----------------------------------------------------------------------------
-static void ImportDominationRules( CDmeCombinationOperator *pDestComboOp, CDmeCombinationOperator *pSrcComboOp )
+static void ImportDominationRules( CDmeCombinationOperator *pDestComboOp, CDmeCombinationOperator *pSrcComboOp, COperationFileListFrame *pStatusFrame )
 {
 	pDestComboOp->RemoveAllDominationRules();
 
@@ -107,6 +116,7 @@ static void ImportDominationRules( CDmeCombinationOperator *pDestComboOp, CDmeCo
 			if ( !pDestComboOp->HasRawControl( pDominatorName ) )
 			{
 				bMismatch = true;
+				pStatusFrame->AddOperation( pDominatorName, "Missing raw control for dominance rule" ); 
 				break;
 			}
 		}
@@ -118,6 +128,7 @@ static void ImportDominationRules( CDmeCombinationOperator *pDestComboOp, CDmeCo
 			if ( !pDestComboOp->HasRawControl( pSuppressedName ) )
 			{
 				bMismatch = true;
+				pStatusFrame->AddOperation( pSuppressedName, "Missing raw control for dominance rule" ); 
 				break;
 			}
 		}
@@ -158,13 +169,20 @@ static bool ImportCombinationData( vgui::Panel* pParent, CDmeCombinationOperator
 
 	if ( pComboOp )
 	{
+		// Actually rename the files, build an error dialog if necessary
+		COperationFileListFrame *pStatusFrame = new COperationFileListFrame( pParent, 
+			"Import Status", "Status", false, true );
+		pStatusFrame->SetOperationColumnHeaderText( "Control Name" );
+
 		CUndoScopeGuard sg( "Import Combination Rules" );
 		if ( kv->FindKey( "ImportControls" ) )
 		{
-			ImportCombinationControls( pDestComboOp, pComboOp );
+			ImportCombinationControls( pDestComboOp, pComboOp, pStatusFrame );
 		}
-		ImportDominationRules( pDestComboOp, pComboOp );
+		ImportDominationRules( pDestComboOp, pComboOp, pStatusFrame );
 		sg.Release();
+
+		pStatusFrame->DoModal();
 	}
 
 	CDisableUndoScopeGuard sg;

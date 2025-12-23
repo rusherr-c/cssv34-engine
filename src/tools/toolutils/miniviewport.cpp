@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,15 +8,15 @@
 #include "tier1/utlstring.h"
 #include "vgui/ISurface.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
-#include "materialsystem/IMaterialSystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "materialsystem/MaterialSystemUtil.h"
-#include "materialsystem/IMesh.h"
-#include "materialsystem/IMaterial.h"
+#include "materialsystem/imesh.h"
+#include "materialsystem/imaterial.h"
 #include "materialsystem/itexture.h"
 #include "tier1/KeyValues.h"
 #include "toolframework/ienginetool.h"
 #include "toolutils/enginetools_int.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "view_shared.h"
 #include "texture_group_names.h"
 #include "vgui_controls/PropertySheet.h"
@@ -273,7 +273,7 @@ void CMiniViewportEngineRenderArea::PaintOverlayText( )
 	int ly = ch - 10 - nTextHeight;
 	g_pMatSystemSurface->DrawColoredTextRect( m_OverlayTextFont, 
 		lx, ly, cw - lx, ch - ly,
-		255, 255, 255, 255, m_OverlayText.GetForModify() );
+		255, 255, 255, 255, "%s", m_OverlayText.Get() );
 }
 
 

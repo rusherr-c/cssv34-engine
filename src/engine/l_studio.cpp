@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // models are the only shared resource between a client and server running
 // on the same machine.
@@ -38,11 +38,13 @@
 #include "vstdlib/random.h"
 #include "datacache/idatacache.h"
 #include "materialsystem/materialsystem_config.h"
+#include "materialsystem/itexture.h"
 #include "IHammer.h"
 #if defined( _WIN32 ) && !defined( _X360 )
 #include <xmmintrin.h>
 #endif
 #include "staticpropmgr.h"
+#include "materialsystem/hardwaretexels.h"
 #include "materialsystem/hardwareverts.h"
 #include "tier1/callqueue.h"
 #include "filesystem/IQueuedLoader.h"
@@ -50,6 +52,7 @@
 #include "tier1/UtlSortVector.h"
 #include "tier1/lzmaDecoder.h"
 #include "ipooledvballocator.h"
+#include "shaderapi/ishaderapi.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -67,6 +70,10 @@ void SetRootLOD_f( IConVar *var, const char *pOldString, float flOldValue );
 void r_lod_f( IConVar *var, const char *pOldValue, float flOldValue );
 void FlushLOD_f();
 
+class CColorMeshData;
+static void CreateLightmapsFromData(CColorMeshData* _colorMeshData);
+
+
 //-----------------------------------------------------------------------------
 // Global variables
 //-----------------------------------------------------------------------------
@@ -79,12 +86,12 @@ ConVar r_lod( "r_lod", "-1", 0, "", r_lod_f );
 static ConVar r_entity( "r_entity", "-1", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY );
 static ConVar r_lightaverage( "r_lightaverage", "1", 0, "Activates/deactivate light averaging" );
 static ConVar r_lightinterp( "r_lightinterp", "5", FCVAR_CHEAT, "Controls the speed of light interpolation, 0 turns off interpolation" );
-static ConVar r_eyeglintlodpixels( "r_eyeglintlodpixels", "20.0", 0, "The number of pixels wide an eyeball has to be before rendering an eyeglint.  Is a floating point value." );
-ConVar r_rootlod( "r_rootlod", "0", 0, "Root LOD", true, 0, true, MAX_NUM_LODS-1, SetRootLOD_f );
+static ConVar r_eyeglintlodpixels( "r_eyeglintlodpixels", "20.0", FCVAR_CHEAT, "The number of pixels wide an eyeball has to be before rendering an eyeglint.  Is a floating point value." );
+ConVar r_rootlod( "r_rootlod", "0", FCVAR_MATERIAL_SYSTEM_THREAD | FCVAR_ARCHIVE, "Root LOD", true, 0, true, MAX_NUM_LODS-1, SetRootLOD_f );
 static ConVar r_decalstaticprops( "r_decalstaticprops", "1", 0, "Decal static props test" );
 static ConCommand r_flushlod( "r_flushlod", FlushLOD_f, "Flush and reload LODs." );
 ConVar r_debugrandomstaticlighting( "r_debugrandomstaticlighting", "0", FCVAR_CHEAT, "Set to 1 to randomize static lighting for debugging.  Must restart for change to take affect." );
-ConVar r_proplightingfromdisk( "r_proplightingfromdisk", "1", 0, "0=Off, 1=On, 2=Show Errors" );
+ConVar r_proplightingfromdisk( "r_proplightingfromdisk", "1", FCVAR_CHEAT, "0=Off, 1=On, 2=Show Errors" );
 static ConVar r_itemblinkmax( "r_itemblinkmax", ".3", FCVAR_CHEAT );
 static ConVar r_itemblinkrate( "r_itemblinkrate", "4.5", FCVAR_CHEAT );
 static ConVar r_proplightingpooling( "r_proplightingpooling", "-1.0", FCVAR_CHEAT, "0 - off, 1 - static prop color meshes are allocated from a single shared vertex buffer (on hardware that supports stream offset)" );
@@ -268,7 +275,7 @@ bool WorldLightToMaterialLight( dworldlight_t* pWorldLight, LightDesc_t& light )
 			}
 		}
 	}
-	light.m_Flags = 0;
+	light.m_Flags = LIGHTTYPE_OPTIMIZATIONFLAGS_DERIVED_VALUES_CALCED;
 	if( light.m_Attenuation0 != 0.0f )
 	{
 		light.m_Flags |= LIGHTTYPE_OPTIMIZATIONFLAGS_HAS_ATTENUATION0;
@@ -645,8 +652,11 @@ class CColorMeshData
 public:
 	void DestroyResource()
 	{
-		g_pFileSystem->AsyncFinish( m_hAsyncControl, true );
-		g_pFileSystem->AsyncRelease( m_hAsyncControl );
+		g_pFileSystem->AsyncFinish( m_hAsyncControlVertex, true );
+		g_pFileSystem->AsyncRelease( m_hAsyncControlVertex );
+
+		g_pFileSystem->AsyncFinish( m_hAsyncControlTexel, true );
+		g_pFileSystem->AsyncRelease( m_hAsyncControlTexel );
 
 		// release the array of meshes
 		CMatRenderContextPtr pRenderContext( materials );
@@ -663,7 +673,21 @@ public:
 				// Free this standalone mesh
 				pRenderContext->DestroyStaticMesh( m_pMeshInfos[i].m_pMesh );
 			}
+
+			if (m_pMeshInfos[i].m_pLightmap)
+			{
+				m_pMeshInfos[i].m_pLightmap->Release();
+				m_pMeshInfos[i].m_pLightmap = NULL;
+			}
+
+			if (m_pMeshInfos[i].m_pLightmapData)
+			{
+				delete [] m_pMeshInfos[i].m_pLightmapData->m_pTexelData;
+				delete m_pMeshInfos[i].m_pLightmapData;
+			}
 		}
+
+
 		delete [] m_pMeshInfos;
 		delete [] m_ppTargets;
 		delete this;
@@ -676,6 +700,9 @@ public:
 
 	unsigned int Size()
 	{ 
+		// TODO: This is wrong because we don't currently account for the size of the textures we create. 
+		// However, that data isn't available until way after this query is made, so just live with 
+		// this for now I guess?
 		return m_nTotalSize; 
 	}
 
@@ -683,19 +710,22 @@ public:
 	{
 		CColorMeshData *data = new CColorMeshData;
 
+		data->m_bHasInvalidVB = false;
 		data->m_bColorMeshValid = false;
+		data->m_bColorTextureValid = false;
+		data->m_bColorTextureCreated = false;
 		data->m_bNeedsRetry = false;
-		data->m_hAsyncControl = NULL;
+		data->m_hAsyncControlVertex = NULL;
+		data->m_hAsyncControlTexel = NULL;
 		data->m_fnHandle = params.m_fnHandle;
-
-		data->m_nTotalSize = params.m_nMeshes*sizeof( IMesh* ) + params.m_nTotalVertexes*4;
+		
+		data->m_nTotalSize = params.m_nMeshes * sizeof( IMesh* ) + params.m_nTotalVertexes * 4;
 		data->m_nMeshes = params.m_nMeshes;
 		data->m_pMeshInfos = new ColorMeshInfo_t[params.m_nMeshes];
 		Q_memset( data->m_pMeshInfos, 0, params.m_nMeshes*sizeof( ColorMeshInfo_t ) );
 		data->m_ppTargets = new unsigned char *[params.m_nMeshes];
 
 		CMeshBuilder meshBuilder;
-		MaterialLock_t hLock = materials->Lock();
 		CMatRenderContextPtr pRenderContext( materials );
 	
 		for ( int i=0; i<params.m_nMeshes; i++ )
@@ -706,6 +736,8 @@ public:
 			data->m_pMeshInfos[i].m_pPooledVBAllocator	= params.m_pPooledVBAllocator;
 			data->m_pMeshInfos[i].m_nVertOffsetInBytes	= 0;
 			data->m_pMeshInfos[i].m_nNumVerts			= params.m_nVertexes[i];
+			data->m_pMeshInfos[i].m_pLightmapData		= NULL;
+			data->m_pMeshInfos[i].m_pLightmap		= NULL;
 
 			if ( params.m_pPooledVBAllocator != NULL )
 			{
@@ -734,12 +766,6 @@ public:
 				// Allocate a standalone VB per color mesh
 				data->m_pMeshInfos[i].m_pMesh = pRenderContext->CreateStaticMesh( vertexFormat, TEXTURE_GROUP_STATIC_VERTEX_BUFFER_COLOR );
 
-				// build out the underlying vertex buffer
-				// lock now in same thread as draw, otherwise d3drip
-				meshBuilder.Begin( data->m_pMeshInfos[i].m_pMesh, MATERIAL_HETEROGENOUS, params.m_nVertexes[i], 0 );
-				data->m_ppTargets[i] = meshBuilder.Specular();
-				meshBuilder.End();
-
 				if ( g_VBAllocTracker )
 					g_VBAllocTracker->TrackMeshAllocations( NULL );
 			}
@@ -748,27 +774,31 @@ public:
 			if ( !data->m_pMeshInfos[i].m_pMesh )
 			{
 				data->DestroyResource();
-				materials->Unlock( hLock );
-				return NULL;
+				data = NULL;
+				break;
 			}
 		}
-		materials->Unlock( hLock );
 		return data;
 	}
 
 	static unsigned int EstimatedSize( const colormeshparams_t &params )
 	{
 		// each vertex is a 4 byte color
-		return params.m_nMeshes*sizeof( IMesh* ) + params.m_nTotalVertexes*4;
+		return params.m_nMeshes * sizeof( IMesh* ) + params.m_nTotalVertexes * 4;
 	}
 
 	int					m_nMeshes;
 	ColorMeshInfo_t		*m_pMeshInfos;
 	unsigned char		**m_ppTargets;
 	unsigned int		m_nTotalSize;
-	FSAsyncControl_t	m_hAsyncControl;
+	FSAsyncControl_t	m_hAsyncControlVertex;
+	FSAsyncControl_t	m_hAsyncControlTexel;
+	unsigned int		m_bHasInvalidVB : 1;
 	unsigned int		m_bColorMeshValid : 1;
+	unsigned int		m_bColorTextureValid : 1;		// Whether the texture data is valid, but not necessarily created
+	unsigned int		m_bColorTextureCreated : 1;	// Whether the texture data has actually been created.
 	unsigned int		m_bNeedsRetry : 1;
+
 	FileNameHandle_t	m_fnHandle;
 };
 
@@ -807,6 +837,10 @@ public:
 	// radius of the decal to create.
 	virtual void AddDecal( ModelInstanceHandle_t handle, Ray_t const& ray, 
 		const Vector& decalUp, int decalIndex, int body, bool noPokethru = false, int maxLODToDecal = ADDDECAL_TO_ALL_LODS );
+	virtual void AddColoredDecal( ModelInstanceHandle_t handle, Ray_t const& ray, 
+		const Vector& decalUp, int decalIndex, int body, Color cColor, bool noPokethru = false, int maxLODToDecal = ADDDECAL_TO_ALL_LODS );
+	
+	virtual void GetMaterialOverride( IMaterial** ppOutForcedMaterial, OverrideType_t* pOutOverrideType );
 
 	// Removes all the decals on a model instance
 	virtual void RemoveAllDecals( ModelInstanceHandle_t handle );
@@ -838,7 +872,7 @@ public:
 	virtual void SetupLighting( const Vector &vecCenter );
 	virtual void SuppressEngineLighting( bool bSuppress );
 
-	inline vertexFileHeader_t *CacheVertexData() { return g_pMDLCache->GetVertexData( (MDLHandle_t)m_pStudioHdr->virtualModel ); }
+	inline vertexFileHeader_t *CacheVertexData() { return g_pMDLCache->GetVertexData( (MDLHandle_t)(int)m_pStudioHdr->virtualModel&0xffff ); }
 
 	bool Init();
 	void Shutdown();
@@ -851,9 +885,14 @@ public:
 		CColorMeshData		*m_pColorMeshData;
 		int					m_nMeshes;
 		unsigned int		m_nRootLOD;
-		char				m_szFilename[MAX_PATH];
+		char				m_szFilenameVertex[MAX_PATH];
+		char				m_szFilenameTexel[MAX_PATH];
 	};
+
+
 	void StaticPropColorMeshCallback( void *pContext, const void *pData, int numReadBytes, FSAsyncStatus_t asyncStatus );
+	void StaticPropColorTexelCallback(void *pContext, const void *pData, int numReadBytes, FSAsyncStatus_t asyncStatus);
+
 
 	// 360 holds onto static prop color meshes during same map transitions
 	void PurgeCachedStaticPropColorData();
@@ -946,6 +985,9 @@ private:
 	void ComputeModelVertexLighting( IHandleEntity *pProp, 
 		mstudiomodel_t *pModel, OptimizedModel::ModelLODHeader_t *pVtxLOD,
 		matrix3x4_t& matrix, Vector4D *pTempMem, color24 *pLighting );
+
+	// Internal Decal
+	void AddDecalInternal( ModelInstanceHandle_t handle, Ray_t const& ray, const Vector& decalUp, int decalIndex, int body, bool bUseColor, Color cColor, bool noPokeThru, int maxLODToDecal);
 
 	// Model instance data
 	CUtlLinkedList< ModelInstance_t, ModelInstanceHandle_t > m_ModelInstances; 
@@ -1068,6 +1110,7 @@ bool CModelRender::Init()
 	{
 		g_pQueuedLoader->InstallLoader( RESOURCEPRELOAD_STATICPROPLIGHTING, &s_ResourcePreloadPropLighting );
 	}
+
 	return true;
 }
 
@@ -1125,7 +1168,7 @@ void CModelRender::SnapCurrentLightingState( ModelInstance_t &inst, LightingStat
 }
 
 
-#define AMBIENT_MAX 8.0
+#define AMBIENT_MAX 8.0f
 
 //-----------------------------------------------------------------------------
 // Time average the ambient term
@@ -1133,7 +1176,7 @@ void CModelRender::SnapCurrentLightingState( ModelInstance_t &inst, LightingStat
 void CModelRender::TimeAverageAmbientLight( LightingState_t &actualLightingState, 
 										   ModelInstance_t &inst, float flAttenFactor, LightingState_t *pLightingState, const Vector *pLightingOrigin )
 {
-	flAttenFactor = clamp( flAttenFactor, 0, 1 );   // don't need this but alex is a coward
+	flAttenFactor = clamp( flAttenFactor, 0.f, 1.f );   // don't need this but alex is a coward
 	Vector vecDelta;
 	for ( int i = 0; i < 6; ++i )
 	{
@@ -1168,9 +1211,9 @@ void CModelRender::TimeAverageAmbientLight( LightingState_t &actualLightingState
 			Assert( inst.m_CurrentLightingState.r_boxcolor[i][nComp] <= AMBIENT_MAX );
 		}
 #endif
-		inst.m_CurrentLightingState.r_boxcolor[i].x = clamp( inst.m_CurrentLightingState.r_boxcolor[i].x, 0, AMBIENT_MAX );
-		inst.m_CurrentLightingState.r_boxcolor[i].y = clamp( inst.m_CurrentLightingState.r_boxcolor[i].y, 0, AMBIENT_MAX );
-		inst.m_CurrentLightingState.r_boxcolor[i].z = clamp( inst.m_CurrentLightingState.r_boxcolor[i].z, 0, AMBIENT_MAX );
+		inst.m_CurrentLightingState.r_boxcolor[i].x = clamp( inst.m_CurrentLightingState.r_boxcolor[i].x, 0.f, AMBIENT_MAX );
+		inst.m_CurrentLightingState.r_boxcolor[i].y = clamp( inst.m_CurrentLightingState.r_boxcolor[i].y, 0.f, AMBIENT_MAX );
+		inst.m_CurrentLightingState.r_boxcolor[i].z = clamp( inst.m_CurrentLightingState.r_boxcolor[i].z, 0.f, AMBIENT_MAX );
 	}
 	memcpy( &actualLightingState.r_boxcolor, &inst.m_CurrentLightingState.r_boxcolor, sizeof(inst.m_CurrentLightingState.r_boxcolor) );
 }
@@ -1494,10 +1537,10 @@ void CModelRender::StudioSetupLighting( const DrawModelState_t &state, const Vec
 			bool bDebugModel = false;
 			if( r_drawlightcache.GetInt() == 5 )
 			{
-				if ( pModelInst && pModelInst->m_pModel && pModelInst->m_pModel->szName )
+				if ( pModelInst && pModelInst->m_pModel && !pModelInst->m_pModel->strName.IsEmpty() )
 				{
 					const char *szModelName = r_lightcachemodel.GetString();
-					bDebugModel = V_stristr( pModelInst->m_pModel->szName, szModelName ) != NULL;
+					bDebugModel = V_stristr( pModelInst->m_pModel->strName, szModelName ) != NULL;
 				}
 			}
 	
@@ -1639,7 +1682,7 @@ void CModelRender::StudioSetupLighting( const DrawModelState_t &state, const Vec
 				if ( avgCubeLuminance < r_ambientmin.GetFloat() && (avgCubeLuminance < (fDirectLight * r_ambientfraction.GetFloat())) )	
 				{
 					Vector vFinalAmbientCube[6];
-					float fBoostFactor =  min( (fDirectLight * r_ambientfraction.GetFloat()) / maxCubeLuminance, 5 ); // boost no more than a certain factor
+					float fBoostFactor =  min( (fDirectLight * r_ambientfraction.GetFloat()) / maxCubeLuminance, 5.f ); // boost no more than a certain factor
 					for( int i = 0; i < 6; i++ )
 					{
 						vFinalAmbientCube[i] = pState->r_boxcolor[i] * fBoostFactor;
@@ -1715,6 +1758,7 @@ int GetLightingConditions( const Vector &vecLightingOrigin, Vector *pColors, int
 	}
 	return nLightCount;
 #endif
+	return 0;
 }
 
 // FIXME: a duplicate of what's in CCDmeMdlRenderable<T>::SetUpLighting and CDmeEmitter::SetUpLighting
@@ -1783,6 +1827,8 @@ void CModelRender::SetupLighting( const Vector &vecCenter )
 //-----------------------------------------------------------------------------
 void CModelRender::ForcedMaterialOverride( IMaterial *newMaterial, OverrideType_t nOverrideType )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	g_pStudioRender->ForcedMaterialOverride( newMaterial, nOverrideType );
 }
 
@@ -1836,7 +1882,7 @@ void DrawModelDebugOverlay( const DrawModelInfo_t& info, const DrawModelResults_
 	float alpha = 1;
 	if( r_drawmodelstatsoverlaydistance.GetFloat() == 1 )
 	{
-		alpha = 1.f - clamp( CurrentViewOrigin().DistTo( origin ) / r_drawmodelstatsoverlaydistance.GetFloat(), 0, 1.f );
+		alpha = 1.f - clamp( CurrentViewOrigin().DistTo( origin ) / r_drawmodelstatsoverlaydistance.GetFloat(), 0.f, 1.f );
 	}
 	else
 	{
@@ -2044,6 +2090,7 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 {
 #ifndef SWDS
 	bool bShadowDepth = (pInfo.flags & STUDIO_SHADOWDEPTHTEXTURE) != 0;
+	bool bSSAODepth = ( pInfo.flags & STUDIO_SSAODEPTHTEXTURE ) != 0;
 
 	// Bail if we're rendering into shadow depth map and this model doesn't cast shadows
 	if ( bShadowDepth && ( ( pInfo.pModel->flags & MODELFLAG_STUDIOHDR_DO_NOT_CAST_SHADOWS ) != 0 ) )
@@ -2058,14 +2105,14 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 	// Sets up flexes
 	float *pFlexWeights = NULL;
 	float *pFlexDelayedWeights = NULL;
-	if ( state.m_pStudioHdr->numflexdesc > 0 )
+	int nFlexCount = state.m_pStudioHdr->numflexdesc;
+	if ( nFlexCount > 0 )
 	{
 		// Does setup for flexes
 		Assert( pBoneToWorld );
 		bool bUsesDelayedWeights = state.m_pRenderable->UsesFlexDelayedWeights();
-		g_pStudioRender->LockFlexWeights( state.m_pStudioHdr->numflexdesc, &pFlexWeights, 
-			bUsesDelayedWeights ? &pFlexDelayedWeights : NULL );
-		state.m_pRenderable->SetupWeights( pBoneToWorld, state.m_pStudioHdr->numflexdesc, pFlexWeights, pFlexDelayedWeights );
+		g_pStudioRender->LockFlexWeights( nFlexCount, &pFlexWeights, bUsesDelayedWeights ? &pFlexDelayedWeights : NULL );
+		state.m_pRenderable->SetupWeights( pBoneToWorld, nFlexCount, pFlexWeights, pFlexDelayedWeights );
 		g_pStudioRender->UnlockFlexWeights();
 	}
 
@@ -2082,7 +2129,7 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 
 	bool bNeedsEnvCubemap = r_showenvcubemap.GetInt() || ( pInfo.pModel->flags & MODELFLAG_STUDIOHDR_USES_ENV_CUBEMAP );
 	
-	if ( r_drawmodellightorigin.GetBool() && !bShadowDepth )
+	if ( r_drawmodellightorigin.GetBool() && !bShadowDepth && !bSSAODepth )
 	{
 		DebugDrawLightingOrigin( state, pInfo );
 	}
@@ -2108,9 +2155,13 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 			}
 		}
 
-		if ( pColorMeshData && pColorMeshData->m_bColorMeshValid )
+		if ( pColorMeshData && ( pColorMeshData->m_bColorMeshValid || pColorMeshData->m_bColorTextureValid ) )
 		{
 			pColorMeshes = pColorMeshData->m_pMeshInfos;
+			if (pColorMeshData->m_bColorTextureValid && !pColorMeshData->m_bColorTextureCreated)
+			{
+				CreateLightmapsFromData(pColorMeshData);
+			}
 		}
 		else
 		{
@@ -2124,7 +2175,7 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 
 	// get lighting from ambient light sources and radiosity bounces
 	// also set up the env_cubemap from the light cache if necessary.
-	if ( ( bVertexLit || bNeedsEnvCubemap ) && !bShadowDepth )
+	if ( ( bVertexLit || bNeedsEnvCubemap ) && !bShadowDepth && !bSSAODepth )
 	{
 		// See if we're using static lighting
 		LightCacheHandle_t* pLightCache = NULL;
@@ -2162,7 +2213,7 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 	info.m_pColorMeshes = pColorMeshes;
 
 	// Don't do decals if shadow depth mapping...
-	info.m_Decals = bShadowDepth ? STUDIORENDER_DECAL_INVALID : state.m_decals;
+	info.m_Decals = ( bShadowDepth || bSSAODepth ) ? STUDIORENDER_DECAL_INVALID : state.m_decals;
 
 	// Get perf stats if we are going to use them.
 	int overlayVal = r_drawmodelstatsoverlay.GetInt();
@@ -2174,9 +2225,20 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 		drawFlags |= STUDIORENDER_SHADOWDEPTHTEXTURE;
 	}
 
-	if ( overlayVal && !bShadowDepth )
+	if ( bSSAODepth == true )
+	{
+		drawFlags |= STUDIORENDER_DRAW_OPAQUE_ONLY;
+		drawFlags |= STUDIORENDER_SSAODEPTHTEXTURE;
+	}
+
+	if ( overlayVal && !bShadowDepth && !bSSAODepth )
 	{
 		drawFlags |= STUDIORENDER_DRAW_GET_PERF_STATS;
+	}
+
+	if ( ( pInfo.flags & STUDIO_GENERATE_STATS ) != 0 )
+	{
+		drawFlags |= STUDIORENDER_GENERATE_STATS;
 	}
 
 	DrawModelResults_t results;
@@ -2184,7 +2246,7 @@ void CModelRender::DrawModelExecute( const DrawModelState_t &state, const ModelR
 		pFlexDelayedWeights, pInfo.origin, drawFlags );
 	info.m_Lod = results.m_nLODUsed;
 
-	if ( overlayVal && !bShadowDepth )
+	if ( overlayVal && !bShadowDepth && !bSSAODepth )
 	{
 		if ( overlayVal != 2 )
 		{
@@ -2305,7 +2367,7 @@ bool CModelRender::DrawModelSetup( ModelRenderInfo_t &pInfo, DrawModelState_t *p
 #if _DEBUG
 	if ( (char*)pInfo.pRenderable < (char*)1024 )
 	{
-		Error( "CModelRender::DrawModel: pRenderable == 0x%x", pInfo.pRenderable );
+		Error( "CModelRender::DrawModel: pRenderable == 0x%p", pInfo.pRenderable );
 	}
 #endif
 
@@ -2456,7 +2518,7 @@ int	CModelRender::DrawModelExStaticProp( ModelRenderInfo_t &pInfo )
 #if _DEBUG
 	if ( (char*)pInfo.pRenderable < (char*)1024 )
 	{
-		Error( "CModelRender::DrawModel: pRenderable == 0x%x", pInfo.pRenderable );
+		Error( "CModelRender::DrawModel: pRenderable == %p", pInfo.pRenderable );
 	}	
 
 	// Can only deal with studio models
@@ -2517,6 +2579,11 @@ int	CModelRender::DrawModelExStaticProp( ModelRenderInfo_t &pInfo )
 		drawFlags |= STUDIORENDER_DRAW_WIREFRAME;
 	}
 
+	if ( pInfo.flags & STUDIO_GENERATE_STATS )
+	{
+		drawFlags |= STUDIORENDER_GENERATE_STATS;
+	}
+
 	// Shadow state...
 	g_pShadowMgr->SetModelShadowState( pInfo.instance );
 
@@ -2558,9 +2625,13 @@ int	CModelRender::DrawModelExStaticProp( ModelRenderInfo_t &pInfo )
 			}
 		}
 
-		if ( pColorMeshData && pColorMeshData->m_bColorMeshValid )
+		if ( pColorMeshData && ( pColorMeshData->m_bColorMeshValid || pColorMeshData->m_bColorTextureValid ) )
 		{
 			pColorMeshes = pColorMeshData->m_pMeshInfos;
+			if (pColorMeshData->m_bColorTextureValid && !pColorMeshData->m_bColorTextureCreated)
+			{
+				CreateLightmapsFromData(pColorMeshData);
+			}
 		}
 		else
 		{
@@ -2760,19 +2831,23 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 		{
 			modelIndex = modelList.AddToTail();
 			modelList[modelIndex].pModel = pProps[i].pModel;
+			modelList[modelIndex].pStudioHWData = g_pMDLCache->GetHardwareData( modelList[modelIndex].pModel->studio );
 		}
-		robject_t obj;
-		obj.pMatrix = pProps[i].pModelToWorld;
-		obj.pRenderable = pProps[i].pRenderable;
-		obj.modelIndex = modelIndex;
-		obj.instance = pProps[i].instance;
-		obj.skin = pProps[i].skin;
-		obj.lod = 0;
-		obj.pColorMeshes = NULL;
-		obj.pEnvCubeMap = NULL;
-		obj.lightIndex = -1;
-		obj.pLightingOrigin = pProps[i].pLightingOrigin;
-		objectList.InsertNoSort(obj);
+		if ( modelList[modelIndex].pStudioHWData )
+		{
+			robject_t obj;
+			obj.pMatrix = pProps[i].pModelToWorld;
+			obj.pRenderable = pProps[i].pRenderable;
+			obj.modelIndex = modelIndex;
+			obj.instance = pProps[i].instance;
+			obj.skin = pProps[i].skin;
+			obj.lod = 0;
+			obj.pColorMeshes = NULL;
+			obj.pEnvCubeMap = NULL;
+			obj.lightIndex = -1;
+			obj.pLightingOrigin = pProps[i].pLightingOrigin;
+			objectList.InsertNoSort(obj);
+		}
 	}
 
 	// process list of unique models
@@ -2783,10 +2858,9 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 		Assert( modelloader->IsLoaded( pModel ) );
 		unsigned int flags = pModel->flags;
 		modelList[i].pStudioHdr = g_pMDLCache->GetStudioHdr( pModel->studio );
-		modelList[i].pStudioHWData = g_pMDLCache->GetHardwareData( pModel->studio );
 		modelList[i].maxArea = 1.0f;
 		modelList[i].lodStart = lodStart;
-		modelList[i].lodCount = modelList[i].pStudioHWData->m_NumLODs;
+		modelList[i].lodCount = modelList[i].pStudioHWData ? modelList[i].pStudioHWData->m_NumLODs : 0;
 		bool bBumpMapped = (flags & MODELFLAG_STUDIOHDR_USES_BUMPMAPPING) != 0;
 		modelList[i].bStaticLighting = (( modelList[i].pStudioHdr->flags & STUDIOHDR_FLAGS_STATIC_PROP ) != 0) && !bBumpMapped;
 		modelList[i].bVertexLit = ( flags & MODELFLAG_VERTEXLIT ) != 0;
@@ -2878,9 +2952,14 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 					}
 				}
 
-				if ( pColorMeshData && pColorMeshData->m_bColorMeshValid )
+				if ( pColorMeshData && ( pColorMeshData->m_bColorMeshValid || pColorMeshData->m_bColorTextureValid ) )
 				{
 					obj.pColorMeshes = pColorMeshData->m_pMeshInfos;
+					if (pColorMeshData->m_bColorTextureValid && !pColorMeshData->m_bColorTextureCreated)
+					{
+						CreateLightmapsFromData(pColorMeshData);
+					}
+
 					if ( pCallQueue )
 					{
 						if ( CacheLock( hColorMeshData ) ) // CacheCreate above will call functions that won't take place until later. If color mesh isn't used right away, it could get dumped
@@ -2952,8 +3031,8 @@ int CModelRender::DrawStaticPropArrayFast( StaticPropRenderInfo_t *pProps, int c
 
 					if ( bHasDecals )
 					{
-						LightcacheGetDynamic_Stats stats;
-						LightcacheGetDynamic( vLightingOrigin, *pDecalLightState, stats,
+						LightcacheGetDynamic_Stats tempStats;
+						LightcacheGetDynamic( vLightingOrigin, *pDecalLightState, tempStats,
 							LIGHTCACHEFLAGS_STATIC|LIGHTCACHEFLAGS_DYNAMIC|LIGHTCACHEFLAGS_LIGHTSTYLE|LIGHTCACHEFLAGS_ALLOWFAST );
 					}
 				}
@@ -3263,9 +3342,16 @@ CColorMeshData *CModelRender::FindOrCreateStaticPropColorData( ModelInstanceHand
 		return pColorMeshData;
 	}
 
+	if ( !instance.m_pModel )
+	{
+		return NULL;
+	}
+
 	Assert( modelloader->IsLoaded( instance.m_pModel ) && ( instance.m_pModel->type == mod_studio ) );
 	studiohwdata_t *pStudioHWData = g_pMDLCache->GetHardwareData( instance.m_pModel->studio );
 	Assert( pStudioHWData );
+	if ( !pStudioHWData )
+		return NULL;
 
 	colormeshparams_t params;
 	InitColormeshParams( instance, pStudioHWData, &params );
@@ -3609,6 +3695,7 @@ void CModelRender::StaticPropColorMeshCallback( void *pContext, const void *pDat
 
 	HardwareVerts::FileHeader_t *pVhvHdr;
 	byte *pOriginalData = NULL;
+	int numLightingComponents = 1;
 
 	if ( asyncStatus != FSASYNC_OK )
 	{
@@ -3619,19 +3706,17 @@ void CModelRender::StaticPropColorMeshCallback( void *pContext, const void *pDat
 	if ( IsX360() )
 	{
 		// only the 360 has compressed VHV data
-		CLZMA lzma;
-
 		// the compressed data is after the header
 		byte *pCompressedData = (byte *)pData + sizeof( HardwareVerts::FileHeader_t );
-		if ( lzma.IsCompressed( pCompressedData ) )
+		if ( CLZMA::IsCompressed( pCompressedData ) )
 		{
 			// create a buffer that matches the original
-			int actualSize = lzma.GetActualSize( pCompressedData );
+			int actualSize = CLZMA::GetActualSize( pCompressedData );
 			pOriginalData = (byte *)malloc( sizeof( HardwareVerts::FileHeader_t ) + actualSize );
 
 			// place the header, then uncompress directly after it
 			V_memcpy( pOriginalData, pData, sizeof( HardwareVerts::FileHeader_t ) );
-			int outputLength = lzma.Uncompress( pCompressedData, pOriginalData + sizeof( HardwareVerts::FileHeader_t ) );
+			int outputLength = CLZMA::Uncompress( pCompressedData, pOriginalData + sizeof( HardwareVerts::FileHeader_t ) );
 			if ( outputLength != actualSize )
 			{
 				goto cleanUp;
@@ -3662,16 +3747,49 @@ void CModelRender::StaticPropColorMeshCallback( void *pContext, const void *pDat
 			// meshes are out of sync, discard data
 			break;
 		}
-		V_memcpy( (void*)pStaticPropContext->m_pColorMeshData->m_ppTargets[meshID-startMesh], pVhvHdr->pVertexBase( meshID ), numVertexes*4 );
-	}
 
+		int nID = meshID-startMesh;
+
+		unsigned char *pIn = (unsigned char *) pVhvHdr->pVertexBase( meshID );
+		unsigned char *pOut = NULL;
+			
+		CMeshBuilder meshBuilder;
+		meshBuilder.Begin( pStaticPropContext->m_pColorMeshData->m_pMeshInfos[ nID ].m_pMesh, MATERIAL_HETEROGENOUS, numVertexes, 0 );
+		if ( numLightingComponents > 1 )
+		{
+			pOut = reinterpret_cast< unsigned char * >( const_cast< float * >( meshBuilder.Normal() ) );
+		}
+		else
+		{
+			pOut = meshBuilder.Specular();
+		}
+
+#ifdef DX_TO_GL_ABSTRACTION
+		// OPENGL_SWAP_COLORS
+		for ( int i=0; i < (numVertexes * numLightingComponents ); i++ )
+		{
+			unsigned char red = *pIn++;
+			unsigned char green = *pIn++;
+			unsigned char blue = *pIn++;
+			*pOut++ = blue;
+			*pOut++ = green;
+			*pOut++ = red;
+			*pOut++ = *pIn++; // Alpha goes straight across
+		}
+#else
+		V_memcpy( pOut, pIn, numVertexes * 4 * numLightingComponents );
+#endif
+		meshBuilder.End();
+	}
 cleanUp:
 	if ( IsX360() )
 	{
-		AUTO_LOCK_FM( m_CachedStaticPropMutex );
+		AUTO_LOCK( m_CachedStaticPropMutex );
 		// track the color mesh's datacache handle so that we can find it long after the model instance's are gone
 		// the static prop filenames are guaranteed uniquely decorated
-		m_CachedStaticPropColorData.Insert( pStaticPropContext->m_szFilename, pStaticPropContext->m_ColorMeshHandle );
+		m_CachedStaticPropColorData.Insert( pStaticPropContext->m_szFilenameVertex, pStaticPropContext->m_ColorMeshHandle );
+
+		// No support for lightmap textures on X360. 
 	}
 
 	// mark as completed in single atomic operation
@@ -3689,10 +3807,86 @@ cleanUp:
 // Async loader callback
 // Called from async i/o thread - must spend minimal cycles in this context
 //-----------------------------------------------------------------------------
+void CModelRender::StaticPropColorTexelCallback(void *pContext, const void *pData, int numReadBytes, FSAsyncStatus_t asyncStatus)
+{
+	// get our preserved data
+	Assert(pContext);
+	staticPropAsyncContext_t *pStaticPropContext = (staticPropAsyncContext_t *)pContext;
+
+	HardwareTexels::FileHeader_t *pVhtHdr;
+
+	// This needs to be above the goto or clang complains "goto into protected scope."
+	bool anyTextures = false;
+
+	if (asyncStatus != FSASYNC_OK)
+	{
+		// any i/o error
+		goto cleanUp;
+	}
+
+	pVhtHdr = (HardwareTexels::FileHeader_t *)pData;
+
+	int startMesh;
+	for (startMesh = 0; startMesh < pVhtHdr->m_nMeshes; startMesh++)
+	{
+		// skip past higher detail lod meshes that must be ignored
+		// find first mesh that matches desired lod
+		if (pVhtHdr->pMesh(startMesh)->m_nLod == pStaticPropContext->m_nRootLOD)
+		{
+			break;
+		}
+	}
+
+
+
+	int meshID;
+	for ( meshID = startMesh; meshID < pVhtHdr->m_nMeshes; meshID++ )
+	{
+		const HardwareTexels::MeshHeader_t* pMeshData = pVhtHdr->pMesh( meshID );
+
+		// We can't create the real texture here because that's just how the material system works.
+		// So instead, squirrel away what we need for later.
+		ColorTexelsInfo_t* newCTI = new ColorTexelsInfo_t;
+		newCTI->m_nWidth = pMeshData->m_nWidth;
+		newCTI->m_nHeight = pMeshData->m_nHeight;
+		newCTI->m_nMipmapCount = ImageLoader::GetNumMipMapLevels( newCTI->m_nWidth, newCTI->m_nHeight );
+		newCTI->m_ImageFormat = ( ImageFormat ) pVhtHdr->m_nTexelFormat;
+		newCTI->m_nByteCount = pVhtHdr->pMesh( meshID )->m_nBytes;
+		newCTI->m_pTexelData = new byte[ newCTI->m_nByteCount ];
+		Q_memcpy( newCTI->m_pTexelData, pVhtHdr->pTexelBase( meshID ), newCTI->m_nByteCount );
+
+		pStaticPropContext->m_pColorMeshData->m_pMeshInfos[ meshID - startMesh ].m_pLightmapData = newCTI;
+		Assert( pStaticPropContext->m_pColorMeshData->m_pMeshInfos[ meshID - startMesh ].m_pLightmap == NULL );
+		anyTextures = true;
+	}
+
+	// This only gets set if we actually have texel data. Otherwise, it remains false.
+	pStaticPropContext->m_pColorMeshData->m_bColorTextureValid = anyTextures;
+
+cleanUp:
+	// mark as completed in single atomic operation
+	CacheUnlock( pStaticPropContext->m_ColorMeshHandle );
+	delete pStaticPropContext;
+}
+
+//-----------------------------------------------------------------------------
+// Async loader callback
+// Called from async i/o thread - must spend minimal cycles in this context
+//-----------------------------------------------------------------------------
 static void StaticPropColorMeshCallback( const FileAsyncRequest_t &request, int numReadBytes, FSAsyncStatus_t asyncStatus )
 {
 	s_ModelRender.StaticPropColorMeshCallback( request.pContext, request.pData, numReadBytes, asyncStatus );
 }
+
+//-----------------------------------------------------------------------------
+// Async loader callback
+// Called from async i/o thread - must spend minimal cycles in this context
+//-----------------------------------------------------------------------------
+static void StaticPropColorTexelCallback( const FileAsyncRequest_t &request, int numReadBytes, FSAsyncStatus_t asyncStatus )
+{
+	s_ModelRender.StaticPropColorTexelCallback( request.pContext, request.pData, numReadBytes, asyncStatus );
+}
+
 
 //-----------------------------------------------------------------------------
 // Queued loader callback
@@ -3726,7 +3920,7 @@ bool CModelRender::LoadStaticPropColorData( IHandleEntity *pProp, DataCacheHandl
 		return false;
 	}
 
-	if ( pColorMeshData->m_hAsyncControl )
+	if ( pColorMeshData->m_hAsyncControlVertex || pColorMeshData->m_hAsyncControlTexel )
 	{
 		// load in progress, ignore additional request 
 		// or already loaded, ignore until discarded from cache
@@ -3748,20 +3942,23 @@ bool CModelRender::LoadStaticPropColorData( IHandleEntity *pProp, DataCacheHandl
 	// mark as invalid, async callback will set upon completion
 	// prevents rendering during async transfer into locked mesh, otherwise d3drip
 	pColorMeshData->m_bColorMeshValid = false;
+	pColorMeshData->m_bColorTextureValid = false;
+	pColorMeshData->m_bColorTextureCreated = false;
+
 
 	// async load high quality lighting from file
 	// can't optimal async yet, because need flat ppColorMesh[], so use callback to distribute
 	// create our private context of data for the callback
-	staticPropAsyncContext_t *pContext = new staticPropAsyncContext_t;
-	pContext->m_nRootLOD = pStudioHWData->m_RootLOD;
-	pContext->m_nMeshes = pColorMeshData->m_nMeshes;
-	pContext->m_ColorMeshHandle = colorMeshHandle;
-	pContext->m_pColorMeshData = pColorMeshData;
-	V_strncpy( pContext->m_szFilename, fileName, sizeof( pContext->m_szFilename ) );
+	staticPropAsyncContext_t *pContextVertex = new staticPropAsyncContext_t;
+	pContextVertex->m_nRootLOD = pStudioHWData->m_RootLOD;
+	pContextVertex->m_nMeshes = pColorMeshData->m_nMeshes;
+	pContextVertex->m_ColorMeshHandle = colorMeshHandle;
+	pContextVertex->m_pColorMeshData = pColorMeshData;
+	V_strncpy( pContextVertex->m_szFilenameVertex, fileName, sizeof( pContextVertex->m_szFilenameVertex ) );
 
 	if ( IsX360() && g_pQueuedLoader->IsMapLoading() )
 	{
-		if ( !g_pQueuedLoader->ClaimAnonymousJob( fileName, QueuedLoaderCallback_PropLighting, (void *)pContext ) )
+		if ( !g_pQueuedLoader->ClaimAnonymousJob( fileName, QueuedLoaderCallback_PropLighting, (void *)pContextVertex ) )
 		{
 			// not there as expected
 			// as a less optimal fallback during loading, issue as a standard queued loader job
@@ -3769,7 +3966,7 @@ bool CModelRender::LoadStaticPropColorData( IHandleEntity *pProp, DataCacheHandl
 			loaderJob.m_pFilename = fileName;
 			loaderJob.m_pPathID = "GAME";
 			loaderJob.m_pCallback = QueuedLoaderCallback_PropLighting;
-			loaderJob.m_pContext = (void *)pContext;
+			loaderJob.m_pContext = (void *)pContextVertex;
 			loaderJob.m_Priority = LOADERPRIORITY_BEFOREPLAY;
 			g_pQueuedLoader->AddJob( &loaderJob );
 		}
@@ -3778,19 +3975,42 @@ bool CModelRender::LoadStaticPropColorData( IHandleEntity *pProp, DataCacheHandl
 
 	// async load the file
 	FileAsyncRequest_t fileRequest;
-	fileRequest.pContext = (void *)pContext;
+	fileRequest.pContext = (void *)pContextVertex;
 	fileRequest.pfnCallback = ::StaticPropColorMeshCallback;
 	fileRequest.pData = NULL;
 	fileRequest.pszFilename = fileName;
 	fileRequest.nOffset = 0;
-	fileRequest.flags = 0;
+	fileRequest.flags = 0; // FSASYNC_FLAGS_SYNC;
 	fileRequest.nBytes = 0;
 	fileRequest.priority = -1;
 	fileRequest.pszPathID = "GAME";
+
+	// This must be done before sending pContextVertex down
+	staticPropAsyncContext_t* pContextTexel = new staticPropAsyncContext_t( *pContextVertex );
 	
-	// queue for async load
-	MEM_ALLOC_CREDIT();
-	g_pFileSystem->AsyncRead( fileRequest, &pColorMeshData->m_hAsyncControl );
+	// queue vertex data for async load
+	{
+		MEM_ALLOC_CREDIT();
+		g_pFileSystem->AsyncRead( fileRequest, &pColorMeshData->m_hAsyncControlVertex );
+	}
+
+	Q_snprintf( fileName, sizeof( fileName ), "texelslighting_%d.ppl", StaticPropMgr()->GetStaticPropIndex( pProp ) );
+	V_strncpy( pContextTexel->m_szFilenameTexel, fileName, sizeof( pContextTexel->m_szFilenameTexel ) );
+
+	
+	// We are already locked, but we will unlock twice--so lock once more for the texel processing. 
+	CacheLock( colorMeshHandle );
+
+	// queue texel data for async load
+	fileRequest.pContext = pContextTexel;
+	fileRequest.pfnCallback = ::StaticPropColorTexelCallback;
+	fileRequest.pData = NULL;
+	fileRequest.pszFilename = fileName; // This doesn't need to happen, but included for clarity.
+
+	{
+		MEM_ALLOC_CREDIT();
+		g_pFileSystem->AsyncRead( fileRequest, &pColorMeshData->m_hAsyncControlTexel );
+	}
 
 	return true;
 }
@@ -3813,7 +4033,16 @@ bool CModelRender::UpdateStaticPropColorData( IHandleEntity *pProp, ModelInstanc
 		return false;
 	}
 
-	unsigned char debugColor[3];
+	// HACK: on PC, VB creation can fail due to device loss
+	if ( IsPC() && pColorMeshData->m_bHasInvalidVB )
+	{
+		// Don't retry until color data is flushed by device restore
+		pColorMeshData->m_bColorMeshValid = false;
+		pColorMeshData->m_bNeedsRetry = false;
+		return false;
+	}
+
+	unsigned char debugColor[3] = {0};
 	bool bDebugColor = false;
 	if ( r_debugrandomstaticlighting.GetBool() )
 	{
@@ -3885,12 +4114,14 @@ bool CModelRender::UpdateStaticPropColorData( IHandleEntity *pProp, ModelInstanc
 	// lighting calculation path
 	// calculation may abort due to lack of async requested data, caller should retry 
 	pColorMeshData->m_bColorMeshValid = false;
+	pColorMeshData->m_bColorTextureValid = false;
+	pColorMeshData->m_bColorTextureCreated = false;
 	pColorMeshData->m_bNeedsRetry = true;
 
 	if ( !bDebugColor )
 	{
 		// vertexes must be available for lighting calculation
-		vertexFileHeader_t *pVertexHdr = g_pMDLCache->GetVertexData( (MDLHandle_t)pStudioHdr->virtualModel );
+		vertexFileHeader_t *pVertexHdr = g_pMDLCache->GetVertexData( (MDLHandle_t)(int)pStudioHdr->virtualModel&0xffff );
 		if ( !pVertexHdr )
 		{
 			// data not available yet
@@ -3951,6 +4182,9 @@ bool CModelRender::UpdateStaticPropColorData( IHandleEntity *pProp, ModelInstanc
 		for ( int modelID = 0; modelID < pBodyPart->nummodels; ++modelID )
 		{
 			mstudiomodel_t* pModel = pBodyPart->pModel(modelID);
+
+			if ( pModel->numvertices == 0 )
+				continue;
 
 			// Make sure we've got enough space allocated
 			tmpLightingMem.EnsureCapacity( pModel->numvertices );
@@ -4269,7 +4503,7 @@ bool CModelRender::IsStaticPropColorDataCached( const char *pName )
 
 	DataCacheHandle_t hColorMesh = DC_INVALID_HANDLE;
 	{
-		AUTO_LOCK_FM( m_CachedStaticPropMutex );
+		AUTO_LOCK( m_CachedStaticPropMutex );
 		int iIndex = m_CachedStaticPropColorData.Find( pName );
 		if ( m_CachedStaticPropColorData.IsValidIndex( iIndex ) )
 		{
@@ -4298,7 +4532,7 @@ DataCacheHandle_t CModelRender::GetCachedStaticPropColorData( const char *pName 
 
 	DataCacheHandle_t hColorMesh = DC_INVALID_HANDLE;
 	{
-		AUTO_LOCK_FM( m_CachedStaticPropMutex );
+		AUTO_LOCK( m_CachedStaticPropMutex );
 		int iIndex = m_CachedStaticPropColorData.Find( pName );
 		if ( m_CachedStaticPropColorData.IsValidIndex( iIndex ) )
 		{
@@ -4405,7 +4639,7 @@ bool CModelRender::IsModelInstanceValid( ModelInstanceHandle_t handle )
 	if ( handle == MODEL_INSTANCE_INVALID )
 		return false;
 
-	ModelInstance_t inst = m_ModelInstances[handle];
+	ModelInstance_t& inst = m_ModelInstances[handle];
 	if ( inst.m_DecalHandle == STUDIORENDER_DECAL_INVALID )
 		return false;
 
@@ -4419,6 +4653,27 @@ bool CModelRender::IsModelInstanceValid( ModelInstanceHandle_t handle )
 //-----------------------------------------------------------------------------
 void CModelRender::AddDecal( ModelInstanceHandle_t handle, Ray_t const& ray,
 	const Vector& decalUp, int decalIndex, int body, bool noPokeThru, int maxLODToDecal )
+{
+	Color cColorTemp;
+	AddDecalInternal( handle, ray, decalUp, decalIndex, body, false, cColorTemp, noPokeThru, maxLODToDecal );
+}
+
+//-----------------------------------------------------------------------------
+void CModelRender::AddColoredDecal( ModelInstanceHandle_t handle, Ray_t const& ray,
+	const Vector& decalUp, int decalIndex, int body, Color cColor, bool noPokeThru, int maxLODToDecal )
+{
+	AddDecalInternal( handle, ray, decalUp, decalIndex, body, true, cColor, noPokeThru, maxLODToDecal );
+}
+
+//-----------------------------------------------------------------------------
+void CModelRender::GetMaterialOverride( IMaterial** ppOutForcedMaterial, OverrideType_t* pOutOverrideType )
+{
+	g_pStudioRender->GetMaterialOverride( ppOutForcedMaterial, pOutOverrideType );
+}
+
+//-----------------------------------------------------------------------------
+void CModelRender::AddDecalInternal( ModelInstanceHandle_t handle, Ray_t const& ray, 
+	const Vector& decalUp, int decalIndex, int body, bool bUseColor, Color cColor, bool noPokeThru, int maxLODToDecal)
 {
 	if (handle == MODEL_INSTANCE_INVALID)
 		return;
@@ -4438,9 +4693,19 @@ void CModelRender::AddDecal( ModelInstanceHandle_t handle, Ray_t const& ray,
 	// FIXME: For now, don't render fading decals on props...
 	bool found = false;
 	pDecalMaterial->FindVar( "$decalFadeDuration", &found, false );
-	if (found)
+	if ( found )
 		return;
 
+	if ( bUseColor )
+	{
+		IMaterialVar *pColor = pDecalMaterial->FindVar( "$color2", &found, false );
+		if ( found )
+		{
+			// expects a 0..1 value.  Input is 0 to 255
+			pColor->SetVecValue( cColor.r() / 255.0f, cColor.g() / 255.0f, cColor.b() / 255.0f );
+		}
+	}
+	
 	// FIXME: Pass w and h into AddDecal
 	float radius = (w > h) ? w : h;
 
@@ -4460,7 +4725,7 @@ void CModelRender::AddDecal( ModelInstanceHandle_t handle, Ray_t const& ray,
 
 	matrix3x4_t *pBoneToWorld = SetupModelState( inst.m_pRenderable );
 	g_pStudioRender->AddDecal( inst.m_DecalHandle, g_pMDLCache->GetStudioHdr( inst.m_pModel->studio ),
-		 pBoneToWorld, ray, decalUp, pDecalMaterial, radius, body, noPokeThru, maxLODToDecal );
+		pBoneToWorld, ray, decalUp, pDecalMaterial, radius, body, noPokeThru, maxLODToDecal );
 }
 
 //-----------------------------------------------------------------------------
@@ -4750,4 +5015,42 @@ void CPooledVBAllocator_ColorMesh::Deallocate( int offset, int numVerts )
 		// We can start allocating again, now
 		m_bStartedDeallocation = false;
 	}
+}
+
+//-----------------------------------------------------------------------------
+// CreateLightmapsFromData
+//  - Creates Lightmap Textures from data that was squirreled away during ASYNC load.
+//  This is necessary because the material system doesn't like us creating things from ASYNC loaders.
+//-----------------------------------------------------------------------------
+static void CreateLightmapsFromData(CColorMeshData* _colorMeshData)
+{
+	Assert(_colorMeshData->m_bColorTextureValid);
+	Assert(!_colorMeshData->m_bColorTextureCreated);
+
+	for (int mesh = 0; mesh < _colorMeshData->m_nMeshes; ++mesh)
+	{
+		ColorMeshInfo_t* meshInfo = &_colorMeshData->m_pMeshInfos[mesh];
+
+		// Ensure that we haven't somehow already messed with these.
+		Assert(meshInfo->m_pLightmapData);
+		Assert(!meshInfo->m_pLightmap);
+
+		ColorTexelsInfo_t* cti = meshInfo->m_pLightmapData;
+
+		Assert(cti->m_pTexelData);
+		
+		meshInfo->m_pLightmap = g_pMaterialSystem->CreateTextureFromBits(cti->m_nWidth, cti->m_nHeight, cti->m_nMipmapCount, cti->m_ImageFormat, cti->m_nByteCount, cti->m_pTexelData);
+
+		// If this triggers, we need to figure out if it's reasonable to fail. If it is, then we should figure out how to signal back
+		// that we shouldn't try to create this again (probably by clearing _colorMeshData->m_bColoTextureValid)
+		Assert(meshInfo->m_pLightmap);
+
+		// Cleanup after ourselves.
+		delete [] cti->m_pTexelData;
+		delete cti;
+
+		meshInfo->m_pLightmapData = NULL;
+	}
+
+	_colorMeshData->m_bColorTextureCreated = true;
 }

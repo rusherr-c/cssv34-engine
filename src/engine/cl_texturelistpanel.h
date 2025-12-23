@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,9 +9,6 @@
 #ifdef _WIN32
 #pragma once
 #endif
-
-
-class vgui::Panel;
 
 
 void CL_CreateTextureListPanel( vgui::Panel *pPanel );

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implements all the functions exported by the GameUI dll
 //
@@ -13,7 +13,7 @@
 #ifdef IS_WINDOWS_PC
 #include "winlite.h"
 #endif
-
+#include "appframework/ilaunchermgr.h"
 #include <vgui_controls/Panel.h>
 #include <vgui_controls/EditablePanel.h>
 #include <matsys_controls/matsyscontrols.h>
@@ -49,10 +49,11 @@
 #include "vgui_vprofgraphpanel.h"
 #include "vgui_texturebudgetpanel.h"
 #include "vgui_budgetpanel.h"
-#include "Steam.h" // for SteamGetUser()
 #include "ivideomode.h"
+#include "sourcevr/isourcevirtualreality.h"
 #include "cl_pluginhelpers.h"
 #include "cl_main.h" // CL_IsHL2Demo()
+#include "cl_steamauth.h"
 
 // interface to gameui dll
 #include <GameUI/IGameUI.h>
@@ -64,6 +65,7 @@
 
 #include "cl_texturelistpanel.h"
 #include "cl_demouipanel.h"
+#include "cl_foguipanel.h"
 #include "cl_txviewpanel.h"
 
 // vgui2 interface
@@ -83,7 +85,7 @@
 #include <vgui_controls/Menu.h>
 #include <vgui_controls/PHandle.h>
 
-#include "ivguimodule.h"
+#include "IVguiModule.h"
 #include "vgui_baseui_interface.h"
 #include "vgui_DebugSystemPanel.h"
 #include "toolframework/itoolframework.h"
@@ -95,15 +97,20 @@
 
 #include "vgui_askconnectpanel.h"
 
+#if defined( REPLAY_ENABLED )
+#include "replay_internal.h"
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-extern IVEngineClient *engineClient;
+#ifndef USE_SDL
 extern HWND *pmainwindow;
+#endif
+
+extern IVEngineClient *engineClient;
 extern bool g_bTextMode;
 static int g_syncReportLevel = -1;
-
-static void VGui_PlaySound(const char *pFileName);
 
 void VGui_ActivateMouse();
 
@@ -236,6 +243,7 @@ public:
 	}
 };
 
+vgui::VPanelHandle g_DrawTreeSelectedPanel;
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -254,6 +262,9 @@ public:
 		g = (int)( 63.78 - slot * 71.4 ) & 255;
 		b = (int)( 188.42 + slot * 13.57 ) & 255;
 	}
+
+	bool DrawTitleSafeOverlay( void );
+	bool DrawFocusPanelList( void );
 };
 
 //-----------------------------------------------------------------------------
@@ -355,6 +366,8 @@ public:
 
 	void SetProgressBias( float bias );
 	void UpdateProgressBar( float progress );
+
+	virtual void ConfirmQuit( void );
 
 private:
 	vgui::Panel *GetRootPanel( VGuiPanel_t type );
@@ -540,19 +553,7 @@ CEngineVGui::~CEngineVGui()
 //-----------------------------------------------------------------------------
 bool CEngineVGui::SetVGUIDirectories()
 {
-	// add vgui skins directory last
-#if defined(_WIN32)
-	char temp[ 512 ];
-	char skin[128];
-	skin[0] = 0;
-	Sys_GetRegKeyValue("Software\\Valve\\Steam", "Skin", skin, sizeof(skin), "");
-	if (strlen(skin) > 0)
-	{
-		sprintf( temp, "%s/platform/skins/%s", GetBaseDirectory(), skin );
-		g_pFileSystem->AddSearchPath( temp, "SKIN" );
-	}
-#endif
-
+	// Legacy, not supported anymore
 	return true;
 }
 
@@ -561,20 +562,11 @@ bool CEngineVGui::SetVGUIDirectories()
 //-----------------------------------------------------------------------------
 void CEngineVGui::Init()
 {
+	COM_TimestampedLog( "Loading gameui.dll" );
+
 	// load the GameUI dll
-	const char *szDllName = "gameui";
-
-	if ( CommandLine()->FindParm( "-gameui" ) )
-	{
-		COM_TimestampedLog( "Loading Mod gameui.dll" );
-		m_hStaticGameUIModule = g_pFileSystem->LoadModule( szDllName, "GAMEBIN", true ); // LoadModule() does a GetLocalCopy() call
-	}
-	else
-	{
-		COM_TimestampedLog( "Loading gameui.dll" );
-		m_hStaticGameUIModule = g_pFileSystem->LoadModule( szDllName, "EXECUTABLE_PATH", true ); // LoadModule() does a GetLocalCopy() call
-	}
-
+	const char *szDllName = "GameUI";
+	m_hStaticGameUIModule = g_pFileSystem->LoadModule(szDllName, "EXECUTABLE_PATH", true); // LoadModule() does a GetLocalCopy() call
 	m_GameUIFactory = Sys_GetFactory(m_hStaticGameUIModule);
 	if ( !m_GameUIFactory )
 	{
@@ -598,6 +590,13 @@ void CEngineVGui::Init()
 	}
 
 	vgui::VGui_InitMatSysInterfacesList( "BaseUI", &g_AppSystemFactory, 1 );
+
+	// Get our langauge string
+	char lang[ 64 ];
+	lang[0] = 0;
+	engineClient->GetUILanguage( lang, sizeof( lang ) );
+	if ( lang[0] )
+		vgui::system()->SetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Source\\Language", lang );
 
 	COM_TimestampedLog( "AttachToWindow" );
 
@@ -647,8 +646,9 @@ void CEngineVGui::Init()
 	//		staticEngineToolsPanel ( zpos == 75 )
 	//		staticGameUIPanel ( GameUI stuff ) ( zpos == 100 )
 	//		staticDebugSystemPanel ( Engine debug stuff ) zpos == 125 )
+
 	staticPanel = new CStaticPanel( NULL, "staticPanel" );	
-	staticPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticPanel->SetPaintBorderEnabled(false);
 	staticPanel->SetPaintBackgroundEnabled(false);
 	staticPanel->SetPaintEnabled(false);
@@ -661,7 +661,7 @@ void CEngineVGui::Init()
 	COM_TimestampedLog( "Building Panels (staticClientDLLPanel)" );
 
 	staticClientDLLPanel = new CEnginePanel( staticPanel, "staticClientDLLPanel" );
-	staticClientDLLPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticClientDLLPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticClientDLLPanel->SetPaintBorderEnabled(false);
 	staticClientDLLPanel->SetPaintBackgroundEnabled(false);
 	staticClientDLLPanel->SetKeyBoardInputEnabled( false );	// popups in the client DLL can enable this.
@@ -675,7 +675,7 @@ void CEngineVGui::Init()
 	COM_TimestampedLog( "Building Panels (staticClientDLLToolsPanel)" );
 
 	staticClientDLLToolsPanel = new CEnginePanel( staticPanel, "staticClientDLLToolsPanel" );
-	staticClientDLLToolsPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticClientDLLToolsPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticClientDLLToolsPanel->SetPaintBorderEnabled(false);
 	staticClientDLLToolsPanel->SetPaintBackgroundEnabled(false);
 	staticClientDLLToolsPanel->SetKeyBoardInputEnabled( false );	// popups in the client DLL can enable this.
@@ -685,7 +685,7 @@ void CEngineVGui::Init()
 	staticClientDLLToolsPanel->SetZPos( 28 );
 
 	staticEngineToolsPanel = new CEnginePanel( staticPanel, "Engine Tools" );
-	staticEngineToolsPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticEngineToolsPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticEngineToolsPanel->SetPaintBorderEnabled(false);
 	staticEngineToolsPanel->SetPaintBackgroundEnabled(false);
 	staticEngineToolsPanel->SetPaintEnabled(false);
@@ -696,7 +696,7 @@ void CEngineVGui::Init()
 	COM_TimestampedLog( "Building Panels (staticGameUIPanel)" );
 
 	staticGameUIPanel = new CEnginePanel( staticPanel, "GameUI Panel" );
-	staticGameUIPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticGameUIPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticGameUIPanel->SetPaintBorderEnabled(false);
 	staticGameUIPanel->SetPaintBackgroundEnabled(false);
 	staticGameUIPanel->SetPaintEnabled(false);
@@ -705,14 +705,22 @@ void CEngineVGui::Init()
 	staticGameUIPanel->SetZPos( 100 );
 
 	staticGameDLLPanel = new CEnginePanel( staticPanel, "staticGameDLLPanel" );
-	staticGameDLLPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticGameDLLPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticGameDLLPanel->SetPaintBorderEnabled(false);
 	staticGameDLLPanel->SetPaintBackgroundEnabled(false);
 	staticGameDLLPanel->SetKeyBoardInputEnabled( false );	// popups in the game DLL can enable this.
 	staticGameDLLPanel->SetPaintEnabled(false);
-	staticGameDLLPanel->SetVisible( true );
 	staticGameDLLPanel->SetCursor( vgui::dc_none );
 	staticGameDLLPanel->SetZPos( 135 );
+
+	if ( CommandLine()->CheckParm( "-tools" ) != NULL )
+	{
+		staticGameDLLPanel->SetVisible( true );
+	}
+	else
+	{
+		staticGameDLLPanel->SetVisible( false );
+	}
 
 	if ( IsPC() )
 	{
@@ -724,6 +732,9 @@ void CEngineVGui::Init()
 		// Install demo playback/editing UI
 		CDemoUIPanel::InstallDemoUI( staticEngineToolsPanel );
 		CDemoUIPanel2::Install( staticClientDLLPanel, staticEngineToolsPanel, true );
+
+		// Install fog control panel UI
+		CFogUIPanel::InstallFogUI( staticEngineToolsPanel );
 
 		// Install texture view panel
 		TxViewPanel::Install( staticEngineToolsPanel );
@@ -747,7 +758,7 @@ void CEngineVGui::Init()
 
 	// Make sure this is on top of everything
 	staticFocusOverlayPanel = new CFocusOverlayPanel( staticPanel, "FocusOverlayPanel" );
-	staticFocusOverlayPanel->SetBounds( 0, 0, videomode->GetModeWidth(), videomode->GetModeHeight() );
+	staticFocusOverlayPanel->SetBounds( 0, 0, videomode->GetModeUIWidth(), videomode->GetModeUIHeight() );
 	staticFocusOverlayPanel->SetZPos( 150 );
 	staticFocusOverlayPanel->MoveToFront();
 
@@ -831,6 +842,7 @@ void CEngineVGui::Connect()
 {
 	m_pInputInternal = (vgui::IInputInternal *)g_GameSystemFactory( VGUI_INPUTINTERNAL_INTERFACE_VERSION,  NULL );
 	staticGameUIFuncs->Connect( g_GameSystemFactory );
+
 }
 
 //-----------------------------------------------------------------------------
@@ -1008,6 +1020,14 @@ bool CEngineVGui::ShouldPause()
 	return false;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CEngineVGui::ConfirmQuit()
+{
+	ActivateGameUI();
+	staticGameUIFuncs->OnConfirmQuit();
+}
 	
 //-----------------------------------------------------------------------------
 // Purpose: Shows any GameUI related panels
@@ -1019,6 +1039,12 @@ void CEngineVGui::ActivateGameUI()
 
 	if (!staticGameUIFuncs)
 		return;
+
+#if defined( REPLAY_ENABLED )
+	// Don't allow the game UI to be activated when a replay is being rendered
+	if ( g_pReplayMovieManager && g_pReplayMovieManager->IsRendering() )
+		return;
+#endif
 
 	// clear any keys that might be stuck down
 	ClearIOStates();
@@ -1543,8 +1569,7 @@ bool CEngineVGui::Key_Event( const InputEvent_t &event )
 #endif
 			   
 	// ESCAPE toggles game ui
-	ButtonCode_t uiToggleKey = IsPC() ? KEY_ESCAPE : KEY_XBUTTON_START;
-	if ( bDown && code == uiToggleKey )
+	if ( bDown && ( code == KEY_ESCAPE || code == KEY_XBUTTON_START || code == STEAMCONTROLLER_START) && !g_ClientDLL->HandleUiToggle() )
 	{
 		if ( IsPC() )
 		{
@@ -1600,16 +1625,32 @@ void CEngineVGui::Simulate()
 		//!! need to make it globally pumped (gameUI.dll has it's own version of this)
 		vgui::GetAnimationController()->UpdateAnimations( Sys_FloatTime() );
 
-		RECT rect;
-		::GetClientRect(*pmainwindow, &rect);
-
 		int w, h;
-		w = rect.right;
-		h = rect.bottom;
+#if defined( USE_SDL )
+		uint width,height;
+		g_pLauncherMgr->RenderedSize( width, height, false );	// false = get
+		w = width;
+		h = height;
+#else
+		if ( ::IsIconic( *pmainwindow ) )
+		{
+			w = videomode->GetModeWidth();
+			h = videomode->GetModeHeight();
+		}
+		else
+		{
+			RECT rect;
+			::GetClientRect(*pmainwindow, &rect);
 
-		CMatRenderContextPtr pRenderContext( materials );
-
-		pRenderContext->Viewport( 0, 0, w, h );
+			w = rect.right;
+			h = rect.bottom;
+		}
+#endif
+		// don't hold this reference over RunFrame()
+		{
+			CMatRenderContextPtr pRenderContext( materials );
+			pRenderContext->Viewport( 0, 0, w, h );
+		}
 
 		staticGameUIFuncs->RunFrame();
 		vgui::ivgui()->RunFrame();
@@ -1623,6 +1664,9 @@ void CEngineVGui::Simulate()
 		VGui_ActivateMouse();
 	}
 
+//	if ( !vgui::ivgui()->IsRunning() )
+//		Cbuf_AddText( "quit\n" );
+	
 	toolframework->VGui_PostSimulateAllTools();
 }
 
@@ -1660,17 +1704,17 @@ void CEngineVGui::Paint( PaintMode_t mode )
 		return;
 	}
 
-	// Force engine's root panel (staticPanel) to be full screen size
-	RECT rect;
-	::GetClientRect(*pmainwindow, &rect);
-
-	int w, h;
-	w = rect.right;
-	h = rect.bottom;
-
 	// draw from the main panel down
 	vgui::Panel *panel = staticPanel;
-	panel->SetBounds(0, 0, w, h);
+
+	// Force engine's root panel (staticPanel) to be full screen size
+	{
+		int x, y, w, h;
+		CMatRenderContextPtr pRenderContext( materials );
+		pRenderContext->GetViewport( x, y, w, h );
+		panel->SetBounds(0, 0, w, h); // ignore x and y here because the viewport takes care of that
+	}
+
 	panel->Repaint();
 
 	toolframework->VGui_PreRenderAllTools( mode );
@@ -1715,6 +1759,11 @@ void CEngineVGui::Paint( PaintMode_t mode )
 		vgui::ipanel()->SetParent( ingameToolsRoot, saveToolParent );
 
 		vgui::ipanel()->SetVisible( pVPanel, bSaveVisible );
+	}
+
+	if ( mode & PAINT_CURSOR )
+	{
+		vgui::surface()->PaintSoftwareCursor();
 	}
 
 	toolframework->VGui_PostRenderAllTools( mode );
@@ -1793,12 +1842,12 @@ bool CEngineVGui::IsCtrlKeyDown( void )
 //-----------------------------------------------------------------------------
 // Purpose: notification
 //-----------------------------------------------------------------------------
-void CEngineVGui::NotifyOfServerConnect(const char *game, int IP, int connectionPort, int queryPort)
+void CEngineVGui::NotifyOfServerConnect(const char *pchGame, int IP, int connectionPort, int queryPort)
 {
 	if (!staticGameUIFuncs)
 		return;
 
-	staticGameUIFuncs->OnConnectToServer2(game, IP, connectionPort, queryPort);
+	staticGameUIFuncs->OnConnectToServer2( pchGame, IP, connectionPort, queryPort);
 }
 
 //-----------------------------------------------------------------------------
@@ -1912,7 +1961,10 @@ void VGui_ActivateMouse()
 	}
 }
 
+static ConVar mat_drawTitleSafe( "mat_drawTitleSafe", "0", 0, "Enable title safe overlay" );
+
 CUtlVector< vgui::VPANEL > g_FocusPanelList;
+
 ConVar vgui_drawfocus( "vgui_drawfocus", "0", 0, "Report which panel is under the mouse." );
 
 CFocusOverlayPanel::CFocusOverlayPanel( vgui::Panel *pParent, const char *pName ) : vgui::Panel( pParent, pName )
@@ -1921,21 +1973,92 @@ CFocusOverlayPanel::CFocusOverlayPanel( vgui::Panel *pParent, const char *pName 
 	SetPaintBorderEnabled( false );
 	SetPaintBackgroundEnabled( false );
 
+	MakePopup();
+
 	SetPostChildPaintEnabled( true );
 	SetKeyBoardInputEnabled( false );
 	SetMouseInputEnabled( false );
+}
+
+bool CFocusOverlayPanel::DrawTitleSafeOverlay( void )
+{
+	if ( !mat_drawTitleSafe.GetBool() )
+		return false;
+
+	int backBufferWidth, backBufferHeight;
+	materials->GetBackBufferDimensions( backBufferWidth, backBufferHeight );
+
+	int x, y, x1, y1;
+
+	// Required Title safe is TCR documented at inner 90% (RED)
+	int insetX = 0.05f * backBufferWidth;
+	int insetY = 0.05f * backBufferHeight;
+
+	x = insetX;
+	y = insetY;
+	x1 = backBufferWidth - insetX;
+	y1 = backBufferHeight - insetY;
+
+	vgui::surface()->DrawSetColor( 255, 0, 0, 255 );
+	vgui::surface()->DrawOutlinedRect( x, y, x1, y1 );
+
+
+	// Suggested Title Safe is TCR documented at inner 85% (YELLOW)
+	insetX = 0.075f * backBufferWidth;
+	insetY = 0.075f * backBufferHeight;
+
+	x = insetX;
+	y = insetY;
+	x1 = backBufferWidth - insetX;
+	y1 = backBufferHeight - insetY;
+
+	vgui::surface()->DrawSetColor( 255, 255, 0, 255 );
+	vgui::surface()->DrawOutlinedRect( x, y, x1, y1 );	
+
+	return true;
 }
 
 void CFocusOverlayPanel::PostChildPaint( void )
 {
 	BaseClass::PostChildPaint();
 
+	bool bNeedsMoveToFront = false;
+
+	if ( g_DrawTreeSelectedPanel )
+	{
+		int x, y, x1, y1;
+		vgui::ipanel()->GetClipRect( g_DrawTreeSelectedPanel, x, y, x1, y1 );
+		vgui::surface()->DrawSetColor( Color( 255, 0, 0, 255 ) );
+		vgui::surface()->DrawOutlinedRect( x, y, x1, y1 );
+
+		bNeedsMoveToFront = true;
+	}
+
+	if ( DrawTitleSafeOverlay() )
+	{
+		bNeedsMoveToFront = true;
+	}
+
+	if ( DrawFocusPanelList() )
+	{
+		bNeedsMoveToFront = true;
+	}
+
+	if ( bNeedsMoveToFront )
+	{
+		// will be valid for the next frame
+		MoveToFront();
+	}
+}
+
+bool CFocusOverlayPanel::DrawFocusPanelList( void )
+{
 	if( !vgui_drawfocus.GetBool() )
-		return;
+		return false;
 
 	int c = g_FocusPanelList.Size();
 	if ( c <= 0 )
-		return;
+		return false;
 
 	int slot = 0;
 	int fullscreeninset = 0;
@@ -1950,7 +2073,7 @@ void CFocusOverlayPanel::PostChildPaint( void )
 			continue;
 
 		if ( !vgui::ipanel()->IsVisible( vpanel ) )
-			return;
+			return false;
 
 		// Convert panel bounds to screen space
 		int r, g, b;
@@ -1959,8 +2082,8 @@ void CFocusOverlayPanel::PostChildPaint( void )
 		int x, y, x1, y1;
 		vgui::ipanel()->GetClipRect( vpanel, x, y, x1, y1 );
 
-		if ( (x1 - x) == videomode->GetModeWidth() && 
-			 (y1 - y) == videomode->GetModeHeight() )
+		if ( (x1 - x) == videomode->GetModeUIWidth() && 
+			 (y1 - y) == videomode->GetModeUIHeight() )
 		{
 			x += fullscreeninset;
 			y += fullscreeninset;
@@ -1973,6 +2096,8 @@ void CFocusOverlayPanel::PostChildPaint( void )
 
 		slot++;
 	}
+
+	return true;
 }
 
 
@@ -2008,7 +2133,7 @@ void VGui_FindNamedPanels( CUtlVector< vgui::VPANEL >& panelList, char const *pa
 		if ( !popup )
 			continue;
 
-		if ( embedded == embedded )
+		if ( embedded == popup )
 			continue;
 
 		VGui_RecursiveFindPanels( panelList, popup, panelname );

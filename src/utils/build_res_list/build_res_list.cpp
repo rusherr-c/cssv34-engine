@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // build_res_list.cpp : Defines the entry point for the console application.
 //
 

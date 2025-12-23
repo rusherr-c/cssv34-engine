@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -16,7 +16,7 @@
 #include "networksystem/inetworksystem.h"
 #include "networksystem/inetworkmessage.h"
 #include "bitbuf.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "filesystem_init.h"
 #include "tier0/icommandline.h"
 #include "vstdlib/cvar.h"
@@ -205,12 +205,12 @@ bool CNetworkTestApp::SetupSearchPaths()
 
 	g_pFileSystem->AddSearchPath( steamInfo.m_GameInfoPath, "SKIN", PATH_ADD_TO_HEAD );
 
-	char core[MAX_PATH];
-	Q_strncpy( core, steamInfo.m_GameInfoPath, MAX_PATH );
-	Q_StripTrailingSlash( core );
-	Q_strncat( core, "/../platform", MAX_PATH, MAX_PATH );
+	char platform[MAX_PATH];
+	Q_strncpy( platform, steamInfo.m_GameInfoPath, MAX_PATH );
+	Q_StripTrailingSlash( platform );
+	Q_strncat( platform, "/../platform", MAX_PATH, MAX_PATH );
 
-	g_pFileSystem->AddSearchPath( core, "PLATFORM" );
+	g_pFileSystem->AddSearchPath( platform, "PLATFORM" );
 
 	return true;
 }

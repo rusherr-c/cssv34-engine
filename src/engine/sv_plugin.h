@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -92,9 +92,16 @@ public:
 	virtual void ClientCommand( edict_t *pEntity, const char *cmd );
 	virtual QueryCvarCookie_t StartQueryCvarValue( edict_t *pEntity, const char *pName );
 
+	int						GetNumLoadedPlugins( void ){ return m_Plugins.Count(); }
+
 private:
 	CUtlVector<CPlugin *>	m_Plugins;
 	IPluginHelpersCheck		*m_PluginHelperCheck;
+
+public:
+	//New plugin interface callbacks
+	virtual void			OnEdictAllocated( edict_t *edict );
+	virtual void			OnEdictFreed( const edict_t *edict  ); 
 };
 
 extern CServerPlugin *g_pServerPluginHandler;

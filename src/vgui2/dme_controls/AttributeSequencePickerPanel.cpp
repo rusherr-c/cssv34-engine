@@ -1,19 +1,19 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
-//=============================================================================//
+//===========================================================================//
 
 #include "dme_controls/AttributeSequencePickerPanel.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "vgui_controls/Button.h"
 #include "vgui_controls/FileOpenDialog.h"
 #include "dme_controls/AttributeTextEntry.h"
-#include "dme_controls/MDLPicker.h"
-#include "dme_controls/sequencepicker.h"
-#include "tier1/keyvalues.h"
+#include "matsys_controls/MDLPicker.h"
+#include "matsys_controls/sequencepicker.h"
+#include "tier1/KeyValues.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -51,8 +51,11 @@ void CAttributeSequencePickerPanel::ShowPickerDialog()
 //-----------------------------------------------------------------------------
 void CAttributeSequencePickerPanel::OnMDLSelected( KeyValues *pKeyValues )
 {
-	const char *pMDLName = pKeyValues->GetString( "mdl", NULL );
-	ShowSequencePickerDialog( pMDLName );
+	const char *pMDLName = pKeyValues->GetString( "asset", NULL );
+
+	char pRelativePath[MAX_PATH];
+	Q_snprintf( pRelativePath, sizeof(pRelativePath), "models\\%s", pMDLName );
+	ShowSequencePickerDialog( pRelativePath );
 }
 
 

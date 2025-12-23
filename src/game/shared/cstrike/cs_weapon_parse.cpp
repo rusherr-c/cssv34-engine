@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -25,60 +25,74 @@ struct WeaponTypeInfo
 //--------------------------------------------------------------------------------------------------------
 WeaponTypeInfo s_weaponTypeInfo[] =
 {
-	{ WEAPONTYPE_KNIFE, "Knife" },
-	{ WEAPONTYPE_PISTOL, "Pistol" },
-	{ WEAPONTYPE_SUBMACHINEGUN, "Submachine Gun" },	// First match is printable
-	{ WEAPONTYPE_SUBMACHINEGUN, "submachinegun" },
-	{ WEAPONTYPE_SUBMACHINEGUN, "smg" },
-	{ WEAPONTYPE_RIFLE, "Rifle" },
-	{ WEAPONTYPE_SHOTGUN, "Shotgun" },
-	{ WEAPONTYPE_SNIPER_RIFLE, "Sniper" },
-	{ WEAPONTYPE_MACHINEGUN, "Machine Gun" },		// First match is printable
-	{ WEAPONTYPE_MACHINEGUN, "machinegun" },
-	{ WEAPONTYPE_MACHINEGUN, "mg" },
-	{ WEAPONTYPE_C4, "C4" },
-	{ WEAPONTYPE_GRENADE, "Grenade" },
-	{ WEAPONTYPE_UNKNOWN, NULL },
+	{ WEAPONTYPE_KNIFE,			"Knife" },
+	{ WEAPONTYPE_PISTOL,		"Pistol" },
+	{ WEAPONTYPE_SUBMACHINEGUN,	"Submachine Gun" },	// First match is printable
+	{ WEAPONTYPE_SUBMACHINEGUN,	"submachinegun" },
+	{ WEAPONTYPE_SUBMACHINEGUN,	"smg" },
+	{ WEAPONTYPE_RIFLE,			"Rifle" },
+	{ WEAPONTYPE_SHOTGUN,		"Shotgun" },
+	{ WEAPONTYPE_SNIPER_RIFLE,	"Sniper Rifle" },	// First match is printable
+	{ WEAPONTYPE_SNIPER_RIFLE,	"SniperRifle" },
+	{ WEAPONTYPE_MACHINEGUN,	"Machine Gun" },		// First match is printable
+	{ WEAPONTYPE_MACHINEGUN,	"machinegun" },
+	{ WEAPONTYPE_MACHINEGUN,	"mg" },
+	{ WEAPONTYPE_C4,			"C4" },
+	{ WEAPONTYPE_GRENADE,		"Grenade" },
 };
+
+
+struct WeaponNameInfo
+{
+	CSWeaponID id;
+	const char *name;
+};
+
+WeaponNameInfo s_weaponNameInfo[] =
+{
+	{ WEAPON_P228,				"weapon_p228" },
+	{ WEAPON_GLOCK,				"weapon_glock" },
+	{ WEAPON_SCOUT,				"weapon_scout" },
+	{ WEAPON_HEGRENADE,			"weapon_hegrenade" },
+	{ WEAPON_XM1014,			"weapon_xm1014" },
+	{ WEAPON_C4,				"weapon_c4" },
+	{ WEAPON_MAC10,				"weapon_mac10" },
+	{ WEAPON_AUG,				"weapon_aug" },
+	{ WEAPON_SMOKEGRENADE,		"weapon_smokegrenade" },
+	{ WEAPON_ELITE,				"weapon_elite" },
+	{ WEAPON_FIVESEVEN,			"weapon_fiveseven" },
+	{ WEAPON_UMP45,				"weapon_ump45" },
+	{ WEAPON_SG550,				"weapon_sg550" },
+
+	{ WEAPON_GALIL,				"weapon_galil" },
+	{ WEAPON_FAMAS,				"weapon_famas" },
+	{ WEAPON_USP,				"weapon_usp" },
+	{ WEAPON_AWP,				"weapon_awp" },
+	{ WEAPON_MP5NAVY,			"weapon_mp5navy" },
+	{ WEAPON_M249,				"weapon_m249" },
+	{ WEAPON_M3,				"weapon_m3" },
+	{ WEAPON_M4A1,				"weapon_m4a1" },
+	{ WEAPON_TMP,				"weapon_tmp" },
+	{ WEAPON_G3SG1,				"weapon_g3sg1" },
+	{ WEAPON_FLASHBANG,			"weapon_flashbang" },
+	{ WEAPON_DEAGLE,			"weapon_deagle" },
+	{ WEAPON_SG552,				"weapon_sg552" },
+	{ WEAPON_AK47,				"weapon_ak47" },
+	{ WEAPON_KNIFE,				"weapon_knife" },
+	{ WEAPON_P90,				"weapon_p90" },
+
+	// not sure any of these are needed
+	{ WEAPON_SHIELDGUN,			"weapon_shieldgun" },
+	{ WEAPON_KEVLAR,			"weapon_kevlar" },
+	{ WEAPON_ASSAULTSUIT,		"weapon_assaultsuit" },
+	{ WEAPON_NVG,				"weapon_nvg" },
+
+	{ WEAPON_NONE,				"weapon_none" },
+};
+
+
 
 //--------------------------------------------------------------------------------------------------------------
-static const char *WeaponNames[WEAPON_MAX] =
-{
-	"weapon_none",
-
-		"weapon_p228",
-		"weapon_glock",
-		"weapon_scout",
-		"weapon_hegrenade",
-		"weapon_xm1014",
-		"weapon_c4",
-		"weapon_mac10",
-		"weapon_aug",
-		"weapon_smokegrenade",
-		"weapon_elite",
-		"weapon_fiveseven",
-		"weapon_ump45",
-		"weapon_sg550",
-
-		"weapon_galil",
-		"weapon_famas",
-		"weapon_usp",
-		"weapon_awp",
-		"weapon_mp5navy",
-		"weapon_m249",
-		"weapon_m3",
-		"weapon_m4a1",
-		"weapon_tmp",
-		"weapon_g3sg1",
-		"weapon_flashbang",
-		"weapon_deagle",
-		"weapon_sg552",
-		"weapon_ak47",
-		"weapon_knife",
-		"weapon_p90",
-
-		"weapon_shieldgun",
-};
 
 
 CCSWeaponInfo g_EquipmentInfo[MAX_EQUIPMENT];
@@ -136,7 +150,7 @@ CCSWeaponInfo * GetWeaponInfo( CSWeaponID weaponID )
 
 	}
 
-	const char *weaponName = WeaponNames[ weaponID ];
+	const char *weaponName = WeaponIdAsString(weaponID);
 	WEAPON_FILE_INFO_HANDLE	hWpnInfo = LookupWeaponInfoSlot( weaponName );
 	if ( hWpnInfo == GetInvalidWeaponInfoHandle() )
 	{
@@ -149,16 +163,14 @@ CCSWeaponInfo * GetWeaponInfo( CSWeaponID weaponID )
 }
 
 //--------------------------------------------------------------------------------------------------------
-const char * WeaponClassAsString( CSWeaponType weaponType )
+const char* WeaponClassAsString( CSWeaponType weaponType )
 {
-	WeaponTypeInfo *info = s_weaponTypeInfo;
-	while ( info->name != NULL )
+	for ( int i = 0; i < ARRAYSIZE(s_weaponTypeInfo); ++i )
 	{
-		if ( info->type == weaponType )
+		if ( s_weaponTypeInfo[i].type == weaponType )
 		{
-			return info->name;
+			return s_weaponTypeInfo[i].name;
 		}
-		++info;
 	}
 
 	return NULL;
@@ -166,16 +178,14 @@ const char * WeaponClassAsString( CSWeaponType weaponType )
 
 
 //--------------------------------------------------------------------------------------------------------
-CSWeaponType WeaponClassFromString( const char * weaponType )
+CSWeaponType WeaponClassFromString( const char* weaponType )
 {
-	WeaponTypeInfo *info = s_weaponTypeInfo;
-	while ( info->name != NULL )
+	for ( int i = 0; i < ARRAYSIZE(s_weaponTypeInfo); ++i )
 	{
-		if ( !Q_stricmp( info->name, weaponType ) )
+		if ( !Q_stricmp( s_weaponTypeInfo[i].name, weaponType ) )
 		{
-			return info->type;
+			return s_weaponTypeInfo[i].type;
 		}
-		++info;
 	}
 
 	return WEAPONTYPE_UNKNOWN;
@@ -205,6 +215,32 @@ CSWeaponType WeaponClassFromWeaponID( CSWeaponID weaponID )
 
 
 //--------------------------------------------------------------------------------------------------------
+const char * WeaponIdAsString( CSWeaponID weaponID )
+{
+	for ( int i = 0; i < ARRAYSIZE(s_weaponNameInfo); ++i )
+	{
+		if (s_weaponNameInfo[i].id == weaponID )
+			return s_weaponNameInfo[i].name;
+	}
+
+	return NULL;
+}
+
+
+//--------------------------------------------------------------------------------------------------------
+CSWeaponID WeaponIdFromString( const char *szWeaponName )
+{
+	for ( int i = 0; i < ARRAYSIZE(s_weaponNameInfo); ++i )
+	{
+		if ( Q_stricmp(s_weaponNameInfo[i].name, szWeaponName) == 0 )
+			return s_weaponNameInfo[i].id;
+	}
+
+	return WEAPON_NONE;
+}
+
+
+//--------------------------------------------------------------------------------------------------------
 void ParseVector( KeyValues *keyValues, const char *keyName, Vector& vec )
 {
 	vec.x = vec.y = vec.z = 0.0f;
@@ -215,7 +251,7 @@ void ParseVector( KeyValues *keyValues, const char *keyName, Vector& vec )
 	const char *vecString = keyValues->GetString( keyName, "0 0 0" );
 	if ( vecString && *vecString )
 	{
-		float x, y, z;
+		float x = 0.0f, y = 0.0f, z = 0.0f;
 		if ( 3 == sscanf( vecString, "%f %f %f", &x, &y, &z ) )
 		{
 			vec.x = x;
@@ -232,14 +268,13 @@ FileWeaponInfo_t* CreateWeaponInfo()
 }
 
 
-
 CCSWeaponInfo::CCSWeaponInfo()
 {
 	m_flMaxSpeed = 1; // This should always be set in the script.
 	m_szAddonModel[0] = 0;
 }
 
-int	CCSWeaponInfo::GetWeaponPrice( void )
+int	CCSWeaponInfo::GetWeaponPrice( void ) const
 {
 	return m_iWeaponPrice;
 }
@@ -270,7 +305,7 @@ void CCSWeaponInfo::Parse( KeyValues *pKeyValuesData, const char *szWeaponName )
 
 	if ( CSGameRules()->IsBlackMarket() )
 	{
-		int iWeaponID = ClassnameToWeaponID( GetTranslatedWeaponAlias ( szWeaponName ) );
+		CSWeaponID iWeaponID = AliasToWeaponID( GetTranslatedWeaponAlias ( szWeaponName ) );
 
 		m_iDefaultPrice = m_iWeaponPrice;
 		m_iPreviousPrice = CSGameRules()->GetBlackMarketPreviousPriceForWeapon( iWeaponID );
@@ -316,6 +351,31 @@ void CCSWeaponInfo::Parse( KeyValues *pKeyValuesData, const char *szWeaponName )
 	m_flAccuracyOffset	= pKeyValuesData->GetFloat( "AccuracyOffset", 0 );
 	m_flMaxInaccuracy	= pKeyValuesData->GetFloat( "MaxInaccuracy", 0 );
 
+	// new accuracy model parameters
+	m_fSpread[0]				= pKeyValuesData->GetFloat("Spread", 0.0f);
+	m_fInaccuracyCrouch[0]		= pKeyValuesData->GetFloat("InaccuracyCrouch", 0.0f);
+	m_fInaccuracyStand[0]		= pKeyValuesData->GetFloat("InaccuracyStand", 0.0f);
+	m_fInaccuracyJump[0]		= pKeyValuesData->GetFloat("InaccuracyJump", 0.0f);
+	m_fInaccuracyLand[0]		= pKeyValuesData->GetFloat("InaccuracyLand", 0.0f);
+	m_fInaccuracyLadder[0]		= pKeyValuesData->GetFloat("InaccuracyLadder", 0.0f);
+	m_fInaccuracyImpulseFire[0]	= pKeyValuesData->GetFloat("InaccuracyFire", 0.0f);
+	m_fInaccuracyMove[0]		= pKeyValuesData->GetFloat("InaccuracyMove", 0.0f);
+
+	m_fSpread[1]				= pKeyValuesData->GetFloat("SpreadAlt", 0.0f);
+	m_fInaccuracyCrouch[1]		= pKeyValuesData->GetFloat("InaccuracyCrouchAlt", 0.0f);
+	m_fInaccuracyStand[1]		= pKeyValuesData->GetFloat("InaccuracyStandAlt", 0.0f);
+	m_fInaccuracyJump[1]		= pKeyValuesData->GetFloat("InaccuracyJumpAlt", 0.0f);
+	m_fInaccuracyLand[1]		= pKeyValuesData->GetFloat("InaccuracyLandAlt", 0.0f);
+	m_fInaccuracyLadder[1]		= pKeyValuesData->GetFloat("InaccuracyLadderAlt", 0.0f);
+	m_fInaccuracyImpulseFire[1]	= pKeyValuesData->GetFloat("InaccuracyFireAlt", 0.0f);
+	m_fInaccuracyMove[1]		= pKeyValuesData->GetFloat("InaccuracyMoveAlt", 0.0f);
+
+	m_fInaccuracyReload			= pKeyValuesData->GetFloat("InaccuracyReload", 0.0f);
+	m_fInaccuracyAltSwitch		= pKeyValuesData->GetFloat("InaccuracyAltSwitch", 0.0f);
+
+	m_fRecoveryTimeCrouch		= pKeyValuesData->GetFloat("RecoveryTimeCrouch", 1.0f);
+	m_fRecoveryTimeStand		= pKeyValuesData->GetFloat("RecoveryTimeStand", 1.0f);
+
 	m_flTimeToIdleAfterFire	= pKeyValuesData->GetFloat( "TimeToIdle", 2 );
 	m_flIdleInterval	= pKeyValuesData->GetFloat( "IdleInterval", 20 );
 
@@ -359,53 +419,10 @@ void CCSWeaponInfo::Parse( KeyValues *pKeyValuesData, const char *szWeaponName )
 	// Default is 2000.
 	m_flBotAudibleRange = pKeyValuesData->GetFloat( "BotAudibleRange", 2000.0f );
 	
-	const char *pTypeString = pKeyValuesData->GetString( "WeaponType", NULL );
-	
-	m_WeaponType = WEAPONTYPE_UNKNOWN;
-	if ( !pTypeString )
-	{
-		Assert( false );
-	}
-	else if ( Q_stricmp( pTypeString, "Knife" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_KNIFE;
-	}
-	else if ( Q_stricmp( pTypeString, "Pistol" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_PISTOL;
-	}
-	else if ( Q_stricmp( pTypeString, "Rifle" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_RIFLE;
-	}
-	else if ( Q_stricmp( pTypeString, "Shotgun" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_SHOTGUN;
-	}
-	else if ( Q_stricmp( pTypeString, "SniperRifle" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_SNIPER_RIFLE;
-	}
-	else if ( Q_stricmp( pTypeString, "SubMachinegun" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_SUBMACHINEGUN;
-	}
-	else if ( Q_stricmp( pTypeString, "Machinegun" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_MACHINEGUN;
-	}
-	else if ( Q_stricmp( pTypeString, "C4" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_C4;
-	}
-	else if ( Q_stricmp( pTypeString, "Grenade" ) == 0 )
-	{
-		m_WeaponType = WEAPONTYPE_GRENADE;
-	}
-	else
-	{
-		Assert( false );
-	}
+	const char *pTypeString = pKeyValuesData->GetString( "WeaponType", "" );
+	m_WeaponType = WeaponClassFromString(pTypeString);
+
+	m_bFullAuto = pKeyValuesData->GetBool("FullAuto");
 
 	// Read the addon model.
 	Q_strncpy( m_szAddonModel, pKeyValuesData->GetString( "AddonModel" ), sizeof( m_szAddonModel ) );
@@ -419,7 +436,8 @@ void CCSWeaponInfo::Parse( KeyValues *pKeyValuesData, const char *szWeaponName )
 #ifndef CLIENT_DLL
 	// Enforce consistency for the weapon here, since that way we don't need to save off the model bounds
 	// for all time.
-	engine->ForceExactFile( UTIL_VarArgs("scripts/%s.ctx", szWeaponName ) );
+	// Moved to pure_server_minimal.txt
+//	engine->ForceExactFile( UTIL_VarArgs("scripts/%s.ctx", szWeaponName ) );
 
 	// Model bounds are rounded to the nearest integer, then extended by 1
 	engine->ForceModelBounds( szWorldModel, Vector( -15, -12, -18 ), Vector( 44, 16, 19 ) );

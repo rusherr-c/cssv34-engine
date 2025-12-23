@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -44,7 +44,7 @@ void DownloadFile( const char *pCachePath, const char *pRemoteFileBase, const ch
 	FILE *fpDest = fopen( localFilename, "wb" );
 	if ( !fpDest )
 	{
-		Error( "Can't open %s for writing.\n" );
+		Error( "Can't open %s for writing.\n", localFilename );
 	}
 	fwrite( data.Base(), 1, data.Count(), fpDest );
 	fclose( fpDest );

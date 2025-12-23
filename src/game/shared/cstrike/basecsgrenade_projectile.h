@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,8 @@
 
 #ifdef CLIENT_DLL
 	#define CBaseCSGrenadeProjectile C_BaseCSGrenadeProjectile
+#else
+	class CCSWeaponInfo;
 #endif
 
 
@@ -63,6 +65,10 @@ public:
 	// Without this, the entity wouldn't have an interpolation history initially, so it would
 	// sit still until it had gotten a few updates from the server.
 	void SetupInitialTransmittedGrenadeVelocity( const Vector &velocity );
+
+    // [jpaquin] give grenade projectiles a link back to the type
+	// of weapon they are
+	CCSWeaponInfo *m_pWeaponInfo;
 
 protected:
 

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,14 +13,18 @@
 #pragma once
 #endif
 
-#include "cpp_shader_constant_register_map.h"
 #include "shaderlib/cshader.h"
-#include "shaderlib/baseshader.h"
-#include "ConVar.h"
+#include "shaderlib/BaseShader.h"
+#include "convar.h"
 #include <renderparm.h>
 
+#ifdef _X360
 #define SUPPORT_DX8 0
 #define SUPPORT_DX7 0
+#else
+#define SUPPORT_DX8 1
+#define SUPPORT_DX7 1
+#endif
 //-----------------------------------------------------------------------------
 // Helper macro for vertex shaders
 //-----------------------------------------------------------------------------
@@ -114,6 +118,7 @@ public:
 											int transformVar, int scaleVar );
 
 	// Moves a matrix into vertex shader constants 
+	void SetVertexShaderMatrix2x4( int vertexReg, int matrixVar );
 	void SetVertexShaderMatrix3x4( int vertexReg, int matrixVar );
 	void SetVertexShaderMatrix4x4( int vertexReg, int matrixVar );
 
@@ -125,6 +130,9 @@ public:
 
 	// Loads the model->view matrix into vertex shader constants
 	void LoadModelViewMatrixIntoVertexShaderConstant( int vertexReg );
+
+	// Loads a scale/offset version of the viewport transform into the specified constant.
+	void LoadViewportTransformScaledIntoVertexShaderConstant( int vertexReg );
 
 	// Sets up ambient light cube...
 	void SetAmbientCubeDynamicStateVertexShader( );
@@ -146,6 +154,8 @@ public:
 	void SetColorVertexShaderConstant( int nVertexReg, int colorVar, int alphaVar );
 	void SetColorPixelShaderConstant( int nPixelReg, int colorVar, int alphaVar );
 
+
+#ifndef GAME_SHADER_DLL
 	//
 	// Standard shader passes!
 	//
@@ -230,7 +240,7 @@ public:
 	void DrawWorldBumpedDiffuseLighting_Blend_ps14( int bumpmapVar, int bumpFrameVar, int bumpTransformVar, 
 		int baseTextureVar, int baseTextureTransformVar, int baseTextureFrameVar, 
 		int baseTexture2Var, int baseTextureTransform2Var, int baseTextureFrame2Var);
-	/*void DrawWorldBumpedUsingVertexShader( int baseTextureVar, int baseTextureTransformVar,
+	void DrawWorldBumpedUsingVertexShader( int baseTextureVar, int baseTextureTransformVar,
 										   int bumpmapVar, int bumpFrameVar, 
 										   int bumpTransformVar,
 										   int envmapMaskVar, int envmapMaskFrame,
@@ -243,7 +253,7 @@ public:
 										   int baseTextureTransform2Var,
 										   int baseTextureFrame2Var,
 										   bool bSSBump
-		);*/
+		);
 	
 	// Sets up hw morphing state for the vertex shader
 	void SetHWMorphVertexShaderState( int nDimConst, int nSubrectConst, VertexTextureSampler_t morphSampler );
@@ -251,10 +261,16 @@ public:
 	// Computes the shader index for vertex lit materials
 	int ComputeVertexLitShaderIndex( bool bVertexLitGeneric, bool hasBump, bool hasEnvmap, bool hasVertexColor, bool bHasNormal ) const;
 
-	BlendType_t EvaluateBlendRequirements( int textureVar, bool isBaseTexture, int detailTextureVar = -1 );
-
 	// Helper for setting up flashlight constants
 	void SetFlashlightVertexShaderConstants( bool bBump, int bumpTransformVar, bool bDetail, int detailScaleVar, bool bSetTextureTransforms );
+
+#if SUPPORT_DX8
+	void DrawFlashlight_dx80( IMaterialVar** params, IShaderDynamicAPI *pShaderAPI, IShaderShadow* pShaderShadow, 
+		bool bBump, int bumpmapVar, int bumpmapFrame, int bumpTransform, int flashlightTextureVar, 
+		int flashlightTextureFrameVar, bool bLightmappedGeneric, bool bWorldVertexTransition, 
+		int nWorldVertexTransitionPassID, int baseTexture2Var, int baseTexture2FrameVar,
+		bool bTeeth=false, int nTeethForwardVar=0, int nTeethIllumFactorVar=0 );
+#endif
 
 	struct DrawFlashlight_dx90_Vars_t
 	{
@@ -297,6 +313,9 @@ public:
 	};
 	void DrawFlashlight_dx90( IMaterialVar** params, 
 		IShaderDynamicAPI *pShaderAPI, IShaderShadow* pShaderShadow, DrawFlashlight_dx90_Vars_t &vars );
+#endif // GAME_SHADER_DLL
+
+	BlendType_t EvaluateBlendRequirements( int textureVar, bool isBaseTexture, int detailTextureVar = -1 );
 
 	void HashShadow2DJitter( const float fJitterSeed, float *fU, float* fV );
 
@@ -367,39 +386,10 @@ FORCEINLINE float ShadowAttenFromState( FlashlightState_t const &state )
 
 FORCEINLINE float ShadowFilterFromState( FlashlightState_t const &state )
 {
-	return state.m_flShadowFilterSize / state.m_flShadowMapResolution;
+	// We developed shadow maps at 1024, so we expect the penumbra size to have been tuned relative to that
+	return state.m_flShadowFilterSize / 1024.0f;
 }
 
-FORCEINLINE void SetupUberlightFromState( IShaderDynamicAPI *pShaderAPI, FlashlightState_t const &state )
-{
-	// Bail if we can't do ps30 or we don't even want an uberlight
-	if ( !g_pHardwareConfig->HasFastVertexTextures() || !state.m_bUberlight || !pShaderAPI )
-		return;
-
-	UberlightState_t u = state.m_uberlightState;
-
-	// Set uberlight shader parameters as function of user controls from UberlightState_t
-	Vector4D vSmoothEdge0		= Vector4D( 0.0f,			u.m_fCutOn - u.m_fNearEdge,	u.m_fCutOff,				0.0f );
-	Vector4D vSmoothEdge1		= Vector4D( 0.0f,			u.m_fCutOn,					u.m_fCutOff + u.m_fFarEdge,	0.0f );
-	Vector4D vSmoothOneOverW	= Vector4D( 0.0f,			1.0f / u.m_fNearEdge,		1.0f / u.m_fFarEdge,		0.0f );
-	Vector4D vShearRound		= Vector4D( u.m_fShearx,	u.m_fSheary,				2.0f / u.m_fRoundness,	   -u.m_fRoundness / 2.0f );
-	Vector4D vaAbB				= Vector4D( u.m_fWidth,		u.m_fWidth + u.m_fWedge,	u.m_fHeight,				u.m_fHeight + u.m_fHedge );
-
-	pShaderAPI->SetPixelShaderConstant( PSREG_UBERLIGHT_SMOOTH_EDGE_0, vSmoothEdge0.Base(), 1 );
-	pShaderAPI->SetPixelShaderConstant( PSREG_UBERLIGHT_SMOOTH_EDGE_1, vSmoothEdge1.Base(), 1 );
-	pShaderAPI->SetPixelShaderConstant( PSREG_UBERLIGHT_SMOOTH_EDGE_OOW, vSmoothOneOverW.Base(), 1 );
-	pShaderAPI->SetPixelShaderConstant( PSREG_UBERLIGHT_SHEAR_ROUND, vShearRound.Base(), 1 );
-	pShaderAPI->SetPixelShaderConstant( PSREG_UBERLIGHT_AABB, vaAbB.Base(), 1 );
-
-	QAngle angles;
-	QuaternionAngles( state.m_quatOrientation, angles );
-
-	// World to Light's View matrix
-	matrix3x4_t viewMatrix, viewMatrixInverse;
-	AngleMatrix( angles, state.m_vecLightOrigin, viewMatrixInverse );
-	MatrixInvert( viewMatrixInverse, viewMatrix );
-	pShaderAPI->SetPixelShaderConstant( PSREG_UBERLIGHT_WORLD_TO_LIGHT, viewMatrix.Base(), 4 );
-}
 
 // convenient material variable access functions for helpers to use.
 FORCEINLINE bool IsTextureSet( int nVar, IMaterialVar **params )

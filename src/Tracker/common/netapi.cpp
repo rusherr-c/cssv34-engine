@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,10 +6,20 @@
 //=============================================================================
 #include <stdio.h>
 #include <stdlib.h>
+#if defined( WIN32 )
 #if !defined( _X360 )
 #include "winsock.h"
 #else
 #include "winsockx.h"
+#endif
+#elif defined( POSIX )
+#include <sys/socket.h>
+#include <netdb.h>
+#include <resolv.h> 
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#else
+#error
 #endif
 #include "inetapi.h"
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -76,6 +76,9 @@ class mxButton;
 #define IDC_EMPHASIS_SELECTALL			1043
 
 #define IDC_PLAYBACKRATE				1044
+
+#define IDC_REALIGNPHONEMES				1045
+#define IDC_REALIGNWORDS				1046
 
 // Support for multiple speech api's
 #define IDC_API_SAPI					1050
@@ -428,6 +431,8 @@ private:
 
 	bool				CreateCroppedWave( char const *filename, int startsample, int endsample );
 	void				CleanupWordsAndPhonemes( bool prepareundo );
+	void				RealignPhonemesToWords( bool prepareundo );
+	void				RealignWordsToPhonemes( bool prepareundo );
 	void				SortWords( bool prepareundo );
 	void				SortPhonemes( bool prepareundo );
 

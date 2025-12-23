@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,20 +7,20 @@
 
 #include "cbase.h"
 #include "cstriketextwindow.h"
-#include "BackgroundPanel.h"
+#include "backgroundpanel.h"
 #include <cdll_client_int.h>
 
 #include <vgui/IScheme.h>
 #include <vgui/ILocalize.h>
 #include <vgui/ISurface.h>
-#include <FileSystem.h>
+#include <filesystem.h>
 #include <KeyValues.h>
 #include <convar.h>
 #include <vgui_controls/ImageList.h>
 
 #include <vgui_controls/TextEntry.h>
 #include <vgui_controls/Button.h>
-#include <vgui_controls/buildgroup.h>
+#include <vgui_controls/BuildGroup.h>
 
 #include "IGameUIFuncs.h" // for key bindings
 #include <igameresources.h>
@@ -98,7 +98,13 @@ void CCSTextWindow::ShowPanel(bool bShow)
 //-----------------------------------------------------------------------------
 void CCSTextWindow::OnKeyCodePressed( KeyCode code )
 {
-	if ( m_iScoreBoardKey != BUTTON_CODE_INVALID && m_iScoreBoardKey == code )
+	//We manually intercept the ENTER key so in case the button loses focus
+	//ENTER still moves you through the MOTD screen.
+	if ( code == KEY_ENTER || code == KEY_XBUTTON_A || code == KEY_XBUTTON_B )
+	{
+		m_pOK->DoClick();
+	}	
+	else if ( m_iScoreBoardKey != BUTTON_CODE_INVALID && m_iScoreBoardKey == code )
 	{
 		gViewPortInterface->ShowPanel( PANEL_SCOREBOARD, true );
 		gViewPortInterface->PostMessageToPanel( PANEL_SCOREBOARD, new KeyValues( "PollHideCode", "code", code ) );

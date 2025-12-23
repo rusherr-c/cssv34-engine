@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Headers and defines for Autobuy and Rebuy 
 //
@@ -30,8 +30,8 @@ enum AutoBuyClassType
 struct AutoBuyInfoStruct
 {
 	AutoBuyClassType m_class;
-	char *m_command;
-	char *m_classname;
+	const char *m_command;
+	const char *m_classname;
 };
 
 struct RebuyStruct

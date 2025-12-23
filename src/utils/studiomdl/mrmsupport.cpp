@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -239,13 +239,13 @@ void Grab_Materiallist( s_source_t *psource )
 				{
 					psource->texmap[j] = -1;
 				}
-				else if (j < sizeof(psource->texmap))
+				else if (j < ARRAYSIZE(psource->texmap))
 				{
 					psource->texmap[j] = LookupTexture( path );
 				}
 				else
 				{
-					MdlError( "Too many materials, max %d\n", sizeof(psource->texmap) );
+					MdlError( "Too many materials, max %d\n", ARRAYSIZE(psource->texmap) );
 				}
 			}
 		}
@@ -446,7 +446,7 @@ int AddToVlist( int v, int m, int n, int t, int firstref )
 
 void DecrementReferenceVlist( int uv, int numverts )
 {
-	if (uv < 0 || uv > MAXSTUDIOVERTS)
+	if (uv < 0 || uv >= MAXSTUDIOVERTS)
 		MdlError( "decrement outside of range\n");
 
 	v_listdata[uv].refcount--;

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,14 +31,13 @@ public:
 
 	virtual void PrimaryAttack();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_P90; }
 
 
 private:
-
 	CWeaponP90( const CWeaponP90 & );
-
-	void P90Fire( float flSpread );
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponP90, DT_WeaponP90 )
@@ -56,7 +55,25 @@ PRECACHE_WEAPON_REGISTER( weapon_p90 );
 
 CWeaponP90::CWeaponP90()
 {
+}
+
+float CWeaponP90::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
 	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.3f * m_flAccuracy;
+		else if (pPlayer->GetAbsVelocity().Length2D() > 170)
+			return 0.115f * m_flAccuracy;
+		else
+			return 0.045f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
 }
 
 void CWeaponP90::PrimaryAttack()
@@ -65,22 +82,7 @@ void CWeaponP90::PrimaryAttack()
 	if ( !pPlayer )
 		return;
 	
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		P90Fire( 0.3f * m_flAccuracy );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 170)
-		P90Fire( 0.115f * m_flAccuracy );
-	else
-		P90Fire( 0.045f * m_flAccuracy );
-}
-
-
-void CWeaponP90::P90Fire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 
 	// Kick the gun based on the state of the player.

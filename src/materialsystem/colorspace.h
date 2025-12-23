@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -89,7 +89,7 @@ namespace ColorSpace
 		// HACK!  Clean this up, and add some else statements
 #define CONDITION(a,b,c) do { if( maxs[a] >= maxs[b] && maxs[b] >= maxs[c] ) { order[0] = a; order[1] = b; order[2] = c; } } while( 0 )
 		
-		int order[3];
+		int order[3] = {};
 		CONDITION(0,1,2);
 		CONDITION(0,2,1);
 		CONDITION(1,0,2);
@@ -204,7 +204,7 @@ namespace ColorSpace
 	{
 		unsigned short out;
 		in = in * ( 1 << nFractionalBits );
-		in = min( in, 65535 );
+		in = min( in, 65535.f );
 		out = max( in, 0.0f );
 		return out;
 	}

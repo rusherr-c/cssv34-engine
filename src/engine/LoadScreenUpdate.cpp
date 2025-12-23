@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: To accomplish X360 TCR 22, we need to call present ever 66msec
 // at least during loading screens.	This amazing hack will do it
@@ -14,6 +14,8 @@
 #include "tier2/tier2.h"
 #include "materialsystem/imaterialsystem.h"
 #include "tier0/dbg.h"
+
+#ifdef _X360
 
 #define LOADING_UPDATE_INTERVAL 0.015f
 #define UNINITIALIZED_LAST_TIME -1000.0f
@@ -61,11 +63,11 @@ public:
 	DELEGATE_TO_OBJECT_2V(			SetStatsExtraInfo, const char *, const char *, m_pMemAlloc );
 #endif
 	DELEGATE_TO_OBJECT_0(size_t,	MemoryAllocFailed, m_pMemAlloc );
-	DELEGATE_TO_OBJECT_0(uint32,	GetDebugInfoSize, m_pMemAlloc );
-	DELEGATE_TO_OBJECT_1V(			SaveDebugInfo, void*, m_pMemAlloc );
-	DELEGATE_TO_OBJECT_1V(			RestoreDebugInfo, const void*, m_pMemAlloc );
-	DELEGATE_TO_OBJECT_3V(			InitDebugInfo, void*, const char*, int, m_pMemAlloc );
-	DELEGATE_TO_OBJECT_2V(			GlobalMemoryStatus, size_t*, size_t*, m_pMemAlloc );
+	virtual uint32 GetDebugInfoSize() { return 0; }
+	virtual void SaveDebugInfo( void *pvDebugInfo ) { }
+	virtual void RestoreDebugInfo( const void *pvDebugInfo ) {}	
+	virtual void InitDebugInfo( void *pvDebugInfo, const char *pchRootFileName, int nLine ) {}
+
 	// Other public methods
 public:
 	CLoaderMemAlloc();
@@ -233,3 +235,5 @@ void  CLoaderMemAlloc::Free( void *pMem, const char *pFileName, int nLine )
 	CheckSwap();
 	m_pMemAlloc->Free( pMem, pFileName, nLine );
 }
+
+#endif // _X360

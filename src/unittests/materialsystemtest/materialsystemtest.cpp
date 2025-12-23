@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -16,13 +16,13 @@
 #include "materialsystem/materialsystem_config.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "materialsystem/imaterialsystem.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "vstdlib/random.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "filesystem_init.h"
-#include "tier0/ICommandLine.h"
+#include "tier0/icommandline.h"
 #include "tier1/KeyValues.h"
-#include "tier1/UtlBuffer.h"
+#include "tier1/utlbuffer.h"
 #include "materialsystem/imesh.h"
 
 

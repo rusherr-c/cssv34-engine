@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,19 +12,48 @@
 #include "filesystem_engine.h"
 #include "demo.h"
 #include "proto_version.h"
+#include "convar.h"	// For dbg_demofile
+
+// NOTE: This has to be the last file included!
+#include "tier0/memdbgon.h"
+
 
 void Host_EndGame (bool bShowMainMenu, const char *message, ...);
+
+// Debug helpers - this class prints in a nested format
+ConVar dbg_demofile( "dbg_demofile", "0", FCVAR_DEVELOPMENTONLY | FCVAR_HIDDEN );
+//#define DEMOFILE_DBG_PRINT
+#if defined( DEMOFILE_DBG_PRINT )
+class CDbgPrint
+{
+public:
+	static int s_nIndent;
+	CDbgPrint( const char *pMsg )
+	{
+		++s_nIndent;
+		if ( dbg_demofile.GetInt() )
+		{
+			for (int i = 0; i < 3*s_nIndent; ++i)
+				DevMsg(" ");
+			DevMsg( pMsg );
+		}
+	}
+	~CDbgPrint() { --s_nIndent; }
+};
+int CDbgPrint::s_nIndent = 0;
+#define DemoFileDbg(_txt) CDbgPrint printer( _txt )
+#else
+#define DemoFileDbg(_txt) (void)0
+#endif
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
 CDemoFile::CDemoFile() :
-#ifdef DEMO_FILE_UTLBUFFER
-	m_Buffer()
-#else
-	m_hDemoFile( FILESYSTEM_INVALID_HANDLE )
-#endif
+	m_pBuffer( NULL ),
+	m_bAllowHeaderWrite( true ),
+	m_bIsStreamBuffer( false )
 {
 }
 
@@ -38,18 +67,10 @@ CDemoFile::~CDemoFile()
 
 void CDemoFile::WriteSequenceInfo(int nSeqNrIn, int nSeqNrOut)
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	m_Buffer.PutInt( nSeqNrIn );
-	m_Buffer.PutInt( nSeqNrOut );
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	nSeqNrIn = LittleDWord( nSeqNrIn );
-	nSeqNrOut = LittleDWord( nSeqNrOut );
-
-	g_pFileSystem->Write( &nSeqNrIn, sizeof(int), m_hDemoFile );
-	g_pFileSystem->Write( &nSeqNrOut, sizeof(int), m_hDemoFile );
-#endif
+	DemoFileDbg( "WriteSequenceInfo()\n" );
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	m_pBuffer->PutInt( nSeqNrIn );
+	m_pBuffer->PutInt( nSeqNrOut );
 }
 
 //-----------------------------------------------------------------------------
@@ -57,18 +78,9 @@ void CDemoFile::WriteSequenceInfo(int nSeqNrIn, int nSeqNrOut)
 //-----------------------------------------------------------------------------
 void CDemoFile::ReadSequenceInfo(int &nSeqNrIn, int &nSeqNrOut)
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	nSeqNrIn = m_Buffer.GetInt( );
-	nSeqNrOut = m_Buffer.GetInt( );
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	g_pFileSystem->Read( &nSeqNrIn, sizeof(int), m_hDemoFile );
-	g_pFileSystem->Read( &nSeqNrOut, sizeof(int), m_hDemoFile );
-
-	nSeqNrIn = LittleDWord( nSeqNrIn );
-	nSeqNrOut = LittleDWord( nSeqNrOut );
-#endif
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	nSeqNrIn = m_pBuffer->GetInt( );
+	nSeqNrOut = m_pBuffer->GetInt( );
 }
 
 
@@ -103,16 +115,12 @@ inline void ByteSwap_democmdinfo_t( democmdinfo_t &swap )
 
 void CDemoFile::WriteCmdInfo( democmdinfo_t& info )
 {
+	DemoFileDbg( "WriteCmdInfo()\n" );
 	democmdinfo_t littleEndianInfo = info;
 	ByteSwap_democmdinfo_t( littleEndianInfo );
 
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	m_Buffer.Put( &littleEndianInfo, sizeof(democmdinfo_t) );
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	g_pFileSystem->Write( &littleEndianInfo, sizeof( democmdinfo_t ), m_hDemoFile );
-#endif
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	m_pBuffer->Put( &littleEndianInfo, sizeof(democmdinfo_t) );
 }
 
 //-----------------------------------------------------------------------------
@@ -120,13 +128,8 @@ void CDemoFile::WriteCmdInfo( democmdinfo_t& info )
 //-----------------------------------------------------------------------------
 void CDemoFile::ReadCmdInfo( democmdinfo_t& info )
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	m_Buffer.Get( &info, sizeof(democmdinfo_t) );
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	g_pFileSystem->Read( &info, sizeof( democmdinfo_t ), m_hDemoFile );
-#endif
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	m_pBuffer->Get( &info, sizeof(democmdinfo_t) );
 
 	ByteSwap_democmdinfo_t( info );
 }
@@ -139,22 +142,14 @@ void CDemoFile::ReadCmdInfo( democmdinfo_t& info )
 //-----------------------------------------------------------------------------
 void CDemoFile::WriteCmdHeader( unsigned char cmd, int tick )
 {
+	if ( dbg_demofile.GetInt() ) DevMsg( "----------------------------------------\n" );
 	Assert( cmd >= dem_signon && cmd <= dem_lastcmd );
 
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	m_Buffer.PutUnsignedChar( cmd );
-	m_Buffer.PutInt( tick );
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	tick = LittleDWord( tick );
-		
-	// Command
-	g_pFileSystem->Write( &cmd, sizeof(byte), m_hDemoFile );
-	g_pFileSystem->Write (&tick, sizeof(int), m_hDemoFile );
-#endif
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	m_pBuffer->PutUnsignedChar( cmd );
+	m_pBuffer->PutInt( tick );
 
-	/*char *cmdname[] = 
+	static const char *cmdname[] = 
 	{
 		"dem_unknown",
 		"dem_signon",
@@ -163,10 +158,12 @@ void CDemoFile::WriteCmdHeader( unsigned char cmd, int tick )
 		"dem_consolecmd",
 		"dem_usercmd",
 		"dem_datatables",
-		"dem_stop"
+		"dem_stop",
+		"dem_stringtables"
 	};
 
-	DevMsg( "Demo Write: tick %i, cmd %s \n", tick, cmdname[cmd] );*/
+	DemoFileDbg( "WriteCmdHeader()..." );
+	if ( dbg_demofile.GetInt() ) DevMsg( "tick %i, cmd %s \n", tick, cmdname[cmd] );
 }
 
 //-----------------------------------------------------------------------------
@@ -177,10 +174,9 @@ void CDemoFile::WriteCmdHeader( unsigned char cmd, int tick )
 //-----------------------------------------------------------------------------
 void CDemoFile::ReadCmdHeader( unsigned char& cmd, int& tick )
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	cmd = m_Buffer.GetUnsignedChar( );
-	if ( !m_Buffer.IsValid() )
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	cmd = m_pBuffer->GetUnsignedChar( );
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 	{
 		ConDMsg("Missing end tag in demo file.\n");
 		cmd = dem_stop;
@@ -194,35 +190,17 @@ void CDemoFile::ReadCmdHeader( unsigned char& cmd, int& tick )
 		return;
 	}
 
-	tick = m_Buffer.GetInt( );
-#else
-	// Read the command
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	int r = g_pFileSystem->Read( &cmd, sizeof(byte), m_hDemoFile );
-	if ( r <= 0 )
-	{
-		ConDMsg("Missing end tag in demo file.\n");
-		cmd = dem_stop;
-		return;
-	}
-	// Read the timestamp
-	g_pFileSystem->Read( &tick, sizeof(int), m_hDemoFile );
-	tick = LittleDWord( tick );
-#endif
+	tick = m_pBuffer->GetInt( );
 }
 
 void CDemoFile::WriteConsoleCommand( const char *cmdstring, int tick )
 {
+	DemoFileDbg( "WriteConsoleCommand()\n" );
 	if ( !cmdstring || !cmdstring[0] )
 		return;
 
-#ifdef DEMO_FILE_UTLBUFFER
-	if ( !m_Buffer.IsOpen() )
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 		return;
-#else
-	if ( m_hDemoFile == FILESYSTEM_INVALID_HANDLE )
-		return;
-#endif
 
 	int len = Q_strlen( cmdstring ) + 1;
 	if ( len >= 1024 )
@@ -247,17 +225,11 @@ const char *CDemoFile::ReadConsoleCommand()
 
 unsigned int CDemoFile::GetCurPos( bool bRead )
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	if ( !m_Buffer.IsOpen() )
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 		return 0;
 	if ( bRead )
-		return m_Buffer.TellGet();
-	return m_Buffer.TellPut();
-#else
-	if ( m_hDemoFile == FILESYSTEM_INVALID_HANDLE )
-		return 0;
-	return g_pFileSystem->Tell( m_hDemoFile );
-#endif
+		return m_pBuffer->TellGet();
+	return m_pBuffer->TellPut();
 }
 
 //-----------------------------------------------------------------------------
@@ -266,21 +238,14 @@ unsigned int CDemoFile::GetCurPos( bool bRead )
 //-----------------------------------------------------------------------------
 void CDemoFile::WriteNetworkDataTables( bf_write *buf, int tick  )
 {
+	DemoFileDbg( "WriteNetworkDataTables()\n" );
 	MEM_ALLOC_CREDIT();
 
-#ifdef DEMO_FILE_UTLBUFFER
-	if ( !m_Buffer.IsOpen() )
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 	{
 		DevMsg("CDemoFile::WriteNetworkDataTables: Haven't opened file yet!\n" );
 		return;
 	}
-#else
-	if ( m_hDemoFile == FILESYSTEM_INVALID_HANDLE )
-	{
-		DevMsg("CDemoFile::WriteNetworkDataTables: file header handle == NULL.\n" );
-		return;
-	}
-#endif
 
 	WriteCmdHeader( dem_datatables, tick );
 
@@ -300,6 +265,28 @@ int CDemoFile::ReadNetworkDataTables( bf_read *buf )
 	return ReadRawData( NULL, 0 ); // skip data
 }
 
+void CDemoFile::WriteStringTables( bf_write *buf, int tick )
+{
+	DemoFileDbg( "WriteStringTables()\n" );
+	MEM_ALLOC_CREDIT();
+
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
+	{
+		DevMsg("CDemoFile::WriteStringTables: Haven't opened file yet!\n" );
+		return;
+	}
+
+	WriteCmdHeader( dem_stringtables, tick );
+
+	WriteRawData( (char*)buf->GetBasePointer(), buf->GetNumBytesWritten() );
+}
+
+int CDemoFile::ReadStringTables( bf_read *buf )
+{
+	if ( buf )
+		return ReadRawData( (char*)buf->GetBasePointer(), buf->GetNumBytesLeft() );
+	return ReadRawData( NULL, 0 ); // skip data
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -307,22 +294,13 @@ int CDemoFile::ReadNetworkDataTables( bf_read *buf )
 //-----------------------------------------------------------------------------
 void CDemoFile::WriteUserCmd( int cmdnumber, const char *buffer, unsigned char bytes, int tick )
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	if ( !m_Buffer.IsOpen() )
+	DemoFileDbg( "WriteUserCmd()\n" );
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 		return;
-#else
-	if ( m_hDemoFile == FILESYSTEM_INVALID_HANDLE )
-		return;
-#endif
 
 	WriteCmdHeader( dem_usercmd, tick );
 
-#ifdef DEMO_FILE_UTLBUFFER
-	m_Buffer.PutInt( cmdnumber );
-#else
-	cmdnumber = LittleDWord( cmdnumber );
-	g_pFileSystem->Write( &cmdnumber, sizeof( int ), m_hDemoFile );
-#endif
+	m_pBuffer->PutInt( cmdnumber );
 
 	WriteRawData( buffer, bytes );
 }
@@ -335,38 +313,27 @@ int CDemoFile::ReadUserCmd( char *buffer, int &size )
 {
 	int outgoing_sequence;
 	
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	outgoing_sequence = m_Buffer.GetInt();
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	g_pFileSystem->Read( &outgoing_sequence, sizeof( int ), m_hDemoFile );
-	outgoing_sequence = LittleDWord( outgoing_sequence );
-#endif
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	outgoing_sequence = m_pBuffer->GetInt();
 
 	size = ReadRawData( buffer, size );
 	return outgoing_sequence;
 }
 
-//-----------------------------------------------------------------------------
+//
 // Purpose: Rewind from the current spot by the time stamp, byte code and frame counter offsets
 //-----------------------------------------------------------------------------
 void CDemoFile::SeekTo( int position, bool bRead )
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
 	if ( bRead )
 	{
-		m_Buffer.SeekGet( CUtlBuffer::SEEK_HEAD, position );
+		m_pBuffer->SeekGet( CUtlBuffer::SEEK_HEAD, position );
 	}
 	else
 	{
-		m_Buffer.SeekPut( CUtlBuffer::SEEK_HEAD, position );
+		m_pBuffer->SeekPut( CUtlBuffer::SEEK_HEAD, position );
 	}
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	g_pFileSystem->Seek( m_hDemoFile, position, FILESYSTEM_SEEK_HEAD );
-#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -377,30 +344,19 @@ int CDemoFile::ReadRawData( char *buffer, int length )
 {
 	int size;
 	
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	size = m_Buffer.GetInt();
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	// read length of data block
-	g_pFileSystem->Read( &size, sizeof( int ), m_hDemoFile );
-	size = LittleDWord( size );
-#endif
-
-	if ( buffer && (length < size) )
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 	{
-		DevMsg("CDemoFile::ReadRawData: buffe overflow (%i).\n", size );
+		Host_EndGame(true, "Error reading demo message data.\n");
 		return -1;
 	}
+
+	size = m_pBuffer->GetInt();
 
 	if ( !buffer )
 	{
 		// just skip it
-#ifdef DEMO_FILE_UTLBUFFER
-		m_Buffer.SeekGet( CUtlBuffer::SEEK_CURRENT, size );
-#else
-		g_pFileSystem->Seek( m_hDemoFile, size, FILESYSTEM_SEEK_CURRENT );
-#endif
+		m_pBuffer->SeekGet( CUtlBuffer::SEEK_CURRENT, size );
 		return size;
 	}
 
@@ -408,73 +364,60 @@ int CDemoFile::ReadRawData( char *buffer, int length )
 	{
 		// given buffer is too small
 		DevMsg("CDemoFile::ReadRawData: buffer overflow (%i).\n", size );
-#ifdef DEMO_FILE_UTLBUFFER
-		m_Buffer.SeekGet( CUtlBuffer::SEEK_CURRENT, size );
-#else
-		g_pFileSystem->Seek( m_hDemoFile, size, FILESYSTEM_SEEK_CURRENT );
-#endif
+		m_pBuffer->SeekGet( CUtlBuffer::SEEK_CURRENT, -(int)sizeof( int ) ); // rewind our get pointer
 		return -1;
 	}
 
 	// read data into buffer
-#ifdef DEMO_FILE_UTLBUFFER
-	m_Buffer.Get( buffer, size );
-	if ( !m_Buffer.IsValid() )
-	{
-		Host_EndGame(true, "Error reading demo message data.\n");
-		return -1;
-	}
-#else
-	int r = g_pFileSystem->Read( buffer, size, m_hDemoFile );
-	if ( r != size )
-	{
-		Host_EndGame(true, "Error reading demo message data.\n");
-		return -1;
-	}
-#endif
+	m_pBuffer->Get( buffer, size );
 
 	return size;
 }
 
 void CDemoFile::WriteRawData( const char *buffer, int length )
 {
+	DemoFileDbg( "WriteRawData()\n" );
 	MEM_ALLOC_CREDIT();
 
-#ifdef DEMO_FILE_UTLBUFFER
-	Assert( m_Buffer.IsOpen() );
-	m_Buffer.PutInt( length );
-	m_Buffer.Put( buffer, length );
-#else
-	Assert( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-	int littleEndianLength = LittleDWord( length );
-	g_pFileSystem->Write( &littleEndianLength, sizeof( int ), m_hDemoFile );
-	g_pFileSystem->Write( buffer, length, m_hDemoFile );
-#endif
-}
-
-inline void ByteSwap_demoheader_t( demoheader_t &swap )
-{
-	swap.demoprotocol = LittleDWord( swap.demoprotocol );
-	swap.networkprotocol = LittleDWord( swap.networkprotocol );
-	LittleFloat( &swap.playback_time, &swap.playback_time );
-	swap.playback_ticks = LittleDWord( swap.playback_ticks );
-	swap.playback_frames = LittleDWord( swap.playback_frames );
-	swap.signonlength = LittleDWord( swap.signonlength );
+	Assert( m_pBuffer && m_pBuffer->IsValid() );
+	m_pBuffer->PutInt( length );
+	m_pBuffer->Put( buffer, length );
 }
 
 void CDemoFile::WriteDemoHeader()
 {
-	demoheader_t littleEndianHeader = m_DemoHeader;
+	if ( !m_bAllowHeaderWrite )
+		return;
+
+	DemoFileDbg( "WriteDemoHeader()\n" );
+	Assert( m_DemoHeader.networkprotocol == PROTOCOL_VERSION );
+
+	if ( dbg_demofile.GetInt() )
+	{
+		DevMsg( "\n" );
+		DevMsg( "     demofilestamp: %s\n", m_DemoHeader.demofilestamp );
+		DevMsg( "     demoprotocol (should be %i): %i\n", DEMO_PROTOCOL, m_DemoHeader.demoprotocol );
+		DevMsg( "     networkprotocol (should be %i): %i\n", PROTOCOL_VERSION, m_DemoHeader.networkprotocol );
+		DevMsg( "     servername: %s\n", m_DemoHeader.servername );
+		DevMsg( "     clientname: %s\n", m_DemoHeader.clientname );
+		DevMsg( "     mapname: %s\n", m_DemoHeader.mapname );
+		DevMsg( "     gamedirectory: %s\n", m_DemoHeader.gamedirectory );
+		DevMsg( "     playback_time: %f\n", m_DemoHeader.playback_time );
+		DevMsg( "     playback_ticks: %i\n", m_DemoHeader.playback_ticks );	
+		DevMsg( "     playback_frames: %i\n", m_DemoHeader.playback_frames );
+		DevMsg( "     signonlength: %i\n", m_DemoHeader.signonlength );
+		DevMsg( "\n" );
+	}
+
+	// Swaps endianness, goes to file start and writes header
+	demoheader_t littleEndianHeader = *((demoheader_t*)&m_DemoHeader);
 	ByteSwap_demoheader_t( littleEndianHeader );
 
-	// goto file start
-#ifdef DEMO_FILE_UTLBUFFER
-	m_Buffer.SeekPut( CUtlBuffer::SEEK_HEAD, 0 );
-	m_Buffer.Put( &littleEndianHeader, sizeof(demoheader_t) );
-#else
-	g_pFileSystem->Seek(m_hDemoFile, 0, FILESYSTEM_SEEK_HEAD);
-	g_pFileSystem->Write( &littleEndianHeader, sizeof(demoheader_t), m_hDemoFile );
-#endif
+	// Goto file start
+	m_pBuffer->SeekPut( CUtlBuffer::SEEK_HEAD, 0 );
+
+	// Write
+	m_pBuffer->Put( &m_DemoHeader, sizeof( m_DemoHeader ) );
 }
 
 demoheader_t *CDemoFile::ReadDemoHeader()
@@ -482,21 +425,11 @@ demoheader_t *CDemoFile::ReadDemoHeader()
 	bool bOk;
 	Q_memset( &m_DemoHeader, 0, sizeof(m_DemoHeader) );
 
-#ifdef DEMO_FILE_UTLBUFFER
-	if ( !m_Buffer.IsOpen() )
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 		return NULL;
-	m_Buffer.SeekGet( CUtlBuffer::SEEK_HEAD, 0 );
-	m_Buffer.Get( &m_DemoHeader, sizeof(demoheader_t) );
-	bOk = m_Buffer.IsValid();
-#else
-	if ( m_hDemoFile == FILESYSTEM_INVALID_HANDLE )
-		return NULL;	// file not open
-
-	// goto file start
-	g_pFileSystem->Seek( m_hDemoFile, 0, FILESYSTEM_SEEK_HEAD );
-	int r = g_pFileSystem->Read( &m_DemoHeader, sizeof(demoheader_t), m_hDemoFile );
-	bOk = ( r == sizeof(demoheader_t) );
-#endif
+	m_pBuffer->SeekGet( CUtlBuffer::SEEK_HEAD, 0 );
+	m_pBuffer->Get( &m_DemoHeader, sizeof(demoheader_t) );
+	bOk = m_pBuffer->IsValid();
 
 	ByteSwap_demoheader_t( m_DemoHeader );
 
@@ -524,7 +457,7 @@ demoheader_t *CDemoFile::ReadDemoHeader()
 	if ( ( m_DemoHeader.demoprotocol > DEMO_PROTOCOL) ||
 		 ( m_DemoHeader.demoprotocol < 2 ) )
 	{
-		ConMsg ("ERROR: demo file protocol %i outdated, engine version is %i \n", 
+		ConMsg ("ERROR: demo file protocol %i outdated, engine vnoteersion is %i \n", 
 			m_DemoHeader.demoprotocol, DEMO_PROTOCOL );
 
 		return NULL;
@@ -535,33 +468,26 @@ demoheader_t *CDemoFile::ReadDemoHeader()
 
 void CDemoFile::WriteFileBytes( FileHandle_t fh, int length )
 {
-#ifdef DEMO_FILE_UTLBUFFER
+	DemoFileDbg( "WriteFileBytes()\n" );
 	int   copysize = length;
 	char  copybuf[COM_COPY_CHUNK_SIZE];
 
 	while ( copysize > COM_COPY_CHUNK_SIZE )
 	{
 		g_pFileSystem->Read ( copybuf, COM_COPY_CHUNK_SIZE, fh );
-		m_Buffer.Put( copybuf, COM_COPY_CHUNK_SIZE );
+		m_pBuffer->Put( copybuf, COM_COPY_CHUNK_SIZE );
 		copysize -= COM_COPY_CHUNK_SIZE;
 	}
 
 	g_pFileSystem->Read ( copybuf, copysize, fh );
-	m_Buffer.Put( copybuf, copysize );
-
+	m_pBuffer->Put( copybuf, copysize );
+	
 	g_pFileSystem->Flush ( fh );
-#else
-	COM_CopyFileChunk( m_hDemoFile, fh, length );
-#endif
 }
 
-bool CDemoFile::Open(const char *name, bool bReadOnly)
+bool CDemoFile::Open(const char *name, bool bReadOnly, bool bMemoryBuffer, int nBufferSize/*=0*/, bool bAllowHeaderWrite/*=true*/)
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	if ( m_Buffer.IsOpen() )
-#else
-	if ( m_hDemoFile != FILESYSTEM_INVALID_HANDLE )
-#endif
+	if ( m_pBuffer && m_pBuffer->IsValid() )
 	{
 		ConMsg ("CDemoFile::Open: file already open.\n");
 		return false;
@@ -570,61 +496,68 @@ bool CDemoFile::Open(const char *name, bool bReadOnly)
 	m_szFileName[0] = 0;  // clear name
 	Q_memset( &m_DemoHeader, 0, sizeof(m_DemoHeader) ); // and demo header
 
-	bool bOk;
-#ifdef DEMO_FILE_UTLBUFFER
-	m_Buffer.Open( name, NULL, bReadOnly ? CUtlBuffer::READ_ONLY : 0 );
-	bOk = m_Buffer.IsOpen() && m_Buffer.IsValid();
-#else
-	m_hDemoFile = g_pFileSystem->Open( name, bReadOnly ? "rb" : "wb" );
-	bOk = ( m_hDemoFile != FILESYSTEM_INVALID_HANDLE );
-#endif
+	// This is used by replay, which manually writes a header.
+	m_bAllowHeaderWrite = bAllowHeaderWrite;
 
-	if ( !bOk )
+	if ( bMemoryBuffer )
+	{
+		Assert( !bReadOnly );	// Only read from files
+		Assert( nBufferSize > 0 );
+		m_pBuffer = new CUtlBuffer( nBufferSize, nBufferSize, 0 );
+		m_bIsStreamBuffer = false;
+	}
+	else
+	{
+		m_pBuffer = new CUtlStreamBuffer( name, NULL, bReadOnly ? CUtlBuffer::READ_ONLY : 0, false );
+		m_bIsStreamBuffer = true;
+	}
+
+	// Demo files are always little endian
+	m_pBuffer->SetBigEndian( false );
+
+	if ( !m_pBuffer || !m_pBuffer->IsValid() )
 	{
 		ConMsg ("CDemoFile::Open: couldn't open file %s for %s.\n", 
 			name, bReadOnly?"reading":"writing" );
-#ifdef DEMO_FILE_UTLBUFFER
-		m_Buffer.Close();
-#endif
+		Close();
 		return false;
 	}
 
-	Q_strncpy( m_szFileName, name, sizeof(m_szFileName) );
+	if ( name )
+	{
+		Q_strncpy( m_szFileName, name, sizeof(m_szFileName) );
+	}
+
 	return true;
 }
 
 bool CDemoFile::IsOpen()
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	return m_Buffer.IsOpen();
-#else
-	return m_hDemoFile != FILESYSTEM_INVALID_HANDLE;
-#endif
+	return m_pBuffer && m_pBuffer->IsValid();
 }
 
 void CDemoFile::Close()
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	m_Buffer.Close();
-#else
-	if ( m_hDemoFile != FILESYSTEM_INVALID_HANDLE )
+	// CUtlBuffer base class does NOT have a virtual destructor!
+	if ( m_bIsStreamBuffer )
 	{
-		if ( g_pFileSystem ) // can get called during shutdown, with a NULL g_pFileSystem!
-		{
-			g_pFileSystem->Close(m_hDemoFile);
-		}
-		m_hDemoFile = FILESYSTEM_INVALID_HANDLE;
+		// Destructor will call Close() as needed
+		delete static_cast<CUtlStreamBuffer*>(m_pBuffer);
 	}
-#endif
+	else
+	{
+		delete m_pBuffer;
+	}
+	m_pBuffer = NULL;
 }
 
 int CDemoFile::GetSize()
 {
-#ifdef DEMO_FILE_UTLBUFFER
-	return m_Buffer.TellMaxPut();
-#else
-	g_pFileSystem->Seek( m_hDemoFile, 0, FILESYSTEM_SEEK_TAIL );
-	return g_pFileSystem->Tell( m_hDemoFile );
-#endif
+	return m_pBuffer->TellMaxPut();
 }
 
+// Returns the PROTOCOL_VERSION used when .dem was recorded
+int CDemoFile::GetProtocolVersion()
+{
+	return m_DemoHeader.networkprotocol;
+}

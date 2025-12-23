@@ -1,11 +1,11 @@
-//======= Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Image Byte Swapping. Isolate routines to own module to allow librarian
 // to ignore xbox 360 dependenices in non-applicable win32 projects.
 //
 //=============================================================================//
 
-#if defined( _WIN32 ) && !defined( _X360 )
+#if defined( _WIN32 ) && !defined( _X360 ) && !defined( DX_TO_GL_ABSTRACTION )
 #include <windows.h>
 #endif
 #include "tier0/platform.h"
@@ -15,14 +15,17 @@
 // Should be last include
 #include "tier0/memdbgon.h"
 
-/*#if defined( _WIN32 ) && !defined( _X360 )
+#if defined( _WIN32 ) && !defined( _X360 ) && !defined( NO_X360_XDK ) && !defined( DX_TO_GL_ABSTRACTION )
 // the x86 version of the 360 (used by win32 tools)
 // It would have been nice to use the 360 D3DFORMAT bit encodings, but the codes
 // are different for WIN32, and this routine is used by a WIN32 library to
 // manipulate 360 data, so there can be no reliance on WIN32 D3DFORMAT bits
+#pragma warning(push)
+#pragma warning(disable : 4458)  // warning C4530: C++ exception handler used, but unwind semantics are not enabled. Specify /EHsc (disabled due to std headers having exception syntax)
 #include "..\x360xdk\include\win32\vs2005\d3d9.h"
 #include "..\x360xdk\include\win32\vs2005\XGraphics.h"
-#endif*/
+#pragma warning(pop)
+#endif
 
 namespace ImageLoader
 {
@@ -85,7 +88,7 @@ namespace ImageLoader
 
 		Assert( IsFormatValidForConversion( imageFormat ) );
 
-#if !defined(_LINUX) && defined( _X360 )
+#if !defined( DX_TO_GL_ABSTRACTION ) && !defined( NO_X360_XDK )
 		if ( IsPC() )
 		{
 			// running as a win32 tool, data is in expected order
@@ -134,7 +137,7 @@ namespace ImageLoader
 	{
 		Assert( IsFormatValidForConversion( imageFormat ) );
 
-#if !defined(_LINUX) && defined( _X360 )
+#if !defined( DX_TO_GL_ABSTRACTION ) && !defined( NO_X360_XDK )
 		// It would have been nice to use the 360 D3DFORMAT bit encodings, but the codes
 		// are different for win32, and this routine is used by a win32 library to
 		// manipulate 360 data, so there can be no reliance on D3DFORMAT bits
@@ -198,7 +201,7 @@ namespace ImageLoader
 	{
 		Assert( IsFormatValidForConversion( imageFormat ) );
 
-#if !defined(_LINUX) && defined( _X360 )
+#if !defined( DX_TO_GL_ABSTRACTION ) && !defined( NO_X360_XDK )
 		XGENDIANTYPE xEndian;
 		switch ( imageFormat )
 		{

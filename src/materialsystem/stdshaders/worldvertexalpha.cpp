@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,12 +8,7 @@
 
 #include "BaseVSShader.h"
 
-//#define SUPPORTS_DX8
-
-#ifdef SUPPORTS_DX8
-#include "worldvertexalpha.inc"
-#endif
-
+#include "WorldVertexAlpha.inc"
 #include "worldvertexalpha_ps20.inc"
 #include "worldvertexalpha_ps20b.inc"
 
@@ -47,7 +42,7 @@ BEGIN_VS_SHADER( WorldVertexAlpha,
 	{
 		if( g_pHardwareConfig->SupportsVertexAndPixelShaders() && !UsingEditor( params ) )
 		{
-			/*if( g_pHardwareConfig->GetDXSupportLevel() < 90 )
+			if( g_pHardwareConfig->GetDXSupportLevel() < 90 )
 			{
 				// NOTE: This is the DX8, Non-Hammer version.
 
@@ -89,7 +84,7 @@ BEGIN_VS_SHADER( WorldVertexAlpha,
 				Draw();
 			}
 			else
-			{*/
+			{
 				// DX 9 version with HDR support
 
 				// Pass 1
@@ -115,7 +110,6 @@ BEGIN_VS_SHADER( WorldVertexAlpha,
 					pShaderShadow->EnableBlendingSeparateAlpha( true );
 					pShaderShadow->BlendFuncSeparateAlpha( SHADER_BLEND_ZERO, SHADER_BLEND_SRC_ALPHA );
 
-					// what the hell will i do for dx9 only
 					worldvertexalpha_Static_Index vshIndex;
 					pShaderShadow->SetVertexShader( "WorldVertexAlpha", vshIndex.GetIndex() );
 
@@ -131,6 +125,7 @@ BEGIN_VS_SHADER( WorldVertexAlpha,
 						SET_STATIC_PIXEL_SHADER_COMBO( PASS, 0 );
 						SET_STATIC_PIXEL_SHADER( worldvertexalpha_ps20 );
 					}
+
 
 					FogToFogColor();
 				}
@@ -223,12 +218,11 @@ BEGIN_VS_SHADER( WorldVertexAlpha,
 					}
 				}
 				Draw();
-			//}
+			}
 		}
 		else
 		{
 			// NOTE: This is the DX7, Hammer version.
-
 			SHADOW_STATE
 			{
 				SET_FLAGS2( MATERIAL_VAR2_LIGHTING_LIGHTMAP );

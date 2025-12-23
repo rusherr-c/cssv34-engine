@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -218,9 +218,9 @@ void AttackState::Dodge( CCSBot *me )
 				// select next dodge state that is different that our current one
 				do
 				{
-					// high-skill bots may jump when first engaging the enemy (if they are moving)
+					// low-skill bots may jump when first engaging the enemy (if they are moving)
 					const float jumpChance = 33.3f;
-					if (m_firstDodge && me->GetProfile()->GetSkill() > 0.5f && RandomFloat( 0, 100 ) < jumpChance && !me->IsNotMoving())
+					if (m_firstDodge && me->GetProfile()->GetSkill() < 0.5f && RandomFloat( 0, 100 ) < jumpChance && !me->IsNotMoving())
 						next = RandomInt( 0, NUM_ATTACK_STATES-1 );
 					else
 						next = RandomInt( 0, NUM_ATTACK_STATES-2 );
@@ -491,7 +491,7 @@ void AttackState::OnUpdate( CCSBot *me )
 	else if (me->IsUsingShotgun())
 	{
 		// if we have a shotgun equipped and enemy is too far away, switch to pistol
-		const float shotgunMaxRange = 1250.0f;
+		const float shotgunMaxRange = 600.0f;
 		if ((enemyOrigin - myOrigin).IsLengthGreaterThan( shotgunMaxRange ))
 			me->EquipPistol();
 	}

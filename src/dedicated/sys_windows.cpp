@@ -1,21 +1,17 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ========//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
 //=============================================================================//
-#ifdef _LINUX
-#include "sys_linux.cpp"
-#else
-
 #include <windows.h> 
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <eh.h>
 #include "isys.h"
-#include "conproc.h"
+#include "console/conproc.h"
 #include "dedicated.h"
 #include "engine_hlds_api.h"
 #include "checksum_md5.h"
@@ -38,6 +34,7 @@
 #include "vphysics_interface.h"
 #include "filesystem.h"
 #include "steam/steam_api.h"
+#include "filesystem/IQueuedLoader.h"
 
 extern CTextConsoleWin32 console;
 extern bool g_bVGui;
@@ -66,8 +63,8 @@ public:
 	void		DestroyConsoleWindow( void );
 
 	void		ConsoleOutput ( char *string );
-	char		*ConsoleInput (void);
-	void		Printf(char *fmt, ...);
+	char		*ConsoleInput ( int index, char *buf, int buflen );
+	void		Printf( PRINTF_FORMAT_STRING const char *fmt, ... );
 };
 
 static CSys g_Sys;
@@ -87,7 +84,10 @@ CSys::~CSys()
 //-----------------------------------------------------------------------------
 void CSys::Sleep( int msec )
 {
-	::Sleep( msec );
+	// Call ThreadSleep because it has the necessary magic to set the system
+	// timer resolution so that Sleep( 1 ) will sleep for one millisecond
+	// instead of for 10-16 ms.
+	ThreadSleep( msec );
 }
 
 //-----------------------------------------------------------------------------
@@ -198,7 +198,7 @@ void CSys::ConsoleOutput (char *string)
 // Input  : *fmt - 
 //			... - 
 //-----------------------------------------------------------------------------
-void CSys::Printf(char *fmt, ...)
+void CSys::Printf( PRINTF_FORMAT_STRING const char *fmt, ... )
 {
 	// Dump text to debugging console.
 	va_list argptr;
@@ -216,9 +216,9 @@ void CSys::Printf(char *fmt, ...)
 // Purpose: 
 // Output : char *
 //-----------------------------------------------------------------------------
-char *CSys::ConsoleInput (void)
+char *CSys::ConsoleInput ( int index, char *buf, int buflen )
 {
-	return console.GetLine();
+	return console.GetLine( index, buf, buflen );
 }
 
 //-----------------------------------------------------------------------------
@@ -274,6 +274,7 @@ bool CSys::LoadModules( CDedicatedAppSystemGroup *pAppSystemGroup )
 		{ "datacache.dll",			STUDIO_DATA_CACHE_INTERFACE_VERSION },
 		{ "vgui2.dll",				VGUI_IVGUI_INTERFACE_VERSION },
 		{ "engine.dll",				VENGINE_HLDS_API_VERSION },
+		{ "dedicated.dll",			QUEUEDLOADER_INTERFACE_VERSION },
 		{ "", "" }	// Required to terminate the list
 	};
 
@@ -335,7 +336,7 @@ static char *GetBaseDir( const char *pszBuffer )
 	int j;
 	char *pBuffer = NULL;
 
-	strcpy( szBuffer, pszBuffer );
+	V_strcpy_safe( szBuffer, pszBuffer );
 
 	pBuffer = strrchr( szBuffer,'\\' );
 	if ( pBuffer )
@@ -360,9 +361,7 @@ static char *GetBaseDir( const char *pszBuffer )
 
 void MiniDumpFunction( unsigned int nExceptionCode, EXCEPTION_POINTERS *pException )
 {
-#ifndef NO_STEAM
 	SteamAPI_WriteMiniDump( nExceptionCode, pException, 0 );
-#endif
 }
 
 extern "C" __declspec(dllexport) int DedicatedMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow )
@@ -385,6 +384,11 @@ extern "C" __declspec(dllexport) int DedicatedMain( HINSTANCE hInstance, HINSTAN
 
 	if ( !Plat_IsInDebugSession() && !CommandLine()->FindParm( "-nominidumps") )
 	{
+		// This warning only applies if you want to catch structured exceptions (crashes)
+		// using C++ exceptions. We do not want to do that so we can build with C++ exceptions
+		// completely disabled, and just suppress this warning.
+		// warning C4535: calling _set_se_translator() requires /EHa
+		#pragma warning( suppress : 4535 )
 		_set_se_translator( MiniDumpFunction );
 
 		try  // this try block allows the SE translator to work
@@ -405,4 +409,3 @@ extern "C" __declspec(dllexport) int DedicatedMain( HINSTANCE hInstance, HINSTAN
 	return iret;
 }
 
-#endif // !_LINUX

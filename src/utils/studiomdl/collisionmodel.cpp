@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Builds physics collision models from studio model source
 //
@@ -32,9 +32,10 @@
 #include "vcollide_parse.h"
 #include "tier1/strtools.h"
 #include "tier2/tier2.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 
 #include "tier1/smartptr.h"
+#include "tier2/p4helpers.h"
 
 
 // these functions just wrap atoi/atof and check for NULL
@@ -287,7 +288,7 @@ CJointedModel::CJointedModel( void )
 	m_allowConcave = false;
 	m_allowConcaveJoints = false;
 	m_remove2d = false;
-	m_maxConvex = 20;
+	m_maxConvex = 40;
 	m_isMassCenterForced = false;
 	m_noSelfCollisions = false;
 	m_massCenterForced.Init();
@@ -2230,11 +2231,12 @@ int DoCollisionModel( bool separateJoints )
 	// name
 	if (!GetToken(false)) return 0;
 
-	strcpyn( name, token );
+	V_strcpy_safe( name, token );
 
 	PhysicsDLLPath( "VPHYSICS.DLL" );
 
-	CreateInterfaceFn physicsFactory = GetPhysicsFactory();
+//	CreateInterfaceFn physicsFactory = GetPhysicsFactory();
+	CreateInterfaceFn physicsFactory = Sys_GetFactory(Sys_LoadModule( "vphysics.dll" ));
 	if ( !physicsFactory )
 		return 0;
 
@@ -2522,17 +2524,17 @@ void CollisionModel_Write( long checkSum )
 	{
 		CPhysCollisionModel *pPhys = g_JointedModel.m_pCollisionList;
 
-		char filename[512];
+		char filename[MAX_PATH];
 
-		strcpy( filename, gamedir );
+		V_strcpy_safe( filename, gamedir );
 //		if( *g_pPlatformName )
 //		{
 //			strcat( filename, "platform_" );
 //			strcat( filename, g_pPlatformName );
 //			strcat( filename, "/" );	
 //		}
-		strcat( filename, "models/" );	
-		strcat( filename, outname );	
+		V_strcat_safe( filename, "models/" );	
+		V_strcat_safe( filename, outname );	
 
 		float volume = TotalVolume( pPhys );
 		if ( volume <= 0 )
@@ -2543,6 +2545,8 @@ void CollisionModel_Write( long checkSum )
 		}
 
 		Q_SetExtension( filename, ".phy", sizeof( filename ) );
+		CPlainAutoPtr< CP4File > spFile( g_p4factory->AccessFile( filename ) );
+		spFile->Edit();
 		FILE *fp = fopen( filename, "wb" );
 		if ( fp )
 		{
@@ -2708,6 +2712,7 @@ void CollisionModel_Write( long checkSum )
 			}
 			fwrite( &terminator, sizeof(terminator), 1, fp );
 			fclose( fp );
+			spFile->Add();
 		}
 		else
 		{

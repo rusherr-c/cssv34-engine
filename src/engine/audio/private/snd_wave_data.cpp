@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "audio_pch.h"
 #include "datacache/idatacache.h"
 #include "utllinkedlist.h"
-#include "UtlDict.h"
+#include "utldict.h"
 #include "filesystem/IQueuedLoader.h"
 #include "cdll_int.h"
 
@@ -19,7 +19,7 @@
 extern IVEngineClient *engineClient;
 extern IFileSystem *g_pFileSystem;
 extern IDataCache *g_pDataCache;
-extern float realtime;
+extern double realtime;
 
 // console streaming buffer implementation, appropriate for high latency and low memory
 // shift this many buffers through the wave
@@ -34,13 +34,24 @@ extern float realtime;
 // UNDONE: Allocate this in cache instead?
 #define SINGLE_BUFFER_SIZE 16384
 
+// Force a small cache for debugging cache issues.
+// #define FORCE_SMALL_MEMORY_CACHE_SIZE	( 6 * 1024 * 1024 )
+
 #define DEFAULT_WAV_MEMORY_CACHE ( 16 * 1024 * 1024 )
 #define DEFAULT_XBOX_WAV_MEMORY_CACHE ( 16 * 1024 * 1024 )
 #define TF_XBOX_WAV_MEMORY_CACHE ( 24 * 1024 * 1024 ) // Team Fortress uses a larger cache
 
-ConVar snd_async_spew_blocking( "snd_async_spew_blocking", "0", 0, "Spew message to console any time async sound loading blocks on file i/o." );
+// Dev builds will be missing soundcaches and hitch sometimes, we only care if its being properly launched from steam where sound caches should be complete.
+ConVar snd_async_spew_blocking( "snd_async_spew_blocking", "1", 0, "Spew message to console any time async sound loading blocks on file i/o. ( 0=Off, 1=With -steam only, 2=Always" );
+ConVar snd_async_spew( "snd_async_spew", "0", 0, "Spew all async sound reads, including success" );
 ConVar snd_async_fullyasync( "snd_async_fullyasync", "0", 0, "All playback is fully async (sound doesn't play until data arrives)." );
 ConVar snd_async_stream_spew( "snd_async_stream_spew", "0", 0, "Spew streaming info ( 0=Off, 1=streams, 2=buffers" );
+
+static bool SndAsyncSpewBlocking()
+{
+	int pref = snd_async_spew_blocking.GetInt();
+	return ( pref >= 2 ) || ( pref == 1 && CommandLine()->FindParm( "-steam" ) != 0 );
+}
 
 #define SndAlignReads() 1
 
@@ -95,7 +106,7 @@ public:
 	int					m_nDataSize;		// bytes requested
 	int					m_nReadSize;		// bytes actually read
 	void				*m_pvData;			// target buffer
-	void				*m_pAlloc;			// memory of buffer (base may not match)
+	byte				*m_pAlloc;			// memory of buffer (base may not match)
 	FileAsyncRequest_t	m_async;
 	FSAsyncControl_t	m_hAsyncControl;
 	float				m_start;			// time at request invocation
@@ -255,7 +266,8 @@ CAsyncWaveData *CAsyncWaveData::CreateResource( const asyncwaveparams_t &params 
 		{
 			// create buffer now for re-use during streaming process
 			pData->m_nBufferBytes = AlignValue( params.datasize, params.alignment );
-			pData->m_pAlloc = pData->m_pvData = new byte[pData->m_nBufferBytes];
+			pData->m_pAlloc = new byte[pData->m_nBufferBytes];
+			pData->m_pvData = pData->m_pAlloc;
 		}
 		pData->StartAsyncLoading( params );
 	}
@@ -329,7 +341,7 @@ void CAsyncWaveData::OnAsyncCompleted( const FileAsyncRequest_t *asyncFilePtr, i
 			m_arrival = ( float )Plat_FloatTime();
 
 			// Take over ptr
-			m_pAlloc = asyncFilePtr->pData;
+			m_pAlloc = ( byte * )asyncFilePtr->pData;
 			if ( SndAlignReads() )
 			{
 				m_async.nOffset = ( m_async.nBytes - m_nDataSize );
@@ -400,13 +412,13 @@ bool CAsyncWaveData::BlockingCopyData( void *destbuffer, int destbufsize, int st
 		Assert( m_hAsyncControl );
 		// Force it to finish
 		// It could finish between the above line and here, but the AsyncFinish call will just have a bogus id, not a big deal
-		if ( snd_async_spew_blocking.GetBool() )
+		if ( SndAsyncSpewBlocking() )
 		{
 			// Force it to finish
 			float st = ( float )Plat_FloatTime();
 			g_pFileSystem->AsyncFinish( m_hAsyncControl, true );
 			float ed = ( float )Plat_FloatTime();
-			DevMsg( "%f BCD:  Async I/O Force %s (%8.2f msec / %8.2f msec total)\n", realtime, GetFileName(), 1000.0f * (float)( ed - st ), 1000.0f * (float)( m_arrival - m_start ) );
+			Warning( "%f BCD:  Async I/O Force %s (%8.2f msec / %8.2f msec total)\n", realtime, GetFileName(), 1000.0f * (float)( ed - st ), 1000.0f * (float)( m_arrival - m_start ) );
 		}
 		else
 		{
@@ -431,7 +443,7 @@ bool CAsyncWaveData::BlockingCopyData( void *destbuffer, int destbufsize, int st
 	{
 		return false;
 	}
-	else if ( m_arrival != 0 && snd_async_spew_blocking.GetInt() >= 2 )
+	else if ( m_arrival != 0 && snd_async_spew.GetBool() )
 	{
 		DevMsg( "%f Async I/O Read successful %s (%8.2f msec)\n", realtime, GetFileName(), 1000.0f * (float)( m_arrival - m_start ) );
 		m_arrival = 0;
@@ -479,12 +491,12 @@ bool CAsyncWaveData::BlockingGetDataPointer( void **ppData )
 	{
 		// Force it to finish
 		// It could finish between the above line and here, but the AsyncFinish call will just have a bogus id, not a big deal
-		if ( snd_async_spew_blocking.GetBool() )
+		if ( SndAsyncSpewBlocking() )
 		{
 			float st = ( float )Plat_FloatTime();
 			g_pFileSystem->AsyncFinish( m_hAsyncControl, true );
 			float ed = ( float )Plat_FloatTime();
-			DevMsg( "%f BlockingGetDataPointer:  Async I/O Force %s (%8.2f msec / %8.2f msec total )\n", realtime, GetFileName(), 1000.0f * (float)( ed - st ), 1000.0f * (float)( m_arrival - m_start ) );
+			Warning( "%f BlockingGetDataPointer:  Async I/O Force %s (%8.2f msec / %8.2f msec total )\n", realtime, GetFileName(), 1000.0f * (float)( ed - st ), 1000.0f * (float)( m_arrival - m_start ) );
 		}
 		else
 		{
@@ -509,7 +521,7 @@ bool CAsyncWaveData::BlockingGetDataPointer( void **ppData )
 	{
 		return false;
 	}
-	else if ( m_arrival != 0 && snd_async_spew_blocking.GetInt() >= 2 )
+	else if ( m_arrival != 0 && snd_async_spew.GetBool() )
 	{
 		DevMsg( "%f Async I/O Read successful %s (%8.2f msec)\n", realtime, GetFileName(), 1000.0f * (float)( m_arrival - m_start ) );
 		m_arrival = 0;
@@ -529,7 +541,7 @@ void CAsyncWaveData::SetAsyncPriority( int priority )
 	{
 		m_async.priority = priority;
 		g_pFileSystem->AsyncSetPriority( m_hAsyncControl, m_async.priority );
-		if ( snd_async_spew_blocking.GetInt() >= 2 ) 
+		if ( snd_async_spew.GetBool() )
 		{
 			DevMsg( "%f Async I/O Bumped priority for %s (%8.2f msec)\n", realtime, GetFileName(), 1000.0f * (float)( Plat_FloatTime() - m_start ) );
 		}
@@ -690,6 +702,10 @@ public:
 	virtual void			*GetStreamedDataPointer( StreamHandle_t hStream, bool bSync );
 
 	virtual	void			Flush();
+	virtual void			OnMixBegin();
+	virtual void			OnMixEnd();
+
+	void					QueueUnlock( const memhandle_t &handle );
 	void					SpewMemoryUsage( int level );
 
 	// Cache helpers
@@ -760,6 +776,8 @@ private:
 
 	memhandle_t				FindOrCreateBuffer( asyncwaveparams_t &params, bool bFind );		
 	bool					m_bInitialized;
+	bool					m_bQueueCacheUnlocks;
+	CUtlVector<memhandle_t> m_unlockQueue;
 };
 
 //-----------------------------------------------------------------------------
@@ -768,7 +786,8 @@ private:
 CAsyncWavDataCache::CAsyncWavDataCache() :  
 	m_CacheHandles( 0, 0, CacheHandleLessFunc ),
 	m_BufferList( 0, 0, BufferHandleLessFunc ),
-	m_bInitialized( false )
+	m_bInitialized( false ),
+	m_bQueueCacheUnlocks( false )
 {
 }
 
@@ -800,6 +819,11 @@ bool CAsyncWavDataCache::Init( unsigned int memSize )
 			memSize = DEFAULT_WAV_MEMORY_CACHE;
 		}
 	}
+
+#if FORCE_SMALL_MEMORY_CACHE_SIZE
+	memSize = FORCE_SMALL_MEMORY_CACHE_SIZE;
+	Msg( "WARNING CAsyncWavDataCache::Init() forcing small memory cache size: %u\n", memSize );
+#endif
 
 	CCacheClientBaseClass::Init( g_pDataCache, "WaveData", memSize );
 
@@ -886,11 +910,11 @@ memhandle_t CAsyncWavDataCache::FindOrCreateBuffer( asyncwaveparams_t &params, b
 	if ( bFind )
 	{
 		// look for an existing buffer that matches exactly (same file, offset, and share)
-		int hBuffer = m_BufferList.Find( search );
-		if ( hBuffer != m_BufferList.InvalidIndex() )
+		int iBuffer = m_BufferList.Find( search );
+		if ( iBuffer != m_BufferList.InvalidIndex() )
 		{
 			// found
-			search.m_hWaveData = m_BufferList[hBuffer].m_hWaveData;
+			search.m_hWaveData = m_BufferList[iBuffer].m_hWaveData;
 			if ( snd_async_stream_spew.GetInt() >= 2 )
 			{
 				char tempBuff[MAX_PATH];
@@ -1465,7 +1489,6 @@ void CAsyncWavDataCache::Unload( memhandle_t handle )
 	}
 }
 
-
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Input  : handle - 
@@ -1520,22 +1543,37 @@ bool CAsyncWavDataCache::GetDataPointer( memhandle_t& handle, char const *filena
 	}
 
 	// Cache entry exists, but if filesize == 0 then the file itself wasn't on disk...
-	if ( data->m_nDataSize != 0 && copystartpos < data->m_nDataSize )
+	if ( data->m_nDataSize != 0 )
 	{
-		if ( data->BlockingGetDataPointer( pData ) )
+		if ( datasize != data->m_nDataSize )
 		{
-			*pData = (char *)*pData + copystartpos;
-			bret = true;
+			// We've had issues where we are called with datasize larger than what we read on disk.
+			//  Ie: datasize is 277,180, data->m_nDataSize is 263,168
+			// This can happen due to a corrupted audio cache, but it's more likely that somehow
+			//  we wound up reading the cache data from one language and the file from another.
+			DevMsg( "Cached datasize != sound datasize %d - %d.\n", datasize, data->m_nDataSize );
+#ifdef STAGING_ONLY
+			// Adding a STAGING_ONLY debugger break to try and help track this down. Hopefully we'll
+			//  get this crash internally with full debug information instead of just minidump files.
+			DebuggerBreak();
+#endif
+		}
+		else if ( copystartpos < data->m_nDataSize )
+		{
+			if ( data->BlockingGetDataPointer( pData ) )
+			{
+				*pData = (char *)*pData + copystartpos;
+				bret = true;
+			}
 		}
 	}
 
 	*pbPostProcessed = data->GetPostProcessed();
 
-	// Release lock
-	CacheUnlock( handle );
+	// Release lock at the end of mixing
+	QueueUnlock( handle );
 	return bret;
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -1589,6 +1627,36 @@ void CAsyncWavDataCache::Flush()
 {
 	GetCacheSection()->Flush();
 	SpewMemoryUsage( 0 );
+}
+
+void CAsyncWavDataCache::QueueUnlock( const memhandle_t &handle )
+{
+	// not queuing right now, just unlock
+	if ( !m_bQueueCacheUnlocks )
+	{
+		CacheUnlock( handle );
+		return;
+	}
+	// queue to unlock at the end of mixing
+	m_unlockQueue.AddToTail( handle );
+}
+
+void CAsyncWavDataCache::OnMixBegin()
+{
+	Assert( !m_bQueueCacheUnlocks );
+	m_bQueueCacheUnlocks = true;
+	Assert( m_unlockQueue.Count() == 0 );
+}
+
+void CAsyncWavDataCache::OnMixEnd()
+{
+	m_bQueueCacheUnlocks = false;
+	// flush the unlock queue
+	for ( int i = 0; i < m_unlockQueue.Count(); i++ )
+	{
+		CacheUnlock( m_unlockQueue[i] );
+	}
+	m_unlockQueue.RemoveAll();
 }
 
 
@@ -1692,9 +1760,7 @@ void CAsyncWavDataCache::SpewMemoryUsage( int level )
 //-----------------------------------------------------------------------------
 void CAsyncWavDataCache::Clear()
 {
-	int i;
-
-	for ( i = m_CacheHandles.FirstInorder(); m_CacheHandles.IsValidIndex(i); i = m_CacheHandles.NextInorder(i) )
+	for ( int i = m_CacheHandles.FirstInorder(); m_CacheHandles.IsValidIndex(i); i = m_CacheHandles.NextInorder(i) )
 	{
 		CacheEntry_t& dat = m_CacheHandles[i];
 		CacheRemove( dat.handle );
@@ -2201,7 +2267,9 @@ int CWaveDataStreamAsync::ReadSourceData( void **pData, int sampleIndex, int sam
 	}
 
 	// If we have some samples in the buffer that are within range of the request
-	if ( sampleIndex < m_bufferCount )
+	// Use unsigned comparisons so that if sampleIndex is somehow negative that
+	// will be treated as out of range.
+	if ( (unsigned)sampleIndex < (unsigned)m_bufferCount )
 	{
 		// Get the desired starting sample
 		*pData = (void *)&m_buffer[sampleIndex * m_sampleSize];

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -32,7 +32,6 @@
 #include "vox.h"
 #include "EngineSoundInternal.h"
 #include "checksum_engine.h"
-#include "master.h"
 #include "host.h"
 #include "keys.h"
 #include "vengineserver_impl.h"

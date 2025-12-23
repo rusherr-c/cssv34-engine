@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -186,5 +186,8 @@ private:
 };
 
 extern IFaceposerModels *models;
+
+void EnableStickySnapshotMode( void );
+void DisableStickySnapshotMode( void );
 
 #endif // FACEPOSER_MODELS_H

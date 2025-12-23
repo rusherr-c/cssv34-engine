@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Helper methods + classes for sound
 //
@@ -137,7 +137,7 @@ unsigned int CFSIOWriteBinary::tell( int file )
 }
 
 
-#ifndef _LINUX
+#ifndef POSIX
 //-----------------------------------------------------------------------------
 // Returns the duration of a wav file
 //-----------------------------------------------------------------------------

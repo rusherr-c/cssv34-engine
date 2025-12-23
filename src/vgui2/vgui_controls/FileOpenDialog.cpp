@@ -8,7 +8,7 @@
 
 #define PROTECTED_THINGS_DISABLE
 
-#if defined(_WIN32)
+#if !defined( _X360 ) && defined( WIN32 )
 #include "winlite.h"
 #include <shellapi.h>
 #elif defined( POSIX )
@@ -212,7 +212,6 @@ public:
 	FileCompletionMenu(Panel *parent, const char *panelName) : Menu(parent, panelName)
 	{
 	}
-	virtual ~FileCompletionMenu() {}
 
 	// override it so it doesn't request focus
 	virtual void SetVisible(bool state)

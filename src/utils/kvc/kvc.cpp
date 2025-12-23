@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: vcd_sound_check.cpp : Defines the entry point for the console application.
 //
@@ -7,7 +7,7 @@
 #include <windows.h>
 #include "tier0/dbg.h"
 #include "tier1/utldict.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "FileSystem_Tools.h"
 #include "tier1/KeyValues.h"
 #include "cmdlib.h"
@@ -18,6 +18,9 @@
 #include "appframework/appframework.h"
 #include "tier0/icommandline.h"
 #include "keyvaluescompiler.h"
+#include "tier2/keyvaluesmacros.h"
+
+#include "kvc_paintkit.h"
 
 #include "tier0/fasttimer.h"
 
@@ -87,7 +90,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )
@@ -160,10 +163,20 @@ void Con_Printf( const char *fmt, ... )
 void printusage( void )
 {
 	vprint( 0, "usage:  kvc <wildcard path> [<wildcard path>] <outputfile>\n\
-		\t-v = verbose output\n\
-		\t-l = log to file log.txt\n\
-		\t-t = perform load timing tests\n\
-		\ne.g.:  kvc -l u:/xbox/game/hl2x/materials/*.vmt u:/xbox/game/hl2x/kvc/vmt.kv" );
+\n\
+    -v = verbose output\n\
+    -l = log to file log.txt\n\
+    -t = perform load timing tests\n\
+    -p = perform paint kit macro expansion\n\
+         in this mode if no output file is specified,\n\
+         the input file is copied to <input>_bak and <input> is overwritten\n\
+         with -p, each file specified is processed separately without wildcards\n\
+    -f = With -p, output is to <input>_fix and <input> is unchanged\n\
+\n\
+e.g.:  kvc -l u:/xbox/game/hl2x/materials/*.vmt u:/xbox/game/hl2x/kvc/vmt.kv\n\
+\n\
+       kvc -v -p americanpastoral_rocketlauncher.paintkit\n\
+\n" );
 
 	// Exit app
 	exit( 1 );
@@ -571,6 +584,8 @@ void CCompileKeyValuesApp::PostShutdown()
 //-----------------------------------------------------------------------------
 int CCompileKeyValuesApp::Main()
 {
+	bool bOptPaintKit = false;
+
 	CUtlVector< CUtlSymbol >	worklist;
 
 	int i;
@@ -592,6 +607,11 @@ int CCompileKeyValuesApp::Main()
 			case 't':
 				timing = true;
 				break;
+			case 'p':
+				bOptPaintKit = true;
+				break;
+			case 'f':	// -f is valid when -p is specified
+				break;
 			default:
 				printusage();
 				break;
@@ -603,6 +623,19 @@ int CCompileKeyValuesApp::Main()
 			sym = CommandLine()->GetParm( i );
 			worklist.AddToTail( sym );
 		}
+	}
+
+	if ( bOptPaintKit )
+	{
+		if ( CommandLine()->ParmCount() < 2 || ( i != CommandLine()->ParmCount() ) || ( worklist.Count() < 1 ) )
+		{
+			PrintHeader();
+			printusage();	// This exits app
+		}
+
+		ProcessPaintKitKeyValuesFiles( worklist );
+
+		return 0;
 	}
 
 	if ( CommandLine()->ParmCount() < 2 || ( i != CommandLine()->ParmCount() ) || worklist.Count() < 2 )

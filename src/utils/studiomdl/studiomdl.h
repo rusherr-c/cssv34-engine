@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,6 +21,8 @@
 #include "tier1/utlstring.h"
 #include "mathlib/vector.h"
 #include "studio.h"
+#include "datamodel/dmelementhandle.h"
+#include "checkuv.h"
 
 struct LodScriptData_t;
 struct s_flexkey_t;
@@ -59,7 +61,7 @@ class CDmeCombinationOperator;
 #define EXTERN extern
 #endif
 
-EXTERN	char		outname[1024];
+EXTERN	char		outname[MAX_PATH];
 //EXTERN	char		g_pPlatformName[1024];
 EXTERN  qboolean	cdset;
 EXTERN  int			numdirs;
@@ -308,6 +310,8 @@ struct s_attachment_t
 	int		flags;
 	matrix3x4_t	local;
 	int		found;	// a owning bone has been flagged
+
+	bool operator==( const s_attachment_t &rhs ) const;
 };
 
 
@@ -1354,7 +1358,6 @@ void clip_rotations( Vector& rot );
 void *kalloc( int num, int size );
 void kmemset( void *ptr, int value, int size );
 char *stristr( const char *string, const char *string2 );
-#define strcpyn( a, b ) strncpy( a, b, sizeof( a ) )
 
 void CalcBoneTransforms( s_animation_t *panimation, int frame, matrix3x4_t* pBoneToWorld );
 void CalcBoneTransforms( s_animation_t *panimation, s_animation_t *pbaseanimation, int frame, matrix3x4_t* pBoneToWorld );
@@ -1572,11 +1575,13 @@ EXTERN CUtlVector< char * >g_collapse;
 
 extern float GetCollisionModelMass();
 
+// List of defined bone flex drivers
+extern DmElementHandle_t g_hDmeBoneFlexDriverList;
 
 // the first time these are called, the name of the model/QC file is printed so that when 
 // running in batch mode, no echo, when dumping to a file, it can be determined which file is broke.
-void MdlError( char const *pMsg, ... );
-void MdlWarning( char const *pMsg, ... );
+void MdlError( PRINTF_FORMAT_STRING char const *pMsg, ... );
+void MdlWarning( PRINTF_FORMAT_STRING char const *pMsg, ... );
 
 void CreateMakefile_AddDependency( const char *pFileName );
 void EnsureDependencyFileCheckedIn( const char *pFileName );
@@ -1588,6 +1593,9 @@ char IsChar( int val );
 int IsInt24( int val );
 short IsShort( int val );
 unsigned short IsUShort( int val );
+
+
+extern CCheckUVCmd g_StudioMdlCheckUVCmd;
 
 
 #endif // STUDIOMDL_H

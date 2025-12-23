@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ====//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,8 @@
 #ifndef COLORFORMATDX8_H
 #define COLORFORMATDX8_H
 
-#include <PixelWriter.h>
+#include <pixelwriter.h>
+#include "togl/rendermechanism.h"
 
 // FOURCC formats for ATI shadow depth textures
 #define ATIFMT_D16		((D3DFORMAT)(MAKEFOURCC('D','F','1','6')))
@@ -30,13 +31,13 @@
 //-----------------------------------------------------------------------------
 // Finds the nearest supported frame buffer format
 //-----------------------------------------------------------------------------
-ImageFormat FindNearestSupportedBackBufferFormat( UINT displayAdapter, D3DDEVTYPE deviceType,
+ImageFormat FindNearestSupportedBackBufferFormat( unsigned int displayAdapter, D3DDEVTYPE deviceType,
 	ImageFormat displayFormat, ImageFormat backBufferFormat, bool bIsWindowed );
 
 //-----------------------------------------------------------------------------
 // Initializes the color format informat; call it every time display mode changes
 //-----------------------------------------------------------------------------
-void InitializeColorInformation( UINT displayAdapter, D3DDEVTYPE deviceType, 
+void InitializeColorInformation( unsigned int displayAdapter, D3DDEVTYPE deviceType, 
 								 ImageFormat displayFormat );
 
 //-----------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,9 @@
 // $NoKeywords: $
 //===========================================================================//
 #include "server_pch.h"
+#include "tier0/valve_minmax_off.h"
 #include <algorithm>
+#include "tier0/valve_minmax_on.h"
 #include "vengineserver_impl.h"
 #include "vox.h"
 #include "sound.h"
@@ -42,6 +44,10 @@
 #include "host_phonehome.h"
 #include "matchmaking.h"
 #include "sv_plugin.h"
+#include "sv_steamauth.h"
+#include "replay_internal.h"
+#include "replayserver.h"
+#include "replay/iserverengine.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -51,12 +57,14 @@
 
 void SV_DetermineMulticastRecipients( bool usepas, const Vector& origin, CBitVec< ABSOLUTE_PLAYER_LIMIT >& playerbits );
 
+int MapList_ListMaps( const char *pszSubString, bool listobsolete, bool verbose, int maxcount, int maxitemlength, char maplist[][ 64 ] );
+
 extern CNetworkStringTableContainer *networkStringTableContainerServer;
 
 CSharedEdictChangeInfo g_SharedEdictChangeInfo;
 CSharedEdictChangeInfo *g_pSharedChangeInfo = &g_SharedEdictChangeInfo;
 IAchievementMgr *g_pAchievementMgr = NULL;
-extern int g_iSteamAppID;
+CGamestatsData *g_pGamestatsData = NULL;
 
 void InvalidateSharedEdictChangeInfos()
 {
@@ -128,15 +136,14 @@ void SeedRandomNumberGenerator( bool random_invariant )
 {
 	if (!random_invariant)
 	{
-		int iSeed = -(long)Sys_FloatTime();
-		if (1000 < iSeed)
-		{
-			iSeed = -iSeed;
-		}
-		else if (-1000 < iSeed)
-		{
-			iSeed -= 22261048;
-		}
+		long iSeed;
+		g_pVCR->Hook_Time( &iSeed );
+		float flAppTime = Plat_FloatTime();
+		ThreadId_t threadId = ThreadGetCurrentId();
+
+		iSeed ^= (*((int *)&flAppTime));
+		iSeed ^= threadId;
+
 		RandomSeed( iSeed );
 	}
 	else
@@ -149,7 +156,6 @@ void SeedRandomNumberGenerator( bool random_invariant )
 // ---------------------------------------------------------------------- //
 // Static helpers.
 // ---------------------------------------------------------------------- //
-
 static void PR_CheckEmptyString (const char *s)
 {
 	if (s[0] <= ' ')
@@ -268,39 +274,45 @@ public:
 
 	virtual void ChangeLevel( const char* s1, const char* s2)
 	{
-		static	int	last_spawncount;
-		
-		// make sure we don't issue two changelevels
-		if (sv.GetSpawnCount() == last_spawncount)
-			return;
-
-		last_spawncount = sv.GetSpawnCount();
-		
 		if ( !s1 )
 		{
 			Sys_Error( "CVEngineServer::Changelevel with NULL s1\n" );
 		}
-		
+
 		char cmd[ 256 ];
-		
+		char s1Escaped[ sizeof( cmd ) ];
+		char s2Escaped[ sizeof( cmd ) ];
+		if ( !Cbuf_EscapeCommandArg( s1, s1Escaped, sizeof( s1Escaped ) ) ||
+		     ( s2 && !Cbuf_EscapeCommandArg( s2, s2Escaped, sizeof( s2Escaped ) )))
+		{
+			Warning( "Illegal map name in ChangeLevel\n" );
+			return;
+		}
+
+		int cmdLen = 0;
 		if ( !s2 ) // no indication of where they are coming from;  so just do a standard old changelevel
 		{
-			Q_snprintf( cmd, sizeof( cmd ), "changelevel %s\n", s1 );
+			cmdLen = Q_snprintf( cmd, sizeof( cmd ), "changelevel %s\n", s1Escaped );
 		}
 		else
 		{
-			Q_snprintf( cmd, sizeof( cmd ), "changelevel2 %s %s\n", s1, s2 );
+			cmdLen = Q_snprintf( cmd, sizeof( cmd ), "changelevel2 %s %s\n", s1Escaped, s2Escaped );
 		}
-		
+
+		if ( !cmdLen || cmdLen >= sizeof( cmd ) )
+		{
+			Warning( "Paramter overflow in ChangeLevel\n" );
+			return;
+		}
+
 		Cbuf_AddText( cmd );
 	}
-	
-	
+
 	virtual int	IsMapValid( const char *filename )
 	{
 		return modelloader->Map_IsValid( filename );
 	}
-	
+
 	virtual bool IsDedicatedServer( void )
 	{
 		return sv.IsDedicated();
@@ -405,8 +417,7 @@ public:
 
 	virtual void ForceExactFile( const char *s )
 	{
-		PR_CheckEmptyString( s );
-		SV_ForceExactFile( s );
+		Warning( "ForceExactFile no longer supported.  Use sv_pure instead.  (%s)\n", s );
 	}
 
 	virtual void ForceModelBounds( const char *s, const Vector &mins, const Vector &maxs )
@@ -524,11 +535,11 @@ public:
 		
 		for ( int i = 0; i < sv.GetClientCount(); i++ )
 		{
-			CGameClient *cl = sv.Client(i);
+			CGameClient *pClient = sv.Client(i);
 			
-			if ( cl->edict == e )
+			if ( pClient->edict == e )
 			{
-				return cl->m_UserID;
+				return pClient->m_UserID;
 			}
 		}
 		
@@ -543,11 +554,11 @@ public:
 		
 		for ( int i = 0; i < sv.GetClientCount(); i++ )
 		{
-			CGameClient *cl = sv.Client(i);
+			CGameClient *pGameClient = sv.Client(i);
 			
-			if ( cl->edict == e )
+			if ( pGameClient->edict == e )
 			{
-				return cl->GetNetworkIDString();
+				return pGameClient->GetNetworkIDString();
 			}
 		}
 		
@@ -556,7 +567,91 @@ public:
 
 	}
 	
-	
+	virtual bool IsPlayerNameLocked( const edict_t *pEdict )
+	{
+		if ( !sv.IsActive() || !pEdict )
+			return false;
+
+		for ( int i = 0; i < sv.GetClientCount(); i++ )
+		{
+			CGameClient *pClient = sv.Client( i );
+
+			if ( pClient->edict == pEdict )
+			{
+				return pClient->IsPlayerNameLocked();
+			}
+		}
+
+		return false;
+	}
+
+	virtual bool CanPlayerChangeName( const edict_t *pEdict )
+	{
+		if ( !sv.IsActive() || !pEdict )
+			return false;
+
+		for ( int i = 0; i < sv.GetClientCount(); i++ )
+		{
+			CGameClient *pClient = sv.Client( i );
+
+			if ( pClient->edict == pEdict )
+			{
+				return ( !pClient->IsPlayerNameLocked() && !pClient->IsNameChangeOnCooldown() );
+			}
+		}
+
+		return false;
+	}
+
+	// See header comment. This is the canonical map lookup spot, and a superset of the server gameDLL's
+	// CanProvideLevel/PrepareLevelResources
+	virtual eFindMapResult FindMap( /* in/out */ char *pMapName, int nMapNameMax )
+	{
+		char szOriginalName[256] = { 0 };
+		V_strncpy( szOriginalName, pMapName, sizeof( szOriginalName ) );
+
+		IServerGameDLL::eCanProvideLevelResult eCanGameDLLProvide = IServerGameDLL::eCanProvideLevel_CannotProvide;
+		if ( g_iServerGameDLLVersion >= 10 )
+		{
+			eCanGameDLLProvide = serverGameDLL->CanProvideLevel( pMapName, nMapNameMax );
+		}
+
+		if ( eCanGameDLLProvide == IServerGameDLL::eCanProvideLevel_Possibly )
+		{
+			return eFindMap_PossiblyAvailable;
+		}
+		else if ( eCanGameDLLProvide == IServerGameDLL::eCanProvideLevel_CanProvide )
+		{
+			// See if the game dll fixed up the map name
+			return ( V_strcmp( szOriginalName, pMapName ) == 0 ) ? eFindMap_Found : eFindMap_NonCanonical;
+		}
+
+		AssertMsg( eCanGameDLLProvide == IServerGameDLL::eCanProvideLevel_CannotProvide,
+		           "Unhandled enum member" );
+
+		char szDiskName[MAX_PATH] = { 0 };
+		// Check if we can directly use this as a map
+		Host_DefaultMapFileName( pMapName, szDiskName, sizeof( szDiskName ) );
+		if ( *szDiskName && modelloader->Map_IsValid( szDiskName, true ) )
+		{
+			return eFindMap_Found;
+		}
+
+		// Fuzzy match in map list and check file
+		char match[1][64] = { {0} };
+		if ( MapList_ListMaps( pMapName, false, false, 1, sizeof( match[0] ), match ) && *(match[0]) )
+		{
+			Host_DefaultMapFileName( match[0], szDiskName, sizeof( szDiskName ) );
+			if ( modelloader->Map_IsValid( szDiskName, true ) )
+			{
+				V_strncpy( pMapName, match[0], nMapNameMax );
+				return eFindMap_FuzzyMatch;
+			}
+		}
+
+		return eFindMap_NotFound;
+	}
+
 	virtual int IndexOfEdict(const edict_t *pEdict)
 	{
 		if ( !pEdict )
@@ -593,7 +688,7 @@ public:
 	
 	virtual int	GetEntityCount( void )
 	{
-		return sv.num_edicts;
+		return sv.num_edicts - sv.free_edicts;
 	}
 	
 	
@@ -611,12 +706,20 @@ public:
 	virtual edict_t* CreateEdict( int iForceEdictIndex )
 	{
 		edict_t	*pedict = ED_Alloc( iForceEdictIndex );
+		if ( g_pServerPluginHandler )
+		{
+			g_pServerPluginHandler->OnEdictAllocated( pedict );
+		}
 		return pedict;
 	}
 	
 	
 	virtual void RemoveEdict(edict_t* ed)
 	{
+		if ( g_pServerPluginHandler )
+		{
+			g_pServerPluginHandler->OnEdictFreed( ed );
+		}
 		ED_Free(ed);
 	}
 	
@@ -634,7 +737,7 @@ public:
 	//
 	virtual void FreeEntPrivateData( void *pEntity )
 	{
-#ifdef _DEBUG
+#if defined( _DEBUG ) && defined( WIN32 )
 		// set the memory to a known value
 		int size = _msize( pEntity );
 		memset( pEntity, 0xDD, size );
@@ -711,7 +814,7 @@ public:
 			sound.nSoundNum = SV_SoundIndex( samp );
 			if (sound.nSoundNum <= 0)
 			{
-				ConMsg ("EmitAmbientSound:  sound note precached: %s\n", samp);
+				ConMsg ("EmitAmbientSound:  sound not precached: %s\n", samp);
 				return;
 			}
 		}
@@ -926,6 +1029,26 @@ public:
 		NET_StringCmd string( szOut );
 		sv.GetClient(entnum-1)->SendNetMsg( string );
 		
+	}
+
+	// Send a client command keyvalues
+	// keyvalues are deleted inside the function
+	virtual void ClientCommandKeyValues( edict_t *pEdict, KeyValues *pCommand )
+	{
+		if ( !pCommand )
+			return;
+
+		int entnum = NUM_FOR_EDICT( pEdict );
+
+		if ( ( entnum < 1 ) || ( entnum >  sv.GetClientCount() ) )
+		{
+			ConMsg("\n!!!\n\nClientCommandKeyValues:  Some entity tried to stuff '%s' to console buffer of entity %i when maxclients was set to %i, ignoring\n\n",
+				pCommand->GetName(), entnum, sv.GetMaxClients() );
+			return;
+		}
+
+		SVC_CmdKeyValues cmd( pCommand );
+		sv.GetClient(entnum-1)->SendNetMsg( cmd );
 	}
 	
 	/*
@@ -1240,15 +1363,24 @@ public:
 	// For use with FAKE CLIENTS
 	virtual edict_t* CreateFakeClient( const char *netname )
 	{
-		CGameClient *fcl = static_cast<CGameClient*>(sv.CreateFakeClient(netname));
+		CGameClient *fcl = static_cast<CGameClient*>( sv.CreateFakeClient( netname ) );
 		if ( !fcl )
 		{
 			// server is full
-			return NULL;		
+			return NULL;
 		}
 
 		return fcl->edict;
-		
+	}
+
+	// For use with FAKE CLIENTS
+	virtual edict_t* CreateFakeClientEx( const char *netname, bool bReportFakeClient /*= true*/ )
+	{
+		sv.SetReportNewFakeClients( bReportFakeClient );
+		edict_t *ret = CreateFakeClient( netname );
+		sv.SetReportNewFakeClients( true ); // Leave this set as true so other callers of sv.CreateFakeClient behave correctly.
+
+		return ret;
 	}
 	
 	// Get a keyvalue for s specified client
@@ -1340,7 +1472,7 @@ public:
 		return sv.IsPaused();
 	}
 
-	virtual void SetFakeClientConVarValue( edict_t *pEntity, const char *cvar, const char *value )
+	virtual void SetFakeClientConVarValue( edict_t *pEntity, const char *pCvarName, const char *value )
 	{
 		int clientnum = NUM_FOR_EDICT( pEntity );
 		if (clientnum < 1 || clientnum > sv.GetClientCount() )
@@ -1349,7 +1481,7 @@ public:
 		CGameClient *client = sv.Client(clientnum-1);
 		if ( client->IsFakeClient() )
 		{
-			client->SetUserCVar( cvar, value );
+			client->SetUserCVar( pCvarName, value );
 			client->m_bConVarsChanged = true;
 		}
 	}
@@ -1361,10 +1493,7 @@ public:
 
 	virtual IChangeInfoAccessor *GetChangeAccessor( const edict_t *pEdict )
 	{
-		extern int NUM_FOR_EDICTINFO( const edict_t * e );
-
-		int idx = NUM_FOR_EDICTINFO( pEdict );
-		return &sv.edictchangeinfo[ idx ];
+		return &sv.edictchangeinfo[ NUM_FOR_EDICT( pEdict ) ];
 	}
 
 	virtual QueryCvarCookie_t StartQueryCvarValue( edict_t *pPlayerEntity, const char *pCvarName )
@@ -1429,7 +1558,7 @@ public:
 
 	virtual int GetAppID()
 	{
-		return g_iSteamAppID;
+		return GetSteamAppID();
 	}
 	
 	virtual bool IsLowViolence();
@@ -1479,6 +1608,127 @@ public:
 		return false;
 	}
 
+	void SetDedicatedServerBenchmarkMode( bool bBenchmarkMode )
+	{
+		g_bDedicatedServerBenchmarkMode = bBenchmarkMode;
+		if ( bBenchmarkMode )
+		{
+			extern ConVar sv_stressbots;
+			sv_stressbots.SetValue( (int)1 );
+		}
+	}
+
+	// Returns the SteamID of the game server
+	const CSteamID	*GetGameServerSteamID()
+	{
+		if ( !Steam3Server().GetGSSteamID().IsValid() )
+			return NULL;
+
+		return &Steam3Server().GetGSSteamID();
+	}
+
+	// Returns the SteamID of the specified player. It'll be NULL if the player hasn't authenticated yet.
+	const CSteamID	*GetClientSteamID( edict_t *pPlayerEdict )
+	{
+		int entnum = NUM_FOR_EDICT( pPlayerEdict );
+		return GetClientSteamIDByPlayerIndex( entnum );
+	}
+	
+	const CSteamID	*GetClientSteamIDByPlayerIndex( int entnum )
+	{
+		if (entnum < 1 || entnum > sv.GetClientCount() )
+			return NULL;
+
+		// Entity numbers are offset by 1 from the player numbers
+		CGameClient *client = sv.Client(entnum-1);
+		if ( !client )
+			return NULL;
+
+		// Make sure they are connected and Steam ID is valid
+		if ( !client->IsConnected() || !client->m_SteamID.IsValid() )
+			return NULL;
+
+		return &client->m_SteamID;
+	}
+	
+	void SetGamestatsData( CGamestatsData *pGamestatsData )
+	{
+		g_pGamestatsData = pGamestatsData;
+	}
+
+	CGamestatsData *GetGamestatsData()
+	{
+		return g_pGamestatsData;
+	}
+
+	virtual IReplaySystem *GetReplay()
+	{
+		return g_pReplay;
+	}
+
+	virtual int GetClusterCount()
+	{
+		CCollisionBSPData *pBSPData = GetCollisionBSPData();
+		if ( pBSPData && pBSPData->map_vis )
+			return pBSPData->map_vis->numclusters;
+		return 0;
+	}
+
+	virtual int GetAllClusterBounds( bbox_t *pBBoxList, int maxBBox )
+	{
+		CCollisionBSPData *pBSPData = GetCollisionBSPData();
+		if ( pBSPData && pBSPData->map_vis && host_state.worldbrush )
+		{
+			// clamp to max clusters in the map
+			if ( maxBBox > pBSPData->map_vis->numclusters )
+			{
+				maxBBox = pBSPData->map_vis->numclusters;
+			}
+			// reset all of the bboxes
+			for ( int i =  0; i < maxBBox; i++ )
+			{
+				ClearBounds( pBBoxList[i].mins, pBBoxList[i].maxs );
+			}
+			// add each leaf's bounds to the bounds for that cluster
+			for ( int i = 0; i < host_state.worldbrush->numleafs; i++ )
+			{
+				mleaf_t *pLeaf = &host_state.worldbrush->leafs[i];
+				// skip solid leaves and leaves with cluster < 0
+				if ( !(pLeaf->contents & CONTENTS_SOLID) && pLeaf->cluster >= 0 && pLeaf->cluster < maxBBox )
+				{
+					Vector mins, maxs;
+					mins = pLeaf->m_vecCenter - pLeaf->m_vecHalfDiagonal;
+					maxs = pLeaf->m_vecCenter + pLeaf->m_vecHalfDiagonal;
+					AddPointToBounds( mins, pBBoxList[pLeaf->cluster].mins, pBBoxList[pLeaf->cluster].maxs );
+					AddPointToBounds( maxs, pBBoxList[pLeaf->cluster].mins, pBBoxList[pLeaf->cluster].maxs );
+				}
+			}
+
+			return pBSPData->map_vis->numclusters;
+		}
+		return 0;
+	}
+
+	virtual int GetServerVersion() const OVERRIDE
+	{
+		return GetSteamInfIDVersionInfo().ServerVersion;
+	}
+
+	virtual float GetServerTime() const OVERRIDE
+	{
+		return sv.GetTime();
+	}
+
+	virtual IServer *GetIServer() OVERRIDE
+	{
+		return (IServer *)&sv;
+	}
+
+	virtual void SetPausedForced( bool bPaused, float flDuration /*= -1.f*/ ) OVERRIDE
+	{
+		sv.SetPausedForced( bPaused, flDuration );
+	}
+
 private:
 	
 	// Purpose: Sends a temp entity to the client ( follows the format of the original MESSAGE_BEGIN stuff from HL1
@@ -1504,11 +1754,32 @@ private:
 	virtual void 		DestroySpatialPartition( ISpatialPartition *pPartition )						{ ::DestroySpatialPartition( pPartition );					}
 };
 
+// Backwards-compat shim that inherits newest then provides overrides for the legacy behavior
+class CVEngineServer22 : public CVEngineServer
+{
+	virtual int	IsMapValid( const char *filename ) OVERRIDE
+	{
+		// For users of the older interface, preserve here the old modelloader behavior of wrapping maps/%.bsp around
+		// the filename. This went away in newer interfaces since maps can now live in other places.
+		char szWrappedName[MAX_PATH] = { 0 };
+		V_snprintf( szWrappedName, sizeof( szWrappedName ), "maps/%s.bsp", filename );
+
+		return modelloader->Map_IsValid( szWrappedName );
+	}
+};
+
 //-----------------------------------------------------------------------------
 // Expose CVEngineServer to the game DLL.
 //-----------------------------------------------------------------------------
-static CVEngineServer	g_VEngineServer;
-EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CVEngineServer, IVEngineServer, INTERFACEVERSION_VENGINESERVER, g_VEngineServer);
+static CVEngineServer   g_VEngineServer;
+static CVEngineServer22 g_VEngineServer22;
+// INTERFACEVERSION_VENGINESERVER_VERSION_21 is compatible with 22 latest since we only added virtuals to the end, so expose that as well.
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CVEngineServer, IVEngineServer021, INTERFACEVERSION_VENGINESERVER_VERSION_21, g_VEngineServer22 );
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CVEngineServer, IVEngineServer022, INTERFACEVERSION_VENGINESERVER_VERSION_22, g_VEngineServer22 );
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CVEngineServer, IVEngineServer, INTERFACEVERSION_VENGINESERVER, g_VEngineServer );
+
+// When bumping the version to this interface, check that our assumption is still valid and expose the older version in the same way
+COMPILE_TIME_ASSERT( INTERFACEVERSION_VENGINESERVER_INT == 23 );
 
 //-----------------------------------------------------------------------------
 // Expose CVEngineServer to the engine.
@@ -1548,7 +1819,7 @@ void CVEngineServer::PlaybackTempEntity( IRecipientFilter& filter, float delay, 
 	classID = classID + 1;
 
 	// Encode now!
-	unsigned char data[ CEventInfo::MAX_EVENT_DATA ];
+	ALIGN4 unsigned char data[ CEventInfo::MAX_EVENT_DATA ] ALIGN4_POST;
 	bf_write buffer( "PlaybackTempEntity", data, sizeof(data) );
 
 	// write all properties, if init or reliable message delta against zero values

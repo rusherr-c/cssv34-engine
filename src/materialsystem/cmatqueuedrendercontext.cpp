@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -14,7 +14,11 @@
 #include "cmatqueuedrendercontext.h"
 #include "cmaterialsystem.h" // @HACKHACK
 
-ConVar mat_report_queue_status("mat_report_queue_status", "0");
+// NOTE: This has to be the last file included!
+#include "tier0/memdbgon.h"
+
+
+ConVar mat_report_queue_status( "mat_report_queue_status", "0", FCVAR_MATERIAL_SYSTEM_THREAD );
 
 //-----------------------------------------------------------------------------
 // 
@@ -183,8 +187,7 @@ public:
 			{
 				// Remove VERTEX_FORMAT_COMPRESSED from the material's format (dynamic meshes don't
 				// support compression, and all materials should support uncompressed verts too)
-				VertexFormat_t materialFormat = pMaterial->GetVertexFormat() & ~VERTEX_FORMAT_COMPRESSED;
-				m_VertexFormat = ( vertexFormat != 0 ) ? vertexFormat : materialFormat;
+				m_VertexFormat = ( vertexFormat == 0 ) ? ( pMaterial->GetVertexFormat() & ~VERTEX_FORMAT_COMPRESSED ) : vertexFormat;
 
 				if ( vertexFormat != 0 )
 				{
@@ -362,7 +365,7 @@ public:
 		}
 		else
 		{
-			desc.m_pIndices = &gm_ScratchIndexBuffer;
+			desc.m_pIndices = &gm_ScratchIndexBuffer[0];
 			desc.m_nIndexSize = 0;
 			desc.m_nFirstIndex = 0;
 			static_cast< IndexDesc_t* >( &desc )->m_nOffset = 0;
@@ -409,7 +412,7 @@ public:
 			}
 			else
 			{
-				#define FindMin( desc, pCurrent, tag )	( ( desc.m_VertexSize_##tag != 0 ) ? min( pCurrent, desc.m_p##tag )  : pCurrent )
+				#define FindMin( desc, pCurrent, tag )	( ( desc.m_VertexSize_##tag != 0 ) ? min( pCurrent, (void *)desc.m_p##tag )  : pCurrent )
 
 				pDest = (void *)(((byte *)0) - 1);
 
@@ -440,7 +443,7 @@ public:
 			}
 		}
 
-		if ( pIndexData && pIndexData != &gm_ScratchIndexBuffer && desc.m_nIndexSize )
+		if ( pIndexData && pIndexData != &gm_ScratchIndexBuffer[0] && desc.m_nIndexSize )
 		{
 			if ( !desc.m_nFirstVertex )
 			{
@@ -459,7 +462,7 @@ public:
 				}
 				while ( i < nIndices )
 				{
-					int nToCopy = min( ARRAYSIZE(tempIndices), nIndices - i );
+					int nToCopy = min( (int)ARRAYSIZE(tempIndices), nIndices - i );
 					for ( int j = 0; j < nToCopy; j++ )
 					{
 						tempIndices[j] = pIndexData[i+j] + desc.m_nFirstVertex;
@@ -472,7 +475,7 @@ public:
 
 		m_pActualMesh->UnlockMesh( nVerts, nIndices, desc );
 
-		if ( pIndexData && pIndexData != &gm_ScratchIndexBuffer)
+		if ( pIndexData && pIndexData != &gm_ScratchIndexBuffer[0])
 		{
 			m_pOwner->FreeIndices( pIndexData, nIndices );
 		}
@@ -531,7 +534,7 @@ public:
 
 	void FreeBuffers()
 	{
-		if ( m_pIndexData && m_pIndexData != &gm_ScratchIndexBuffer)
+		if ( m_pIndexData && m_pIndexData != &gm_ScratchIndexBuffer[0])
 		{
 			m_pOwner->FreeIndices( m_pIndexData, m_nIndices );
 			m_pIndexData = NULL;
@@ -549,12 +552,10 @@ public:
 		m_pIndexData = NULL;
 	}
 
-#if defined( _X360 )
 	unsigned ComputeMemoryUsed()
 	{
 		return 0;
 	}
-#endif
 
 	virtual VertexFormat_t GetVertexFormat() const
 	{
@@ -685,32 +686,48 @@ private:
 	IMesh *m_pVertexOverride;
 	IMesh *m_pIndexOverride;
 
-	static unsigned short gm_ScratchIndexBuffer;
+	static unsigned short gm_ScratchIndexBuffer[6];
 };
 
-unsigned short CMatQueuedMesh::gm_ScratchIndexBuffer;
+unsigned short CMatQueuedMesh::gm_ScratchIndexBuffer[6];
 
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
-void CMatQueuedRenderContext::Init( CMaterialSystem *pMaterialSystem, CMatRenderContextBase *pHardwareContext )
+bool CMatQueuedRenderContext::Init( CMaterialSystem *pMaterialSystem, CMatRenderContextBase *pHardwareContext )
 {
+	BaseClass::Init();
+
 	m_pMaterialSystem = pMaterialSystem;
 	m_pHardwareContext = pHardwareContext;
 
 	m_pQueuedMesh = new CMatQueuedMesh( this, pHardwareContext );
 
 	MEM_ALLOC_CREDIT();
-	m_Vertices.Init( 16 * 1024 * 1024, 128 * 1024 );
-	m_Indices.Init( 16 * 1024 * 1024, 128 * 1024 );
-	m_Primitives.Init( 16 * 1024 * 1024, 128 * 1024, 0 );
+
+	int nSize = 16 * 1024 * 1024;
+	int nCommitSize = 128 * 1024;
+#if defined(DEDICATED)
+	Assert( !"CMatQueuedRenderContext shouldn't be initialized on dedicated servers..." );
+	nSize = nCommitSize = 1024;
+#endif
+
+	bool bVerticesInit = m_Vertices.Init( nSize, nCommitSize );
+	bool bIndicesInit = m_Indices.Init( nSize, nCommitSize );
+
+	if ( !bVerticesInit || !bIndicesInit )
+	{
+		return false;
+	}
+
+	return true;
 }
 
 
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
-void CMatQueuedRenderContext::Term()
+void CMatQueuedRenderContext::Shutdown()
 {
 	if ( !m_pHardwareContext )
 	{
@@ -726,17 +743,30 @@ void CMatQueuedRenderContext::Term()
 
 	m_Vertices.Term();
 	m_Indices.Term();
-	m_Primitives.Term();
+
+	BaseClass::Shutdown();
+	Assert(m_queue.Count() == 0);
 }
+
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
+void CMatQueuedRenderContext::Free()
+{
+	m_Vertices.FreeAll();
+	m_Indices.FreeAll();
+}
+
 
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
 void CMatQueuedRenderContext::CompactMemory()
 {
+	BaseClass::CompactMemory();
 	m_Vertices.FreeAll();
 	m_Indices.FreeAll();
-	m_Primitives.FreeAll();
 }
 
 
@@ -836,6 +866,8 @@ void CMatQueuedRenderContext::BeginRender()
 {
 	if ( ++m_iRenderDepth == 1 )
 	{
+		VPROF_INCREMENT_GROUP_COUNTER( "render/CMatQBeginRender", COUNTER_GROUP_TELEMETRY, 1 );
+
 		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContext::BeginRender );
 	}
 }
@@ -858,17 +890,18 @@ void CMatQueuedRenderContext::CallQueued( bool bTermAfterCall )
 {
 	if ( mat_report_queue_status.GetBool() )
 	{
-		Msg( "%d calls queued for %d bytes in parameters and overhead, %d bytes verts, %d bytes indices, %d bytes primitives\n", m_queue.Count(), m_queue.GetMemoryUsed(), m_Vertices.GetUsed(), m_Indices.GetUsed(), m_Primitives.GetUsed() );
+		Msg( "%d calls queued for %llu bytes in parameters and overhead, %d bytes verts, %d bytes indices, %d bytes other\n", m_queue.Count(), (uint64)(m_queue.GetMemoryUsed()), m_Vertices.GetUsed(), m_Indices.GetUsed(), RenderDataSizeUsed() );
 	}
 
 	m_queue.CallQueued();
 
 	m_Vertices.FreeAll( false );
 	m_Indices.FreeAll( false );
-	m_Primitives.FreeAll( false );
 
 	if ( bTermAfterCall )
-		Term();
+	{
+		Shutdown();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -903,7 +936,12 @@ void CMatQueuedRenderContext::SetRenderTargetEx( int nRenderTargetID, ITexture *
 void CMatQueuedRenderContext::GetRenderTargetDimensions( int &width, int &height) const
 {
 	// Target at top of stack
-	ITexture *pTOS = m_RenderTargetStack.Top().m_pRenderTargets[0];
+	ITexture *pTOS = NULL;
+
+	if ( m_RenderTargetStack.Count() )
+	{
+		pTOS = m_RenderTargetStack.Top().m_pRenderTargets[ 0 ];
+	}
 
 	// If top of stack isn't the back buffer, get dimensions from the texture
 	if ( pTOS != NULL )
@@ -1305,6 +1343,14 @@ void CMatQueuedRenderContext::CopyRenderTargetToTextureEx( ITexture *pTexture, i
 //-----------------------------------------------------------------------------
 // 
 //-----------------------------------------------------------------------------
+void CMatQueuedRenderContext::CopyTextureToRenderTargetEx( int i, ITexture *pTexture, Rect_t *pSrc, Rect_t *pDst )
+{
+	m_queue.QueueCall( m_pHardwareContext, &IMatRenderContext::CopyTextureToRenderTargetEx, i, pTexture, CUtlEnvelope<Rect_t>(pSrc), CUtlEnvelope<Rect_t>(pDst) );
+}
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
 bool CMatQueuedRenderContext::OnDrawMesh( IMesh *pMesh, int firstIndex, int numIndices )
 {
 	void (IMesh::*pfnDraw)( int, int) = &IMesh::Draw; // need assignment to disambiguate overloaded function
@@ -1317,16 +1363,14 @@ bool CMatQueuedRenderContext::OnDrawMesh( IMesh *pMesh, int firstIndex, int numI
 //-----------------------------------------------------------------------------
 bool CMatQueuedRenderContext::OnDrawMesh( IMesh *pMesh, CPrimList *pLists, int nLists )
 {
-	CPrimList *pCopyPrimList = AllocPrimLists( nLists );
-	memcpy( pCopyPrimList, pLists, sizeof(CPrimList) * nLists );
-	m_queue.QueueCall( this, &CMatQueuedRenderContext::DeferredDrawPrimList, pMesh, pCopyPrimList, nLists );
+	CMatRenderData< CPrimList > rdPrimList( this, nLists, pLists );
+	m_queue.QueueCall( this, &CMatQueuedRenderContext::DeferredDrawPrimList, pMesh, rdPrimList.Base(), nLists );
 	return false;
 }
 
 void CMatQueuedRenderContext::DeferredDrawPrimList( IMesh *pMesh, CPrimList *pLists, int nLists )
 {
 	pMesh->Draw( pLists, nLists );
-	FreePrimLists( pLists );
 }
 
 
@@ -1527,13 +1571,87 @@ void CMatQueuedRenderContext::DeferredBeginBatch( uint16 *pIndexData, int nIndic
 byte *CMatQueuedRenderContext::AllocVertices( int nVerts, int nVertexSize )
 {
 	MEM_ALLOC_CREDIT();
-	return (byte *)m_Vertices.Alloc( nVerts * nVertexSize, false );
+
+#if defined(_WIN32) && !defined(_X360)
+	const byte *pNextAlloc = (const byte *)(m_Vertices.GetBase()) + m_Vertices.GetUsed() + AlignValue( nVerts * nVertexSize, 16 );
+	const byte *pCommitLimit = (const byte *)(m_Vertices.GetBase()) + m_Vertices.GetSize();
+#endif
+
+	void *pResult = m_Vertices.Alloc( nVerts * nVertexSize, false );
+#if defined(_WIN32) && !defined(_X360)
+	if ( !pResult )
+	{
+		// Force a crash with useful minidump info in the registers.
+		uint64 status = 0x31415926;
+
+		// Print some information to the console so that it's picked up in the minidump comment.
+		Msg( "AllocVertices( %d, %d ) on %p failed. m_Vertices is based at %p with a size of 0x%x.\n", nVerts, nVertexSize, this, m_Vertices.GetBase(), m_Vertices.GetSize() );
+		Msg( "%d vertices used.\n", m_Vertices.GetUsed() );
+		if ( pNextAlloc > pCommitLimit )
+		{
+			Msg( "VirtualAlloc would have been called. %p > %p.\n", pNextAlloc, pCommitLimit );
+
+			const byte *pNewCommitLimit = AlignValue( pNextAlloc, 128 * 1024 );
+			const uint32 commitSize = pNewCommitLimit - pCommitLimit;
+			const void *pRet = VirtualAlloc( (void *)pCommitLimit, commitSize, MEM_COMMIT, PAGE_READWRITE );
+			if ( !pRet )
+				status = GetLastError();
+
+			Msg( "VirtualAlloc( %p, %d ) returned %p on repeat. VirtualAlloc %s with code %x.\n", pCommitLimit, commitSize, pRet, (pRet != NULL) ? "succeeded" : "failed", (uint32) status );
+		}
+		else
+		{
+			Msg( "VirtualAlloc would not have been called. %p <= %p.\n", pNextAlloc, pCommitLimit );
+		}
+
+		// Now crash.
+		*(volatile uint64 *)0 = status << 32 | m_Vertices.GetUsed();
+	}
+#endif
+	return (byte *) pResult;
 }
 
 uint16 *CMatQueuedRenderContext::AllocIndices( int nIndices )
 {
 	MEM_ALLOC_CREDIT();
-	return (uint16 *)m_Indices.Alloc( nIndices * sizeof(uint16), false );
+
+#if defined(_WIN32) && !defined(_X360)
+	const byte *pNextAlloc = (const byte *)(m_Indices.GetBase()) + m_Indices.GetUsed() + AlignValue( nIndices * sizeof(uint16), 16 );
+	const byte *pCommitLimit = (const byte *)(m_Indices.GetBase()) + m_Indices.GetSize();
+#endif
+
+	void *pResult = m_Indices.Alloc( nIndices * sizeof(uint16), false );
+#if defined(_WIN32) && !defined(_X360)
+	if ( !pResult )
+	{
+		// Force a crash with useful minidump info in the registers.
+		uint64 status = 0x31415926;
+
+		// Print some information to the console so that it's picked up in the minidump comment.
+		Msg( "AllocIndices( %d ) on %p failed. m_Indices is based at %p with a size of 0x%x.\n", nIndices, this, m_Indices.GetBase(), m_Indices.GetSize() );
+		Msg( "%d indices used.\n", m_Indices.GetUsed() );
+		if ( pNextAlloc > pCommitLimit )
+		{
+			Msg( "VirtualAlloc would have been called. %p > %p.\n", pNextAlloc, pCommitLimit );
+
+			const byte *pNewCommitLimit = AlignValue( pNextAlloc, 128 * 1024 );
+			const uint32 commitSize = pNewCommitLimit - pCommitLimit;
+			const void *pRet = VirtualAlloc( (void *)pCommitLimit, commitSize, MEM_COMMIT, PAGE_READWRITE );
+			if ( !pRet )
+				status = GetLastError();
+
+			Msg( "VirtualAlloc( %p, %d ) returned %p on repeat. VirtualAlloc %s with code %x.\n", pCommitLimit, commitSize, pRet, (pRet != NULL) ? "succeeded" : "failed", (uint32) status );
+		}
+		else
+		{
+			Msg( "VirtualAlloc would not have been called. %p <= %p.\n", pNextAlloc, pCommitLimit );
+		}
+
+		// Now crash.
+		*(volatile uint64 *)0 = status << 32 | m_Indices.GetUsed();
+	}
+#endif
+	return (uint16 *) pResult;
 }
 
 byte *CMatQueuedRenderContext::ReallocVertices( byte *pVerts, int nVertsOld, int nVertsNew, int nVertexSize )
@@ -1565,17 +1683,6 @@ void CMatQueuedRenderContext::FreeVertices( byte *pVerts, int nVerts, int nVerte
 }
 
 void CMatQueuedRenderContext::FreeIndices( uint16 *pIndices, int nIndices )
-{
-	// free at end of call dispatch
-}
-
-CPrimList *CMatQueuedRenderContext::AllocPrimLists( int nPrimLists )
-{
-	MEM_ALLOC_CREDIT();
-	return (CPrimList *)m_Primitives.Alloc( nPrimLists * sizeof(CPrimList), false );
-}
-
-void CMatQueuedRenderContext::FreePrimLists( CPrimList *pList )
 {
 	// free at end of call dispatch
 }
@@ -1620,5 +1727,27 @@ void CMatQueuedRenderContext::UnlockLookup( ColorCorrectionHandle_t handle )
 	MaterialLock_t hLock = m_pMaterialSystem->Lock();
 	ColorCorrectionSystem()->UnlockLookup( handle );
 	m_pMaterialSystem->Unlock( hLock );
+}
+
+// NOTE: These are synchronous calls!  The rendering thread is stopped, the current queue is drained and the pixels are read
+// NOTE: We should also have a queued read pixels in the API for doing mid frame reads (as opposed to screenshots)
+void CMatQueuedRenderContext::ReadPixels( int x, int y, int width, int height, unsigned char *data, ImageFormat dstFormat )
+{
+	EndRender();
+	MaterialLock_t hLock = m_pMaterialSystem->Lock();
+	this->CallQueued(false);
+	g_pShaderAPI->ReadPixels( x, y, width, height, data, dstFormat );
+	m_pMaterialSystem->Unlock( hLock );
+	BeginRender();
+}
+
+void CMatQueuedRenderContext::ReadPixelsAndStretch( Rect_t *pSrcRect, Rect_t *pDstRect, unsigned char *pBuffer, ImageFormat dstFormat, int nDstStride )
+{
+	EndRender();
+	MaterialLock_t hLock = m_pMaterialSystem->Lock();
+	this->CallQueued(false);
+	g_pShaderAPI->ReadPixels( pSrcRect, pDstRect, pBuffer, dstFormat, nDstStride );
+	m_pMaterialSystem->Unlock( hLock );
+	BeginRender();
 }
 

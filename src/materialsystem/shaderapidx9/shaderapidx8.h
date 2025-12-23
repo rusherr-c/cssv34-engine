@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #ifndef SHADERAPIDX8_H
 #define SHADERAPIDX8_H
 
-#include "shaderAPIbase.h"
+#include "shaderapibase.h"
 #include "shaderapi/ishadershadow.h"
 #include "locald3dtypes.h"
 
@@ -19,7 +19,6 @@
 #define ATI_FETCH4_ENABLE		MAKEFOURCC('G','E','T','4')
 #define ATI_FETCH4_DISABLE		MAKEFOURCC('G','E','T','1')
 #define ATISAMP_FETCH4			D3DSAMP_MIPMAPLODBIAS
-
 
 //-----------------------------------------------------------------------------
 // Forward declarations
@@ -109,6 +108,10 @@ public:
 #if defined( _X360 )
 	virtual void ApplySRGBReadState( int iTextureStage, bool bSRGBReadEnabled ) = 0; //360 needs to rebind the texture over again instead of setting a sampler state
 #endif
+
+	virtual void PrintfVA( char *fmt, va_list vargs ) = 0;
+	virtual void Printf( PRINTF_FORMAT_STRING const char *fmt, ... ) = 0;	
+	virtual float Knob( char *knobname, float *setvalue = NULL ) = 0;
 };
 
 

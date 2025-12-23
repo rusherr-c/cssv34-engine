@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -69,7 +69,7 @@ void FloatBitMap_t::TileableBilateralFilter( int radius_in_pixels,
 	ctxs[0].edge_threshold_value = edge_threshold_value;
 	ctxs[0].orig_bm = &orig;
 	ctxs[0].dest_bm = this;
-	int nthreads=min(32,GetCPUInformation()->m_nPhysicalProcessors);
+	int nthreads = min( 32, (int)GetCPUInformation()->m_nPhysicalProcessors );
 	ThreadHandle_t waithandles[32];
 	int starty=0;
 	int ystep=Height/nthreads;

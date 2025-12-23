@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 
 #include "VGuiSystemModuleLoader.h"
 #include "Sys_Utils.h"
-#include "IVGuiModule.h"
+#include "IVguiModule.h"
 #include "ServerBrowser/IServerBrowser.h"
 
 #include <vgui/IPanel.h>
@@ -20,8 +20,7 @@
 #include <vgui_controls/Controls.h>
 #include <vgui_controls/Panel.h>
 
-#include "FileSystem.h"
-#include "steam/steam_api.h"
+#include "filesystem.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -157,7 +156,20 @@ bool CVGuiSystemModuleLoader::LoadPlatformModules(CreateInterfaceFn *factorylist
 			continue;
 
 		// get copy out of steam cache
-		const char *dllPath = it->GetString("dll");
+		const char *dllPath = NULL;
+		if ( IsOSX() )
+		{
+			dllPath = it->GetString("dll_osx");
+		}
+		else if ( IsLinux() )
+		{
+			dllPath = it->GetString("dll_linux");
+		}
+		else 
+		{
+			dllPath = it->GetString("dll");
+		}
+
 
 		// load the module (LoadModule calls GetLocalCopy() under steam)
 		CSysModule *mod = g_pFullFileSystem->LoadModule(dllPath, "EXECUTABLE_PATH");

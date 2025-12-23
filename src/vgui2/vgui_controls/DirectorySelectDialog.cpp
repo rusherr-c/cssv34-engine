@@ -19,7 +19,7 @@
 #include <vgui/ISystem.h>
 #include <filesystem.h>
 
-#ifdef _WIN32
+#ifdef WIN32
 #include <direct.h>
 #include <stdio.h>
 #include <io.h>

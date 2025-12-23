@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,6 +11,7 @@
 #include "cs_player.h"
 #include "KeyValues.h"
 #include "bot_manager.h"
+#include "weapon_csbase.h"
 
 #define GRENADE_MODEL "models/Weapons/w_eq_smokegrenade_thrown.mdl"
 
@@ -52,6 +53,8 @@ CSmokeGrenadeProjectile* CSmokeGrenadeProjectile::Create(
 	pGrenade->SetElasticity( BaseClass::GetGrenadeElasticity() );
 	pGrenade->m_bDidSmokeEffect = false;
 
+	pGrenade->m_pWeaponInfo = GetWeaponInfo( WEAPON_SMOKEGRENADE );
+
 	return pGrenade;
 }
 
@@ -80,7 +83,7 @@ void CSmokeGrenadeProjectile::Think_Detonate()
 	if ( pGren )
 	{
 		pGren->FillVolume();
-		pGren->SetFadeTime( 17, 22 );
+		pGren->SetFadeTime( 15, 20 );
 		pGren->SetAbsOrigin( GetAbsOrigin() );
 
 		//tell the hostages about the smoke!

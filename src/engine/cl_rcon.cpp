@@ -1,21 +1,16 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  implementation of the rcon client
 //
 //===========================================================================//
 
-#ifdef _LINUX
+// If we are going to include winsock.h then we need to disable protected_things.h
+// or else we get many warnings.
+#undef PROTECTED_THINGS_ENABLE
 #include "tier0/platform.h"
-#include "sys/ioctl.h"
-#include "netinet/in.h"
-#include <sys/socket.h>
-#include <asm/ioctls.h>
-#include <netinet/tcp.h>
-#include <errno.h>
-#define closesocket close
-#define ioctlsocket ioctl
+#ifdef POSIX
+#include "net_ws_headers.h"
 #define WSAGetLastError() errno
-#define WSAEWOULDBLOCK EWOULDBLOCK
 #else
 #if !defined( _X360 )
 #include <winsock.h>
@@ -32,7 +27,7 @@
 #include "proto_oob.h" // PORT_RCON define
 #include "cmd.h"
 #include "tier2/fileutils.h"
-#include "zip/xunzip.h"
+#include "zip/XUnzip.h"
 
 
 #if defined( _X360 )
@@ -42,6 +37,13 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+static CRConClient g_RCONClient;
+CRConClient & RCONClient()
+{
+	return g_RCONClient;
+}
+
+#ifdef ENABLE_RPT
 class CRPTClient : public CRConClient
 {
 	typedef CRConClient BaseClass;
@@ -65,30 +67,31 @@ public:
 	}
 };
 
-
-static CRConClient g_RCONClient;
-CRConClient & RCONClient()
-{
-	return g_RCONClient;
-}
-
 static CRPTClient g_RPTClient;
 CRConClient & RPTClient()
 {
 	return g_RPTClient;
 }
+#endif // ENABLE_RPT
 
 static void RconAddressChanged_f( IConVar *pConVar, const char *pOldString, float flOldValue )
 {
 #ifndef SWDS
 	ConVarRef var( pConVar );
 	netadr_t to;
+
 	const char *cmdargs = var.GetString(); 
-	if ( !NET_StringToAdr( cmdargs, &to ) )
+	if ( ( !cmdargs || !cmdargs[ 0 ] ) && cl.m_NetChannel )
+	{
+		to = cl.m_NetChannel->GetRemoteAddress();
+	}
+	else if ( !NET_StringToAdr( cmdargs, &to ) )
 	{
 		Msg( "Unable to resolve rcon address %s\n", var.GetString() );
 		return;
 	}
+
+	Msg( "Setting rcon_address: %s:%d\n", to.ToString( true ), to.GetPort() );
 	RCONClient().SetAddress( to );
 #endif
 }
@@ -128,7 +131,7 @@ void CRConVProfExport::GetBudgetGroupInfos( CExportedBudgetGroupInfo *pInfos )
 
 void CRConVProfExport::GetBudgetGroupTimes( float times[IVProfExport::MAX_BUDGETGROUP_TIMES] )
 {
-	int nGroups = min( m_Times.Count(), IVProfExport::MAX_BUDGETGROUP_TIMES );
+	int nGroups = min( m_Times.Count(), (int)IVProfExport::MAX_BUDGETGROUP_TIMES );
 	memset( times, 0, nGroups * sizeof(float) );
 	nGroups = min( GetNumBudgetGroups(), nGroups );
 	memcpy( times, m_Times.Base(), nGroups * sizeof(float) );
@@ -188,7 +191,7 @@ void CRConVProfExport::OnRemoteGroupData( const void *data, int len )
 		green = buf.GetUnsignedChar( );
 		blue = buf.GetUnsignedChar( );
 		alpha = buf.GetUnsignedChar( );
-		buf.GetStringManualCharCount( temp, sizeof(temp) );
+		buf.GetString( temp );
 		int nLen = Q_strlen( temp );
 
 		pInfo->m_Color.SetColor( red, green, blue, alpha );
@@ -224,6 +227,7 @@ CON_COMMAND( vprof_remote_stop, "Stop an existing remote VProf data request" )
 //	RCONClient().StopVProfData();
 }
 
+#ifdef ENABLE_RPT
 CON_COMMAND_F( rpt_screenshot, "", FCVAR_HIDDEN | FCVAR_DONTRECORD )
 {
 	RPTClient().TakeScreenshot();
@@ -233,7 +237,7 @@ CON_COMMAND_F( rpt_download_log, "", FCVAR_HIDDEN | FCVAR_DONTRECORD )
 {
 	RPTClient().GrabConsoleLog();
 }
-
+#endif // ENABLE_RPT
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -429,8 +433,8 @@ void CRConClient::ParseReceivedData()
 					m_bAuthenticated = true;
 				}
 				char dummy[2];
-				m_RecvBuffer.GetStringManualCharCount( dummy, sizeof(dummy) );
-				m_RecvBuffer.GetStringManualCharCount( dummy, sizeof(dummy) );
+				m_RecvBuffer.GetString( dummy );
+				m_RecvBuffer.GetString( dummy );
 			}
 			break;
 
@@ -469,7 +473,7 @@ void CRConClient::ParseReceivedData()
 		case SERVERDATA_RESPONSE_STRING:
 			{
 				char pBuf[2048];
-				m_RecvBuffer.GetStringManualCharCount( pBuf, sizeof(pBuf) );
+				m_RecvBuffer.GetString( pBuf );
 				Msg( "%s", pBuf );
 			}
 			break;
@@ -565,11 +569,11 @@ void CRConClient::RunFrame()
 	// we have a command to process
 	// Read data into a utlbuffer
 	m_RecvBuffer.EnsureCapacity( m_RecvBuffer.TellPut() + readLen + 1 );
-	char *recvbuffer = (char *)_alloca( min( 1024, readLen + 1 ) );
+	char *recvbuffer = (char *)_alloca( min( 1024ul, readLen + 1 ) );
 	unsigned int len = 0;
 	while ( len < readLen )
 	{
-		int recvLen = recv( hSocket, recvbuffer , min( 1024, readLen - len ) , 0 );
+		int recvLen = recv( hSocket, recvbuffer , min( 1024ul, readLen - len ) , 0 );
 		if ( recvLen == 0 ) // socket was closed
 		{
 			CloseSocket();

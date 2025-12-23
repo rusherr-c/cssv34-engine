@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -48,7 +48,7 @@ void TestChannels( IChannel *pChannel1, IChannel *pChannel2, int maxPacketSize, 
 {
 	for ( int iTest=0; iTest < nTests; iTest++ )
 	{
-		float t = (float)rand() / RAND_MAX;
+		float t = (float)rand() / VALVE_RAND_MAX;
 		int testSize = (int)( t * (maxPacketSize-1) ) + 1;
 		
 		CUtlVector<unsigned char> rnd1, rnd2;

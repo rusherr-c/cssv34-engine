@@ -1,30 +1,30 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================
 
-#if !defined( _X360 )
+#if defined( WIN32) && !defined( _X360 )
 #include "winlite.h"
 #endif
-#include "mpafile.h"
+#include "tier0/platform.h"
+#include "MPAFile.h"
 
 
 // static variables
-LPCTSTR CMPAHeader::m_szLayers[] = { _T("Layer I"), _T("Layer II"), _T("Layer III") };
-LPCTSTR CMPAHeader::m_szMPEGVersions[] = {_T("MPEG 2.5"), _T(""), _T("MPEG 2"), _T("MPEG 1") };
-LPCTSTR CMPAHeader::m_szChannelModes[] = { _T("Stereo"), _T("Joint Stereo"), _T("Dual Channel"), _T("Single Channel") };
-LPCTSTR CMPAHeader::m_szEmphasis[] = { _T("None"), _T("50/15ms"), _T(""), _T("CCIT J.17") };
-
+const char *CMPAHeader::m_szLayers[] = { "Layer I", "Layer II", "Layer III" };
+const char *CMPAHeader::m_szMPEGVersions[] = {"MPEG 2.5", "", "MPEG 2", "MPEG 1" };
+const char *CMPAHeader::m_szChannelModes[] = { "Stereo", "Joint Stereo", "Dual Channel", "Single Channel" };
+const char *CMPAHeader::m_szEmphasis[] = { "None", "50/15ms", "", "CCIT J.17" };
 
 // tolerance range, look at expected offset +/- m_dwTolerance for subsequent frames
-const DWORD CMPAHeader::m_dwTolerance = 3;	// 3 bytes
+const uint32 CMPAHeader::m_dwTolerance = 3;	// 3 bytes
 
 // max. range where to look for frame sync
-const DWORD CMPAHeader::m_dwMaxRange = ( 256 * 1024 );
+const uint32 CMPAHeader::m_dwMaxRange = ( 256 * 1024 );
 
 // sampling rates in hertz: 1. index = MPEG Version ID, 2. index = sampling rate index
-const DWORD CMPAHeader::m_dwSamplingRates[4][3] = 
+const uint32 CMPAHeader::m_dwSamplingRates[4][3] = 
 { 
 	{11025, 12000, 8000,  },	// MPEG 2.5
 	{0,     0,     0,     },	// reserved
@@ -33,7 +33,7 @@ const DWORD CMPAHeader::m_dwSamplingRates[4][3] =
 };
 
 // padding sizes in bytes for different layers: 1. index = layer
-const DWORD CMPAHeader::m_dwPaddingSizes[3] =
+const uint32 CMPAHeader::m_dwPaddingSizes[3] =
 {
 	4,	// Layer1
 	1,	// Layer2
@@ -41,7 +41,7 @@ const DWORD CMPAHeader::m_dwPaddingSizes[3] =
 };
 
 // bitrates: 1. index = LSF, 2. index = Layer, 3. index = bitrate index
-const DWORD CMPAHeader::m_dwBitrates[2][3][15] =
+const uint32 CMPAHeader::m_dwBitrates[2][3][15] =
 {
 	{	// MPEG 1
 		{0,32,64,96,128,160,192,224,256,288,320,352,384,416,448,},	// Layer1
@@ -56,7 +56,7 @@ const DWORD CMPAHeader::m_dwBitrates[2][3][15] =
 };
 
 // Samples per Frame: 1. index = LSF, 2. index = Layer
-const DWORD CMPAHeader::m_dwSamplesPerFrames[2][3] =
+const uint32 CMPAHeader::m_dwSamplesPerFrames[2][3] =
 {
 	{	// MPEG 1
 		384,	// Layer1
@@ -71,7 +71,7 @@ const DWORD CMPAHeader::m_dwSamplesPerFrames[2][3] =
 };
 
 // Samples per Frame / 8
-const DWORD CMPAHeader::m_dwCoefficients[2][3] =
+const uint32 CMPAHeader::m_dwCoefficients[2][3] =
 {
 	{	// MPEG 1
 		48,		// Layer1
@@ -87,7 +87,7 @@ const DWORD CMPAHeader::m_dwCoefficients[2][3] =
 
 // needed later for CRC check
 // sideinformation size: 1.index = lsf, 2. index = layer, 3. index = mono
-const DWORD CMPAHeader::m_dwSideinfoSizes[2][3][2] =
+const uint32 CMPAHeader::m_dwSideinfoSizes[2][3][2] =
 {
 	{	// MPEG 1 (not mono, mono
 		{0,0},	// Layer1
@@ -102,7 +102,7 @@ const DWORD CMPAHeader::m_dwSideinfoSizes[2][3][2] =
 };
 
 // constructor (throws exception if no frame found)
-CMPAHeader::CMPAHeader( CMPAFile* pMPAFile, DWORD dwExpectedOffset, bool bSubsequentFrame, bool bReverse ) :
+CMPAHeader::CMPAHeader( CMPAFile* pMPAFile, uint32 dwExpectedOffset, bool bSubsequentFrame, bool bReverse ) :
 m_pMPAFile( pMPAFile ), m_dwSyncOffset( dwExpectedOffset ), m_dwRealFrameSize( 0 ) 
 {
 	// first check at expected offset (extended for not subsequent frames)
@@ -118,9 +118,9 @@ m_pMPAFile( pMPAFile ), m_dwSyncOffset( dwExpectedOffset ), m_dwRealFrameSize( 0
 			if( nStep > m_dwTolerance )
 			{
 				// out of tolerance range
-				throw CMPAException( CMPAException::NoFrameInTolerance, pMPAFile->GetFilename() );
+				throw CMPAException( CMPAException::NoFrameInTolerance, pMPAFile->GetFilename() ? pMPAFile->GetFilename() : "??" );
 			}
-			
+
 			// look around dwExpectedOffset with increasing steps (+1,-1,+2,-2,...)
 			if( m_dwSyncOffset <= dwExpectedOffset )
 			{
@@ -141,8 +141,7 @@ m_pMPAFile( pMPAFile ), m_dwSyncOffset( dwExpectedOffset ), m_dwRealFrameSize( 0
 		if( nSyncOffset < 0 || nSyncOffset > (int)((pMPAFile->m_dwEnd - pMPAFile->m_dwBegin) - MPA_HEADER_SIZE) || abs( (long)(nSyncOffset-dwExpectedOffset) ) > m_dwMaxRange )
 		{
 			// out of tolerance range
-			throw CMPAException( CMPAException::NoFrame, pMPAFile->GetFilename() );
-			
+			throw CMPAException( CMPAException::NoFrame, pMPAFile->GetFilename() ? pMPAFile->GetFilename() : "??" );
 		}
 		m_dwSyncOffset = nSyncOffset;
 
@@ -162,7 +161,7 @@ bool CMPAHeader::SkipEmptyFrames()
 	if( m_dwBitrate > 32 )
 		return false;
 
-	DWORD dwHeader;
+	uint32 dwHeader;
 	try
 	{
 		while( m_dwBitrate <= 32 )
@@ -183,7 +182,7 @@ bool CMPAHeader::SkipEmptyFrames()
 
 // in dwHeader stands 32bit header in big-endian format: frame sync at the end!
 // because shifts do only work for integral types!!!
-CMPAHeader::HeaderError CMPAHeader::DecodeHeader( DWORD dwHeader, bool bSimpleDecode )
+CMPAHeader::HeaderError CMPAHeader::DecodeHeader( uint32 dwHeader, bool bSimpleDecode )
 {
 	// Check SYNC bits (last eleven bits set)
 	if( (dwHeader >> 24 != 0xff) || ((((dwHeader >> 16))&0xe0) != 0xe0) )
@@ -254,10 +253,10 @@ CMPAHeader::HeaderError CMPAHeader::DecodeHeader( DWORD dwHeader, bool bSimpleDe
 	return noError;
 }
 
-CMPAHeader::HeaderError CMPAHeader::IsSync( DWORD dwOffset,  bool bExtended  )
+CMPAHeader::HeaderError CMPAHeader::IsSync( uint32 dwOffset,  bool bExtended  )
 {
 	HeaderError error = noSync;
-	DWORD dwHeader = m_pMPAFile->ExtractBytes( dwOffset, MPA_HEADER_SIZE, false );
+	uint32 dwHeader = m_pMPAFile->ExtractBytes( dwOffset, MPA_HEADER_SIZE, false );
 		
 	// sync bytes found?
 	if( (dwHeader & 0xFFE00000) ==  0xFFE00000 )
@@ -269,7 +268,7 @@ CMPAHeader::HeaderError CMPAHeader::IsSync( DWORD dwOffset,  bool bExtended  )
 			if( bExtended )
 			{	
 				// recursive call (offset for next frame header)
-				DWORD dwOffset = m_dwSyncOffset+m_dwComputedFrameSize;
+				dwOffset = m_dwSyncOffset+m_dwComputedFrameSize;
 				try
 				{
 					CMPAHeader m_SubsequentFrame( m_pMPAFile, dwOffset, true );	
@@ -296,7 +295,7 @@ CMPAHeader::HeaderError CMPAHeader::IsSync( DWORD dwOffset,  bool bExtended  )
 }
 
 // CRC-16 lookup table
-const WORD CMPAHeader::wCRC16Table[256] =
+const uint16 CMPAHeader::wCRC16Table[256] =
 {
  0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
  0xC601, 0x06C0, 0x0780, 0xC741, 0x0500, 0xC5C1, 0xC481, 0x0440,

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,7 +16,7 @@
 #include <vgui_controls/Panel.h>
 #include <vgui_controls/ListPanel.h>
 #include <vgui_controls/PHandle.h>
-#include "UtlVector.h"
+#include "utlvector.h"
 
 //#include <GamePanelInfo.h>
 

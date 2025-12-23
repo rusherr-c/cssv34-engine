@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Includes all the headers/declarations necessary to access the
 //			engine interface
@@ -29,5 +29,6 @@ extern class IEngineSound *enginesound;
 extern class IMatchmaking *matchmaking;
 extern class IXboxSystem  *xboxsystem;
 extern class IAchievementMgr *achievementmgr; 
+extern class CSteamAPIContext *steamapicontext;
 
 #endif // ENGINEINTERFACE_H

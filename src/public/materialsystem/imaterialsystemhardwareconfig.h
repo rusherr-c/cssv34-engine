@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,19 @@
 
 #include "tier1/interface.h"
 
+//-----------------------------------------------------------------------------
+// GL helpers
+//-----------------------------------------------------------------------------
+FORCEINLINE bool IsEmulatingGL()
+{
+	static bool bIsEmulatingGL = ( Plat_GetCommandLineA() ) ? ( strstr( Plat_GetCommandLineA(), "-r_emulate_gl" ) != NULL ) : false;
+	return bIsEmulatingGL;
+}
+
+FORCEINLINE bool IsOpenGL( void )
+{
+	return IsPlatformOpenGL() || IsEmulatingGL();
+}
 
 //-----------------------------------------------------------------------------
 // Material system interface version
@@ -85,9 +98,10 @@ public:
 	virtual bool HasSetDeviceGammaRamp() const = 0;
 	DEFCONFIGMETHOD( bool, SupportsCompressedTextures(), true );
 	virtual VertexCompressionType_t SupportsCompressedVertices() const = 0;
-	DEFCONFIGMETHOD( bool, SupportsNormalMapCompression(), true );
+	virtual bool SupportsNormalMapCompression() const { return false; }
 	DEFCONFIGMETHOD( bool, SupportsVertexAndPixelShaders(), true );
 	DEFCONFIGMETHOD( bool, SupportsPixelShaders_1_4(), true );
+	DEFCONFIGMETHOD( bool, SupportsStaticControlFlow(), true );
 	DEFCONFIGMETHOD( bool, SupportsPixelShaders_2_0(), true );
 	DEFCONFIGMETHOD( bool,  SupportsVertexShaders_2_0(), true );
 	virtual int  MaximumAnisotropicLevel() const = 0;	// 0 means no anisotropic filtering
@@ -146,6 +160,10 @@ public:
 
 	// Does the card support sRGB reads/writes?
 	DEFCONFIGMETHOD( bool, SupportsSRGB(), true );
+	DEFCONFIGMETHOD( bool, FakeSRGBWrite(), false );
+	DEFCONFIGMETHOD( bool, CanDoSRGBReadFromRTs(), true );
+
+	virtual bool SupportsGLMixedSizeTargets() const = 0;
 
 	virtual bool IsAAEnabled() const = 0;	// Is antialiasing being used?
 
@@ -186,9 +204,10 @@ public:
 
 	virtual bool SupportsBorderColor( void ) const = 0;
 	virtual bool SupportsFetch4( void ) const = 0;
+	virtual bool CanStretchRectFromTextures( void ) const = 0;
 
-	virtual float GetShadowDepthBias() const = 0;
-	virtual float GetShadowSlopeScaleDepthBias() const = 0;
+	inline bool ShouldAlwaysUseShaderModel2bShaders() const { return IsOpenGL(); }
+	inline bool PlatformRequiresNonNullPixelShaders() const { return IsOpenGL(); }
 };
 
 #endif // IMATERIALSYSTEMHARDWARECONFIG_H

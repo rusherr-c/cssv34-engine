@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // CWMPHost.cpp : Implementation of the CWMPHost
 //
 

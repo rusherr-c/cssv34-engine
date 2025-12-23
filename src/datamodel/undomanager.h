@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -73,7 +73,7 @@ public:
 	static const char *GetUndoString( CUtlSymbol sym );
 
 private:
-	void			Trace( const char *fmt, ... );
+	void			Trace( PRINTF_FORMAT_STRING const char *fmt, ... );
 
 	CUtlLinkedList< IUndoElement *, int >	m_UndoList;
 	CUtlStack< IUndoElement * >			m_RedoStack;

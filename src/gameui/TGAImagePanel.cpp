@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,6 +26,11 @@ CTGAImagePanel::CTGAImagePanel( vgui::Panel *parent, const char *name ) : BaseCl
 CTGAImagePanel::~CTGAImagePanel()
 {
 	// release the texture memory
+	if ( vgui::surface() && m_iTextureID != -1 )
+	{
+		vgui::surface()->DestroyTextureID( m_iTextureID );
+		m_iTextureID = -1;
+	}
 }
 
 void CTGAImagePanel::SetTGA( const char *filename )
@@ -35,7 +40,7 @@ void CTGAImagePanel::SetTGA( const char *filename )
 
 void CTGAImagePanel::SetTGANonMod( const char *filename )
 {
-	Q_strcpy( m_szTGAName, filename );
+	V_strcpy_safe( m_szTGAName, filename );
 }
 
 void CTGAImagePanel::Paint()
@@ -44,7 +49,7 @@ void CTGAImagePanel::Paint()
 	{
 		m_bLoadedTexture = true;
 		// get a texture id, if we haven't already
-		if ( m_iTextureID < 0 )
+		if ( m_iTextureID == -1 )
 		{
 			m_iTextureID = vgui::surface()->CreateNewTextureID( true );
 			SetSize( 180, 100 );

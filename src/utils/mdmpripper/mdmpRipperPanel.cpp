@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "vgui_controls/MessageMap.h"
 #include "vgui_controls/MenuBar.h"
 #include "vgui_controls/Menu.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui/ISurface.h"
 #include "vgui_controls/Frame.h"
 #include "vgui_controls/FileOpenDialog.h"

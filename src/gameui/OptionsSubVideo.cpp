@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,10 +6,10 @@
 //=============================================================================//
 
 #include "OptionsSubVideo.h"
-#include "CvarSlider.h"
+#include "cvarslider.h"
 #include "EngineInterface.h"
 #include "BasePanel.h"
-#include "igameuifuncs.h"
+#include "IGameUIFuncs.h"
 #include "modes.h"
 #include "materialsystem/materialsystem_config.h"
 #include "filesystem.h"
@@ -23,9 +23,15 @@
 #include "vgui/IInput.h"
 #include "vgui/ILocalize.h"
 #include "vgui/ISystem.h"
-#include "tier0/ICommandLine.h"
+#include "tier0/icommandline.h"
 #include "tier1/convar.h"
 #include "ModInfo.h"
+#include "vgui_controls/Tooltip.h"
+#include "sourcevr/isourcevirtualreality.h"
+
+#if defined( USE_SDL )
+#include "SDL.h"
+#endif
 
 #include "inetchannelinfo.h"
 
@@ -67,6 +73,9 @@ int g_DirectXLevels[] =
 	80,
 	81,
 	90,
+#if DX_TO_GL_ABSTRACTION
+	92,
+#endif
 	95,
 };
 
@@ -75,7 +84,7 @@ int g_DirectXLevels[] =
 //-----------------------------------------------------------------------------
 void GetNameForDXLevel( int dxlevel, char *name, int bufferSize)
 {
-	if( dxlevel == 95 )
+	if ( ( dxlevel >= 92 ) && ( dxlevel <= 95 ) )
 	{
 		Q_snprintf( name, bufferSize, "DirectX v9.0+" );
 	}
@@ -111,17 +120,10 @@ int GetScreenAspectMode( int width, int height )
 //-----------------------------------------------------------------------------
 // Purpose: returns the string name of the specified resolution mode
 //-----------------------------------------------------------------------------
-void GetResolutionName( vmode_t *mode, char *sz, int sizeofsz )
+static void GetResolutionName( vmode_t *mode, char *sz, int sizeofsz, int desktopWidth, int desktopHeight )
 {
-	if ( mode->width == 1280 && mode->height == 1024 )
-	{
-		// LCD native monitor resolution gets special case
-		Q_snprintf( sz, sizeofsz, "%i x %i (LCD)", mode->width, mode->height );
-	}
-	else
-	{
-		Q_snprintf( sz, sizeofsz, "%i x %i", mode->width, mode->height );
-	}
+	Q_snprintf( sz, sizeofsz, "%i x %i%s", mode->width, mode->height,
+				( mode->width == desktopWidth ) && ( mode->height == desktopHeight ) ? " (native)": "" );
 }
 
 //-----------------------------------------------------------------------------
@@ -408,6 +410,10 @@ public:
 		m_pVSync->AddItem("#gameui_disabled", NULL);
 		m_pVSync->AddItem("#gameui_enabled", NULL);
 
+		m_pMulticore = new ComboBox( this, "Multicore", 2, false );
+		m_pMulticore->AddItem("#gameui_disabled", NULL);
+		m_pMulticore->AddItem("#gameui_enabled", NULL);
+
 		m_pShaderDetail = new ComboBox( this, "ShaderDetail", 6, false );
 		m_pShaderDetail->AddItem("#gameui_low", NULL);
 		m_pShaderDetail->AddItem("#gameui_high", NULL);
@@ -425,10 +431,25 @@ public:
 		SetSizeable( false );
 
 		m_pDXLevel->SetEnabled(false);
-
+		
 		m_pColorCorrection->SetEnabled( mat_dxlevel.GetInt() >= 90 );
 		m_pMotionBlur->SetEnabled( mat_dxlevel.GetInt() >= 90 );
+		
+		if ( g_pCVar->FindVar( "fov_desired" ) == NULL )
+		{
+			Panel *pFOV = FindChildByName( "FovSlider" );
+			if ( pFOV )
+			{
+				pFOV->SetVisible( false );
+			}
 
+			pFOV = FindChildByName( "FovLabel" );
+			if ( pFOV )
+			{
+				pFOV->SetVisible( false );
+			}
+		}
+		
 		MarkDefaultSettingsAsRecommended();
 
 		m_bUseChanges = false;
@@ -455,7 +476,7 @@ public:
 
 		// append the recommended flag
 		wchar_t newText[512];
-		_snwprintf( newText, sizeof(newText) / sizeof(wchar_t), L"%s *", text );
+		_snwprintf( newText, sizeof(newText) / sizeof(wchar_t), L"%ls *", text );
 
 		// reset
 		combo->UpdateItem(iItem, newText, NULL);
@@ -545,7 +566,10 @@ public:
 		int nDXLevel = pKeyValues->GetInt( "ConVar.mat_dxlevel", 0 );
 		int nColorCorrection = pKeyValues->GetInt( "ConVar.mat_colorcorrection", 0 );
 		int nMotionBlur = pKeyValues->GetInt( "ConVar.mat_motion_blur_enabled", 0 );
-
+		// It doesn't make sense to retrieve this convar from dxsupport, because we'll then have materialsystem setting this config at loadtime. (Also, it only has very minimal support for CPU related configuration.)
+		//int nMulticore = pKeyValues->GetInt( "ConVar.mat_queue_mode", 0 );
+		int nMulticore = GetCPUInformation()->m_nPhysicalProcessors >= 2;
+		
 		// Only recommend a dxlevel if there is more than one available
 		if ( m_pDXLevel->GetItemCount() > 1 )
 		{
@@ -625,6 +649,8 @@ public:
 
 		SetComboItemAsRecommended( m_pVSync, nMatVSync != 0 );
 
+		SetComboItemAsRecommended( m_pMulticore, nMulticore != 0 );
+
 		SetComboItemAsRecommended( m_pHDR, nDXLevel >= 90 ? 2 : 0 );
 
 		SetComboItemAsRecommended( m_pColorCorrection, nColorCorrection );
@@ -644,17 +670,22 @@ public:
 
 	virtual void ApplyChanges()
 	{
-		if (!m_bUseChanges)
+		if ( !m_bUseChanges )
 			return;
-
-		ApplyChangesToConVar( "mat_dxlevel", m_pDXLevel->GetActiveItemUserData()->GetInt("dxlevel") );
+		
+		KeyValues *pActiveItem = m_pDXLevel->GetActiveItemUserData();
+		if ( pActiveItem )
+		{
+			ApplyChangesToConVar( "mat_dxlevel", pActiveItem->GetInt( "dxlevel" ) );
+		}
+		
 		ApplyChangesToConVar( "r_rootlod", 2 - m_pModelDetail->GetActiveItem());
 		ApplyChangesToConVar( "mat_picmip", 2 - m_pTextureDetail->GetActiveItem());
 
 		// reset everything tied to the filtering mode, then the switch sets the appropriate one
 		ApplyChangesToConVar( "mat_trilinear", false );
 		ApplyChangesToConVar( "mat_forceaniso", 1 );
-		switch (m_pFilteringMode->GetActiveItem())
+		switch ( m_pFilteringMode->GetActiveItem() )
 		{
 		case 0:
 			break;
@@ -672,6 +703,10 @@ public:
 			break;
 		case 5:
 			ApplyChangesToConVar( "mat_forceaniso", 16 );
+			break;
+		default:
+			// Trilinear.
+			ApplyChangesToConVar( "mat_forceaniso", 1 );
 			break;
 		}
 
@@ -730,9 +765,18 @@ public:
 
 		ApplyChangesToConVar( "mat_vsync", m_pVSync->GetActiveItem() );	 
 
+		int iMC = m_pMulticore->GetActiveItem();
+		ApplyChangesToConVar( "mat_queue_mode", (iMC == 0) ? 0 : -1 );	 
+
 		ApplyChangesToConVar( "mat_colorcorrection", m_pColorCorrection->GetActiveItem() );
 
 		ApplyChangesToConVar( "mat_motion_blur_enabled", m_pMotionBlur->GetActiveItem() );
+		
+		CCvarSlider *pFOV = (CCvarSlider *)FindChildByName( "FOVSlider" );
+		if ( pFOV ) 
+		{
+			pFOV->ApplyChanges();
+		}
 	}
 
 	virtual void OnResetData()
@@ -745,6 +789,7 @@ public:
 		ConVarRef mat_antialias( "mat_antialias" );
 		ConVarRef mat_aaquality( "mat_aaquality" );
 		ConVarRef mat_vsync( "mat_vsync" );
+		ConVarRef mat_queue_mode( "mat_queue_mode" );
 		ConVarRef r_flashlightdepthtexture( "r_flashlightdepthtexture" );
 #ifndef _X360
 		ConVarRef r_waterforceexpensive( "r_waterforceexpensive" );
@@ -810,7 +855,9 @@ public:
 		int nAAQuality = mat_aaquality.GetInt();
 		int nMSAAMode = FindMSAAMode( nAASamples, nAAQuality );
 		m_pAntialiasingMode->ActivateItem( nMSAAMode );
-		
+	
+		m_pAntialiasingMode->SetEnabled( m_nNumAAModes > 1 );
+
 #ifndef _X360
 		if ( r_waterforceexpensive.GetBool() )
 #endif
@@ -832,6 +879,13 @@ public:
 #endif
 
 		m_pVSync->ActivateItem( mat_vsync.GetInt() );
+
+		int iMC = mat_queue_mode.GetInt();
+
+		// We (Rick!) have now switched -2 to mean enabled. So this comment has been rendered obsolete:
+		//  -- For testing, we have -2, the legacy default setting as meaning multicore is disabled.
+		//  -- After that, we'll switch -2 to mean it's enabled.
+		m_pMulticore->ActivateItem( (iMC == 0) ? 0 : 1 );
 
 		m_pColorCorrection->ActivateItem( mat_colorcorrection.GetInt() );
 
@@ -922,7 +976,7 @@ public:
 private:
 	bool m_bUseChanges;
 	vgui::ComboBox *m_pModelDetail, *m_pTextureDetail, *m_pAntialiasingMode, *m_pFilteringMode;
-	vgui::ComboBox *m_pShadowDetail, *m_pHDR, *m_pWaterDetail, *m_pVSync, *m_pShaderDetail;
+	vgui::ComboBox *m_pShadowDetail, *m_pHDR, *m_pWaterDetail, *m_pVSync, *m_pMulticore, *m_pShaderDetail;
 	vgui::ComboBox *m_pColorCorrection;
 	vgui::ComboBox *m_pMotionBlur;
 	vgui::ComboBox *m_pDXLevel;
@@ -931,38 +985,68 @@ private:
 	AAMode_t m_nAAModes[16];
 };
 
+#if defined( USE_SDL )
+
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose: Get display index we will go fullscreen on.
+//-----------------------------------------------------------------------------
+static int getSDLDisplayIndex()
+{
+	static ConVarRef sdl_displayindex( "sdl_displayindex" );
+
+	Assert( sdl_displayindex.IsValid() );
+	return sdl_displayindex.IsValid() ? sdl_displayindex.GetInt() : 0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Get display index we are currently fullscreen on. (or -1 if none).
+//-----------------------------------------------------------------------------
+static int getSDLDisplayIndexFullscreen()
+{
+	static ConVarRef sdl_displayindex_fullscreen( "sdl_displayindex_fullscreen" );
+
+	Assert( sdl_displayindex_fullscreen.IsValid() );
+	return sdl_displayindex_fullscreen.IsValid() ? sdl_displayindex_fullscreen.GetInt() : -1;
+}
+
+#endif // USE_SDL
+
+//-----------------------------------------------------------------------------
+// Purpose:
 //-----------------------------------------------------------------------------
 COptionsSubVideo::COptionsSubVideo(vgui::Panel *parent) : PropertyPage(parent, NULL)
 {
 	m_bRequireRestart = false;
 
+	m_bDisplayedVRModeMessage = false;
+
 	m_pGammaButton = new Button( this, "GammaButton", "#GameUI_AdjustGamma" );
 	m_pGammaButton->SetCommand(new KeyValues("OpenGammaDialog"));
 	m_pMode = new ComboBox(this, "Resolution", 8, false);
 	m_pAspectRatio = new ComboBox( this, "AspectRatio", 6, false );
+	m_pVRMode = new ComboBox( this, "VRMode", 2, false );
 	m_pAdvanced = new Button( this, "AdvancedButton", "#GameUI_AdvancedEllipsis" );
 	m_pAdvanced->SetCommand(new KeyValues("OpenAdvanced"));
 	m_pBenchmark = new Button( this, "BenchmarkButton", "#GameUI_LaunchBenchmark" );
 	m_pBenchmark->SetCommand(new KeyValues("LaunchBenchmark"));
-   m_pThirdPartyCredits = new URLButton(this, "ThirdPartyVideoCredits", "#GameUI_ThirdPartyTechCredits");
-   m_pThirdPartyCredits->SetCommand(new KeyValues("OpenThirdPartyVideoCreditsDialog"));
+	m_pThirdPartyCredits = new URLButton(this, "ThirdPartyVideoCredits", "#GameUI_ThirdPartyTechCredits");
+	m_pThirdPartyCredits->SetCommand(new KeyValues("OpenThirdPartyVideoCreditsDialog"));
+	m_pHDContent = new CheckButton( this, "HDContentButton", "#GameUI_HDContent" );
 
 	char pszAspectName[3][64];
-	wchar_t *unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectNormal");
-    g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszAspectName[0], 32);
-    unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectWide16x9");
-    g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszAspectName[1], 32);
-    unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectWide16x10");
-    g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszAspectName[2], 32);
+	const wchar_t *unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectNormal");
+	g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszAspectName[0], 32);
+	unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectWide16x9");
+	g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszAspectName[1], 32);
+	unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectWide16x10");
+	g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszAspectName[2], 32);
 
 	int iNormalItemID = m_pAspectRatio->AddItem( pszAspectName[0], NULL );
 	int i16x9ItemID = m_pAspectRatio->AddItem( pszAspectName[1], NULL );
 	int i16x10ItemID = m_pAspectRatio->AddItem( pszAspectName[2], NULL );
-	
+
 	const MaterialSystem_Config_t &config = materials->GetCurrentConfigForVideoCard();
-	
+
 	int iAspectMode = GetScreenAspectMode( config.m_VideoMode.m_Width, config.m_VideoMode.m_Height );
 	switch ( iAspectMode )
 	{
@@ -978,13 +1062,57 @@ COptionsSubVideo::COptionsSubVideo(vgui::Panel *parent) : PropertyPage(parent, N
 		break;
 	}
 
+	char pszVRModeName[2][64];
+	unicodeText = g_pVGuiLocalize->Find("#GameUI_Disabled");
+	g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszVRModeName[0], 32);
+	unicodeText = g_pVGuiLocalize->Find("#GameUI_Enabled");
+	g_pVGuiLocalize->ConvertUnicodeToANSI(unicodeText, pszVRModeName[1], 32);
+
+	m_pVRMode->AddItem( pszVRModeName[0], NULL );
+	m_pVRMode->AddItem( pszVRModeName[1], NULL );
+
+	// Multimonitor under Direct3D requires you to destroy and recreate the device, 
+	// which is an operation we don't support as it currently stands. The user can 
+	// pass -adapter N to use a different device.
+#if defined( USE_SDL ) && defined( DX_TO_GL_ABSTRACTION )
+	int numVideoDisplays = SDL_GetNumVideoDisplays();
+
+	m_pWindowed = new vgui::ComboBox( this, "DisplayModeCombo", 5 + numVideoDisplays, false );
+
+	if ( numVideoDisplays <= 1 )
+	{
+		m_pWindowed->AddItem( "#GameUI_Fullscreen", NULL );
+		m_pWindowed->AddItem( "#GameUI_Windowed", NULL );
+	}
+	else
+	{
+		// Add something like this:
+		//   Full Screen (0)
+		//   Full Screen (1)
+		//   Windowed
+		wchar_t *fullscreenText = g_pVGuiLocalize->Find( "#GameUI_Fullscreen" );
+
+		for ( int i = 0; i < numVideoDisplays; i++ )
+		{
+			wchar_t ItemText[ 256 ];
+
+			V_swprintf_safe( ItemText, L"%ls (%d)", fullscreenText, i );
+			m_pWindowed->AddItem( ItemText, NULL );
+		}
+
+		m_pWindowed->AddItem( "#GameUI_Windowed", NULL );
+	}
+
+#else
 	m_pWindowed = new vgui::ComboBox( this, "DisplayModeCombo", 6, false );
+
 	m_pWindowed->AddItem( "#GameUI_Fullscreen", NULL );
 	m_pWindowed->AddItem( "#GameUI_Windowed", NULL );
+#endif
 
 	LoadControlSettings("Resource\\OptionsSubVideo.res");
 
-	// Moved down here so we can set the Drop down's 
+	// Moved down here so we can set the Drop down's
 	// menu state after the default (disabled) value is loaded
 	PrepareResolutionList();
 
@@ -992,6 +1120,30 @@ COptionsSubVideo::COptionsSubVideo(vgui::Panel *parent) : PropertyPage(parent, N
 	if ( !g_pFullFileSystem->FileExists("maps/test_hardware.bsp") )
 	{
 		m_pBenchmark->SetVisible( false );
+	}
+
+	if ( ModInfo().HasHDContent() )
+	{
+		m_pHDContent->SetVisible( true );
+	}
+	
+	// if VR mode isn't available, disable the dropdown
+	if( !g_pSourceVR )
+	{
+		// if sourcevr.dll is missing entirely that means VR mode is not
+		// supported in this game. Hide the mode dropdown and its label 
+		m_pVRMode->SetVisible( false );
+
+		Panel *label = FindChildByName( "VRModeLabel" );
+		if( label )
+			label->SetVisible( false );
+	}
+	else if( !g_pSourceVR->IsHmdConnected() )
+	{
+		m_pVRMode->ActivateItem( 0 );
+		m_pVRMode->SetEnabled( false );
+		m_pVRMode->GetTooltip()->SetText( "#GameUI_NoVRTooltip" );
+		EnableOrDisableWindowedForVR();
 	}
 }
 
@@ -1018,21 +1170,59 @@ void COptionsSubVideo::PrepareResolutionList()
 
 	const MaterialSystem_Config_t &config = materials->GetCurrentConfigForVideoCard();
 
-	bool bWindowed = (m_pWindowed->GetActiveItem() > 0);
+	// Windowed is the last item in the combobox.
+	bool bWindowed = ( m_pWindowed->GetActiveItem() >= ( m_pWindowed->GetItemCount() - 1 ) );
 	int desktopWidth, desktopHeight;
 	gameuifuncs->GetDesktopResolution( desktopWidth, desktopHeight );
+
+#if defined( USE_SDL )
+	bool bFullScreenWithMultipleDisplays = ( !bWindowed && ( SDL_GetNumVideoDisplays() > 1 ) );
+	if ( bFullScreenWithMultipleDisplays )
+	{
+		SDL_Rect rect;
+#if defined( DX_TO_GL_ABSTRACTION )
+		int displayIndex = m_pWindowed->GetActiveItem();
+#else
+		int displayIndex = materials->GetCurrentAdapter();
+#endif
+
+		if ( !SDL_GetDisplayBounds( displayIndex, &rect ) )
+		{
+			desktopWidth = rect.w;
+			desktopHeight = rect.h;
+		}
+	}
+
+	// If we are switching to fullscreen, and this isn't the mode we're currently in, then
+	//	fake things out so the native fullscreen resolution is selected. Stuck this in
+	//	because I assume most people will go fullscreen at native resolution, and it's sometimes
+	//	difficult to find the native resolution with all the aspect ratio options.
+	bool bNewFullscreenDisplay = ( !bWindowed && ( getSDLDisplayIndexFullscreen() != m_pWindowed->GetActiveItem() ) );
+	if ( bNewFullscreenDisplay )
+	{
+		currentWidth = desktopWidth;
+		currentHeight = desktopHeight;
+	}
+#endif
 
 	// iterate all the video modes adding them to the dropdown
 	bool bFoundWidescreen = false;
 	int selectedItemID = -1;
 	for (int i = 0; i < count; i++, plist++)
 	{
-		char sz[ 256 ];
-		GetResolutionName( plist, sz, sizeof( sz ) );
-
+#if !defined( USE_SDL )
 		// don't show modes bigger than the desktop for windowed mode
-		if ( bWindowed && (plist->width > desktopWidth || plist->height > desktopHeight) )
-			continue;
+		if ( bWindowed )
+#endif
+		{
+			if ( plist->width > desktopWidth || plist->height > desktopHeight )
+			{
+				// Filter out sizes larger than our desktop.
+				continue;
+			}
+		}
+
+		GetResolutionName( plist, sz, sizeof( sz ), desktopWidth, desktopHeight );
 
 		int itemID = -1;
 		int iAspectMode = GetScreenAspectMode( plist->width, plist->height );
@@ -1070,8 +1260,20 @@ void COptionsSubVideo::PrepareResolutionList()
 	}
 	else
 	{
-		char sz[256];
-		sprintf( sz, "%d x %d", config.m_VideoMode.m_Width, config.m_VideoMode.m_Height );
+		int Width = config.m_VideoMode.m_Width;
+		int Height = config.m_VideoMode.m_Height;
+
+#if defined( USE_SDL )
+		// If we are switching to a new display, or the size is greater than the desktop, then
+		//	display the desktop width and height.
+		if ( bNewFullscreenDisplay || ( Width > desktopWidth ) || ( Height > desktopHeight ) )
+		{
+			Width = desktopWidth;
+			Height = desktopHeight;
+		}
+#endif
+
+		Q_snprintf( sz, ARRAYSIZE( sz ), "%d x %d", Width, Height );
 		m_pMode->SetText( sz );
 	}
 }
@@ -1087,6 +1289,58 @@ COptionsSubVideo::~COptionsSubVideo()
 	}
 }
 
+
+FILE *FOpenGameHDFile( const char *pchMode )
+{
+	const char *pGameDir = engine->GetGameDirectory();
+	char szModSteamInfPath[ 1024 ];
+	V_ComposeFileName( pGameDir, "game_hd.txt", szModSteamInfPath, sizeof( szModSteamInfPath ) );
+
+	FILE *fp = fopen( szModSteamInfPath, pchMode );
+	return fp;
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool COptionsSubVideo::BUseHDContent()
+{
+	FILE *fp = FOpenGameHDFile( "rb" );
+	if ( fp )
+	{
+		fclose(fp);
+		return true;
+	}
+	return false;
+
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: hint the engine to load HD content if possible, logic must match with engine/common.cpp BLoadHDContent
+//-----------------------------------------------------------------------------
+void COptionsSubVideo::SetUseHDContent( bool bUse )
+{
+	if ( bUse )
+	{
+		FILE *fp = FOpenGameHDFile( "wb+" );
+		if ( fp )
+		{
+			fprintf( fp, "If this file exists on disk HD content will be loaded.\n" );
+			fclose( fp );
+		}
+	}
+	else
+	{
+		const char *pGameDir = engine->GetGameDirectory();
+		char szModSteamInfPath[ 1024 ];
+		V_ComposeFileName( pGameDir, "game_hd.txt", szModSteamInfPath, sizeof( szModSteamInfPath ) );
+		_unlink( szModSteamInfPath );
+	}
+}
+
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
@@ -1097,13 +1351,42 @@ void COptionsSubVideo::OnResetData()
 	const MaterialSystem_Config_t &config = materials->GetCurrentConfigForVideoCard();
 
     // reset UI elements
-    m_pWindowed->ActivateItem(config.Windowed() ? 1 : 0);
+#if defined( USE_SDL ) && defined( DX_TO_GL_ABSTRACTION )
+	int ItemIndex;
+
+	if ( config.Windowed() )
+	{
+		// Last item in the combobox is Windowed.
+		ItemIndex = ( m_pWindowed->GetItemCount() - 1 );
+	}
+	else
+	{
+		// Check which fullscreen displayindex is currently selected, and pick it.
+		ItemIndex = getSDLDisplayIndex();
+
+		if ( ( ItemIndex < 0 ) || ItemIndex >= ( m_pWindowed->GetItemCount() - 1 ) )
+		{
+			Assert( 0 );
+			ItemIndex = 0;
+		}
+	}
+
+    m_pWindowed->ActivateItem( ItemIndex );
+#else
+    m_pWindowed->ActivateItem( config.Windowed() ? 1 : 0 );
+#endif
 
 	// reset gamma control
 	m_pGammaButton->SetEnabled( !config.Windowed() );
 
+	m_pHDContent->SetSelected( BUseHDContent() );
 
     SetCurrentResolutionComboItem();
+
+	bool bVREnabled = config.m_nVRModeAdapter != -1;
+	m_pVRMode->ActivateItem( bVREnabled ? 1 : 0 );
+	EnableOrDisableWindowedForVR();
+
 }
 
 //-----------------------------------------------------------------------------
@@ -1131,7 +1414,26 @@ void COptionsSubVideo::SetCurrentResolutionComboItem()
     if (resolution != -1)
 	{
 		char sz[256];
-		GetResolutionName( plist, sz, sizeof(sz) );
+		int desktopWidth, desktopHeight;
+
+		gameuifuncs->GetDesktopResolution( desktopWidth, desktopHeight );
+
+#if defined( USE_SDL )
+		SDL_Rect rect;
+#if defined( DX_TO_GL_ABSTRACTION )
+		int displayIndex = getSDLDisplayIndex();
+#else
+		int displayIndex = materials->GetCurrentAdapter();
+#endif
+
+		if ( !SDL_GetDisplayBounds( displayIndex, &rect ) )
+		{
+			desktopWidth = rect.w;
+			desktopHeight = rect.h;
+		}
+#endif
+
+		GetResolutionName( plist, sz, sizeof(sz), desktopWidth, desktopHeight );
         m_pMode->SetText(sz);
 	}
 }
@@ -1172,29 +1474,93 @@ void COptionsSubVideo::OnApplyChanges()
 	char sz[256];
 	if ( m_nSelectedMode == -1 )
 	{
-		m_pMode->GetText(sz, 256);
+		m_pMode->GetText( sz, 256 );
 	}
 	else
 	{
 		m_pMode->GetItemText( m_nSelectedMode, sz, 256 );
 	}
-	
+
 	int width = 0, height = 0;
 	sscanf( sz, "%i x %i", &width, &height );
 
 	// windowed
-	bool windowed = (m_pWindowed->GetActiveItem() > 0) ? true : false;
+	bool bConfigChanged = false;
+	bool windowed = ( m_pWindowed->GetActiveItem() == ( m_pWindowed->GetItemCount() - 1 ) ) ? true : false;
+	const MaterialSystem_Config_t &config = materials->GetCurrentConfigForVideoCard();
+
+	bool bVRMode = m_pVRMode->GetActiveItem() != 0;
+	if( ( -1 != config.m_nVRModeAdapter ) != bVRMode )
+	{
+		// let engine fill in mat_vrmode_adapter 
+		char szCmd[256];
+		Q_snprintf( szCmd, sizeof(szCmd), "mat_enable_vrmode %d\n", bVRMode ? 1 : 0 );
+		engine->ClientCmd_Unrestricted( szCmd );
+
+		// force windowed. VR mode ignores this flag and desktop mode needs to be in a window always
+		windowed = bVRMode;
+	}
+
 
 	// make sure there is a change
-	const MaterialSystem_Config_t &config = materials->GetCurrentConfigForVideoCard();
-	if ( config.m_VideoMode.m_Width != width 
+	if ( config.m_VideoMode.m_Width != width
 		|| config.m_VideoMode.m_Height != height
-		|| config.Windowed() != windowed)
+		|| config.Windowed() != windowed )
+	{
+		bConfigChanged = true;
+	}
+
+#if defined( USE_SDL )
+	if ( !windowed )
+	{
+		SDL_Rect rect;
+		int displayIndexTarget = m_pWindowed->GetActiveItem();
+		int displayIndexCurrent = getSDLDisplayIndexFullscreen();
+
+		// Handle going fullscreen from display X to display Y.
+		if ( displayIndexCurrent != displayIndexTarget )
+		{
+			static ConVarRef sdl_displayindex( "sdl_displayindex" );
+
+			if ( sdl_displayindex.IsValid() )
+			{
+				// Set the displayindex we want to go fullscreen on now.
+				sdl_displayindex.SetValue( displayIndexTarget );
+				bConfigChanged = true;
+			}
+		}
+
+		if ( !SDL_GetDisplayBounds( displayIndexTarget, &rect ) )
+		{
+			// If we are going non-native fullscreen, tweak the resolution to have the same aspect ratio as the display.
+			if ( ( width != rect.w ) || ( height != rect.h ) )
+			{
+				// TODO: We may want a convar to allow folks to mess with their aspect ratio?
+				height = ( width * rect.h ) / rect.w;
+				bConfigChanged = true;
+			}
+		}
+	}
+#endif // USE_SDL
+
+	if ( bConfigChanged )
 	{
 		// set mode
 		char szCmd[ 256 ];
 		Q_snprintf( szCmd, sizeof( szCmd ), "mat_setvideomode %i %i %i\n", width, height, windowed ? 1 : 0 );
 		engine->ClientCmd_Unrestricted( szCmd );
+	}
+
+	if ( ModInfo().HasHDContent() )
+	{
+		if ( BUseHDContent() != m_pHDContent->IsSelected() )
+		{
+			SetUseHDContent( m_pHDContent->IsSelected() );
+			// Bring up the confirmation dialog
+			MessageBox *box = new MessageBox("#GameUI_OptionsRestartRequired_Title", "#GameUI_HDRestartRequired_Info");
+			box->DoModal();
+			box->MoveToFront();
+		}
 	}
 
 	// apply changes
@@ -1243,7 +1609,47 @@ void COptionsSubVideo::OnTextChanged(Panel *pPanel, const char *pszText)
 		PrepareResolutionList();
 		OnDataChanged();
 	}
+	else if ( pPanel == m_pVRMode )
+	{
+		if ( !m_bDisplayedVRModeMessage )
+		{
+			bool bVRNowEnabled = m_pVRMode->GetActiveItem() == 1;
+			bool bVRWasEnabled = materials->GetCurrentConfigForVideoCard().m_nVRModeAdapter != -1;
+			if( bVRWasEnabled != bVRNowEnabled )
+			{
+				m_bDisplayedVRModeMessage = true;
+				MessageBox *box = new MessageBox( "#GameUI_VRMode", "#GameUI_VRModeRelaunchMsg", this );
+				box->MoveToFront();
+				box->DoModal();
+			}
+		}
+
+		EnableOrDisableWindowedForVR();
+	}
 }
+
+
+//-----------------------------------------------------------------------------
+// Purpose: enables windowed combo box
+//-----------------------------------------------------------------------------
+void		COptionsSubVideo::EnableOrDisableWindowedForVR()
+{
+	bool bCanBeEnabled = g_pSourceVR && g_pSourceVR->IsHmdConnected();
+	bool bVRNowEnabled = m_pVRMode->GetActiveItem() == 1;
+	bool bVRWasEnabled = materials->GetCurrentConfigForVideoCard().m_nVRModeAdapter != -1;
+	if( bCanBeEnabled && ( bVRNowEnabled || bVRWasEnabled ) )
+	{
+		m_pWindowed->SetEnabled( false );
+		m_pWindowed->ActivateItem( m_pWindowed->GetItemCount() - 1 );
+		m_pWindowed->GetTooltip()->SetText( "#GameUI_WindowedTooltip" );
+	}
+	else
+	{
+		m_pWindowed->SetEnabled( true );
+	}
+
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: enables apply button
@@ -1251,6 +1657,7 @@ void COptionsSubVideo::OnTextChanged(Panel *pPanel, const char *pszText)
 void COptionsSubVideo::OnDataChanged()
 {
 	PostActionSignal(new KeyValues("ApplyButtonEnable"));
+
 }
 
 //-----------------------------------------------------------------------------

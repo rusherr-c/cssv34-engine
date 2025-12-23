@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,18 @@
 #include "vphysics/object_hash.h"
 #include "mathlib/IceKey.H"
 #include "checksum_crc.h"
+#ifdef TF_CLIENT_DLL
+#include "cdll_util.h"
+#endif
 #include "particle_parse.h"
+#include "KeyValues.h"
+#include "time.h"
+
+#ifdef USES_ECON_ITEMS
+	#include "econ_item_constants.h"
+	#include "econ_holidays.h"
+	#include "rtime.h"
+#endif // USES_ECON_ITEMS
 
 #ifdef CLIENT_DLL
 	#include "c_te_effect_dispatch.h"
@@ -23,6 +34,7 @@
 bool NPC_CheckBrushExclude( CBaseEntity *pEntity, CBaseEntity *pBrush );
 #endif
 
+#include "steam/steam_api.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -166,11 +178,11 @@ Vector SharedRandomVector( const char *sharedname, float minVal, float maxVal, i
 	RandomSeed( seed );
 	// HACK:  Can't call RandomVector/Angle because it uses rand() not vstlib Random*() functions!
 	// Get a random vector.
-	Vector random;
-	random.x = RandomFloat( minVal, maxVal );
-	random.y = RandomFloat( minVal, maxVal );
-	random.z = RandomFloat( minVal, maxVal );
-	return random;
+	Vector vRandom;
+	vRandom.x = RandomFloat( minVal, maxVal );
+	vRandom.y = RandomFloat( minVal, maxVal );
+	vRandom.z = RandomFloat( minVal, maxVal );
+	return vRandom;
 }
 
 QAngle SharedRandomAngle( const char *sharedname, float minVal, float maxVal, int additionalSeed /*=0*/ )
@@ -182,11 +194,11 @@ QAngle SharedRandomAngle( const char *sharedname, float minVal, float maxVal, in
 
 	// HACK:  Can't call RandomVector/Angle because it uses rand() not vstlib Random*() functions!
 	// Get a random vector.
-	Vector random;
-	random.x = RandomFloat( minVal, maxVal );
-	random.y = RandomFloat( minVal, maxVal );
-	random.z = RandomFloat( minVal, maxVal );
-	return QAngle( random.x, random.y, random.z );
+	Vector vRandom;
+	vRandom.x = RandomFloat( minVal, maxVal );
+	vRandom.y = RandomFloat( minVal, maxVal );
+	vRandom.z = RandomFloat( minVal, maxVal );
+	return QAngle( vRandom.x, vRandom.y, vRandom.z );
 }
 
 
@@ -257,16 +269,16 @@ bool StandardFilterRules( IHandleEntity *pHandleEntity, int fContentsMask )
 }
 
 
-
 //-----------------------------------------------------------------------------
 // Simple trace filter
 //-----------------------------------------------------------------------------
-CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int collisionGroup )
+CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int collisionGroup,
+									   ShouldHitFunc_t pExtraShouldHitFunc )
 {
 	m_pPassEnt = passedict;
 	m_collisionGroup = collisionGroup;
+	m_pExtraShouldHitCheckFunction = pExtraShouldHitFunc;
 }
-
 
 //-----------------------------------------------------------------------------
 // The trace filter!
@@ -291,6 +303,9 @@ bool CTraceFilterSimple::ShouldHitEntity( IHandleEntity *pHandleEntity, int cont
 	if ( !pEntity->ShouldCollide( m_collisionGroup, contentsMask ) )
 		return false;
 	if ( pEntity && !g_pGameRules->ShouldCollide( m_collisionGroup, pEntity->GetCollisionGroup() ) )
+		return false;
+	if ( m_pExtraShouldHitCheckFunction &&
+		(! ( m_pExtraShouldHitCheckFunction( pHandleEntity, contentsMask ) ) ) )
 		return false;
 
 	return true;
@@ -810,6 +825,14 @@ bool UTIL_IsLowViolence( void )
 	if ( !violence_hblood.GetBool() || !violence_ablood.GetBool() || !violence_hgibs.GetBool() || !violence_agibs.GetBool() )
 		return true;
 
+#ifdef TF_CLIENT_DLL
+	// Use low violence if the local player has an item that allows them to see it (Pyro Goggles)
+	if ( IsLocalPlayerUsingVisionFilterFlags( TF_VISION_FILTER_PYRO ) )
+	{
+		return true;
+	}
+#endif
+
 	return engine->IsLowViolence();
 }
 
@@ -1015,21 +1038,369 @@ float CountdownTimer::Now( void ) const
 #endif
 
 
-unsigned short UTIL_GetAchievementEventMask( void )
+CBasePlayer *UTIL_PlayerBySteamID( const CSteamID &steamID )
 {
-	CRC32_t mapCRC;
-	CRC32_Init( &mapCRC );
+	CSteamID steamIDPlayer;
+	for ( int i = 1; i <= gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+		if ( !pPlayer )
+			continue;
 
-	char lowercase[ 256 ];
-#ifdef CLIENT_DLL
-	Q_FileBase( engine->GetLevelName(), lowercase, sizeof( lowercase ) );
-#else
-	Q_strncpy( lowercase, STRING( gpGlobals->mapname ), sizeof( lowercase ) );
+		if ( !pPlayer->GetSteamID( &steamIDPlayer ) )
+			continue;
+
+		if ( steamIDPlayer == steamID )
+			return pPlayer;
+	}
+	return NULL;
+}
+
+// Helper for use with console commands and the like.
+// Returns NULL if not found or if the provided arg would match multiple players.
+// Currently accepts, in descending priority:
+//  - Formatted SteamID ([U:1:1234])
+//  - SteamID64 (76561197989728462)
+//  - Legacy SteamID (STEAM_0:1:1234)
+//  - UserID preceded by a pound (#4)
+//  - Partial name match (if unique)
+//  - UserID not preceded by a pound*
+//
+// *Does not count as ambiguous with higher priority items
+CBasePlayer* UTIL_PlayerByCommandArg( const char *arg )
+{
+	size_t nLength = V_strlen( arg );
+	if ( nLength < 1 )
+		{ return NULL; }
+
+	// Is the argument numeric?
+	bool bAllButFirstNumbers = true;
+	for ( size_t idx = 1; bAllButFirstNumbers && idx < nLength; idx++ )
+	{
+		bAllButFirstNumbers = V_isdigit( arg[idx] );
+	}
+	bool bAllNumbers = V_isdigit( arg[0] ) && bAllButFirstNumbers;
+
+	// Keep searching when we find a match to track ambiguous results
+	CBasePlayer *pFound = NULL;
+
+	// Assign pFound unless we already found a different player, in which case return NULL due to ambiguous
+	// WTB Lambdas
+#define UTIL_PLAYERBYCMDARG_CHECKMATCH( pEvalMatch ) \
+	do                                               \
+	{                                                \
+		CBasePlayer *_pMacroMatch = (pEvalMatch);    \
+		if ( _pMacroMatch )                          \
+		{                                            \
+			/* Ambiguity check */                    \
+			if ( pFound && pFound != _pMacroMatch )  \
+				{ return NULL; }                     \
+			pFound = _pMacroMatch;                   \
+		}                                            \
+	} while ( false );
+
+	// Formatted SteamID or SteamID64
+	if ( bAllNumbers || ( arg[0] == '[' && arg[nLength-1] == ']' ) )
+	{
+		CSteamID steamID;
+		bool bMatch = steamID.SetFromStringStrict( arg, GetUniverse() );
+		UTIL_PLAYERBYCMDARG_CHECKMATCH( bMatch ? UTIL_PlayerBySteamID( steamID ) : NULL );
+	}
+
+	// Legacy SteamID?
+	const char szPrefix[] = "STEAM_";
+	if ( nLength >= V_ARRAYSIZE( szPrefix ) && V_strncmp( szPrefix, arg, V_ARRAYSIZE( szPrefix ) - 1 ) == 0 )
+	{
+		CSteamID steamID;
+		bool bMatch = steamID.SetFromSteam2String( arg, GetUniverse() );
+		UTIL_PLAYERBYCMDARG_CHECKMATCH( bMatch ? UTIL_PlayerBySteamID( steamID ) : NULL );
+	}
+
+	// UserID preceded by a pound (#4)
+	if ( nLength > 1 && arg[0] == '#' && bAllButFirstNumbers )
+	{
+		UTIL_PLAYERBYCMDARG_CHECKMATCH( UTIL_PlayerByUserId( V_atoi( arg + 1 ) ) );
+	}
+
+	// Partial name match (if unique)
+	UTIL_PLAYERBYCMDARG_CHECKMATCH( UTIL_PlayerByPartialName( arg ) );
+
+	// UserID not preceded by a pound
+	// *Does not count as ambiguous with higher priority items
+	if ( bAllNumbers && !pFound )
+	{
+		UTIL_PLAYERBYCMDARG_CHECKMATCH( UTIL_PlayerByUserId( V_atoi( arg ) ) );
+	}
+
+	return pFound;
+
+#undef UTIL_PLAYERBYCMDARG_CHECKMATCH
+}
+
+CBasePlayer* UTIL_PlayerByName( const char *name )
+{
+	if ( !name || !name[0] )
+		return NULL;
+
+	for (int i = 1; i<=gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+
+		if ( !pPlayer )
+			continue;
+
+#ifndef CLIENT_DLL
+		if ( !pPlayer->IsConnected() )
+			continue;
 #endif
-	Q_strlower( lowercase );
 
-	CRC32_ProcessBuffer( &mapCRC, lowercase, Q_strlen( lowercase ) );
-	CRC32_Final( &mapCRC );
+		if ( Q_stricmp( pPlayer->GetPlayerName(), name ) == 0 )
+		{
+			return pPlayer;
+		}
+	}
 
-	return ( mapCRC & 0xFFFF );
+	return NULL;
+}
+
+// Finds a player who has this non-ambiguous substring
+CBasePlayer* UTIL_PlayerByPartialName( const char *name )
+{
+	if ( !name || !name[0] )
+		return NULL;
+
+	CBasePlayer *pFound = NULL;
+	for (int i = 1; i<=gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+
+		if ( !pPlayer )
+			continue;
+
+#ifndef CLIENT_DLL
+		if ( !pPlayer->IsConnected() )
+			continue;
+#endif
+
+		if ( Q_stristr( pPlayer->GetPlayerName(), name ) )
+		{
+			if ( pFound )
+			{
+				// Ambiguous
+				return NULL;
+			}
+			pFound = pPlayer;
+		}
+	}
+
+	return pFound;
+}
+
+CBasePlayer* UTIL_PlayerByUserId( int userID )
+{
+	for (int i = 1; i<=gpGlobals->maxClients; i++ )
+	{
+		CBasePlayer *pPlayer = UTIL_PlayerByIndex( i );
+
+		if ( !pPlayer )
+			continue;
+
+#ifndef CLIENT_DLL
+		if ( !pPlayer->IsConnected() )
+			continue;
+#endif
+
+		if ( pPlayer->GetUserID()  == userID )
+		{
+			return pPlayer;
+		}
+	}
+
+	return NULL;
+}
+
+char* ReadAndAllocStringValue( KeyValues *pSub, const char *pName, const char *pFilename )
+{
+	const char *pValue = pSub->GetString( pName, NULL );
+	if ( !pValue )
+	{
+		if ( pFilename )
+		{
+			DevWarning( "Can't get key value	'%s' from file '%s'.\n", pName, pFilename );
+		}
+		return "";
+	}
+
+	int len = Q_strlen( pValue ) + 1;
+	char *pAlloced = new char[ len ];
+	Assert( pAlloced );
+	Q_strncpy( pAlloced, pValue, len );
+	return pAlloced;
+}
+
+int UTIL_StringFieldToInt( const char *szValue, const char **pValueStrings, int iNumStrings )
+{
+	if ( !szValue || !szValue[0] )
+		return -1;
+
+	for ( int i = 0; i < iNumStrings; i++ )
+	{
+		if ( FStrEq(szValue, pValueStrings[i]) )
+			return i;
+	}
+
+	Assert(0);
+	return -1;
+}
+
+
+int find_day_of_week( struct tm& found_day, int day_of_week, int step )
+{
+	return 0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+#ifdef USES_ECON_ITEMS
+static bool					  s_HolidaysCalculated = false;
+static CBitVec<kHolidayCount> s_HolidaysActive;
+
+//-----------------------------------------------------------------------------
+// Purpose: Used at level change and round start to re-calculate which holiday is active
+//-----------------------------------------------------------------------------
+void UTIL_CalculateHolidays()
+{
+	s_HolidaysActive.ClearAll();
+
+	CRTime::UpdateRealTime();
+	for ( int iHoliday = 0; iHoliday < kHolidayCount; iHoliday++ )
+	{
+		if ( EconHolidays_IsHolidayActive( iHoliday, CRTime::RTime32TimeCur() ) )
+		{
+			s_HolidaysActive.Set( iHoliday );
+		}
+	}
+
+	s_HolidaysCalculated = true;
+}
+#endif // USES_ECON_ITEMS
+
+bool UTIL_IsHolidayActive( /*EHoliday*/ int eHoliday )
+{
+#ifdef USES_ECON_ITEMS
+	if ( IsX360() )
+		return false;
+
+	if ( !s_HolidaysCalculated )
+	{
+		UTIL_CalculateHolidays();
+	}
+
+	return s_HolidaysActive.IsBitSet( eHoliday );
+#else
+	return false;
+#endif
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+int	UTIL_GetHolidayForString( const char* pszHolidayName )
+{
+#ifdef USES_ECON_ITEMS
+	if ( !pszHolidayName )
+		return kHoliday_None;
+
+	return EconHolidays_GetHolidayForString( pszHolidayName );
+#else
+	return 0;
+#endif
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+const char* UTIL_GetActiveHolidayString()
+{
+#ifdef USES_ECON_ITEMS
+	return EconHolidays_GetActiveHolidayString();
+#else
+	return NULL;
+#endif
+}
+
+extern ISoundEmitterSystemBase *soundemitterbase;
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+const char *UTIL_GetRandomSoundFromEntry( const char* pszEntryName )
+{
+	Assert( pszEntryName );
+
+	if ( pszEntryName )
+	{
+		int soundIndex = soundemitterbase->GetSoundIndex( pszEntryName );
+		CSoundParametersInternal *internal = ( soundIndex != -1 ) ? soundemitterbase->InternalGetParametersForSound( soundIndex ) : NULL;
+		// See if we need to pick a random one
+		if ( internal )
+		{
+			int wave = RandomInt( 0, internal->NumSoundNames() - 1 );
+			pszEntryName = soundemitterbase->GetWaveName( internal->GetSoundNames()[wave].symbol );
+		}
+	}
+
+	return pszEntryName;
+}
+
+/// Clamp and round float vals to int.  The values are in the 0...255 range.
+Color FloatRGBAToColor( float r, float g, float b, float a )
+{
+	return Color(
+		(unsigned char)clamp(r + .5f, 0.0, 255.0f),
+		(unsigned char)clamp(g + .5f, 0.0, 255.0f),
+		(unsigned char)clamp(b + .5f, 0.0, 255.0f),
+		(unsigned char)clamp(a + .5f, 0.0, 255.0f)
+	);
+}
+
+float LerpFloat( float x0, float x1, float t )
+{
+	return x0 + (x1 - x0) * t;
+}
+
+Color LerpColor( const Color &c0, const Color &c1, float t )
+{
+	if ( t <= 0.0f ) return c0;
+	if ( t >= 1.0f ) return c1;
+	return FloatRGBAToColor(
+		LerpFloat( (float)c0.r(), (float)c1.r(), t ),
+		LerpFloat( (float)c0.g(), (float)c1.g(), t ),
+		LerpFloat( (float)c0.b(), (float)c1.b(), t ),
+		LerpFloat( (float)c0.a(), (float)c1.a(), t )
+	);
+}
+
+ISteamUtils* GetSteamUtils()
+{
+#ifdef GAME_DLL
+	// Use steamgameserver context if this isn't a client/listenserver.
+	if ( engine->IsDedicatedServer() )
+	{
+		return steamgameserverapicontext ? steamgameserverapicontext->SteamGameServerUtils() : NULL;
+	}
+#endif
+	return steamapicontext ? steamapicontext->SteamUtils() : NULL;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+EUniverse GetUniverse()
+{
+	if ( !GetSteamUtils() )
+		return k_EUniverseInvalid;
+
+	static EUniverse steamUniverse = GetSteamUtils()->GetConnectedUniverse();
+	return steamUniverse;
 }

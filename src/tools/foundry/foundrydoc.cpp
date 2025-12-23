@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 //=============================================================================//
 
 #include "foundrydoc.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "datamodel/dmelement.h"
 #include "toolutils/enginetools_int.h"
@@ -274,9 +274,9 @@ void CFoundryDoc::AddVMFEntities( CUtlBuffer &entityBuf, const char *pActualEnti
 		return;
 
 	int nCount = entityArray.Count();
-	for ( int i = 0; i < nCount; ++i )
+	for ( int iEntity = 0; iEntity < nCount; ++iEntity )
 	{
-		CDmElement *pEntity = entityArray[i];
+		CDmElement *pEntity = entityArray[iEntity];
 		const char *pClassName = pEntity->GetValueString( "classname" );
 		if ( !pClassName || !pClassName[0] )
 			continue;

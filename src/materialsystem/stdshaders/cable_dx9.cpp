@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A wet version of base * lightmap
 //
@@ -41,7 +41,7 @@ BEGIN_VS_SHADER( Cable_DX9,
 	SHADER_INIT
 	{
 		LoadBumpMap( BUMPMAP );
-		LoadTexture( BASETEXTURE );
+		LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 	}
 
 	SHADER_DRAW

@@ -1,13 +1,13 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Dialog allowing users to select presets from within a preset group
 //
 //===========================================================================//
 
 #include "dme_controls/presetpicker.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
-#include "vgui/ivgui.h"
+#include "vgui/IVGui.h"
 #include "vgui_controls/button.h"
 #include "vgui_controls/listpanel.h"
 #include "vgui_controls/splitter.h"

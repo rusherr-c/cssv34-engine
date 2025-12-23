@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,9 +6,9 @@
 
 #include "client_pch.h"
 
-#include "vgui_TextureBudgetPanel.h"
-#include "vgui_controls/label.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "vgui_texturebudgetpanel.h"
+#include "vgui_controls/Label.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "vgui_baseui_interface.h"
 #include "ivideomode.h"
 
@@ -198,13 +198,13 @@ void CTextureBudgetPanel::SendConfigDataToBase()
 	data.m_Height = texture_budget_panel_height.GetInt();
 
 	// Shift it..
-	if ( data.m_xCoord + data.m_Width > videomode->GetModeWidth() )
+	if ( data.m_xCoord + data.m_Width > videomode->GetModeStereoWidth() )
 	{
-		data.m_xCoord = videomode->GetModeWidth() - data.m_Width;
+		data.m_xCoord = videomode->GetModeStereoWidth() - data.m_Width;
 	}
-	if ( data.m_yCoord + data.m_Height > videomode->GetModeHeight() )
+	if ( data.m_yCoord + data.m_Height > videomode->GetModeStereoHeight() )
 	{
-		data.m_yCoord = videomode->GetModeHeight() - data.m_Height;
+		data.m_yCoord = videomode->GetModeStereoHeight() - data.m_Height;
 	}
 
 	// Send the config data to the base class.

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -59,8 +59,8 @@ private:
 		vgui::HFont font, 
 		int x, int y, 
 		int r, int g, int b, int a,
-		const char *pText,
-		... );
+		PRINTF_FORMAT_STRING const char *pText,
+		... ) FMTFUNCTION( 9, 10 );
 };
 
 

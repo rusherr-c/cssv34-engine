@@ -1,19 +1,19 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Multi-purpose menu for matchmaking dialogs, navigable with the xbox controller.
 //
 //=============================================================================//
 
 #include "engine/imatchmaking.h"
-#include "gameui_interface.h"
+#include "GameUI_Interface.h"
 #include "vgui_controls/Label.h"
 #include "vgui_controls/ImagePanel.h"
 #include "vgui/ILocalize.h"
 #include "vgui/ISurface.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "dialogmenu.h"
-#include "basepanel.h"
-#include "vgui_controls\ImagePanel.h"
+#include "BasePanel.h"
+#include "vgui_controls/ImagePanel.h"
 #include "iachievementmgr.h"			// for iachievement abstract class in CAchievementItem
 #include "achievementsdialog.h"			// for helper functions used by both pc and xbox achievements
 
@@ -601,7 +601,7 @@ CAchievementItem::CAchievementItem( CDialogMenu *pParent, const wchar_t *pName, 
 	{
 		wchar_t *wzFormat = g_pVGuiLocalize->Find( "#GameUI_Achievement_Points" );	// "%s1G"
 		wchar_t wzPoints[10];
-		_itow_s( points, wzPoints, ARRAYSIZE( wzPoints ), 10 );
+		V_snwprintf( wzPoints, ARRAYSIZE( wzPoints ), L"%d", points );
 		wchar_t wzPointsLayout[10];
 		g_pVGuiLocalize->ConstructString( wzPointsLayout, sizeof( wzPointsLayout ), wzFormat, 1, wzPoints );
 		m_pPoints = new vgui::Label( this, "Points", wzPointsLayout );
@@ -1051,7 +1051,7 @@ void CDialogMenu::ApplySettings( KeyValues *pResourceData )
 					prop.nType = SESSION_PROPERTY;
 					Q_strncpy( prop.szID, pID, sizeof( prop.szID ) );
 					Q_strncpy( prop.szValueType, pValueType, sizeof( prop.szValueType ) );
-					itoa( i, prop.szValue, 10 );
+					Q_snprintf( prop.szValue, sizeof(prop.szValue), "%d", i ); 
 
 					pItem->AddOption( prop.szValue, prop );
 				}
@@ -1477,27 +1477,32 @@ bool CDialogMenu::HandleKeyCode( vgui::KeyCode code )
 	{
 	case KEY_XBUTTON_DOWN:
 	case KEY_XSTICK1_DOWN:
+	case STEAMCONTROLLER_DPAD_DOWN:
 		SetFocusNext();
 		break;
 
 	case KEY_XBUTTON_UP:
 	case KEY_XSTICK1_UP:
+	case STEAMCONTROLLER_DPAD_UP:
 		SetFocusPrev();
 		break;
 
 	case KEY_XBUTTON_LEFT:
 	case KEY_XSTICK1_LEFT:
+	case STEAMCONTROLLER_DPAD_LEFT:
 		SetOptionFocusPrev();
 		SetColumnFocusPrev();
 		break;
 
 	case KEY_XBUTTON_RIGHT:
 	case KEY_XSTICK1_RIGHT:
+	case STEAMCONTROLLER_DPAD_RIGHT:
 		SetOptionFocusNext();
 		SetColumnFocusNext();
 		break;
 
 	case KEY_XBUTTON_A:
+	case STEAMCONTROLLER_A:
 		if ( m_MenuItems.Count() && m_nActive >= 0 )
 		{
 			m_MenuItems[m_nActive]->OnClick();
@@ -1505,6 +1510,7 @@ bool CDialogMenu::HandleKeyCode( vgui::KeyCode code )
 		break;
 
 	case KEY_XBUTTON_Y:
+	case STEAMCONTROLLER_Y:
 		SortMenuItems();
 		break;
 

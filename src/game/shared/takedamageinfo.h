@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,16 +24,33 @@ class CBaseEntity;
 class CTakeDamageInfo
 {
 public:
+
+	enum ECritType
+	{
+		CRIT_NONE = 0,
+		CRIT_MINI,
+		CRIT_FULL,
+	};
+
+
 	DECLARE_CLASS_NOBASE( CTakeDamageInfo );
 
 					CTakeDamageInfo();
 					CTakeDamageInfo( CBaseEntity *pInflictor, CBaseEntity *pAttacker, float flDamage, int bitsDamageType, int iKillType = 0 );
+					CTakeDamageInfo( CBaseEntity *pInflictor, CBaseEntity *pAttacker, CBaseEntity *pWeapon, float flDamage, int bitsDamageType, int iKillType = 0 );
 					CTakeDamageInfo( CBaseEntity *pInflictor, CBaseEntity *pAttacker, const Vector &damageForce, const Vector &damagePosition, float flDamage, int bitsDamageType, int iKillType = 0, Vector *reportedPosition = NULL );
+					CTakeDamageInfo( CBaseEntity *pInflictor, CBaseEntity *pAttacker, CBaseEntity *pWeapon, const Vector &damageForce, const Vector &damagePosition, float flDamage, int bitsDamageType, int iKillType = 0, Vector *reportedPosition = NULL );
 	
 
 	// Inflictor is the weapon or rocket (or player) that is dealing the damage.
 	CBaseEntity*	GetInflictor() const;
 	void			SetInflictor( CBaseEntity *pInflictor );
+
+	// Weapon is the weapon that did the attack.
+	// For hitscan weapons, it'll be the same as the inflictor. For projectile weapons, the projectile 
+	// is the inflictor, and this contains the weapon that created the projectile.
+	CBaseEntity*	GetWeapon() const;
+	void			SetWeapon( CBaseEntity *pWeapon );
 
 	// Attacker is the character who originated the attack (like a player or an AI).
 	CBaseEntity*	GetAttacker() const;
@@ -46,6 +63,9 @@ public:
 	void			ScaleDamage( float flScaleAmount );
 	void			AddDamage( float flAddAmount );
 	void			SubtractDamage( float flSubtractAmount );
+	float			GetDamageBonus() const;
+	CBaseEntity		*GetDamageBonusProvider() const;
+	void			SetDamageBonus( float flBonus, CBaseEntity *pProvider = NULL );
 
 	float			GetBaseDamage() const;
 	bool			BaseDamageIsValid() const;
@@ -53,6 +73,8 @@ public:
 	Vector			GetDamageForce() const;
 	void			SetDamageForce( const Vector &damageForce );
 	void			ScaleDamageForce( float flScaleAmount );
+	float			GetDamageForForceCalc() const;
+	void			SetDamageForForceCalc( const float flScaleAmount );
 
 	Vector			GetDamagePosition() const;
 	void			SetDamagePosition( const Vector &damagePosition );
@@ -67,13 +89,23 @@ public:
 	void			SetDamageCustom( int iDamageCustom );
 	int				GetDamageStats( void ) const;
 	void			SetDamageStats( int iDamageStats );
+	void			SetForceFriendlyFire( bool bValue ) { m_bForceFriendlyFire = bValue; }
+	bool			IsForceFriendlyFire( void ) const { return m_bForceFriendlyFire; }
 
 	int				GetAmmoType() const;
 	void			SetAmmoType( int iAmmoType );
 	const char *	GetAmmoName() const;
 
+	int				GetPlayerPenetrationCount() const { return m_iPlayerPenetrationCount; }
+	void			SetPlayerPenetrationCount( int iPlayerPenetrationCount ) { m_iPlayerPenetrationCount = iPlayerPenetrationCount; }
+	
+	int				GetDamagedOtherPlayers() const     { return m_iDamagedOtherPlayers; }
+	void			SetDamagedOtherPlayers( int iVal ) { m_iDamagedOtherPlayers = iVal; }
+
 	void			Set( CBaseEntity *pInflictor, CBaseEntity *pAttacker, float flDamage, int bitsDamageType, int iKillType = 0 );
+	void			Set( CBaseEntity *pInflictor, CBaseEntity *pAttacker, CBaseEntity *pWeapon, float flDamage, int bitsDamageType, int iKillType = 0 );
 	void			Set( CBaseEntity *pInflictor, CBaseEntity *pAttacker, const Vector &damageForce, const Vector &damagePosition, float flDamage, int bitsDamageType, int iKillType = 0, Vector *reportedPosition = NULL );
+	void			Set( CBaseEntity *pInflictor, CBaseEntity *pAttacker, CBaseEntity *pWeapon, const Vector &damageForce, const Vector &damagePosition, float flDamage, int bitsDamageType, int iKillType = 0, Vector *reportedPosition = NULL );
 
 	void			AdjustPlayerDamageInflictedForSkillLevel();
 	void			AdjustPlayerDamageTakenForSkillLevel();
@@ -82,18 +114,22 @@ public:
 	// For designer debug output.
 	static void		DebugGetDamageTypeString(unsigned int DamageType, char *outbuf, int outbuflength );
 
+	void			SetCritType( ECritType eType ); 
+
+	ECritType		GetCritType() const { return m_eCritType; }
 
 //private:
 	void			CopyDamageToBaseDamage();
 
 protected:
-	void			Init( CBaseEntity *pInflictor, CBaseEntity *pAttacker, const Vector &damageForce, const Vector &damagePosition, const Vector &reportedPosition, float flDamage, int bitsDamageType, int iKillType );
+	void			Init( CBaseEntity *pInflictor, CBaseEntity *pAttacker, CBaseEntity *pWeapon, const Vector &damageForce, const Vector &damagePosition, const Vector &reportedPosition, float flDamage, int bitsDamageType, int iKillType );
 
 	Vector			m_vecDamageForce;
 	Vector			m_vecDamagePosition;
 	Vector			m_vecReportedPosition;	// Position players are told damage is coming from
 	EHANDLE			m_hInflictor;
 	EHANDLE			m_hAttacker;
+	EHANDLE			m_hWeapon;
 	float			m_flDamage;
 	float			m_flMaxDamage;
 	float			m_flBaseDamage;			// The damage amount before skill leve adjustments are made. Used to get uniform damage forces.
@@ -101,6 +137,15 @@ protected:
 	int				m_iDamageCustom;
 	int				m_iDamageStats;
 	int				m_iAmmoType;			// AmmoType of the weapon used to cause this damage, if any
+	int				m_iDamagedOtherPlayers;
+	int				m_iPlayerPenetrationCount;
+	float			m_flDamageBonus;		// Anything that increases damage (crit) - store the delta
+	EHANDLE			m_hDamageBonusProvider;	// Who gave us the ability to do extra damage?
+	bool			m_bForceFriendlyFire;	// Ideally this would be a dmg type, but we can't add more
+
+	float			m_flDamageForForce;
+
+	ECritType		m_eCritType;
 
 	DECLARE_SIMPLE_DATADESC();
 };
@@ -118,7 +163,7 @@ public:
 	CBaseEntity		*GetTarget() const;
 	void			SetTarget( CBaseEntity *pTarget );
 
-	void			Init( CBaseEntity *pTarget, CBaseEntity *pInflictor, CBaseEntity *pAttacker, const Vector &damageForce, const Vector &damagePosition, const Vector &reportedPosition, float flDamage, int bitsDamageType, int iKillType );
+	void			Init( CBaseEntity *pTarget, CBaseEntity *pInflictor, CBaseEntity *pAttacker, CBaseEntity *pWeapon, const Vector &damageForce, const Vector &damagePosition, const Vector &reportedPosition, float flDamage, int bitsDamageType, int iKillType );
 
 protected:
 	EHANDLE			m_hTarget;
@@ -170,6 +215,17 @@ inline void CTakeDamageInfo::SetAttacker( CBaseEntity *pAttacker )
 	m_hAttacker = pAttacker;
 }
 
+inline CBaseEntity* CTakeDamageInfo::GetWeapon() const
+{
+	return m_hWeapon;
+}
+
+
+inline void CTakeDamageInfo::SetWeapon( CBaseEntity *pWeapon )
+{
+	m_hWeapon = pWeapon;
+}
+
 
 inline float CTakeDamageInfo::GetDamage() const
 {
@@ -206,6 +262,22 @@ inline void CTakeDamageInfo::SubtractDamage( float flSubtractAmount )
 	m_flDamage -= flSubtractAmount;
 }
 
+inline float CTakeDamageInfo::GetDamageBonus() const
+{
+	return m_flDamageBonus;
+}
+
+inline CBaseEntity *CTakeDamageInfo::GetDamageBonusProvider() const
+{
+	return m_hDamageBonusProvider;
+}
+
+inline void CTakeDamageInfo::SetDamageBonus( float flBonus, CBaseEntity *pProvider /*= NULL*/ )
+{
+	m_flDamageBonus = flBonus;
+	m_hDamageBonusProvider = pProvider;
+}
+
 inline float CTakeDamageInfo::GetBaseDamage() const
 {
 	if( BaseDamageIsValid() )
@@ -235,6 +307,16 @@ inline void	CTakeDamageInfo::ScaleDamageForce( float flScaleAmount )
 	m_vecDamageForce *= flScaleAmount;
 }
 
+inline float CTakeDamageInfo::GetDamageForForceCalc() const
+{
+	return m_flDamageForForce;
+}
+
+inline void CTakeDamageInfo::SetDamageForForceCalc( float flDamage )
+{
+	m_flDamageForForce = flDamage;
+}
+
 inline Vector CTakeDamageInfo::GetDamagePosition() const
 {
 	return m_vecDamagePosition;
@@ -257,15 +339,15 @@ inline void CTakeDamageInfo::SetReportedPosition( const Vector &reportedPosition
 	m_vecReportedPosition = reportedPosition;
 }
 
-inline int CTakeDamageInfo::GetDamageType() const
-{
-	return m_bitsDamageType;
-}
-
 
 inline void CTakeDamageInfo::SetDamageType( int bitsDamageType )
 {
 	m_bitsDamageType = bitsDamageType;
+}
+
+inline int CTakeDamageInfo::GetDamageType() const
+{
+	return m_bitsDamageType;
 }
 
 inline void	CTakeDamageInfo::AddDamageType( int bitsDamageType )

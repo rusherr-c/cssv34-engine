@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -37,11 +37,11 @@ public:
 	virtual void PrimaryAttack();
 	virtual bool Deploy();
 
-	void ELITEFire( float flSpread );
-	
 	virtual bool Reload();
 
 	virtual void WeaponIdle();
+
+ 	virtual float GetInaccuracy() const;
 	
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_ELITE; }
 
@@ -53,11 +53,13 @@ public:
 	virtual const char		*GetWorldModel( void ) const;
 	virtual int				GetWorldModelIndex( void );
 
+protected:
+	bool FiringLeft() const;
+
 private:
 	
 	CWeaponElite( const CWeaponElite & );
 	float		m_flLastFire;
-	CNetworkVar( bool, m_bFireRight );
 
 	int m_droppedModelIndex;
 	bool m_inPrecache;
@@ -66,16 +68,11 @@ private:
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponElite, DT_WeaponElite )
 
 BEGIN_NETWORK_TABLE( CWeaponElite, DT_WeaponElite )
-#ifdef CLIENT_DLL
-	RecvPropBool( RECVINFO( m_bFireRight ) ),
-#else
-	SendPropBool( SENDINFO( m_bFireRight ) ),
-#endif
 END_NETWORK_TABLE()
 
 #if defined CLIENT_DLL
 BEGIN_PREDICTION_DATA( CWeaponElite )
-	DEFINE_PRED_FIELD( m_bFireRight, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE )
+	DEFINE_FIELD( m_flLastFire, FIELD_FLOAT ),
 END_PREDICTION_DATA()
 #endif
 
@@ -92,8 +89,6 @@ CWeaponElite::CWeaponElite()
 void CWeaponElite::Spawn( )
 {
 	m_flAccuracy = 0.88;
-	m_bFireRight = false;
-	
 	BaseClass::Spawn();
 }
 
@@ -140,34 +135,43 @@ const char * CWeaponElite::GetWorldModel( void ) const
 	}
 }
 
+
+bool CWeaponElite::FiringLeft() const
+{
+	// fire left-hand gun with even number of bullets left
+	return (m_iClip1 & 1) == 0;
+}
+
+
+
+float CWeaponElite::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 1.3f * (1 - m_flAccuracy);
+
+		else if (pPlayer->GetAbsVelocity().Length2D() > 5)
+			return 0.175f * (1 - m_flAccuracy);
+
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			return 0.08f * (1 - m_flAccuracy);
+
+		else
+			return 0.1f * (1 - m_flAccuracy);
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
 void CWeaponElite::PrimaryAttack()
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
-		return;
-
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		ELITEFire( 1.3f * (1 - m_flAccuracy) );
-	
-	else if (pPlayer->GetAbsVelocity().Length2D() > 5)
-		ELITEFire( 0.175f * (1 - m_flAccuracy) );
-	
-	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
-		ELITEFire( 0.08f * (1 - m_flAccuracy) );
-	
-	else
-		ELITEFire( 0.1f * (1 - m_flAccuracy));
-}
-
-void CWeaponElite::ELITEFire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
-	pPlayer->m_iShotsFired++;
-
-	if (pPlayer->m_iShotsFired > 1)
 		return;
 
 	// Mark the time of this shot and determine the accuracy modifier based on the last shot fired...
@@ -182,17 +186,19 @@ void CWeaponElite::ELITEFire( float flSpread )
 
 	if (m_iClip1 <= 0)
 	{
-		if (m_bFireOnEmpty)
+		if ( m_bFireOnEmpty )
 		{
 			PlayEmptySound();
-			m_flNextPrimaryAttack = gpGlobals->curtime + 0.2;
+			m_flNextPrimaryAttack = gpGlobals->curtime + 0.1f;
+			m_bFireOnEmpty = false;
 		}
 
 		return;
 	}
 
+	pPlayer->m_iShotsFired++;
+
 	m_iClip1--;
-	m_bFireRight = !m_bFireRight; // flip side
 
 	pPlayer->DoMuzzleFlash();
 
@@ -206,9 +212,10 @@ void CWeaponElite::ELITEFire( float flSpread )
 		pPlayer->Weapon_ShootPosition(),
 		pPlayer->EyeAngles() + 2.0f * pPlayer->GetPunchAngle(),
 		GetWeaponID(),
-		m_bFireRight?Primary_Mode:Secondary_Mode,
+		FiringLeft() ? Secondary_Mode : Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		flSpread );
+		GetInaccuracy(),
+		GetSpread());
 		
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->curtime + GetCSWpnData().m_flCycleTime;
 	
@@ -220,20 +227,23 @@ void CWeaponElite::ELITEFire( float flSpread )
 
 	SetWeaponIdleTime( gpGlobals->curtime + 2.5 );
 
-	if ( m_bFireRight )  //even number
+	if ( FiringLeft() )
 	{
-		if ( m_iClip1 > 1 )
-			 SendWeaponAnim( ACT_VM_PRIMARYATTACK );
+		if ( m_iClip1 > 0 )
+			SendWeaponAnim( ACT_VM_SECONDARYATTACK );
 		else
-			 SendWeaponAnim( ACT_VM_DRYFIRE_LEFT );
+			SendWeaponAnim( ACT_VM_DRYFIRE );
 	}
 	else
 	{
-		if ( m_iClip1 > 0 )
-			 SendWeaponAnim( ACT_VM_SECONDARYATTACK );
+		if ( m_iClip1 > 1 )
+			SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 		else
-			 SendWeaponAnim( ACT_VM_DRYFIRE );
+			SendWeaponAnim( ACT_VM_DRYFIRE_LEFT );
 	}
+
+	// update accuracy
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyImpulseFire[Primary_Mode];
 
 	QAngle punchAngle = pPlayer->GetPunchAngle();
 	punchAngle.x -= 2;
@@ -249,37 +259,29 @@ bool CWeaponElite::Reload()
 		return false;
 
 	m_flAccuracy = 0.88;
-	m_bFireRight = false;
 	return true;
 }
 
 void CWeaponElite::WeaponIdle()
 {
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
 	if (m_flTimeWeaponIdle > gpGlobals->curtime)
 		return;
 
-	if ( pPlayer->HasShield() )
+/*
+	// switching to the idle with the slide back on the right pistol causes animation pops transitioning
+	// from/to the depot/holster animations. The pop transition to the reload is less noticeable, so 
+	// we'll live with that one
+
+	if ( m_iClip1 == 1 )
 	{
-		SetWeaponIdleTime( gpGlobals->curtime + 20 );
-		
-		//MIKETODO: shields
-		//if ( FBitSet(m_iWeaponState, WPNSTATE_SHIELD_DRAWN) )
-		//	 SendWeaponAnim( GLOCK18_SHIELD_IDLE, UseDecrement() ? 1:0 );
+		SendWeaponAnim( ACT_VM_IDLE_EMPTY_LEFT );
 	}
-	else
+*/
+
+	// only idle if either slide isn't back
+	if ( m_iClip1 >= 2 )
 	{
-		// only idle if the slid isn't back
-		if (m_iClip1 != 0)
-		{
-			if ( m_iClip1 == 1 )
-				SendWeaponAnim( ACT_VM_IDLE_EMPTY_LEFT );
-			else
-				SendWeaponAnim( ACT_VM_IDLE );
-		}
+			SendWeaponAnim( ACT_VM_IDLE );
 	}
 }
 
@@ -296,7 +298,7 @@ void CWeaponElite::WeaponIdle()
 			CEffectData data;
 			data.m_fFlags = 0;
 			data.m_hEntity = pViewModel->GetRefEHandle();
-			data.m_nAttachmentIndex = m_bFireRight?2:1; // toggle muzzle flash
+			data.m_nAttachmentIndex = FiringLeft() ? 1 : 2; // toggle muzzle flash
 			data.m_flScale = GetCSWpnData().m_flMuzzleScale;
 		
 			DispatchEffect( "CS_MuzzleFlash", data );
@@ -309,14 +311,7 @@ void CWeaponElite::WeaponIdle()
 
 	int CWeaponElite::GetMuzzleAttachment( void )
 	{
-		if ( m_bFireRight )  //even number
-		{
-			return LookupAttachment( "muzzle_flash_r" );
-		}
-		else
-		{
-			return LookupAttachment( "muzzle_flash_l" );	
-		}
+		return LookupAttachment( FiringLeft() ? "muzzle_flash_l" : "muzzle_flash_r" );	
 	}
 
 #endif

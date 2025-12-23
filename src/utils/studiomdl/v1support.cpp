@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -93,7 +93,7 @@ int lookup_index( s_source_t *psource, int material, Vector& vertex, Vector& nor
 
 void ParseFaceData( s_source_t *psource, int material, s_face_t *pFace )
 {
-	int index[3];
+	int index[3] = {};
 	int i, j;
 	Vector p;
 	Vector normal;
@@ -244,8 +244,8 @@ void Grab_Triangles( s_source_t *psource )
 		}
 
 		// strip off trailing smag
-		strncpy( texturename, g_szLine, sizeof( texturename ) - 1 );
-		for (i = strlen( texturename ) - 1; i >= 0 && ! isgraph( texturename[i] ); i--)
+		V_strcpy_safe( texturename, g_szLine );
+		for (i = strlen( texturename ) - 1; i >= 0 && ! V_isgraph( texturename[i] ); i--)
 		{
 		}
 		texturename[i + 1] = '\0';
@@ -255,12 +255,12 @@ void Grab_Triangles( s_source_t *psource )
 		{
 			if (sourcetexture[i][0] == '\0') 
 			{
-				strcpy( texturename, defaulttexture[i] );
+				V_strcpy_safe( texturename, defaulttexture[i] );
 				break;
 			}
 			if (stricmp( texturename, sourcetexture[i]) == 0) 
 			{
-				strcpy( texturename, defaulttexture[i] );
+				V_strcpy_safe( texturename, defaulttexture[i] );
 				break;
 			}
 		}

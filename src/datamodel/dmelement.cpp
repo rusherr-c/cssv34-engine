@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1401,15 +1401,15 @@ void RemoveElementFromRefereringAttributes( CDmElement *pElement, bool bPreserve
 		if ( IsArrayType( pAttribute->GetType() ) )
 		{
 			CDmrElementArray<> array( pAttribute );
-			int i = array.Find( pElement );
-			Assert( i != array.InvalidIndex() );
+			int iElem = array.Find( pElement );
+			Assert( iElem != array.InvalidIndex() );
 			if ( bPreserveOrder )
 			{
-				array.Remove( i );
+				array.Remove( iElem );
 			}
 			else
 			{
-				array.FastRemove( i );
+				array.FastRemove( iElem );
 			}
 		}
 		else

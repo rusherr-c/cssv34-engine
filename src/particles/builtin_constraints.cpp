@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: particle system code
 //
@@ -39,7 +39,8 @@ class C_OP_ConstrainDistance : public CParticleOperatorInstance
 	bool EnforceConstraint( int nStartBlock,
 							int nEndBlock,
 							CParticleCollection *pParticles,
-							void *pContext ) const;
+							void *pContext,
+							int nNumValidParticlesInLastChunk ) const;
 
 	float m_fMinDistance, m_fMaxDistance;
 	int m_nControlPointNumber;
@@ -71,7 +72,7 @@ static void CHECKSYSTEM( CParticleCollection *pParticles )
 bool C_OP_ConstrainDistance::EnforceConstraint( int nStartBlock,
 												int nNumBlocks,
 												CParticleCollection *pParticles,
-												void *pContext ) const
+												void *pContext, int nNumValidParticlesInLastChunk ) const
 {
 	size_t nStride;
 	FourVectors *pXYZ=pParticles->Get4VAttributePtrForWrite( PARTICLE_ATTRIBUTE_XYZ,
@@ -105,7 +106,7 @@ bool C_OP_ConstrainDistance::EnforceConstraint( int nStartBlock,
 		if ( IsAnyNegative( NeedAdjust ) )				// any out of bounds?
 		{
 			// change squared distance into approximate rsqr root
-			fltx4 guess=ReciprocalSqrtEstSIMD(dist_squared);
+			fltx4 guess = ReciprocalSqrtEstSaturateSIMD(dist_squared);
 			// newton iteration for 1/sqrt(x) : y(n+1)=1/2 (y(n)*(3-x*y(n)^2));
 			guess=MulSIMD(guess,SubSIMD(Four_Threes,MulSIMD(dist_squared,MulSIMD(guess,guess))));
 			guess=MulSIMD(Four_PointFives,guess);
@@ -152,11 +153,16 @@ class C_OP_ConstrainDistanceToPath : public CParticleOperatorInstance
 		return PARTICLE_ATTRIBUTE_XYZ_MASK | PARTICLE_ATTRIBUTE_CREATION_TIME_MASK;
 	}
 
+	virtual uint64 GetReadControlPointMask() const 
+	{ 
+		return ( 1ULL << m_PathParameters.m_nStartControlPointNumber ) |
+			( 1ULL << m_PathParameters.m_nEndControlPointNumber ); 
+	}
 
 	bool EnforceConstraint( int nStartBlock,
 							int nEndBlock,
 							CParticleCollection *pParticles,
-							void *pContext ) const;
+							void *pContext, int nNumValidParticlesInLastChunk ) const;
 
 	float m_fMinDistance;
 
@@ -170,7 +176,8 @@ class C_OP_ConstrainDistanceToPath : public CParticleOperatorInstance
 bool C_OP_ConstrainDistanceToPath::EnforceConstraint( int nStartBlock,
 													  int nNumBlocks,
 													  CParticleCollection *pParticles,
-													  void *pContext ) const
+													  void *pContext,
+													  int nNumValidParticlesInLastChunk ) const
 {
 	C4VAttributeWriteIterator pXYZ( PARTICLE_ATTRIBUTE_XYZ, pParticles );
 	pXYZ += nStartBlock;
@@ -185,7 +192,7 @@ bool C_OP_ConstrainDistanceToPath::EnforceConstraint( int nStartBlock,
 									 &StartPnt, &MidP, &EndPnt );
 
 	fltx4 CurTime = ReplicateX4( pParticles->m_flCurTime );
-	fltx4 TimeScale= ReplicateX4( 1.0/(max(0.001,  m_flTravelTime ) ) );
+	fltx4 TimeScale= ReplicateX4( 1.0/(max(0.001f,  m_flTravelTime ) ) );
 
 	// calculate radius spline
 	bool bConstantRadius = true;
@@ -340,7 +347,7 @@ class C_OP_PlanarConstraint : public CParticleOperatorInstance
 	bool EnforceConstraint( int nStartBlock,
 							int nEndBlock,
 							CParticleCollection *pParticles,
-							void *pContext ) const;
+							void *pContext, int nNumValidParticlesInLastChunk ) const;
 
 	Vector m_PointOnPlane;
 	Vector m_PlaneNormal;
@@ -353,7 +360,8 @@ class C_OP_PlanarConstraint : public CParticleOperatorInstance
 bool C_OP_PlanarConstraint::EnforceConstraint( int nStartBlock,
 											   int nNumBlocks,
 											   CParticleCollection *pParticles,
-											   void *pContext ) const
+											   void *pContext,
+											   int nNumValidParticlesInLastChunk ) const
 {
 	C4VAttributeWriteIterator pXYZ( PARTICLE_ATTRIBUTE_XYZ, pParticles );
 	pXYZ += nStartBlock;
@@ -419,47 +427,110 @@ END_PARTICLE_OPERATOR_UNPACK( C_OP_PlanarConstraint )
 
 
 
+static Vector s_OrientationRelativeTraceVectors[] = {
+	Vector( 0, .1962, .784929 ),
+	Vector( -.1962, 0, .784929 ),
+	Vector( .1962, 0, .784929 ),
+	Vector( 0, -.1962, .78929 ),
+};
+
+void CWorldCollideContextData::SetBaseTrace(  int nIndex, Vector const &rayStart, Vector const &traceDir, int nCollisionGroup, bool bKeepMisses )
+{
+	CBaseTrace tr;
+	Vector rayEnd = rayStart + traceDir;
+	g_pParticleSystemMgr->Query()->TraceLine( rayStart, rayEnd, MASK_SOLID, NULL, nCollisionGroup, &tr );
+	if ( tr.fraction < 1.0 )
+	{
+		m_bPlaneActive[nIndex] = true;
+		m_PointOnPlane[nIndex].DuplicateVector( rayStart + tr.fraction * traceDir );
+		m_PlaneNormal[nIndex].DuplicateVector( tr.plane.normal );
+		m_TraceStartPnt[nIndex].DuplicateVector( rayStart );
+		m_TraceEndPnt[nIndex].DuplicateVector( rayEnd );
+	}
+	else
+	{
+		if ( bKeepMisses )
+		{
+			m_PlaneNormal[nIndex].x = Four_Zeros;
+			m_PlaneNormal[nIndex].y = Four_Zeros;
+			m_PlaneNormal[nIndex].z = Four_Zeros;
+			m_TraceStartPnt[nIndex].DuplicateVector( rayStart );
+			m_TraceEndPnt[nIndex].DuplicateVector( rayEnd );
+			m_bPlaneActive[nIndex] = true;
+		}
+		else
+			m_bPlaneActive[nIndex] = false;
+	}
+}
+
 void CWorldCollideContextData::CalculatePlanes( CParticleCollection *pParticles, int nCollisionMode,
-												int nCollisionGroup, Vector const *pCPOffset, float flDistanceTolerance )
+												int nCollisionGroup, Vector const *pCPOffset, 
+												float flDistanceTolerance )
 {
 	// fire some rays to find the convex around the control point
 	if ( m_nActivePlanes && ( nCollisionMode == COLLISION_MODE_INITIAL_TRACE_DOWN ) )
 		return;
-	Vector RayStart = pParticles->GetControlPointAtCurrentTime( 0 ); // allow config + offset
+	Vector rayStart = pParticles->GetControlPointAtCurrentTime( 0 ); // allow config + offset
 
 	if ( pCPOffset )
-		RayStart += *pCPOffset;
+		rayStart += *pCPOffset;
 
-	if ( ( m_flLastUpdateTime > 0. ) && ( ( RayStart - m_vecLastUpdateOrigin ).LengthSqr() < Square( flDistanceTolerance ) ) )
+	if ( ( m_flLastUpdateTime > 0. ) && ( ( rayStart - m_vecLastUpdateOrigin ).LengthSqr() < Square( flDistanceTolerance ) ) )
 		return;
 
-// 	if ( m_flLastUpdateTime > 0 )
-// 		Warning("nooed recalc %f tol=%f\n", (RayStart-m_vecLastUpdateOrigin).Length(), flDistanceTolerance );
-	m_vecLastUpdateOrigin = RayStart;
+	m_vecLastUpdateOrigin = rayStart;
 	m_nActivePlanes = 0;
-	for( int i = -1; i <= 1; i++ )
-		for( int j = -1; j <= 1; j++ )
-			for( int k = -1; k <= 1; k++ )
-			{
-				if ( 
-					( ( nCollisionMode == COLLISION_MODE_PER_FRAME_PLANESET ) && ( i || j || k ) ) ||
-					( ( nCollisionMode == COLLISION_MODE_INITIAL_TRACE_DOWN ) && 
-					  ( k == -1 ) && ( i == 0 ) && ( j == 0 ) ) )
-				{
-					Vector TraceDir( i, j, k );
-					float flRadius = 1000.0;
-					CBaseTrace tr;
-					g_pParticleSystemMgr->Query()->TraceLine( RayStart, RayStart+TraceDir * flRadius,
-															  MASK_SOLID, NULL, nCollisionGroup, &tr );
-					if ( tr.fraction < 1.0 )
+	switch( nCollisionMode )
+	{
+		case COLLISION_MODE_INITIAL_TRACE_DOWN:
+		{
+			SetBaseTrace( 0, rayStart, 1000.0 * Vector( -1, 0, 0 ), nCollisionGroup, false );
+			m_nActivePlanes = 1;
+			m_nNumFixedPlanes = 1;
+			break;
+		}
+		case COLLISION_MODE_PER_FRAME_PLANESET:
+		{
+			int nIndexOut = 0;
+			for( int i = -1; i <= 1; i++ )
+				for( int j = -1; j <= 1; j++ )
+					for( int k = -1; k <= 1; k++ )
 					{
-						int n=m_nActivePlanes;
-						m_PointOnPlane[n].DuplicateVector( RayStart+(tr.fraction*flRadius)*TraceDir );
-						m_PlaneNormal[n].DuplicateVector( tr.plane.normal );
-						m_nActivePlanes++;
+						if ( i || j || k )
+						{
+							SetBaseTrace( nIndexOut++, rayStart, 1000.0 * Vector( i, j, k ), nCollisionGroup, false );
+						}
 					}
-				}
-			}
+			m_nNumFixedPlanes = nIndexOut;
+			m_nActivePlanes = nIndexOut;
+		}
+		// Long missing break. Added to Source2 in change 700053.
+		// It's a bug, but changing it now could cause regressions, so
+		// leaving it for now until someone decides it's worth fixing.
+#ifdef FP_EXCEPTIONS_ENABLED
+		// This break is necessary when exceptions are enabled because otherwise
+		// m_bPlaneActive[21] is set even though that plane is filled with
+		// NaNs. We should perhaps put this break in, but we need to do
+		// careful particle testing.
+		break;
+#endif
+
+		case COLLISION_MODE_USE_NEAREST_TRACE:
+		{
+			int nIndexOut = 0;
+			for( int i = -1; i <= 1; i++ )
+				for( int j = -1; j <= 1; j++ )
+					for( int k = -1; k <= 1; k++ )
+					{
+						if ( i || j || k )
+						{
+							SetBaseTrace( nIndexOut++, rayStart, 1000.0 * Vector( i, j, k ), nCollisionGroup, true );
+						}
+					}
+			m_nNumFixedPlanes = nIndexOut;
+			m_nActivePlanes = nIndexOut;
+		}
+	}
 }
 
 class C_OP_WorldCollideConstraint : public CParticleOperatorInstance
@@ -489,7 +560,7 @@ class C_OP_WorldCollideConstraint : public CParticleOperatorInstance
 	bool EnforceConstraint( int nStartBlock,
 							int nEndBlock,
 							CParticleCollection *pParticles,
-							void *pContext ) const;
+							void *pContext, int nNumValidParticlesInLastChunk ) const;
 
 	void SetupConstraintPerFrameData( CParticleCollection *pParticles,
 									  void *pContext ) const;
@@ -507,7 +578,8 @@ void C_OP_WorldCollideConstraint::SetupConstraintPerFrameData( CParticleCollecti
 bool C_OP_WorldCollideConstraint::EnforceConstraint( int nStartBlock,
 													 int nNumBlocks,
 													 CParticleCollection *pParticles,
-													 void *pContext ) const
+													 void *pContext,
+													 int nNumValidParticlesInLastChunk ) const
 {
 	C4VAttributeWriteIterator pXYZ( PARTICLE_ATTRIBUTE_XYZ, pParticles );
 	pXYZ += nStartBlock;
@@ -523,20 +595,23 @@ bool C_OP_WorldCollideConstraint::EnforceConstraint( int nStartBlock,
 	{
 		for( int i=0; i < pCtx->m_nActivePlanes; i++ )
 		{
-			FourVectors pts = *pXYZ;
-			pts -= pCtx->m_PointOnPlane[i];
-			fltx4 PlaneEq=pts * pCtx->m_PlaneNormal[i];
-			// where planeeq<0, inside
-			PlaneEq = SubSIMD( PlaneEq, *pRadius );
-			fltx4 BadPts=CmpLtSIMD( PlaneEq, Four_Zeros );
-			if ( IsAnyNegative( BadPts ) )
+			if ( pCtx->m_bPlaneActive[ i ] )
 			{
-				bChangedSomething = true;
-				// project points to plane surface
-				fltx4 PenetrationDistance=MinSIMD( Four_Zeros, PlaneEq );
-				FourVectors PenetrationVector = pCtx->m_PlaneNormal[i];
-				PenetrationVector *= PenetrationDistance;
-				(*pXYZ) -= PenetrationVector;
+				FourVectors pts = *pXYZ;
+				pts -= pCtx->m_PointOnPlane[i];
+				fltx4 PlaneEq=pts * pCtx->m_PlaneNormal[i];
+				// where planeeq<0, inside
+				PlaneEq = SubSIMD( PlaneEq, *pRadius );
+				fltx4 BadPts=CmpLtSIMD( PlaneEq, Four_Zeros );
+				if ( IsAnyNegative( BadPts ) )
+				{
+					bChangedSomething = true;
+					// project points to plane surface
+					fltx4 PenetrationDistance=MinSIMD( Four_Zeros, PlaneEq );
+					FourVectors PenetrationVector = pCtx->m_PlaneNormal[i];
+					PenetrationVector *= PenetrationDistance;
+					(*pXYZ) -= PenetrationVector;
+				}
 			}
 		}
 		++pXYZ;
@@ -558,7 +633,10 @@ class C_OP_WorldTraceConstraint : public CParticleOperatorInstance
 
 	uint32 GetWrittenAttributes( void ) const
 	{
-		return PARTICLE_ATTRIBUTE_XYZ_MASK;
+		int nRet = PARTICLE_ATTRIBUTE_XYZ_MASK | PARTICLE_ATTRIBUTE_PREV_XYZ;
+		if ( m_bKillonContact )
+			nRet |= PARTICLE_ATTRIBUTE_LIFE_DURATION_MASK;
+		return nRet;
 	}
 
 	uint32 GetReadAttributes( void ) const
@@ -577,8 +655,11 @@ class C_OP_WorldTraceConstraint : public CParticleOperatorInstance
 	float m_flSlideAmount;
 	float m_flRadiusScale;
 	float m_flCpMovementTolerance;
+	float m_flTraceTolerance;
 
-	virtual bool IsFinalConstaint( void ) const
+	bool m_bKillonContact;
+
+	virtual bool IsFinalConstraint( void ) const
 	{
 		return ( m_flBounceAmount != 0. ) || ( m_flSlideAmount != 0. );
 	}
@@ -597,7 +678,12 @@ class C_OP_WorldTraceConstraint : public CParticleOperatorInstance
 	bool EnforceConstraint( int nStartBlock,
 							int nEndBlock,
 							CParticleCollection *pParticles,
-							void *pContext ) const;
+							void *pContext,
+							int nNumValidParticlesInLastChunk ) const;
+	template<bool bKillOnContact, bool bCached> bool EnforceConstraintInternal( int nStartBlock,
+																				int nEndBlock,
+																				CParticleCollection *pParticles,
+																				void *pContext, int nNumValidParticlesInLastChunk ) const;
 };
 
 void C_OP_WorldTraceConstraint::InitParams( CParticleSystemDefinition *pDef, CDmxElement *pElement )
@@ -613,6 +699,116 @@ struct ISectData_t
 	FourVectors m_ISectNormal;								// normal at intersection if any
 };
 
+
+
+static void WorldIntersectTNew( FourVectors const *pStartPnt, FourVectors const *pEndPnt, 
+								int nCollisionGroup, int nMask, ISectData_t *pISectData,
+								int nCollisionMode, CWorldCollideContextData *pCtx, fltx4 const &fl4ParticleValidMask,
+								float flTolerance = 0.0 )
+{
+	pISectData->m_ISectT = Four_Zeros;
+	pISectData->m_LeftOverT = Four_Zeros;
+	pISectData->m_ISectNormal.x = Four_Zeros;
+	pISectData->m_ISectNormal.y = Four_Zeros;
+	pISectData->m_ISectNormal.z = Four_Zeros;
+
+	if ( pCtx )
+	{
+		pISectData->m_ISectT = Four_Twos;
+		// do simd interseciton against planes
+		if ( nCollisionMode == COLLISION_MODE_USE_NEAREST_TRACE )
+		{
+			// find which of our traces is closest to our start / end points
+			pISectData->m_ISectT = Four_Twos;				// no hit
+
+			FourVectors v4PointOnPlane;
+			FourVectors v4PlaneNormal;
+			fltx4 fl4ClosestDist = Four_FLT_MAX;
+			for( int i = 0 ; i < pCtx->m_nActivePlanes; i++ )
+			{
+				if ( pCtx->m_bPlaneActive[i] )
+				{
+					fltx4 fl4TrialDistance = MaxSIMD( 
+						pStartPnt->DistSqrToLineSegment( pCtx->m_TraceStartPnt[i], pCtx->m_TraceEndPnt[i] ),
+						pEndPnt->DistSqrToLineSegment( pCtx->m_TraceStartPnt[i], pCtx->m_TraceEndPnt[i] ) );
+					fltx4 fl4Nearestmask = CmpLeSIMD( fl4TrialDistance, fl4ClosestDist );
+					fl4ClosestDist = MaskedAssign( fl4ClosestDist, fl4TrialDistance, fl4Nearestmask );
+					v4PointOnPlane.x = MaskedAssign( fl4Nearestmask, pCtx->m_PointOnPlane[i].x, v4PointOnPlane.x );
+					v4PointOnPlane.y = MaskedAssign( fl4Nearestmask, pCtx->m_PointOnPlane[i].y, v4PointOnPlane.y );
+					v4PointOnPlane.z = MaskedAssign( fl4Nearestmask, pCtx->m_PointOnPlane[i].z, v4PointOnPlane.z );
+					v4PlaneNormal.x = MaskedAssign( fl4Nearestmask, pCtx->m_PlaneNormal[i].x, v4PlaneNormal.x );
+					v4PlaneNormal.y = MaskedAssign( fl4Nearestmask, pCtx->m_PlaneNormal[i].y, v4PlaneNormal.y );
+					v4PlaneNormal.z = MaskedAssign( fl4Nearestmask, pCtx->m_PlaneNormal[i].z, v4PlaneNormal.z );
+				}
+			}
+			fltx4 fl4OutOfRange = AndSIMD( fl4ParticleValidMask, 
+										   CmpGtSIMD( fl4ClosestDist, ReplicateX4( flTolerance ) ) );
+			if ( IsAnyNegative( fl4OutOfRange ) )
+			{
+				nMask = TestSignSIMD( fl4OutOfRange );
+				for(int i=0; i < 4; i++ )
+				{
+					if ( nMask & ( 1 << i ) )
+					{
+						Vector start = pStartPnt->Vec( i );
+						Vector delta = pEndPnt->Vec( i ) - start;
+						
+						float ln = delta.Length();
+
+						float traceScale = max( 5.0, 300.0 / ( ln + .01 ) );
+
+						Vector end = start + delta * traceScale;
+
+						CBaseTrace tr;
+						g_pParticleSystemMgr->Query()->TraceLine( start, end,
+																  nMask, NULL, nCollisionGroup, &tr );
+		
+						if ( tr.fraction < 1.0 )
+						{
+							SubFloat( v4PointOnPlane.x, i ) = start.x + ( tr.fraction * ( end.x - start.x ) );
+							SubFloat( v4PointOnPlane.y, i ) = start.y + ( tr.fraction * ( end.y - start.y ) );
+							SubFloat( v4PointOnPlane.z, i ) = start.z + ( tr.fraction * ( end.z - start.z ) );
+							SubFloat( v4PlaneNormal.x, i ) = tr.plane.normal.x;
+							SubFloat( v4PlaneNormal.y, i ) = tr.plane.normal.y;
+							SubFloat( v4PlaneNormal.z, i ) = tr.plane.normal.z;
+						}
+						else
+						{
+							// no hit.  a normal of 0 will prevent the crossing check from ever
+							// finding a crossing, since it will check for (p - origin ) dot normal
+							// < 0
+							SubFloat( v4PlaneNormal.x, i ) = 0;
+							SubFloat( v4PlaneNormal.y, i ) = 0;
+							SubFloat( v4PlaneNormal.z, i ) = 0;
+						}
+					}
+				}
+			}
+			FourVectors v4StartD = *pStartPnt;
+			FourVectors v4EndD = *pEndPnt;
+			v4StartD -= v4PointOnPlane;
+			v4EndD -= v4PointOnPlane;
+			fltx4 fl4StartDist = v4StartD * v4PlaneNormal;
+			fltx4 fl4EndDist = v4EndD * v4PlaneNormal;
+			fltx4 fl4CrossMask = AndSIMD( CmpGeSIMD( fl4StartDist, Four_Zeros ), CmpLtSIMD( fl4EndDist, Four_Zeros ) );
+			fl4CrossMask = AndSIMD( fl4CrossMask, fl4ParticleValidMask );
+			if ( IsAnyNegative( fl4CrossMask ) )
+			{
+				// a hit!
+				fltx4 fl4T = DivSIMD( fl4StartDist, SubSIMD( fl4StartDist, fl4EndDist ) );
+				fl4CrossMask = AndSIMD( fl4CrossMask, CmpLtSIMD( fl4T, pISectData->m_ISectT ) );
+				if ( IsAnyNegative( fl4CrossMask ) )
+				{
+					pISectData->m_ISectT = MaskedAssign( fl4CrossMask, fl4T, pISectData->m_ISectT );
+					pISectData->m_ISectNormal.x = MaskedAssign( fl4CrossMask, v4PlaneNormal.x, pISectData->m_ISectNormal.x );
+					pISectData->m_ISectNormal.y = MaskedAssign( fl4CrossMask, v4PlaneNormal.y, pISectData->m_ISectNormal.y );
+					pISectData->m_ISectNormal.z = MaskedAssign( fl4CrossMask, v4PlaneNormal.z, pISectData->m_ISectNormal.z );
+				}
+			}
+		}
+		pISectData->m_LeftOverT = MaxSIMD( Four_Zeros, SubSIMD( Four_Ones, pISectData->m_ISectT ) );
+	}
+}
 
 static void WorldIntersectT( FourVectors const *pStartPnt, FourVectors const *pEndPnt, 
 							 int nCollisionGroup, int nMask, ISectData_t *pISectData,
@@ -630,24 +826,33 @@ static void WorldIntersectT( FourVectors const *pStartPnt, FourVectors const *pE
 		// do simd interseciton against planes
 		for( int i=0 ; i < pCtx->m_nActivePlanes; i++ )
 		{
-			FourVectors v4StartD = *pStartPnt;
-			FourVectors v4EndD = *pEndPnt;
-			v4StartD -= pCtx->m_PointOnPlane[i];
-			v4EndD -= pCtx->m_PointOnPlane[i];
-			fltx4 fl4StartDist = v4StartD * pCtx->m_PlaneNormal[i];
-			fltx4 fl4EndDist = v4EndD * pCtx->m_PlaneNormal[i];
-			fltx4 fl4CrossMask = AndSIMD( CmpGeSIMD( fl4StartDist, Four_Zeros ), CmpLtSIMD( fl4EndDist, Four_Zeros ) );
-			if ( IsAnyNegative( fl4CrossMask ) )
+			if ( pCtx->m_bPlaneActive[ i ] )
 			{
-				// a hit!
-				fltx4 fl4T = DivSIMD( fl4StartDist, SubSIMD( fl4StartDist, fl4EndDist ) );
-				fl4CrossMask = AndSIMD( fl4CrossMask, CmpLtSIMD( fl4T, pISectData->m_ISectT ) );
+				FourVectors v4StartD = *pStartPnt;
+				FourVectors v4EndD = *pEndPnt;
+				v4StartD -= pCtx->m_PointOnPlane[i];
+				v4EndD -= pCtx->m_PointOnPlane[i];
+				fltx4 fl4StartDist = v4StartD * pCtx->m_PlaneNormal[i];
+				fltx4 fl4EndDist = v4EndD * pCtx->m_PlaneNormal[i];
+				fltx4 fl4CrossMask = AndSIMD( CmpGeSIMD( fl4StartDist, Four_Zeros ), CmpLtSIMD( fl4EndDist, Four_Zeros ) );
 				if ( IsAnyNegative( fl4CrossMask ) )
 				{
-					pISectData->m_ISectT = MaskedAssign( fl4CrossMask, fl4T, pISectData->m_ISectT );
-					pISectData->m_ISectNormal.x = MaskedAssign( fl4CrossMask, pCtx->m_PlaneNormal[i].x, pISectData->m_ISectNormal.x );
-					pISectData->m_ISectNormal.y = MaskedAssign( fl4CrossMask, pCtx->m_PlaneNormal[i].y, pISectData->m_ISectNormal.y );
-					pISectData->m_ISectNormal.z = MaskedAssign( fl4CrossMask, pCtx->m_PlaneNormal[i].z, pISectData->m_ISectNormal.z );
+#ifdef FP_EXCEPTIONS_ENABLED
+					// Wherever fl4CrossMask is zero we need to ensure that fl4StartDist does
+					// not equal fl4EndDist to avoid divide-by-zero.
+					//fl4FadeWindow = OrSIMD( AndSIMD( fl4GoodMask, fl4EndTime ), AndNotSIMD( fl4GoodMask, fl4EndTime ) );
+					fl4EndDist = AddSIMD( fl4EndDist, AndNotSIMD( fl4CrossMask, Four_Ones ) );
+#endif
+					// a hit!
+					fltx4 fl4T = DivSIMD( fl4StartDist, SubSIMD( fl4StartDist, fl4EndDist ) );
+					fl4CrossMask = AndSIMD( fl4CrossMask, CmpLtSIMD( fl4T, pISectData->m_ISectT ) );
+					if ( IsAnyNegative( fl4CrossMask ) )
+					{
+						pISectData->m_ISectT = MaskedAssign( fl4CrossMask, fl4T, pISectData->m_ISectT );
+						pISectData->m_ISectNormal.x = MaskedAssign( fl4CrossMask, pCtx->m_PlaneNormal[i].x, pISectData->m_ISectNormal.x );
+						pISectData->m_ISectNormal.y = MaskedAssign( fl4CrossMask, pCtx->m_PlaneNormal[i].y, pISectData->m_ISectNormal.y );
+						pISectData->m_ISectNormal.z = MaskedAssign( fl4CrossMask, pCtx->m_PlaneNormal[i].z, pISectData->m_ISectNormal.z );
+					}
 				}
 			}
 		}
@@ -683,12 +888,32 @@ static void WorldIntersectT( FourVectors const *pStartPnt, FourVectors const *pE
 	}
 }
 
-#define N_PASSES_WORLDTRACE 1
-
 bool C_OP_WorldTraceConstraint::EnforceConstraint( int nStartBlock,
 												   int nNumBlocks,
 												   CParticleCollection *pParticles,
-												   void *pContext ) const
+												   void *pContext, int nNumValidParticlesInLastChunk ) const
+{
+	if ( m_nCollisionMode == COLLISION_MODE_USE_NEAREST_TRACE )
+	{
+		if ( m_bKillonContact )
+			return EnforceConstraintInternal<true, true>( nStartBlock, nNumBlocks, pParticles, pContext, nNumValidParticlesInLastChunk );
+		else
+			return EnforceConstraintInternal<false, true>( nStartBlock, nNumBlocks, pParticles, pContext, nNumValidParticlesInLastChunk );
+	}
+	else
+	{
+		if ( m_bKillonContact )
+			return EnforceConstraintInternal<true, false>( nStartBlock, nNumBlocks, pParticles, pContext, nNumValidParticlesInLastChunk );
+		else
+			return EnforceConstraintInternal<false, false>( nStartBlock, nNumBlocks, pParticles, pContext, nNumValidParticlesInLastChunk );
+	}
+}
+
+template<bool bKillonContact, bool bCached> bool C_OP_WorldTraceConstraint::EnforceConstraintInternal( 
+	int nStartBlock,
+	int nNumBlocks,
+	CParticleCollection *pParticles,
+	void *pContext, int nNumValidParticlesInLastChunk ) const
 {
 	C4VAttributeWriteIterator pPrevXYZ( PARTICLE_ATTRIBUTE_PREV_XYZ, pParticles );
 	pPrevXYZ += nStartBlock;
@@ -699,6 +924,15 @@ bool C_OP_WorldTraceConstraint::EnforceConstraint( int nStartBlock,
 	CM128AttributeIterator pRadius( PARTICLE_ATTRIBUTE_RADIUS, pParticles );
 	pRadius += nStartBlock;
 
+	CM128AttributeWriteIterator pLifetime;
+
+	if ( bKillonContact )
+	{
+		pLifetime.Init( PARTICLE_ATTRIBUTE_LIFE_DURATION, pParticles );
+		pLifetime += nStartBlock;
+	}
+	
+	
 	fltx4 bounceScale = ReplicateX4( m_flBounceAmount );
 
 	fltx4 slideScale = ReplicateX4( m_flSlideAmount );
@@ -723,6 +957,7 @@ bool C_OP_WorldTraceConstraint::EnforceConstraint( int nStartBlock,
 
 	CWorldCollideContextData *pCtx = NULL;
 	if ( ( m_nCollisionMode == COLLISION_MODE_PER_FRAME_PLANESET ) ||
+		 ( m_nCollisionMode == COLLISION_MODE_USE_NEAREST_TRACE ) ||
 		 ( m_nCollisionMode == COLLISION_MODE_INITIAL_TRACE_DOWN ) )
 	{
 		if ( ! *ppCtx )
@@ -738,6 +973,7 @@ bool C_OP_WorldTraceConstraint::EnforceConstraint( int nStartBlock,
 			pCtx->m_flLastUpdateTime = pParticles->m_flCurTime;
 		}
 	}
+	float flTol = m_flTraceTolerance * m_flTraceTolerance;
 	do
 	{
 		// compute radius adjust factor for intersection
@@ -770,8 +1006,19 @@ bool C_OP_WorldTraceConstraint::EnforceConstraint( int nStartBlock,
 		
 		ISectData_t iData;
 		
-		WorldIntersectT( pPrevXYZ, &endPnt, m_nCollisionGroupNumber, nMask, &iData, pCtx );
-		
+		if ( bCached )
+		{
+			fltx4 fl4TailMask;
+			if ( nNumBlocks > 1 )
+				fl4TailMask = LoadAlignedIntSIMD( g_SIMD_AllOnesMask );
+			else
+				fl4TailMask = LoadAlignedIntSIMD( g_SIMD_SkipTailMask[nNumValidParticlesInLastChunk] );
+			
+			WorldIntersectTNew( pPrevXYZ, &endPnt, m_nCollisionGroupNumber, nMask, &iData, m_nCollisionMode, pCtx, fl4TailMask, flTol );
+		}
+		else
+			WorldIntersectT( pPrevXYZ, &endPnt, m_nCollisionGroupNumber, nMask, &iData, pCtx );
+
 		
 		fltx4 didhit = CmpLtSIMD( iData.m_ISectT, Four_Ones );
 		// mask off zero-length deltas
@@ -781,49 +1028,59 @@ bool C_OP_WorldTraceConstraint::EnforceConstraint( int nStartBlock,
 		{
 
 			bChangedSomething = true;
-
-
-			FourVectors newPnt = delta;
-			newPnt *= iData.m_ISectT;
-			newPnt += *pPrevXYZ;
-
-			if ( bBouncingOrSliding )
-			{
-				// need to compute movement due to sliding and bouncing, and add it to the point,
-				// and also compute the new velocity, adjust prev pnt to reflect that new velocity
-
-				FourVectors bouncePart = VectorReflect( deltanormalized, iData.m_ISectNormal );
-				bouncePart *= bounceScale;
-				FourVectors newVel = bouncePart;
-				
-				bouncePart *= iData.m_LeftOverT;
-				newPnt += bouncePart;
-				
-				FourVectors slidePart = VectorSlide( delta, iData.m_ISectNormal );
-				slidePart *= slideScale;
-				newVel += slidePart;
-				
-				slidePart *= iData.m_LeftOverT;
-				
-				newPnt += slidePart;
-
-				FourVectors newPrev = newPnt;
-				newPrev -= newVel;
-				pPrevXYZ->x = MaskedAssign( didhit, newPrev.x, pPrevXYZ->x );
-				pPrevXYZ->y = MaskedAssign( didhit, newPrev.y, pPrevXYZ->y );
-				pPrevXYZ->z = MaskedAssign( didhit, newPrev.z, pPrevXYZ->z );
+			if ( bKillonContact )
+			{	
+				*pLifetime = MaskedAssign( didhit, Four_Zeros, *pLifetime );
 			}
-			pXYZ->x = MaskedAssign( didhit, newPnt.x, pXYZ->x );
-			pXYZ->y = MaskedAssign( didhit, newPnt.y, pXYZ->y );
-			pXYZ->z = MaskedAssign( didhit, newPnt.z, pXYZ->z );
+			else
+			{
+				FourVectors newPnt = delta;
+				newPnt *= iData.m_ISectT;
+				newPnt += *pPrevXYZ;
+
+				if ( bBouncingOrSliding )
+				{
+					// need to compute movement due to sliding and bouncing, and add it to the point,
+					// and also compute the new velocity, adjust prev pnt to reflect that new velocity
+
+					FourVectors bouncePart = VectorReflect( deltanormalized, iData.m_ISectNormal );
+					bouncePart *= bounceScale;
+					FourVectors newVel = bouncePart;
+
+					bouncePart *= iData.m_LeftOverT;
+					newPnt += bouncePart;
+
+					FourVectors slidePart = VectorSlide( delta, iData.m_ISectNormal );
+					slidePart *= slideScale;
+					newVel += slidePart;
+
+					slidePart *= iData.m_LeftOverT;
+
+					newPnt += slidePart;
+
+					FourVectors newPrev = newPnt;
+					newPrev -= newVel;
+					pPrevXYZ->x = MaskedAssign( didhit, newPrev.x, pPrevXYZ->x );
+					pPrevXYZ->y = MaskedAssign( didhit, newPrev.y, pPrevXYZ->y );
+					pPrevXYZ->z = MaskedAssign( didhit, newPrev.z, pPrevXYZ->z );
+				}
+				pXYZ->x = MaskedAssign( didhit, newPnt.x, pXYZ->x );
+				pXYZ->y = MaskedAssign( didhit, newPnt.y, pXYZ->y );
+				pXYZ->z = MaskedAssign( didhit, newPnt.z, pXYZ->z );
+			}
+
 			CHECKSYSTEM( pParticles );
 		}
 		++pXYZ;
 		++pPrevXYZ;
 		++pRadius;
+		if ( bKillonContact )
+			++pLifetime;
 	} while (--nNumBlocks);
 	return bChangedSomething;
 }
+
+
 
 DEFINE_PARTICLE_OPERATOR( C_OP_WorldTraceConstraint, "Collision via traces", OPERATOR_GENERIC );
 
@@ -836,6 +1093,8 @@ BEGIN_PARTICLE_OPERATOR_UNPACK( C_OP_WorldTraceConstraint )
 	DMXELEMENT_UNPACK_FIELD_STRING( "collision group", "NONE", m_CollisionGroupName )
 	DMXELEMENT_UNPACK_FIELD( "control point offset for fast collisions", "0 0 0", Vector, m_vecCpOffset )
 	DMXELEMENT_UNPACK_FIELD( "control point movement distance tolerance", "5", float, m_flCpMovementTolerance )
+	DMXELEMENT_UNPACK_FIELD( "kill particle on collision", "0", bool, m_bKillonContact )
+	DMXELEMENT_UNPACK_FIELD( "trace accuracy tolerance", "24", float, m_flTraceTolerance )
 END_PARTICLE_OPERATOR_UNPACK( C_OP_WorldTraceConstraint )
 
 void AddBuiltInParticleConstraints( void )

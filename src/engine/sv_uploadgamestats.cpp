@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,23 +7,34 @@
 //=============================================================================//
 
 #ifdef _WIN32
+
 #if !defined( _X360 )
 #include <winsock.h>
 #else
 #include "winsockx.h"
 #endif
-#include "net.h"
-#elif _LINUX
+
+#elif POSIX
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+//$ #include <uuid/uuid.h>
+typedef unsigned char uuid_t[16];
+#ifdef OSX
+#include <uuid/uuid.h>
+#else
+typedef unsigned char uuid_t[16];
+#endif
+#include <pwd.h>
 #define closesocket close
 #include "quakedef.h" // build_number()
-#include "net.h"
 #endif
+
+#include "net.h"
 #include "quakedef.h"
+#include "sv_uploadgamestats.h"
 #include "host.h"
 #include "host_phonehome.h"
 #include "mathlib/IceKey.H"
@@ -39,9 +50,13 @@
 #include "iregistry.h"
 #include "filesystem_engine.h"
 #include "checksum_md5.h"
-#include "steam/steam_api.h"
+#include "cl_steamauth.h"
+#include "steam/steam_gameserver.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "tier2/tier2.h"
+#include "server.h"
+#include "sv_steamauth.h"
+#include "host_state.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
@@ -49,8 +64,6 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
-
-extern int g_iSteamAppID;
 
 typedef unsigned int u32;
 typedef unsigned char u8;
@@ -260,41 +273,42 @@ public:
 
 	#define GAMESTATSUPLOADER_CONNECT_RETRY_TIME	1.0
 
+	CUploadGameStats() : m_bConnected(false), m_flNextConnectAttempt(0) {}
+
 	//-----------------------------------------------------------------------------
 	// Purpose: Initializes the connection to the CSER
 	//-----------------------------------------------------------------------------
 	void InitConnection( void )
 	{
+		AsyncUpload_Shutdown();
+
 		m_bConnected = false;
 		m_Adr.Clear();
 		m_Adr.SetType( NA_IP );
 		m_flNextConnectAttempt = 0;
-
 		// don't call UpdateConnection here, does bad things
 	}
 
 	void UpdateConnection( void )
 	{
-		if ( m_bConnected )
+		if ( m_bConnected || HostState_IsShuttingDown() )
 			return;
 
-		if ( CommandLine()->FindParm( "-localcser" ) || !g_pFileSystem->IsSteam() )
+		// try getting client SteamUtils interface
+		ISteamUtils *pSteamUtils = NULL;
+#ifndef SWDS
+		pSteamUtils = Steam3Client().SteamUtils();
+#endif
+		// if that fails, try the game server SteamUtils interface
+		if ( !pSteamUtils )
 		{
-			char const *cserIP = CommandLine()->ParmValue( "-localcser", "steambeta1:27013" );
-			if ( cserIP && cserIP[ 0 ] )
-			{
-				Warning( "Using '%s' CSER server!\n", cserIP );
-				m_bConnected = true;
-				NET_StringToAdr( cserIP, &m_Adr );
-			}
-			return;
+			pSteamUtils = Steam3Server().SteamGameServerUtils();
 		}
-#ifndef NO_STEAM
 
 		// can't determine CSER if Steam not running
-		if ( !SteamUtils() )
+		if ( !pSteamUtils )
 			return;
-#endif
+
 		float curTime = Sys_FloatTime();
 
 		if ( curTime < m_flNextConnectAttempt )
@@ -306,9 +320,7 @@ public:
 		if ( VCRGetMode() != VCR_Playback )
 #endif
 		{
-#ifndef NO_STEAM
-			SteamUtils()->GetCSERIPPort( &unIP, &usPort );
-#endif
+			pSteamUtils->GetCSERIPPort( &unIP, &usPort );
 		}
 #if !defined( NO_VCR )
 		VCRGenericValue( "a", &unIP, sizeof( unIP ) );	
@@ -329,86 +341,20 @@ public:
 		}
 	}
 
-	bool ForceGameStats() const
-	{
-		bool bForcingGameStats = CommandLine()->FindParm( "-gamestats" ) ? true : false;
-		return bForcingGameStats;
-	}
-
 	virtual bool UploadGameStats( char const *mapname,
 		unsigned int blobversion, unsigned int blobsize, const void *pvBlobData )
 	{
-		// Attempt connection, for backwards compatibility
-		UpdateConnection();
-
-		if ( !m_bConnected )
-			return false;
-
-		unsigned int useAppId = g_iSteamAppID;
-
-		// This is a hack so that if we are running internally, but not from steam, that we can generate gamestats data still for episodic
-		if ( !g_pFileSystem->IsSteam() )
-		{
-			char gamedir[ 64 ];
-			Q_FileBase( com_gamedir, gamedir, sizeof( gamedir ) );
-
-			bool bForcingGameStats = ForceGameStats();
-			if ( bForcingGameStats )
-			{
-				if ( !Q_stricmp( gamedir, "episodic" ) )
-				{
-					// ywb:  HACK HACK for debugging gamestats for episode 1!!!
-					useAppId = 380;
-				}
-				if ( !Q_stricmp( gamedir, "ep2" ) )
-				{
-					// ywb:  HACK HACK for debugging gamestats for episode 2!!!
-					useAppId = 420;
-				}
-				if ( !Q_stricmp( gamedir, "tf" ) )
-				{
-					useAppId = 440;
-				}
-				else if ( !Q_stricmp( gamedir, "portal" ) )
-				{
-					// dbk:  HACK HACK for debugging gamestats for portal!!!
-					useAppId = 400;
-				}
-			}
-		}
-
-		if ( useAppId == 0 )
-			return false;
-
-		TGameStatsParameters params;
-		Q_memset( &params, 0, sizeof( params ) );
-
-		params.m_ipCSERServer = m_Adr;
-
-		params.m_uEngineBuildNumber		= build_number();
-		Q_strncpy( params.m_sExecutableName, "hl2.exe", sizeof( params.m_sExecutableName ) );
-		Q_FileBase( com_gamedir, params.m_sGameDirectory, sizeof( params.m_sGameDirectory ) );
-		Q_FileBase( mapname, params.m_sMapName, sizeof( params.m_sMapName ) );
-		params.m_uStatsBlobVersion		= blobversion;
-		params.m_uStatsBlobSize			= blobsize;
-		params.m_pStatsBlobData			= ( void * )pvBlobData;
-
-		////////////////////////////////////////////////////////////////////////////
-		// New protocol sorts things by Steam AppId (4/6/06 ywb)
-		params.m_uAppId = useAppId;
-		////////////////////////////////////////////////////////////////////////////
-
-		EGameStatsUploadStatus result = Win32UploadGameStatsBlocking( params );
-		return ( result == eGameStatsUploadSucceeded ) ? true : false;
+		AsyncUpload_QueueData( mapname, blobversion, blobsize, pvBlobData );
+		return true;
+		//return UploadGameStatsInternal( mapname, blobversion, blobsize, pvBlobData );
 	}
 
 	// If user has disabled stats tracking, do nothing
 	virtual bool IsGameStatsLoggingEnabled()
 	{
-		if ( !g_pFileSystem->IsSteam() )
-		{
-			return ForceGameStats();
-        	}
+		if ( CommandLine()->FindParm( "-nogamestats" ) )
+			return false;
+
 #ifdef SWDS
 		return true;
 #else
@@ -444,18 +390,28 @@ public:
 		if ( !uuid || !*uuid )
 		{
 			// Create a new one
+#ifdef WIN32
 			UUID newId;
 			UuidCreate( &newId );
+#elif defined(POSIX)
+			uuid_t newId;
+#ifdef OSX
+			uuid_generate( newId );
+#endif
+#else
+#error
+#endif
 			char hex[ 17 ];
 			Q_memset( hex, 0, sizeof( hex ) );
 			Q_binarytohex( (const byte *)&newId, sizeof( newId ), hex, sizeof( hex ) );
 
 			// If running at Valve, copy in the users name here
-			if ( !g_pFileSystem->IsSteam() )
+			if ( Steam3Client().SteamUtils() && ( Steam3Client().SteamUser()->BLoggedOn() ) && 
+				( k_EUniverseBeta == Steam3Client().SteamUtils()->GetConnectedUniverse() ) )
 			{
-#if defined( _WIN32 )
 				bool bOk = true;
 				char username[ 64 ];
+#if defined( _WIN32 )
 				Q_memset( username, 0, sizeof( username ) );
 				DWORD length = sizeof( username ) - 1;
 				if ( !GetUserName( username, &length ) )
@@ -476,7 +432,7 @@ public:
 #endif
 				if ( bOk )
 				{
-					int nBytesToCopy = min( Q_strlen( username ), sizeof( hex ) - 1 );
+					int nBytesToCopy = min( (size_t)Q_strlen( username ), sizeof( hex ) - 1 );
 					// NOTE:  This doesn't copy the NULL terminator from username because we want the "random" bits after the name
 					Q_memcpy( hex, username, nBytesToCopy );					
 				}
@@ -492,7 +448,15 @@ public:
 		}
 
 	    ReleaseInstancedRegistry( temp );
-#endif
+#endif		
+
+		if ( ( buf[0] == 0 ) && sv.IsDedicated() )
+		{
+			// For Linux dedicated servers, where we won't get a unique ID: set the ID to "unknown" so we have something.  (If there's no ID,
+			// stats don't get sent.)  This will later get altered to be a hash of IP&port, but this gets called early before IP is determined
+			// so we can't make the hash now.
+			Q_strncpy( buf, "unknown", bufsize );
+		}
 	}
 
 	virtual bool IsCyberCafeUser( void )
@@ -510,13 +474,50 @@ public:
 		return g_pMaterialSystemHardwareConfig->GetHDREnabled();
 #endif
 	}
+
+	bool UploadGameStatsInternal( char const *mapname,
+		unsigned int blobversion, unsigned int blobsize, const void *pvBlobData )
+	{
+		// Attempt connection, for backwards compatibility
+		UpdateConnection();
+
+		if ( !m_bConnected )
+			return false;
+
+		unsigned int useAppId = GetSteamAppID();
+		if ( useAppId == 0 )
+			return false;
+
+		TGameStatsParameters params;
+		Q_memset( &params, 0, sizeof( params ) );
+
+		params.m_ipCSERServer = m_Adr;
+
+		params.m_uEngineBuildNumber		= build_number();
+		Q_strncpy( params.m_sExecutableName, "hl2.exe", sizeof( params.m_sExecutableName ) );
+		Q_FileBase( com_gamedir, params.m_sGameDirectory, sizeof( params.m_sGameDirectory ) );
+		Q_FileBase( mapname, params.m_sMapName, sizeof( params.m_sMapName ) );
+		params.m_uStatsBlobVersion		= blobversion;
+		params.m_uStatsBlobSize			= blobsize;
+		params.m_pStatsBlobData			= ( void * )pvBlobData;
+
+		////////////////////////////////////////////////////////////////////////////
+		// New protocol sorts things by Steam AppId (4/6/06 ywb)
+		params.m_uAppId = useAppId;
+		////////////////////////////////////////////////////////////////////////////
+
+		EGameStatsUploadStatus result = Win32UploadGameStatsBlocking( params );
+		return ( result == eGameStatsUploadSucceeded ) ? true : false;
+	}
 private:
 	netadr_t	m_Adr;
 	float		m_flNextConnectAttempt;
 	bool		m_bConnected;
 };
 
-EXPOSE_SINGLE_INTERFACE( CUploadGameStats, IUploadGameStats, INTERFACEVERSION_UPLOADGAMESTATS );
+static CUploadGameStats g_UploadGameStats;
+IUploadGameStats *g_pUploadGameStats = &g_UploadGameStats;
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CUploadGameStats, IUploadGameStats, INTERFACEVERSION_UPLOADGAMESTATS, g_UploadGameStats );
 
 void UpdateProgress( const TGameStatsParameters & params, char const *fmt, ... )
 {
@@ -1038,7 +1039,7 @@ EGameStatsUploadStatus Win32UploadGameStatsBlocking
 			adr.sin_port = htons( harvester_port );
 #ifdef _WIN32
 			adr.sin_addr.S_un.S_addr = harvester_ip;
-#elif _LINUX
+#elif POSIX
 			adr.sin_addr.s_addr = harvester_ip;
 #endif
 
@@ -1058,4 +1059,195 @@ EGameStatsUploadStatus Win32UploadGameStatsBlocking
 	}
 
 	return status;
+}
+//////////////////////////////////////////////////////////////////////////
+//
+// Implementation of async uploading
+//
+
+class CAsyncUploaderThread
+{
+public:
+	CAsyncUploaderThread()
+		: m_hThread( NULL ), m_bRunning( false ), m_eventQueue(false), m_eventInitShutdown(false) {}
+
+	ThreadHandle_t m_hThread;
+
+protected:
+	
+	struct DataEntry
+	{
+		char const *szMapName;
+		uint uiBlobVersion;
+		uint uiBlobSize;
+		void const *pvBlob;
+
+		DataEntry *AllocCopy() const;
+		void Free() { delete [] ( (char*)this ); }
+	};
+
+	CThreadEvent m_eventQueue;
+	CThreadEvent m_eventInitShutdown;
+	CThreadFastMutex m_mtx;
+	CUtlVector< DataEntry * > m_queue;
+	bool m_bRunning;
+	
+	void ThreadProc();
+	
+	enum {
+		SLEEP_ENTRY_UPLOADED	= 10 * 1000
+	};
+
+public:
+	static unsigned CallbackThreadProc( void *pvParam ) { ((CAsyncUploaderThread*) pvParam)->ThreadProc(); return 0; }
+	void QueueData( char const *szMapName, uint uiBlobVersion, uint uiBlobSize, const void *pvBlob );
+	void TerminateAndSelfDelete();
+};
+
+static CAsyncUploaderThread *g_pAsyncUploader = NULL;
+
+CAsyncUploaderThread::DataEntry * CAsyncUploaderThread::DataEntry::AllocCopy() const
+{
+	// Find out how much memory we would need
+	uint lenMapName = ( szMapName ? strlen( szMapName ) : 0 );
+	uint numBytes = sizeof( DataEntry ) + uiBlobSize + lenMapName + 1;
+
+	char *pbData = new char[ numBytes ];
+	DataEntry *pNew = ( DataEntry * )( pbData );
+	if ( !pNew )
+		return NULL;
+
+	pNew->uiBlobVersion = uiBlobVersion;
+	pNew->uiBlobSize = uiBlobSize;
+	
+	char *pbWriteMapName = ( char * )( pNew + 1 );
+	pNew->szMapName = pbWriteMapName;
+	memcpy( pbWriteMapName, szMapName, lenMapName );
+	pbWriteMapName[ lenMapName ] = 0;
+
+	char *pbWriteBlob = pbWriteMapName + lenMapName + 1;
+	pNew->pvBlob = pbWriteBlob;
+	memcpy( pbWriteBlob, pvBlob, uiBlobSize );
+
+	return pNew;
+}
+
+void CAsyncUploaderThread::QueueData( char const *szMapName, uint uiBlobVersion, uint uiBlobSize, const void *pvBlob )
+{
+	// DevMsg( 3, "AsyncUploaderThread: Queue [%.*s]\n", uiBlobSize, pvBlob );
+
+	if ( !m_hThread )
+	{
+		// Start the thread and wait for it to be running.
+		// There is a slightly complicated two-event negotiation:
+		// ThreadProc signals eventInitShutdown then waits on eventQueue
+		Assert( m_bRunning == false );
+		m_hThread = CreateSimpleThread( CallbackThreadProc, this );
+		m_eventInitShutdown.Wait();
+		Assert( m_bRunning == true );
+		// At this point, both events are unsignaled and the thread
+		// is in its main loop.
+	}
+
+	// Prepare for a DataEntry
+	DataEntry de = { szMapName, uiBlobVersion, uiBlobSize, pvBlob };
+	if ( DataEntry *pNew = de.AllocCopy() )
+	{
+		{
+			AUTO_LOCK( m_mtx );
+			m_queue.AddToTail( pNew );
+		}
+		m_eventQueue.Set();
+	}
+}
+
+void CAsyncUploaderThread::TerminateAndSelfDelete()
+{
+	ThreadHandle_t hThread = m_hThread;
+	if ( hThread )
+	{
+		m_bRunning = false;
+		m_eventQueue.Set();
+		m_eventInitShutdown.Set(); // MUST BE LAST MEMBER ACCESS, other thread may now delete this
+
+		// Wait for a while for upload to finish, but don't wait forever
+		ThreadJoin( hThread, 10 * 1000 );
+		ReleaseThreadHandle( hThread );
+	}
+	else
+	{
+		delete this;
+	}
+}
+
+void CAsyncUploaderThread::ThreadProc()
+{
+	bool bQueueDrained = true;
+	bool bGotShutdownEvent = false;
+
+	m_bRunning = true;
+	m_eventInitShutdown.Set();
+
+	while ( m_bRunning )
+	{
+		if ( bQueueDrained )
+		{
+			m_eventQueue.Wait();
+		}
+
+		DataEntry *pUpload = NULL;
+		{
+			AUTO_LOCK( m_mtx );
+			if ( m_queue.Count() )
+			{
+				pUpload = m_queue[0];
+				m_queue.Remove( 0 );
+			}
+			bQueueDrained = ( m_queue.Count() == 0 );
+		}
+
+		if ( m_bRunning && pUpload )
+		{
+			// DevMsg( 3, "AsyncUploaderThread: Uploading [%.*s]\n", pUpload->uiBlobSize, pUpload->pvBlob );
+
+			// Attempt to upload the data until successful
+			bool bSuccess = g_UploadGameStats.UploadGameStatsInternal( pUpload->szMapName, pUpload->uiBlobVersion, pUpload->uiBlobSize, pUpload->pvBlob );
+			bSuccess;
+
+			pUpload->Free();
+
+			// After the data entry got uploaded, grab the next one
+			// DevMsg( 3, "AsyncUploaderThread: Upload finished (status=%d) for data [%.*s]\n", bSuccess, pUpload->uiBlobSize, pUpload->pvBlob );
+			
+			// Using an event as an interruptable sleep; signaled if m_bRunning is cleared
+			bGotShutdownEvent |= m_eventInitShutdown.Wait( SLEEP_ENTRY_UPLOADED );
+		}
+	}
+
+	Assert( !m_bRunning );
+
+	// Deletes self at end of execution!
+	if ( !bGotShutdownEvent )
+	{
+		m_eventInitShutdown.Wait();
+	}
+	delete this;
+}
+
+void AsyncUpload_QueueData( char const *szMapName, uint uiBlobVersion, uint uiBlobSize, const void *pvBlob )
+{
+	if ( !g_pAsyncUploader )
+	{
+		g_pAsyncUploader = new CAsyncUploaderThread;
+	}
+	g_pAsyncUploader->QueueData( szMapName, uiBlobVersion, uiBlobSize, pvBlob );
+}
+
+void AsyncUpload_Shutdown()
+{
+	if ( g_pAsyncUploader )
+	{
+		g_pAsyncUploader->TerminateAndSelfDelete();
+		g_pAsyncUploader = NULL;
+	}
 }

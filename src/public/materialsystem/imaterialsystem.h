@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,11 +18,11 @@
 #define GAMMA 2.2f
 #define TEXGAMMA 2.2f
 
-#include "tier1/interface.h"
-#include "tier1/refcount.h"
 #include "mathlib/vector.h"
 #include "mathlib/vector4d.h"
 #include "mathlib/vmatrix.h"
+#include "tier1/interface.h"
+#include "tier1/refcount.h"
 #include "appframework/IAppSystem.h"
 #include "bitmap/imageformat.h"
 #include "texture_group_names.h"
@@ -43,6 +43,7 @@ struct MaterialSystem_Config_t;
 class VMatrix;
 struct matrix3x4_t;
 class ITexture;
+class ITextureCompositor;
 struct MaterialSystemHardwareIdentifier_t;
 class KeyValues;
 class IShader;
@@ -65,7 +66,17 @@ typedef uint64 VertexFormat_t;
 
 // NOTE NOTE NOTE!!!!  If you up this, grep for "NEW_INTERFACE" to see if there is anything
 // waiting to be enabled during an interface revision.
-#define MATERIAL_SYSTEM_INTERFACE_VERSION "VMaterialSystem079"
+
+// V081 - 10/25/2016 - Added new Suspend/Resume texture streaming interfaces. Might also have added more calls here due
+//                     to the streaming work that didn't get bumped, but we're not guarding versions on the TF branch
+//                     very judiciously since we need to audit them when merging to SDK branch either way.
+#define MATERIAL_SYSTEM_INTERFACE_VERSION "VMaterialSystem081"
+
+#ifdef POSIX
+#define ABSOLUTE_MINIMUM_DXLEVEL 90
+#else
+#define ABSOLUTE_MINIMUM_DXLEVEL 80
+#endif
 
 enum ShaderParamType_t 
 { 
@@ -82,6 +93,7 @@ enum ShaderParamType_t
 	SHADER_PARAM_TYPE_MATRIX,
 	SHADER_PARAM_TYPE_MATERIAL,
 	SHADER_PARAM_TYPE_STRING,
+	SHADER_PARAM_TYPE_MATRIX4X2
 };
 
 enum MaterialMatrixMode_t
@@ -217,6 +229,15 @@ enum MaterialContextType_t
 	MATERIAL_NULL_CONTEXT
 };
 
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+
+enum MaterialFindContext_t
+{
+	MATERIAL_FINDCONTEXT_NONE,
+	MATERIAL_FINDCONTEXT_ISONAMODEL,
+};
 
 //-----------------------------------------------------------------------------
 // Light structure
@@ -273,7 +294,6 @@ private:
 // XBOX ONLY:
 #define CREATERENDERTARGETFLAGS_NOEDRAM			0x00000008 // inhibit allocation in 360 EDRAM
 #define CREATERENDERTARGETFLAGS_TEMP			0x00000010 // only allocates memory upon first resolve, destroyed at level end
-
 
 //-----------------------------------------------------------------------------
 // allowed stencil operations. These match the d3d operations
@@ -399,41 +419,6 @@ struct MaterialVideoMode_t
 	ImageFormat m_Format;	// use ImageFormats (ignored for windowed mode)
 	int m_RefreshRate;		// 0 == default (ignored for windowed mode)
 };
-//--------------------------------------------------------------------------------
-// Uberlight parameters
-//--------------------------------------------------------------------------------
-struct UberlightState_t
-{
-	UberlightState_t()
-	{
-		m_bEnabled		= false;
-		m_fNearEdge 	= 2.0f;
-		m_fFarEdge  	= 100.0f;
-		m_fCutOn    	= 10.0f;
-		m_fCutOff   	= 1500.0f;
-		m_fShearx   	= 0.0f;
-		m_fSheary   	= 0.0f;
-		m_fWidth    	= 0.3f;
-		m_fWedge    	= 0.05f;
-		m_fHeight		= 0.3f;
-		m_fHedge		= 0.05f;
-		m_fRoundness	= 0.5f; //0.8f;
-	}
-	bool m_bEnabled;
-	float m_fNearEdge;
-	float m_fFarEdge;
-	float m_fCutOn;
-	float m_fCutOff;
-	float m_fShearx;
-	float m_fSheary;
-	float m_fWidth;
-	float m_fWedge;
-	float m_fHeight;
-	float m_fHedge;
-	float m_fRoundness;
-
-	IMPLEMENT_OPERATOR_EQUAL( UberlightState_t );
-};
 
 // fixme: should move this into something else.
 struct FlashlightState_t
@@ -442,29 +427,18 @@ struct FlashlightState_t
 	{
 		m_bEnableShadows = false;						// Provide reasonable defaults for shadow depth mapping parameters
 		m_bDrawShadowFrustum = false;
-		m_flShadowMapResolution = 2048.0f;
-		m_flShadowFilterSize = 1.0f;
-		m_flShadowSlopeScaleDepthBias = 4.0f;
-		m_flShadowDepthBias = 0.00001f;
-		m_flShadowJitterSeed = 0.0f; // i think this is unused
-		m_flShadowAtten = 0.0f; // fade out for the shadows?
-		m_nShadowQuality = 0;
-
+		m_flShadowMapResolution = 1024.0f;
+		m_flShadowFilterSize = 3.0f;
+		m_flShadowSlopeScaleDepthBias = 16.0f;
+		m_flShadowDepthBias = 0.0005f;
+		m_flShadowJitterSeed = 0.0f;
+		m_flShadowAtten = 0.0f;
 		m_bScissor = false; 
 		m_nLeft = -1;
 		m_nTop = -1;
 		m_nRight = -1;
 		m_nBottom = -1;
-
-		m_bUberlight = false;
-
-		/*m_bOrtho = false;
-		m_fOrthoLeft = -1.0f;
-		m_fOrthoRight = 1.0f;
-		m_fOrthoTop = -1.0f;
-		m_fOrthoBottom = 1.0f;*/
-		
-		m_fBrightnessScale = 1.0f;
+		m_nShadowQuality = 0;
 	}
 
 	Vector m_vecLightOrigin;
@@ -473,18 +447,10 @@ struct FlashlightState_t
 	float m_FarZ;
 	float m_fHorizontalFOVDegrees;
 	float m_fVerticalFOVDegrees;
-
-	/*bool  m_bOrtho;
-	float m_fOrthoLeft;
-	float m_fOrthoRight;
-	float m_fOrthoTop;
-	float m_fOrthoBottom;*/
-
 	float m_fQuadraticAtten;
 	float m_fLinearAtten;
 	float m_fConstantAtten;
 	float m_Color[4];
-	float m_fBrightnessScale;
 	ITexture *m_pSpotlightTexture;
 	int m_nSpotlightTextureFrame;
 
@@ -498,10 +464,6 @@ struct FlashlightState_t
 	float m_flShadowJitterSeed;
 	float m_flShadowAtten;
 	int   m_nShadowQuality;
-	
-	// Uberlight parameters
-	bool m_bUberlight;
-	UberlightState_t m_uberlightState;
 
 	// Getters for scissor members
 	bool DoScissor() { return m_bScissor; }
@@ -520,6 +482,21 @@ private:
 	int m_nRight;
 	int m_nBottom;
 };
+
+// Passed as the callback object to Async functions in the material system
+// so that callers don't have to worry about memory going out of scope before the 
+// results return.
+abstract_class IAsyncTextureOperationReceiver : public IRefCounted
+{
+public:
+	virtual void OnAsyncCreateComplete( ITexture* pTex, void* pExtraArgs ) = 0;
+	virtual void OnAsyncFindComplete( ITexture* pTex, void* pExtraArgs ) = 0;
+	virtual void OnAsyncMapComplete( ITexture* pTex, void* pExtraArgs, void* pMemory, int nPitch ) = 0;
+	virtual void OnAsyncReadbackBegin( ITexture* pDst, ITexture* pSrc, void* pExtraArgs ) = 0;
+
+	virtual int GetRefCount() const = 0;
+};
+
 
 //-----------------------------------------------------------------------------
 // Flags to be used with the Init call
@@ -566,7 +543,11 @@ enum RenderTargetSizeMode_t
 	RT_SIZE_HDR=3,					// frame_buffer_width / 4
 	RT_SIZE_FULL_FRAME_BUFFER=4,	// Same size as frame buffer, or next lower power of 2 if we can't do that.
 	RT_SIZE_OFFSCREEN=5,			// Target of specified size, don't mess with dimensions
-	RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP=6 // Same size as the frame buffer, rounded up if necessary for systems that can't do non-power of two textures.
+	RT_SIZE_FULL_FRAME_BUFFER_ROUNDED_UP=6, // Same size as the frame buffer, rounded up if necessary for systems that can't do non-power of two textures.
+	RT_SIZE_REPLAY_SCREENSHOT = 7,	// Rounded down to power of 2, essentially...
+	RT_SIZE_LITERAL = 8,			// Use the size passed in. Don't clamp it to the frame buffer size. Really.
+	RT_SIZE_LITERAL_PICMIP = 9		// Use the size passed in, don't clamp to the frame buffer size, but do apply picmip restrictions.
+
 };
 
 typedef void (*MaterialBufferReleaseFunc_t)( );
@@ -627,9 +608,10 @@ public:
 	//---------------------------------------------------------
 	//
 	//---------------------------------------------------------
-	virtual void				SetThreadMode( MaterialThreadMode_t mode, int nServiceThread = -1 ) = 0;
-	virtual MaterialThreadMode_t GetThreadMode() = 0;
-	virtual void				ExecuteQueued() = 0;
+	virtual void					SetThreadMode( MaterialThreadMode_t mode, int nServiceThread = -1 ) = 0;
+	virtual MaterialThreadMode_t	GetThreadMode( ) = 0;
+	virtual bool					IsRenderThreadSafe( ) = 0;
+	virtual void					ExecuteQueued() = 0;
 
 	//---------------------------------------------------------
 	// Config management
@@ -824,6 +806,11 @@ public:
 	// Material and texture management
 	//---------------------------------------------------------
 
+	// Stop attempting to stream in textures in response to usage.  Useful for phases such as loading or other explicit
+	// operations that shouldn't take usage of textures as a signal to stream them in at full rez.
+	virtual void				SuspendTextureStreaming( ) = 0;
+	virtual void				ResumeTextureStreaming( ) = 0;
+
 	// uncache all materials. .  good for forcing reload of materials.
 	virtual void				UncacheAllMaterials( ) = 0;
 
@@ -858,6 +845,9 @@ public:
 	// (Or use the global IsErrorMaterial function, which checks if it's null too).
 	virtual IMaterial *			FindMaterial( char const* pMaterialName, const char *pTextureGroupName, bool complain = true, const char *pComplainPrefix = NULL ) = 0;
 
+	// Query whether a material is loaded (eg, whether FindMaterial will be nonblocking)
+	virtual bool				IsMaterialLoaded( char const* pMaterialName ) = 0;
+
 	//---------------------------------
 	// This is the interface for knowing what materials are available
 	// is to use the following functions to get a list of materials.  The
@@ -885,7 +875,9 @@ public:
 
 	//---------------------------------
 
-	virtual ITexture *			FindTexture( char const* pTextureName, const char *pTextureGroupName, bool complain = true ) = 0;
+	virtual void				SetAsyncTextureLoadCache( void* hFileCache ) = 0;
+
+	virtual ITexture *			FindTexture( char const* pTextureName, const char *pTextureGroupName, bool complain = true, int nAdditionalCreationFlags = 0  ) = 0;
 
 	// Checks to see if a particular texture is loaded
 	virtual bool				IsTextureLoaded( char const* pTextureName ) const = 0;
@@ -1055,6 +1047,52 @@ public:
 
 	// For sv_pure mode. The filesystem figures out which files the client needs to reload to be "pure" ala the server's preferences.
 	virtual void ReloadFilesInList( IFileList *pFilesToReload ) = 0;
+	virtual	bool				AllowThreading( bool bAllow, int nServiceThread ) = 0;
+
+	// Extended version of FindMaterial().
+	// Contains context in so it can make decisions (i.e. if it's a model, ignore certain cheat parameters)
+	virtual IMaterial *			FindMaterialEx( char const* pMaterialName, const char *pTextureGroupName, int nContext, bool complain = true, const char *pComplainPrefix = NULL ) = 0;
+
+#ifdef DX_TO_GL_ABSTRACTION
+	virtual void				DoStartupShaderPreloading( void ) = 0;
+#endif	
+
+	// Sets the override sizes for all render target size tests. These replace the frame buffer size.
+	// Set them when you are rendering primarily to something larger than the frame buffer (as in VR mode).
+	virtual void				SetRenderTargetFrameBufferSizeOverrides( int nWidth, int nHeight ) = 0;
+
+	// Returns the (possibly overridden) framebuffer size for render target sizing.
+	virtual void				GetRenderTargetFrameBufferDimensions( int & nWidth, int & nHeight ) = 0;
+
+	// returns the display device name that matches the adapter index we were started with
+	virtual char *GetDisplayDeviceName() const = 0;
+
+	// creates a texture suitable for use with materials from a raw stream of bits.
+	// The bits will be retained by the material system and can be freed upon return.
+	virtual ITexture*			CreateTextureFromBits(int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits) = 0;
+
+	// Lie to the material system to pretend to be in render target allocation mode at the beginning of time.
+	// This was a thing that mattered a lot to old hardware, but doesn't matter at all to new hardware,
+	// where new is defined to be "anything from the last decade." However, we want to preserve legacy behavior
+	// for the old games because it's easier than testing them.
+	virtual void				OverrideRenderTargetAllocation( bool rtAlloc ) = 0;
+
+	// creates a texture compositor that will attempt to composite a new textuer from the steps of the specified KeyValues.
+	virtual ITextureCompositor*	NewTextureCompositor( int w, int h, const char* pCompositeName, int nTeamNum, uint64 randomSeed, KeyValues* stageDesc, uint32 texCompositeCreateFlags = 0 ) = 0;
+
+	// Loads the texture with the specified name, calls pRecipient->OnAsyncFindComplete with the result from the main thread.
+	// once the texture load is complete. If the texture cannot be found, the returned texture will return true for IsError().
+	virtual void AsyncFindTexture( const char* pFilename, const char *pTextureGroupName, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs, bool bComplain = true, int nAdditionalCreationFlags = 0 ) = 0;
+
+	// creates a texture suitable for use with materials from a raw stream of bits.
+	// The bits will be retained by the material system and can be freed upon return.
+	virtual ITexture*			CreateNamedTextureFromBitsEx( const char* pName, const char *pTextureGroupName, int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits, int nFlags ) = 0;
+
+	// Creates a texture compositor template for use in later code. 
+	virtual bool				AddTextureCompositorTemplate( const char* pName, KeyValues* pTmplDesc, int nTexCompositeTemplateFlags = 0 ) = 0;
+
+	// Performs final verification of all compositor templates (after they've all been initially loaded).
+	virtual bool				VerifyTextureCompositorTemplates( ) = 0;
 };
 
 
@@ -1340,6 +1378,7 @@ public:
 
 	// Blit a subrect of the current render target to another texture
 	virtual void CopyRenderTargetToTextureEx( ITexture *pTexture, int nRenderTargetID, Rect_t *pSrcRect, Rect_t *pDstRect = NULL ) = 0;
+	virtual void CopyTextureToRenderTargetEx( int nRenderTargetID, ITexture *pTexture, Rect_t *pSrcRect, Rect_t *pDstRect = NULL ) = 0;
 
 	// Special off-center perspective matrix for DoF, MSAA jitter and poster rendering
 	virtual void PerspectiveOffCenterX( double fovx, double aspect, double zNear, double zFar, double bottom, double top, double left, double right ) = 0;
@@ -1491,7 +1530,220 @@ public:
 	virtual void SetNonInteractiveTempFullscreenBuffer( ITexture *pTexture, MaterialNonInteractiveMode_t mode ) = 0;
 	virtual void EnableNonInteractiveMode( MaterialNonInteractiveMode_t mode ) = 0;
 	virtual void RefreshFrontBufferNonInteractive() = 0;
+	// Allocates temp render data. Renderdata goes out of scope at frame end in multicore
+	// Renderdata goes out of scope after refcount goes to zero in singlecore.
+	// Locking/unlocking increases + decreases refcount
+	virtual void *			LockRenderData( int nSizeInBytes ) = 0;
+	virtual void			UnlockRenderData( void *pData ) = 0;
+
+	// Typed version. If specified, pSrcData is copied into the locked memory.
+	template< class E > E*  LockRenderDataTyped( int nCount, const E* pSrcData = NULL );
+
+	// Temp render data gets immediately freed after it's all unlocked in single core.
+	// This prevents it from being freed
+	virtual void			AddRefRenderData() = 0;	
+	virtual void			ReleaseRenderData() = 0;
+
+	// Returns whether a pointer is render data. NOTE: passing NULL returns true
+	virtual bool			IsRenderData( const void *pData ) const = 0;
+	virtual void			PrintfVA( char *fmt, va_list vargs ) = 0;
+	virtual void			Printf( PRINTF_FORMAT_STRING const char *fmt, ... ) = 0;
+	virtual float			Knob( char *knobname, float *setvalue = NULL ) = 0;
+	// Allows us to override the alpha write setting of a material
+	virtual void OverrideAlphaWriteEnable( bool bEnable, bool bAlphaWriteEnable ) = 0;
+	virtual void OverrideColorWriteEnable( bool bOverrideEnable, bool bColorWriteEnable ) = 0;
+
+	virtual void ClearBuffersObeyStencilEx( bool bClearColor, bool bClearAlpha, bool bClearDepth ) = 0;
+
+	// Create a texture from the specified src render target, then call pRecipient->OnAsyncCreateComplete from the main thread.
+	// The texture will be created using the destination format, and will optionally have mipmaps generated.
+	// In case of error, the provided callback function will be called with the error texture.
+	virtual void AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) = 0;
 };
+
+template< class E > inline E* IMatRenderContext::LockRenderDataTyped( int nCount, const E* pSrcData )
+{
+	int nSizeInBytes = nCount * sizeof(E);
+	E *pDstData = (E*)LockRenderData( nSizeInBytes );
+	if ( pSrcData && pDstData )
+	{
+		memcpy( pDstData, pSrcData, nSizeInBytes );
+	}
+	return pDstData;
+}
+
+
+//-----------------------------------------------------------------------------
+// Utility class for addreffing/releasing render data (prevents freeing on single core)
+//-----------------------------------------------------------------------------
+class CMatRenderDataReference
+{
+public:
+	CMatRenderDataReference();
+	CMatRenderDataReference( IMatRenderContext* pRenderContext );
+	~CMatRenderDataReference();
+	void Lock( IMatRenderContext *pRenderContext );
+	void Release();
+
+private:
+	IMatRenderContext *m_pRenderContext;
+};
+
+
+inline CMatRenderDataReference::CMatRenderDataReference()
+{
+	m_pRenderContext = NULL;
+}
+
+inline CMatRenderDataReference::CMatRenderDataReference( IMatRenderContext* pRenderContext )
+{
+	m_pRenderContext = NULL;
+	Lock( pRenderContext );
+}
+
+inline CMatRenderDataReference::~CMatRenderDataReference()
+{
+	Release();
+}
+
+inline void CMatRenderDataReference::Lock( IMatRenderContext* pRenderContext )
+{
+	if ( !m_pRenderContext )
+	{
+		m_pRenderContext = pRenderContext;
+		m_pRenderContext->AddRefRenderData( );
+	}
+}
+
+inline void CMatRenderDataReference::Release()
+{
+	if ( m_pRenderContext )
+	{
+		m_pRenderContext->ReleaseRenderData( );
+		m_pRenderContext = NULL;
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Utility class for locking/unlocking render data
+//-----------------------------------------------------------------------------
+template< typename E > 
+class CMatRenderData
+{
+public:
+	CMatRenderData( IMatRenderContext* pRenderContext );
+	CMatRenderData( IMatRenderContext* pRenderContext, int nCount, const E *pSrcData = NULL );
+	~CMatRenderData();
+	E* Lock( int nCount, const E* pSrcData = NULL ); 
+	void Release();
+	bool IsValid() const;
+	const E* Base() const;
+	E* Base();
+	const E& operator[]( int i ) const;
+	E& operator[]( int i );
+
+private:
+	IMatRenderContext* m_pRenderContext;
+	E *m_pRenderData;
+	int m_nCount;
+	bool m_bNeedsUnlock;
+};
+
+template< typename E >
+inline CMatRenderData<E>::CMatRenderData( IMatRenderContext* pRenderContext )
+{
+	m_pRenderContext = pRenderContext;
+	m_nCount = 0;
+	m_pRenderData = 0;
+	m_bNeedsUnlock = false;
+}
+
+template< typename E >
+inline CMatRenderData<E>::CMatRenderData( IMatRenderContext* pRenderContext, int nCount, const E* pSrcData )
+{
+	m_pRenderContext = pRenderContext;
+	m_nCount = 0;
+	m_pRenderData = 0;
+	m_bNeedsUnlock = false;
+	Lock( nCount, pSrcData );
+}
+
+template< typename E >
+inline CMatRenderData<E>::~CMatRenderData()
+{
+	Release();
+}
+
+template< typename E >
+inline bool CMatRenderData<E>::IsValid() const
+{
+	return m_pRenderData != NULL;
+}
+
+template< typename E >
+inline E* CMatRenderData<E>::Lock( int nCount, const E* pSrcData )
+{
+	m_nCount = nCount;
+	if ( pSrcData && m_pRenderContext->IsRenderData( pSrcData ) )
+	{
+		// Yes, we're const-casting away, but that should be ok since 
+		// the src data is render data
+		m_pRenderData = const_cast<E*>( pSrcData );
+		m_pRenderContext->AddRefRenderData();
+		m_bNeedsUnlock = false;
+		return m_pRenderData;
+	}
+	m_pRenderData = m_pRenderContext->LockRenderDataTyped<E>( nCount, pSrcData );
+	m_bNeedsUnlock = true;
+	return m_pRenderData;
+}
+
+template< typename E >
+inline void CMatRenderData<E>::Release()
+{
+	if ( m_pRenderContext && m_pRenderData )
+	{
+		if ( m_bNeedsUnlock )
+		{
+			m_pRenderContext->UnlockRenderData( m_pRenderData );
+		}
+		else
+		{
+			m_pRenderContext->ReleaseRenderData();
+		}
+	}
+	m_pRenderData = NULL;
+	m_nCount = 0;
+	m_bNeedsUnlock = false;
+}
+
+template< typename E >
+inline E* CMatRenderData<E>::Base()
+{
+	return m_pRenderData;
+}
+
+template< typename E >
+inline const E* CMatRenderData<E>::Base() const
+{
+	return m_pRenderData;
+}
+
+template< typename E >
+inline E& CMatRenderData<E>::operator[]( int i )
+{
+	Assert( ( i >= 0 ) && ( i < m_nCount ) );
+	return m_pRenderData[i];
+}
+
+template< typename E >
+inline const E& CMatRenderData<E>::operator[]( int i ) const
+{
+	Assert( ( i >= 0 ) && ( i < m_nCount ) );
+	return m_pRenderData[i];
+}
+
 
 //-----------------------------------------------------------------------------
 
@@ -1542,7 +1794,8 @@ private:
 };
 
 
-#define PIX_ENABLE 0		// set this to 1 and build engine/studiorender to enable pix events in the engine
+// Also be sure to enable PIX_INSTRUMENTATION in shaderdevicedx8.h
+//#define PIX_ENABLE 1		// set this to 1 and build engine/studiorender to enable pix events in the engine
 
 #if PIX_ENABLE
 #	define PIXEVENT PIXEvent _pixEvent

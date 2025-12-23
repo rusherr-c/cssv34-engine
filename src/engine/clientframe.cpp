@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,7 +15,7 @@
 CClientFrame::CClientFrame( CFrameSnapshot *pSnapshot )
 {
 	last_entity = 0;
-	transmit_always = NULL;	// bit array used only by HLTV client
+	transmit_always = NULL;	// bit array used only by HLTV and replay client
 	from_baseline = NULL;
 	tick_count = pSnapshot->m_nTickCount;
 	m_pSnapshot = NULL;
@@ -26,7 +26,7 @@ CClientFrame::CClientFrame( CFrameSnapshot *pSnapshot )
 CClientFrame::CClientFrame( int tickcount )
 {
 	last_entity = 0;
-	transmit_always = NULL;	// bit array used only by HLTV client
+	transmit_always = NULL;	// bit array used only by HLTV and replay client
 	from_baseline = NULL;
 	tick_count = tickcount;
 	m_pSnapshot = NULL;
@@ -36,7 +36,7 @@ CClientFrame::CClientFrame( int tickcount )
 CClientFrame::CClientFrame( void )
 {
 	last_entity = 0;
-	transmit_always = NULL;	// bit array used only by HLTV client
+	transmit_always = NULL;	// bit array used only by HLTV and replay client
 	from_baseline = NULL;
 	tick_count = 0;
 	m_pSnapshot = NULL;
@@ -129,17 +129,19 @@ CClientFrame *CClientFrameManager::GetClientFrame( int nTick, bool bExact )
 
 int	CClientFrameManager::CountClientFrames( void )
 {
+
+#if _DEBUG
 	int count = 0;
-
 	CClientFrame *f = m_Frames;
-
 	while ( f )
 	{
 		count++;
 		f = f->m_pNext;
 	}
+	Assert( m_nFrames == count );
+#endif
 
-	return count;
+	return m_nFrames;
 }
 
 //-----------------------------------------------------------------------------
@@ -153,24 +155,18 @@ int CClientFrameManager::AddClientFrame( CClientFrame *frame)
 	if ( !m_Frames )
 	{
 		// first client frame at all
-		m_Frames = frame;	
+		Assert( m_LastFrame == NULL && m_nFrames == 0 );
+		m_Frames = frame;
+		m_LastFrame = frame;
+		m_nFrames = 1;
 		return 1;
 	}
 
-	CClientFrame *f = m_Frames;
-
-	int count = 1;
-
-	while ( f->m_pNext )
-	{
-		f = f->m_pNext;	
-		++count;
-	}
-
-	++count;
-	f->m_pNext = frame;
-
-	return count;
+	Assert( m_Frames != NULL && m_nFrames > 0 );
+	Assert( m_LastFrame->m_pNext == NULL );
+	m_LastFrame->m_pNext = frame;
+	m_LastFrame = frame;
+	return ++m_nFrames;
 }
 
 void CClientFrameManager::RemoveOldestFrame( void )
@@ -180,47 +176,64 @@ void CClientFrameManager::RemoveOldestFrame( void )
 	if ( !frame )
 		return;	// no frames at all
 
+	Assert( m_nFrames > 0 );
 	m_Frames = frame->m_pNext; // unlink head
-
 	// deleting frame will decrease global reference counter
 	FreeFrame( frame );
+
+	if ( --m_nFrames == 0 )
+	{
+		Assert( m_LastFrame == frame && m_Frames == NULL );
+		m_LastFrame = NULL;
+	}
 }
 
 void CClientFrameManager::DeleteClientFrames(int nTick)
 {
-	CClientFrame *frame = m_Frames; // first
-	CClientFrame *prev = NULL;	  // last
-
-	while ( frame )
+	
+	if ( nTick < 0 )
 	{
-		// remove frame if tick small nTick
-		// remove all frames if nTick == -1
-
-		if ( (nTick < 0) || (frame->tick_count < nTick) )
+		while ( m_nFrames > 0 )
 		{
-			// removed frame
-
-			if ( prev )
+			RemoveOldestFrame();
+		}
+	}
+	else
+	{
+		CClientFrame *frame = m_Frames;
+		// rebuild m_LastFrame while iterating forward through the list
+		m_LastFrame = NULL;
+		while ( frame )
+		{
+			if ( frame->tick_count < nTick )
 			{
-				prev->m_pNext = frame->m_pNext;
-				// deleting frame will decrease global reference counter
+				// Delete this frame
+				CClientFrame* next = frame->m_pNext;
+				if ( m_Frames == frame )
+					m_Frames = next;
 				FreeFrame( frame );
-				frame = prev->m_pNext;
+				if ( --m_nFrames == 0 )
+				{
+					Assert( next == NULL );
+					m_LastFrame = m_Frames = NULL;
+					break;
+				}
+				Assert( m_LastFrame != frame && m_nFrames > 0 );
+				frame = next;
+				if ( m_LastFrame )
+					m_LastFrame->m_pNext = next;
 			}
 			else
 			{
-				m_Frames = frame->m_pNext;	
-				FreeFrame( frame );
-				frame = m_Frames;
+				Assert( m_LastFrame == NULL || m_LastFrame->m_pNext == frame );
+				m_LastFrame = frame;
+				frame = frame->m_pNext;
 			}
 		}
-		else
-		{
-			// go to next frame
-			prev = frame;
-			frame = frame->m_pNext;
-		}
 	}
+
+
+
 }
 
 
@@ -242,4 +255,18 @@ void CClientFrameManager::FreeFrame( CClientFrame* pFrame )
 	{
 		delete pFrame;
 	}
+}
+
+CClientFrameManager::CClientFrameManager( void )
+:	m_ClientFramePool( MAX_CLIENT_FRAMES, CUtlMemoryPool::GROW_SLOW ),
+	m_Frames(NULL),
+	m_LastFrame(NULL),
+	m_nFrames(0)
+{
+}
+
+CClientFrameManager::~CClientFrameManager( void )
+{
+	DeleteClientFrames( -1 );
+	Assert( m_nFrames == 0 );
 }

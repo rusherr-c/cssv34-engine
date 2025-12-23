@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // CSceneViewerPanel Definition
 //
@@ -1423,15 +1423,16 @@ void CSceneViewerPanel::OnNew()
 //-----------------------------------------------------------------------------
 void CSceneViewerPanel::OnOpen()
 {
-	//int nFlags = 0;
+	int nFlags = 0;
 	const char *pFileName = NULL;
 	if ( m_pRoot )
 	{
+		nFlags = vgui::FOSM_SHOW_PERFORCE_DIALOGS;
 		pFileName = g_pDataModel->GetFileName( m_pRoot->GetFileId() );
 	}
 
 	KeyValues *pContextKeyValues = new KeyValues( "FileOpen" );
-	m_pFileOpenStateMachine->OpenFile( DEFAULT_FILE_FORMAT, pContextKeyValues, pFileName, NULL, NULL );
+	m_pFileOpenStateMachine->OpenFile( DEFAULT_FILE_FORMAT, pContextKeyValues, pFileName, NULL, nFlags );
 }
 
 
@@ -1451,7 +1452,7 @@ void CSceneViewerPanel::OnSave()
 		pContextKeyValues,
 		g_pDataModel->GetFileName( m_pRoot->GetFileId() ),
 		DEFAULT_FILE_FORMAT,
-		NULL );
+		vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 
@@ -1470,7 +1471,7 @@ void CSceneViewerPanel::OnSaveAs()
 	}
 
 	KeyValues *pContextKeyValues = new KeyValues( "FileSave" );
-	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, DEFAULT_FILE_FORMAT, NULL );
+	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, DEFAULT_FILE_FORMAT, vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 
@@ -1489,7 +1490,7 @@ void CSceneViewerPanel::OnSaveCurrentAs()
 	}
 
 	KeyValues *pContextKeyValues = new KeyValues( "SaveCurrentAs" );
-	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, DEFAULT_FILE_FORMAT, NULL );
+	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, DEFAULT_FILE_FORMAT, vgui::FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 

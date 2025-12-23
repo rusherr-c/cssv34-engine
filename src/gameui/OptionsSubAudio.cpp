@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,11 +6,12 @@
 
 #include "OptionsSubAudio.h"
 
-#include "CvarSlider.h"
+#include "cvarslider.h"
 #include "EngineInterface.h"
 #include "ModInfo.h"
 #include "vgui_controls/ComboBox.h"
 #include "vgui_controls/QueryBox.h"
+#include "CvarToggleCheckButton.h"
 #include "tier1/KeyValues.h"
 #include "tier1/convar.h"
 #include <vgui/IInput.h>
@@ -52,13 +53,18 @@ COptionsSubAudio::COptionsSubAudio(vgui::Panel *parent) : PropertyPage(parent, N
 	m_pSoundQualityCombo->AddItem( "#GameUI_Low", new KeyValues("SoundQuality", "quality", SOUNDQUALITY_LOW) );
 
 	m_pSpeakerSetupCombo = new ComboBox( this, "SpeakerSetup", 6, false );
+#ifndef POSIX
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_Headphones", new KeyValues("SpeakerSetup", "speakers", 0) );
+#endif
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_2Speakers", new KeyValues("SpeakerSetup", "speakers", 2) );
+#ifndef POSIX
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_4Speakers", new KeyValues("SpeakerSetup", "speakers", 4) );
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_5Speakers", new KeyValues("SpeakerSetup", "speakers", 5) );
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_7Speakers", new KeyValues("SpeakerSetup", "speakers", 7) );
-
+#endif
    m_pSpokenLanguageCombo = new ComboBox (this, "AudioSpokenLanguage", 6, false );
+
+   m_pSoundMuteLoseFocusCheckButton = new CCvarToggleCheckButton( this, "snd_mute_losefocus", "#GameUI_SndMuteLoseFocus", "snd_mute_losefocus" );
 
 	LoadControlSettings("Resource\\OptionsSubAudio.res");
 }
@@ -104,12 +110,24 @@ void COptionsSubAudio::OnResetData()
 	// speakers
 	ConVarRef snd_surround_speakers("Snd_Surround_Speakers");
 	int speakers = snd_surround_speakers.GetInt();
+	
+#ifdef POSIX
+	// On Posix there is no headphone option, so we upgrade to 2 speakers if Snd_Surround_Speakers == 0
+	if ( speakers == 0 )
+		speakers = 2;
+#endif
+
+	// if Snd_Surround_Speakers is -1, then upgrade to 2 speakers
+	if ( speakers < 0 )
+		speakers = 2;
+	
 	{for (int itemID = 0; itemID < m_pSpeakerSetupCombo->GetItemCount(); itemID++)
 	{
-		KeyValues *kv = m_pSpeakerSetupCombo->GetItemUserData(itemID);
-		if (kv && kv->GetInt("speakers") == speakers)
+		KeyValues *kv = m_pSpeakerSetupCombo->GetItemUserData( itemID );
+		if (kv && kv->GetInt( "speakers" ) == speakers)
 		{
-			m_pSpeakerSetupCombo->ActivateItem(itemID);
+			m_pSpeakerSetupCombo->ActivateItem( itemID );
+			break;
 		}
 	}}
 	
@@ -140,7 +158,8 @@ void COptionsSubAudio::OnResetData()
    //
    char szCurrentLanguage[50];
    char szAvailableLanguages[512];
-   szAvailableLanguages[0] = NULL;
+   szCurrentLanguage[0] = 0;
+   szAvailableLanguages[0] = 0;
 
    // Fallback to current engine language
    engine->GetUILanguage( szCurrentLanguage, sizeof( szCurrentLanguage ));
@@ -148,10 +167,10 @@ void COptionsSubAudio::OnResetData()
    // In a Steam environment we get the current language 
 #if !defined( NO_STEAM )
    // When Steam isn't running we can't get the language info... 
-   if ( SteamApps() )
+   if ( steamapicontext->SteamApps() )
    {
-	  V_strcpy( szCurrentLanguage, SteamApps()->GetCurrentGameLanguage() );
-	  V_strcpy( szAvailableLanguages, SteamApps()->GetAvailableGameLanguages() );
+      Q_strncpy( szCurrentLanguage, steamapicontext->SteamApps()->GetCurrentGameLanguage(), sizeof(szCurrentLanguage) );
+	  Q_strncpy( szAvailableLanguages, steamapicontext->SteamApps()->GetAvailableGameLanguages(), sizeof(szAvailableLanguages) );
    }
 #endif
 
@@ -170,6 +189,8 @@ void COptionsSubAudio::OnResetData()
          const ELanguage languageCode = PchLanguageToELanguage( languagesList[i] );
          m_pSpokenLanguageCombo->AddItem( GetLanguageVGUILocalization( languageCode ), new KeyValues ("Audio Languages", "language", languageCode) );
       }
+
+	  languagesList.PurgeAndDeleteElements();
    }
    else
    {
@@ -187,6 +208,8 @@ void COptionsSubAudio::OnResetData()
          break;
       }
    }}
+
+   m_pSoundMuteLoseFocusCheckButton->Reset();
 }
 
 //-----------------------------------------------------------------------------
@@ -286,6 +309,8 @@ void COptionsSubAudio::OnApplyChanges()
          qb->DoModal();
       }
    }
+
+   m_pSoundMuteLoseFocusCheckButton->ApplyChanges();
 }
 
 //-----------------------------------------------------------------------------

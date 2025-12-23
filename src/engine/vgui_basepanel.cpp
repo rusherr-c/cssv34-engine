@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,10 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+
+ConVar vgui_nav_lock( "vgui_nav_lock", "0", FCVAR_DEVELOPMENTONLY );
+ConVar vgui_nav_lock_default_button( "vgui_nav_lock_default_button", "0", FCVAR_DEVELOPMENTONLY );
 
 
 //-----------------------------------------------------------------------------
@@ -111,6 +115,16 @@ CBasePanel::~CBasePanel( void )
 
 void CBasePanel::OnTick()
 {
+	if ( vgui_nav_lock.GetInt() > 0 )
+	{
+		vgui_nav_lock.SetValue( vgui_nav_lock.GetInt() - 1 );
+	}
+
+	if ( vgui_nav_lock_default_button.GetInt() > 0 )
+	{
+		vgui_nav_lock_default_button.SetValue( vgui_nav_lock_default_button.GetInt() - 1 );
+	}
+
 	SetVisible( ShouldDraw() );
 }
 

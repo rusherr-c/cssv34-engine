@@ -1,20 +1,47 @@
 #include "shaderlib/cshader.h"
 class depthwrite_ps20_Static_Index
 {
+private:
+	int m_nCOLOR_DEPTH;
+#ifdef _DEBUG
+	bool m_bCOLOR_DEPTH;
+#endif
+public:
+	void SetCOLOR_DEPTH( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nCOLOR_DEPTH = i;
+#ifdef _DEBUG
+		m_bCOLOR_DEPTH = true;
+#endif
+	}
+	void SetCOLOR_DEPTH( bool i )
+	{
+		m_nCOLOR_DEPTH = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bCOLOR_DEPTH = true;
+#endif
+	}
 public:
 	depthwrite_ps20_Static_Index( )
 	{
+#ifdef _DEBUG
+		m_bCOLOR_DEPTH = false;
+#endif // _DEBUG
+		m_nCOLOR_DEPTH = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
+		bool bAllStaticVarsDefined = m_bCOLOR_DEPTH;
+		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return 0;
+		return ( 2 * m_nCOLOR_DEPTH ) + 0;
 	}
 };
-#define shaderStaticTest_depthwrite_ps20 0
+#define shaderStaticTest_depthwrite_ps20 psh_forgot_to_set_static_COLOR_DEPTH + 0
 class depthwrite_ps20_Dynamic_Index
 {
 private:

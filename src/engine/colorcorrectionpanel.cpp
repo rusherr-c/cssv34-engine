@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2003, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -45,7 +45,7 @@ using namespace vgui;
 const int g_nPreviewImageWidth  = 128;
 const int g_nPreviewImageHeight =  96;
 
-ConVar mat_colorcorrection( "mat_colorcorrection", "0", 0 );
+ConVar mat_colorcorrection( "mat_colorcorrection", "0", FCVAR_ARCHIVE );
 ConVar mat_colcorrection_disableentities( "mat_colcorrection_disableentities", "0" );
 
 //-----------------------------------------------------------------------------
@@ -556,7 +556,7 @@ public:
 	virtual void Release() { delete this; }
 
 	virtual const char *GetName()			  { return m_pName; }
-	virtual void SetName( const char *pName ) { Q_strcpy( m_pName, pName ); }
+	virtual void SetName( const char *pName ) { V_strcpy_safe( m_pName, pName ); }
 
 	virtual IColorOperation *Clone();
 
@@ -644,7 +644,7 @@ CCurvesColorOperation::CCurvesColorOperation() : m_ControlPoints()
 	m_bEnable = true;
 	UpdateOutColorArray();
 
-	Q_strcpy( m_pName, "Curves" );
+	V_strcpy_safe( m_pName, "Curves" );
 }
 
 
@@ -1162,7 +1162,7 @@ public:
 	virtual void Release() { delete this; }
 
 	virtual const char *GetName()			  { return m_pName; }
-	virtual void SetName( const char *pName ) { Q_strcpy( m_pName, pName ); }
+	virtual void SetName( const char *pName ) { V_strcpy_safe( m_pName, pName ); }
 
 	virtual ColorCorrectionTool_t ToolID() { return CC_TOOL_LEVELS; }
 
@@ -1237,7 +1237,7 @@ CLevelsColorOperation::CLevelsColorOperation()
 	m_bEnable = true;
 	UpdateOutputLevelArray();
 
-	Q_strcpy( m_pName, "Levels" );
+	V_strcpy_safe( m_pName, "Levels" );
 }
 
 
@@ -1537,7 +1537,7 @@ void CColorHistogramPanel::ComputeHistogram( Rect_t &srcRect, unsigned char *pBi
 			case RGB:
 				{
 					float flGreyScale = 0.299f * col.r + 0.587f * col.g + 0.114f * col.b;
-					int g = (int)(flGreyScale + 0.5f);
+					g = (int)(flGreyScale + 0.5f);
 					g = clamp( g, 0, 255 );
 					++m_pHistogram[g];
 				}
@@ -1691,6 +1691,11 @@ CColorSlider::CColorSlider( vgui::Panel *pParent, const char *pName, int nKnobCo
 
 CColorSlider::~CColorSlider()
 {
+	if ( vgui::surface() && m_nWhiteMaterial != -1 )
+	{
+		vgui::surface()->DestroyTextureID( m_nWhiteMaterial );
+		m_nWhiteMaterial = -1;
+	}
 }
 
 
@@ -2177,7 +2182,7 @@ public:
 	virtual void Release() { delete this; }
 
 	virtual const char *GetName()			  { return m_pName; }
-	virtual void SetName( const char *pName ) { Q_strcpy( m_pName, pName ); }
+	virtual void SetName( const char *pName ) { V_strcpy_safe( m_pName, pName ); }
 
 	virtual ColorCorrectionTool_t ToolID() { return CC_TOOL_SELECTED_HSV; }
 
@@ -2258,7 +2263,7 @@ CSelectedHSVOperation::CSelectedHSVOperation()
 
 	m_bEnable = true;
 
-	Q_strcpy( m_pName, "HSV" );
+	V_strcpy_safe( m_pName, "HSV" );
 }
 
 
@@ -3196,7 +3201,7 @@ public:
 	virtual void Release() { delete this; }
 
 	virtual const char *GetName()			  { return m_pName; }
-	virtual void SetName( const char *pName ) { Q_strcpy( m_pName, pName ); }
+	virtual void SetName( const char *pName ) { V_strcpy_safe( m_pName, pName ); }
 
 	virtual ColorCorrectionTool_t ToolID() { return CC_TOOL_LOOKUP; }
 
@@ -3215,7 +3220,7 @@ public:
 	virtual void SetBlendFactor( float flBlend );
 	virtual float GetBlendFactor( ) { return m_flBlendFactor; }
 
-	bool IsFileLoaded( )		{ return m_LookupTable; }
+	bool IsFileLoaded( )		{ return m_LookupTable != 0; }
 	const char *GetFilename( )	{ return m_pFilename; }
 
 private:
@@ -3248,8 +3253,8 @@ CColorLookupOperation::CColorLookupOperation( )
 	m_LookupTable = 0;
 	m_flBlendFactor = 1.0f;
 
-	Q_strcpy( m_pName, "Lookup" );
-	Q_strcpy( m_pFilename, "" );
+	V_strcpy_safe( m_pName, "Lookup" );
+	V_strcpy_safe( m_pFilename, "" );
 }
 
 
@@ -3370,7 +3375,7 @@ void CColorLookupOperation::LoadLookupTable( const char *pFilename )
 
 	g_pFileSystem->Close( file_handle );
 
-	Q_strcpy( m_pFilename, pFilename );
+	V_strcpy_safe( m_pFilename, pFilename );
 
 	colorcorrectiontools->UpdateColorCorrection();
 }
@@ -3578,7 +3583,7 @@ public:
 	virtual void Release() { delete this; }
 
 	virtual const char *GetName()			  { return m_pName; }
-	virtual void SetName( const char *pName ) { Q_strcpy( m_pName, pName ); }
+	virtual void SetName( const char *pName ) { V_strcpy_safe( m_pName, pName ); }
 
 	virtual ColorCorrectionTool_t ToolID() { return CC_TOOL_BALANCE; }
 
@@ -3661,7 +3666,7 @@ CColorBalanceOperation::CColorBalanceOperation( )
 
 	CreateLookupTables( );
 
-	Q_strcpy( m_pName, "Balance" );
+	V_strcpy_safe( m_pName, "Balance" );
 }
 
 
@@ -5118,8 +5123,8 @@ CColorCorrectionUIPanel::CColorCorrectionUIPanel( vgui::Panel *parent ) : BaseCl
 	int w = 250;
 	int h = 480;
 
-	int x = videomode->GetModeWidth() - w - 10;
-	int y = videomode->GetModeHeight() - h - 10;
+	int x = videomode->GetModeStereoWidth() - w - 10;
+	int y = videomode->GetModeStereoHeight() - h - 10;
 	SetBounds( x, y, w, h );
 
 	m_pOperationListPanel->PopulateList( );

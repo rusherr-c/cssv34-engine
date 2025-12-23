@@ -1,6 +1,6 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose:
 //
 //=============================================================================//
 
@@ -11,7 +11,7 @@
 #include "iclientvehicle.h"
 #include "ivieweffects.h"
 #include "input.h"
-#include "ieffects.h"
+#include "IEffects.h"
 #include "fx.h"
 #include "c_basetempentity.h"
 #include "hud_macros.h"	//HOOK_COMMAND
@@ -40,6 +40,12 @@
 #include "ragdoll_shared.h"
 #include "collisionutils.h"
 
+// NVNT - haptics system for spectating
+#include "haptics/haptic_utils.h"
+
+#include "steam/steam_api.h"
+
+#include "cs_blackmarket.h"				// for vest/helmet prices
 
 #if defined( CCSPlayer )
 	#undef CCSPlayer
@@ -50,6 +56,22 @@
 
 #include "iviewrender_beams.h"			// flashlight beam
 
+//=============================================================================
+// HPE_BEGIN:
+// [menglish] Adding and externing variables needed for the freezecam
+//=============================================================================
+
+static Vector WALL_MIN(-WALL_OFFSET,-WALL_OFFSET,-WALL_OFFSET);
+static Vector WALL_MAX(WALL_OFFSET,WALL_OFFSET,WALL_OFFSET);
+
+extern ConVar	spec_freeze_time;
+extern ConVar	spec_freeze_traveltime;
+extern ConVar	spec_freeze_distance_min;
+extern ConVar	spec_freeze_distance_max;
+
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 ConVar cl_left_hand_ik( "cl_left_hand_ik", "0", 0, "Attach player's left hand to rifle with IK." );
 
@@ -58,25 +80,25 @@ ConVar cl_ragdoll_physics_enable( "cl_ragdoll_physics_enable", "1", 0, "Enable/d
 ConVar cl_minmodels( "cl_minmodels", "0", 0, "Uses one player model for each team." );
 ConVar cl_min_ct( "cl_min_ct", "1", 0, "Controls which CT model is used when cl_minmodels is set.", true, 1, true, 4 );
 ConVar cl_min_t( "cl_min_t", "1", 0, "Controls which Terrorist model is used when cl_minmodels is set.", true, 1, true, 4 );
-
 const float CycleLatchTolerance = 0.15;	// amount we can diverge from the server's cycle before we're corrected
 
 extern ConVar mp_playerid_delay;
 extern ConVar mp_playerid_hold;
+extern ConVar sv_allowminmodels;
 
 class CAddonInfo
 {
 public:
 	const char *m_pAttachmentName;
 	const char *m_pWeaponClassName;	// The addon uses the w_ model from this weapon.
-	const char *m_pModelName;		//If this is present, will use this model instead of looking up the weapon 
+	const char *m_pModelName;		//If this is present, will use this model instead of looking up the weapon
 	const char *m_pHolsterName;
 };
 
 
 
 // These must follow the ADDON_ ordering.
-CAddonInfo g_AddonInfo[] = 
+CAddonInfo g_AddonInfo[] =
 {
 	{ "grenade0",	"weapon_flashbang",		0, 0 },
 	{ "grenade1",	"weapon_flashbang",		0, 0 },
@@ -106,7 +128,7 @@ public:
 		if ( pPlayer && !pPlayer->IsDormant() )
 		{
 			pPlayer->DoAnimationEvent( (PlayerAnimEvent_t)m_iEvent.Get(), m_nData );
-		}	
+		}
 	}
 
 public:
@@ -129,9 +151,34 @@ BEGIN_PREDICTION_DATA( C_CSPlayer )
 #endif
 	DEFINE_PRED_FIELD_TOL( m_flStamina, FIELD_FLOAT, FTYPEDESC_INSENDTABLE, 0.1f ),
 	DEFINE_PRED_FIELD( m_flCycle, FIELD_FLOAT, FTYPEDESC_OVERRIDE | FTYPEDESC_PRIVATE | FTYPEDESC_NOERRORCHECK ),
-	DEFINE_PRED_FIELD( m_iShotsFired, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),   
-	DEFINE_PRED_FIELD( m_iDirection, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),   
+	DEFINE_PRED_FIELD( m_iShotsFired, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_iDirection, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_bResumeZoom, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_iLastZoom, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
+
 END_PREDICTION_DATA()
+
+vgui::IImage* GetDefaultAvatarImage( C_BasePlayer *pPlayer )
+{
+	vgui::IImage* result = NULL;
+
+	switch ( pPlayer ? pPlayer->GetTeamNumber() : TEAM_MAXCOUNT )
+	{
+		case TEAM_TERRORIST: 
+			result = vgui::scheme()->GetImage( CSTRIKE_DEFAULT_T_AVATAR, true );
+			break;
+
+		case TEAM_CT:		 
+			result = vgui::scheme()->GetImage( CSTRIKE_DEFAULT_CT_AVATAR, true );
+			break;
+
+		default:
+			result = vgui::scheme()->GetImage( CSTRIKE_DEFAULT_AVATAR, true );
+			break;
+	}
+
+	return result;
+}
 
 // ----------------------------------------------------------------------------- //
 // Client ragdoll entity.
@@ -144,7 +191,7 @@ class C_CSRagdoll : public C_BaseAnimatingOverlay
 public:
 	DECLARE_CLASS( C_CSRagdoll, C_BaseAnimatingOverlay );
 	DECLARE_CLIENTCLASS();
-	
+
 	C_CSRagdoll();
 	~C_CSRagdoll();
 
@@ -152,24 +199,31 @@ public:
 
 	int GetPlayerEntIndex() const;
 	IRagdoll* GetIRagdoll() const;
-	void GetRagdollInitBoneArrays( matrix3x4_t *pDeltaBones0, matrix3x4_t *pDeltaBones1, matrix3x4_t *pCurrentBones, float boneDt );
+	bool GetRagdollInitBoneArrays( matrix3x4_t *pDeltaBones0, matrix3x4_t *pDeltaBones1, matrix3x4_t *pCurrentBones, float boneDt ) OVERRIDE;
 
-	void ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomImpactName );
+	void ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCustomImpactName );
 
 	virtual void ComputeFxBlend();
 	virtual bool IsTransparent();
 	bool IsInitialized() { return m_bInitialized; }
+	// fading ragdolls don't cast shadows
+	virtual ShadowType_t ShadowCastType() 
+	{ 
+		if ( m_flRagdollSinkStart == -1 )
+			return BaseClass::ShadowCastType();
+		return SHADOWS_NONE;
+	}
+
+	virtual void ValidateModelIndex( void );
 
 private:
-	
+
 	C_CSRagdoll( const C_CSRagdoll & ) {}
 
 	void Interp_Copy( C_BaseAnimatingOverlay *pSourceEntity );
 
 	void CreateLowViolenceRagdoll( void );
 	void CreateCSRagdoll( void );
-
-	void ChooseMinModel( void );
 
 private:
 
@@ -179,9 +233,8 @@ private:
 	CNetworkVar(int, m_iDeathPose );
 	CNetworkVar(int, m_iDeathFrame );
 	float m_flRagdollSinkStart;
-	int m_realModelIndex;	// model index ignoring cl_minmodels
-	int m_minModelIndex;	// model index obeying cl_minmodels
 	bool m_bInitialized;
+	bool m_bCreatedWhilePlaybackSkipping;
 };
 
 
@@ -204,6 +257,7 @@ C_CSRagdoll::C_CSRagdoll()
 {
 	m_flRagdollSinkStart = -1;
 	m_bInitialized = false;
+	m_bCreatedWhilePlaybackSkipping = engine->IsSkippingPlayback();
 }
 
 C_CSRagdoll::~C_CSRagdoll()
@@ -211,22 +265,22 @@ C_CSRagdoll::~C_CSRagdoll()
 	PhysCleanupFrictionSounds( this );
 }
 
-void C_CSRagdoll::GetRagdollInitBoneArrays( matrix3x4_t *pDeltaBones0, matrix3x4_t *pDeltaBones1, matrix3x4_t *pCurrentBones, float boneDt )
+bool C_CSRagdoll::GetRagdollInitBoneArrays( matrix3x4_t *pDeltaBones0, matrix3x4_t *pDeltaBones1, matrix3x4_t *pCurrentBones, float boneDt )
 {
 	// otherwise use the death pose to set up the ragdoll
 	ForceSetupBonesAtTime( pDeltaBones0, gpGlobals->curtime - boneDt );
 	GetRagdollCurSequenceWithDeathPose( this, pDeltaBones1, gpGlobals->curtime, m_iDeathPose, m_iDeathFrame );
-	SetupBones( pCurrentBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, gpGlobals->curtime );
+	return SetupBones( pCurrentBones, MAXSTUDIOBONES, BONE_USED_BY_ANYTHING, gpGlobals->curtime );
 }
 
 void C_CSRagdoll::Interp_Copy( C_BaseAnimatingOverlay *pSourceEntity )
 {
 	if ( !pSourceEntity )
 		return;
-	
+
 	VarMapping_t *pSrc = pSourceEntity->GetVarMapping();
 	VarMapping_t *pDest = GetVarMapping();
-    	
+
 	// Find all the VarMapEntry_t's that represent the same variable.
 	for ( int i = 0; i < pDest->m_Entries.Count(); i++ )
 	{
@@ -244,7 +298,7 @@ void C_CSRagdoll::Interp_Copy( C_BaseAnimatingOverlay *pSourceEntity )
 	}
 }
 
-void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomImpactName )
+void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCustomImpactName )
 {
 	IPhysicsObject *pPhysicsObject = VPhysicsGetObject();
 
@@ -256,21 +310,21 @@ void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomIm
 	if ( iDamageType == DMG_BLAST )
 	{
 		dir *= 4000;  // adjust impact strenght
-				
+
 		// apply force at object mass center
 		pPhysicsObject->ApplyForceCenter( dir );
 	}
 	else
 	{
-		Vector hitpos;  
-	
+		Vector hitpos;
+
 		VectorMA( pTrace->startpos, pTrace->fraction, dir, hitpos );
 		VectorNormalize( dir );
 
 		dir *= 4000;  // adjust impact strenght
 
 		// apply force where we hit it
-		pPhysicsObject->ApplyForceOffset( dir, hitpos );	
+		pPhysicsObject->ApplyForceOffset( dir, hitpos );
 
 		// Blood spray!
 		FX_CS_BloodSpray( hitpos, dir, 10 );
@@ -280,34 +334,34 @@ void C_CSRagdoll::ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomIm
 }
 
 
-void C_CSRagdoll::ChooseMinModel( void )
+void C_CSRagdoll::ValidateModelIndex( void )
 {
-	if ( cl_minmodels.GetBool() )
+	if ( sv_allowminmodels.GetBool() && cl_minmodels.GetBool() )
 	{
 		if ( GetTeamNumber() == TEAM_CT )
 		{
 			int index = cl_min_ct.GetInt() - 1;
 			if ( index >= 0 && index < CTPlayerModels.Count() )
 			{
-				m_nModelIndex = modelinfo->GetModelIndex( CTPlayerModels[index] );
+				m_nModelIndex = modelinfo->GetModelIndex(CTPlayerModels[index]);
 			}
 		}
-		else
+		else if ( GetTeamNumber() == TEAM_TERRORIST )
 		{
 			int index = cl_min_t.GetInt() - 1;
 			if ( index >= 0 && index < TerroristPlayerModels.Count() )
 			{
-				m_nModelIndex = modelinfo->GetModelIndex( TerroristPlayerModels[index] );
+				m_nModelIndex = modelinfo->GetModelIndex(TerroristPlayerModels[index]);
 			}
 		}
 	}
+
+	BaseClass::ValidateModelIndex();
 }
 
 
 void C_CSRagdoll::CreateLowViolenceRagdoll( void )
 {
-	m_realModelIndex = GetModelIndex();
-
 	// Just play a death animation.
 	// Find a death anim to play.
 	int iMinDeathAnim = 9999, iMaxDeathAnim = -9999;
@@ -317,52 +371,41 @@ void C_CSRagdoll::CreateLowViolenceRagdoll( void )
 		Q_snprintf( str, sizeof( str ), "death%d", iAnim );
 		if ( LookupSequence( str ) == -1 )
 			break;
-		
-		iMinDeathAnim = min( iMinDeathAnim, iAnim );
-		iMaxDeathAnim = max( iMaxDeathAnim, iAnim );
+
+		iMinDeathAnim = MIN( iMinDeathAnim, iAnim );
+		iMaxDeathAnim = MAX( iMaxDeathAnim, iAnim );
 	}
 
 	if ( iMinDeathAnim == 9999 )
 	{
 		CreateCSRagdoll();
+		return;
 	}
-	else
+
+	SetNetworkOrigin( m_vecRagdollOrigin );
+	SetAbsOrigin( m_vecRagdollOrigin );
+	SetAbsVelocity( m_vecRagdollVelocity );
+
+	C_CSPlayer *pPlayer = dynamic_cast< C_CSPlayer* >( m_hPlayer.Get() );
+	if ( pPlayer )
 	{
-		int iDeathAnim = RandomInt( iMinDeathAnim, iMaxDeathAnim );
-		char str[512];
-		Q_snprintf( str, sizeof( str ), "death%d", iDeathAnim );
-
-		SetSequence( LookupSequence( str ) );
-		ForceClientSideAnimationOn();
-
-		SetNetworkOrigin( m_vecRagdollOrigin );
-		SetAbsOrigin( m_vecRagdollOrigin );
-		SetAbsVelocity( m_vecRagdollVelocity );
-
-		C_CSPlayer *pPlayer = dynamic_cast< C_CSPlayer* >( m_hPlayer.Get() );
-		if ( pPlayer && !pPlayer->IsDormant() )
+		if ( !pPlayer->IsDormant() )
 		{
 			// move my current model instance to the ragdoll's so decals are preserved.
-			SetModelIndex( pPlayer->GetModelIndex() );
 			pPlayer->SnatchModelInstance( this );
-
-			SetAbsAngles( pPlayer->GetRenderAngles() );
-			SetNetworkAngles( pPlayer->GetRenderAngles() );
-
-			if ( pPlayer->IsLocalPlayer() )
-			{
-				ChooseMinModel();
-			}
-		}
-		else
-		{
-			ChooseMinModel();
 		}
 
-		m_minModelIndex = GetModelIndex();
-
-		Interp_Reset( GetVarMapping() );
+		SetAbsAngles( pPlayer->GetRenderAngles() );
+		SetNetworkAngles( pPlayer->GetRenderAngles() );
 	}
+
+	int iDeathAnim = RandomInt( iMinDeathAnim, iMaxDeathAnim );
+	char str[512];
+	Q_snprintf( str, sizeof( str ), "death%d", iDeathAnim );
+	SetSequence( LookupSequence( str ) );
+	ForceClientSideAnimationOn();
+
+	Interp_Reset( GetVarMapping() );
 }
 
 
@@ -372,19 +415,19 @@ void C_CSRagdoll::CreateCSRagdoll()
 	// then we can make ourselves start out exactly where the player is.
 	C_CSPlayer *pPlayer = dynamic_cast< C_CSPlayer* >( m_hPlayer.Get() );
 
-	m_realModelIndex = GetModelIndex();
+	// mark this to prevent model changes from overwriting the death sequence with the server sequence
+	SetReceivedSequence();
 
 	if ( pPlayer && !pPlayer->IsDormant() )
 	{
 		// move my current model instance to the ragdoll's so decals are preserved.
-		SetModelIndex( pPlayer->GetModelIndex() );
 		pPlayer->SnatchModelInstance( this );
 
 		VarMapping_t *varMap = GetVarMapping();
 
 		// Copy all the interpolated vars from the player entity.
 		// The entity uses the interpolated history to get bone velocity.
-		bool bRemotePlayer = (pPlayer != C_BasePlayer::GetLocalPlayer());			
+		bool bRemotePlayer = (pPlayer != C_BasePlayer::GetLocalPlayer());
 		if ( bRemotePlayer )
 		{
 			Interp_Copy( pPlayer );
@@ -401,7 +444,7 @@ void C_CSRagdoll::CreateCSRagdoll()
 			// This is the local player, so set them in a default
 			// pose and slam their velocity, angles and origin
 			SetAbsOrigin( m_vecRagdollOrigin );
-			
+
 			SetAbsAngles( pPlayer->GetRenderAngles() );
 
 			SetAbsVelocity( m_vecRagdollVelocity );
@@ -412,12 +455,17 @@ void C_CSRagdoll::CreateCSRagdoll()
 				Assert( false );	// missing walk_lower?
 				iSeq = 0;
 			}
-			
+
 			SetSequence( iSeq );	// walk_lower, basic pose
 			SetCycle( 0.0 );
 
+			// go ahead and set these on the player in case the code below decides to set up bones using
+			// that entity instead of this one.  The local player may not have valid animation
+			pPlayer->SetSequence( iSeq );	// walk_lower, basic pose
+			pPlayer->SetCycle( 0.0 );
+
 			Interp_Reset( varMap );
-		}		
+		}
 	}
 	else
 	{
@@ -429,11 +477,7 @@ void C_CSRagdoll::CreateCSRagdoll()
 		SetAbsVelocity( m_vecRagdollVelocity );
 
 		Interp_Reset( GetVarMapping() );
-
-		ChooseMinModel();
 	}
-
-	m_minModelIndex = GetModelIndex();
 
 	// Turn it into a ragdoll.
 	if ( cl_ragdoll_physics_enable.GetInt() )
@@ -446,7 +490,15 @@ void C_CSRagdoll::CreateCSRagdoll()
 		matrix3x4_t currentBones[MAXSTUDIOBONES];
 		const float boneDt = 0.05f;
 
-		if ( pPlayer && pPlayer == C_BasePlayer::GetLocalPlayer() )
+		//=============================================================================
+		// [pfreese], [tj]
+		// There are visual problems with the attempted blending of the 
+		// death pose animations in C_CSRagdoll::GetRagdollInitBoneArrays. The version
+		// in C_BasePlayer::GetRagdollInitBoneArrays doesn't attempt to blend death
+		// poses, so if the player is relevant, use that one regardless of whether the 
+		// player is the local one or not.
+		//=============================================================================
+		if ( pPlayer && !pPlayer->IsDormant() )
 		{
 			pPlayer->GetRagdollInitBoneArrays( boneDelta0, boneDelta1, currentBones, boneDt );
 		}
@@ -461,8 +513,9 @@ void C_CSRagdoll::CreateCSRagdoll()
 	else
 	{
 		m_flRagdollSinkStart = gpGlobals->curtime;
+		DestroyShadow();
 		ClientLeafSystem()->SetRenderGroup( GetRenderHandle(), RENDER_GROUP_TRANSLUCENT_ENTITY );
-	}		
+	}
 	m_bInitialized = true;
 }
 
@@ -506,6 +559,16 @@ void C_CSRagdoll::OnDataChanged( DataUpdateType_t type )
 
 	if ( type == DATA_UPDATE_CREATED )
 	{
+		// Prevent replays from creating ragdolls on the first frame of playback after skipping through playback.
+		// If a player died (leaving a ragdoll) previous to the first frame of replay playback,
+		// their ragdoll wasn't yet initialized because OnDataChanged events are queued but not processed
+		// until the first render. 
+		if ( engine->IsPlayingDemo() && m_bCreatedWhilePlaybackSkipping )
+		{
+			Release();
+			return;
+		}
+
 		if ( g_RagdollLVManager.IsLowViolence() )
 		{
 			CreateLowViolenceRagdoll();
@@ -515,27 +578,12 @@ void C_CSRagdoll::OnDataChanged( DataUpdateType_t type )
 			CreateCSRagdoll();
 		}
 	}
-	else 
+	else
 	{
 		if ( !cl_ragdoll_physics_enable.GetInt() )
 		{
 			// Don't let it set us back to a ragdoll with data from the server.
 			m_nRenderFX = kRenderFxNone;
-		}
-
-		if ( cl_minmodels.GetBool() )
-		{
-			if ( GetModelIndex() != m_minModelIndex )
-			{
-				SetModelIndex( m_minModelIndex );
-			}
-		}
-		else
-		{
-			if ( GetModelIndex() != m_realModelIndex )
-			{
-				SetModelIndex( m_realModelIndex );
-			}
 		}
 	}
 }
@@ -549,14 +597,14 @@ IRagdoll* C_CSRagdoll::GetIRagdoll() const
 // Purpose: Called when the player toggles nightvision
 // Input  : *pData - the int value of the nightvision state
 //			*pStruct - the player
-//			*pOut - 
+//			*pOut -
 //-----------------------------------------------------------------------------
 void RecvProxy_NightVision( const CRecvProxyData *pData, void *pStruct, void *pOut )
 {
 	C_CSPlayer *pPlayerData = (C_CSPlayer *) pStruct;
 
 	bool bNightVisionOn = ( pData->m_Value.m_Int > 0 );
-	
+
 	if ( pPlayerData->m_bNightVisionOn != bNightVisionOn )
 	{
 		if ( bNightVisionOn )
@@ -572,7 +620,7 @@ void RecvProxy_FlashTime( const CRecvProxyData *pData, void *pStruct, void *pOut
 
 	if( pPlayerData != C_BasePlayer::GetLocalPlayer() )
 		return;
-	
+
 	if ( (pPlayerData->m_flFlashDuration != pData->m_Value.m_Float) && pData->m_Value.m_Float > 0 )
 	{
 		pPlayerData->m_flFlashAlpha = 1;
@@ -613,7 +661,7 @@ void RecvProxy_HasDefuser( const CRecvProxyData *pData, void *pStruct, void *pOu
 
 		if ( pHudHR )
 		{
-			pHudHR->AddToHistory(HISTSLOT_ITEM, "defuser");
+			pHudHR->AddToHistory(HISTSLOT_ITEM, "defuser_pickup");
 		}
 	}
 }
@@ -625,7 +673,7 @@ void C_CSPlayer::RecvProxy_CycleLatch( const CRecvProxyData *pData, void *pStruc
 	// while they were out of PVS.
 	C_CSPlayer *pPlayer = (C_CSPlayer *)pStruct;
 	if( pPlayer->IsLocalPlayer() )
-		return; // Don't need to fixup ourselves.  
+		return; // Don't need to fixup ourselves.
 
 	float incomingCycle = (float)(pData->m_Value.m_Int) / 16; // Came in as 4 bit fixed point
 	float currentCycle = pPlayer->GetCycle();
@@ -653,7 +701,7 @@ void __MsgFunc_ReloadEffect( bf_read &msg )
 	C_CSPlayer *pPlayer = dynamic_cast< C_CSPlayer* >( C_BaseEntity::Instance( iPlayer ) );
 	if ( pPlayer )
 		pPlayer->PlayReloadEffect();
-	
+
 }
 USER_MESSAGE_REGISTER( ReloadEffect );
 
@@ -664,6 +712,19 @@ BEGIN_RECV_TABLE_NOBASE( C_CSPlayer, DT_CSLocalPlayerExclusive )
 	RecvPropFloat( RECVINFO( m_flVelocityModifier ) ),
 
 	RecvPropVector( RECVINFO_NAME( m_vecNetworkOrigin, m_vecOrigin ) ),
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj]Set up the receive table for per-client domination data
+    //=============================================================================
+
+    RecvPropArray3( RECVINFO_ARRAY( m_bPlayerDominated ), RecvPropBool( RECVINFO( m_bPlayerDominated[0] ) ) ),
+    RecvPropArray3( RECVINFO_ARRAY( m_bPlayerDominatingMe ), RecvPropBool( RECVINFO( m_bPlayerDominatingMe[0] ) ) )
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
 END_RECV_TABLE()
 
 
@@ -691,9 +752,26 @@ IMPLEMENT_CLIENTCLASS_DT( C_CSPlayer, DT_CSPlayer, CCSPlayer )
 	RecvPropInt( RECVINFO( m_bHasDefuser ), 0, RecvProxy_HasDefuser ),
 	RecvPropInt( RECVINFO( m_bNightVisionOn), 0, RecvProxy_NightVision ),
 	RecvPropBool( RECVINFO( m_bHasNightVision ) ),
-	RecvPropBool( RECVINFO( m_bInHostageRescueZone ) ),
+
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Added for fun-fact support
+    //=============================================================================
+
+    //RecvPropBool( RECVINFO( m_bPickedUpDefuser ) ),
+    //RecvPropBool( RECVINFO( m_bDefusedWithPickedUpKit ) ),
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+    RecvPropBool( RECVINFO( m_bInHostageRescueZone ) ),
 	RecvPropInt( RECVINFO( m_ArmorValue ) ),
 	RecvPropBool( RECVINFO( m_bIsDefusing ) ),
+	RecvPropBool( RECVINFO( m_bResumeZoom ) ),
+	RecvPropInt( RECVINFO( m_iLastZoom ) ),
+
 #ifdef CS_SHIELD_ENABLED
 	RecvPropBool( RECVINFO( m_bHasShield ) ),
 	RecvPropBool( RECVINFO( m_bShieldDrawn ) ),
@@ -711,7 +789,7 @@ END_RECV_TABLE()
 
 
 
-C_CSPlayer::C_CSPlayer() : 
+C_CSPlayer::C_CSPlayer() :
 	m_iv_angEyeAngles( "C_CSPlayer::m_iv_angEyeAngles" )
 {
 	m_PlayerAnimState = CreatePlayerAnimState( this, this, LEGANIM_9WAY, true );
@@ -740,6 +818,8 @@ C_CSPlayer::C_CSPlayer() :
 	m_serverIntendedCycle = -1.0f;
 
 	view->SetScreenOverlayMaterial( NULL );
+
+    m_bPlayingFreezeCamSound = false;
 }
 
 
@@ -834,6 +914,30 @@ bool C_CSPlayer::HasHelmet() const
 	return m_bHasHelmet;
 }
 
+int C_CSPlayer::GetCurrentAssaultSuitPrice()
+{
+	// WARNING: This price logic also exists in CCSPlayer::AttemptToBuyAssaultSuit
+	// and must be kept in sync if changes are made.
+
+	int fullArmor = ArmorValue() >= 100 ? 1 : 0;
+	if ( fullArmor && !HasHelmet() )
+	{
+		return HELMET_PRICE;
+	}
+	else if ( !fullArmor && HasHelmet() )
+	{
+		return KEVLAR_PRICE;
+	}
+	else
+	{
+		// NOTE: This applies to the case where you already have both
+		// as well as the case where you have neither.  In the case
+		// where you have both, the item should still have a price
+		// and become disabled when you have little or no money left.
+		return ASSAULTSUIT_PRICE;
+	}
+}
+
 const QAngle& C_CSPlayer::GetRenderAngles()
 {
 	if ( IsRagdoll() )
@@ -861,8 +965,8 @@ void C_CSPlayer::GetShadowRenderBounds( Vector &mins, Vector &maxs, ShadowType_t
 	{
 		GetRenderBounds( mins, maxs );
 
-		// We do this because the normal bbox calculations don't take pose params into account, and 
-		// the rotation of the guy's upper torso can place his gun a ways out of his bbox, and 
+		// We do this because the normal bbox calculations don't take pose params into account, and
+		// the rotation of the guy's upper torso can place his gun a ways out of his bbox, and
 		// the shadow will get cut off as he rotates.
 		//
 		// Thus, we give it some padding here.
@@ -891,7 +995,7 @@ void C_CSPlayer::GetRenderBounds( Vector& theMins, Vector& theMaxs )
 
 
 bool C_CSPlayer::GetShadowCastDirection( Vector *pDirection, ShadowType_t shadowType ) const
-{ 
+{
 	if ( shadowType == SHADOWS_SIMPLE )
 	{
 		// Blobby shadows should sit directly underneath us.
@@ -954,7 +1058,7 @@ void C_CSPlayer::CreateAddonModel( int i )
 
 	// Create the model entity.
 	CAddonInfo *pAddonInfo = &g_AddonInfo[i];
-	
+
 	int iAttachment = LookupAttachment( pAddonInfo->m_pAttachmentName );
 	if ( iAttachment <= 0 )
 		return;
@@ -1002,7 +1106,7 @@ void C_CSPlayer::CreateAddonModel( int i )
 
 		CCSWeaponInfo *pWeaponInfo = dynamic_cast< CCSWeaponInfo* >( GetFileWeaponInfoFromHandle( hWpnInfo ) );
 		if ( pWeaponInfo )
-		{		
+		{
 			if ( pWeaponInfo->m_szAddonModel[0] == 0 )
 				pEnt->InitializeAsClientEntity( pWeaponInfo->szWorldModel, RENDER_GROUP_OPAQUE_ENTITY );
 			else
@@ -1019,12 +1123,12 @@ void C_CSPlayer::CreateAddonModel( int i )
 	if ( Q_strcmp( pAddonInfo->m_pAttachmentName, "c4" ) )
 	{
 		// fade out all attached models except C4
-		pEnt->SetFadeMinMax( 400, 500 ); 
+		pEnt->SetFadeMinMax( 400, 500 );
 	}
 
 	// Create the addon.
 	CAddonModel *pAddon = &m_AddonModels[m_AddonModels.AddToTail()];
-	
+
 	pAddon->m_hEnt = pEnt;
 	pAddon->m_iAddon = i;
 	pAddon->m_iAttachmentPoint = iAttachment;
@@ -1151,7 +1255,10 @@ void C_CSPlayer::UpdateSoundEvents()
 void C_CSPlayer::UpdateMinModels( void )
 {
 	int modelIndex = m_nModelIndex;
-	if ( !IsVIP() && cl_minmodels.GetBool() && !IsLocalPlayer() )
+
+	// cl_minmodels convar dependent on sv_allowminmodels convar
+
+	if ( !IsVIP() && sv_allowminmodels.GetBool() && cl_minmodels.GetBool() && !IsLocalPlayer() )
 	{
 		if ( GetTeamNumber() == TEAM_CT )
 		{
@@ -1174,7 +1281,8 @@ void C_CSPlayer::UpdateMinModels( void )
 	SetModelByIndex( modelIndex );
 }
 
-
+// NVNT gate for spectating.
+static bool inSpectating_Haptics = false;
 //-----------------------------------------------------------------------------
 void C_CSPlayer::ClientThink()
 {
@@ -1190,6 +1298,62 @@ void C_CSPlayer::ClientThink()
 	{
 		PerformObstaclePushaway( this );
 		m_fNextThinkPushAway =  gpGlobals->curtime + PUSHAWAY_THINK_INTERVAL;
+	}
+
+	// NVNT - check for spectating forces
+	if ( IsLocalPlayer() )
+	{
+		if ( GetTeamNumber() == TEAM_SPECTATOR || !this->IsAlive() || GetLocalOrInEyeCSPlayer() != this )
+		{
+			if (!inSpectating_Haptics)
+			{
+				if ( haptics )
+					haptics->SetNavigationClass("spectate");
+
+				inSpectating_Haptics = true;
+			}
+		}
+		else
+		{
+			if (inSpectating_Haptics)
+			{
+				if ( haptics )
+					haptics->SetNavigationClass("on_foot");
+
+				inSpectating_Haptics = false;
+			}
+		}
+
+		if ( m_iObserverMode == OBS_MODE_FREEZECAM )
+		{
+			//=============================================================================
+			// HPE_BEGIN:
+			// [Forrest] Added sv_disablefreezecam check
+			//=============================================================================
+			static ConVarRef sv_disablefreezecam( "sv_disablefreezecam" );
+			if ( !m_bPlayingFreezeCamSound && !cl_disablefreezecam.GetBool() && !sv_disablefreezecam.GetBool() )
+				//=============================================================================
+				// HPE_END
+				//=============================================================================
+			{
+				// Play sound
+				m_bPlayingFreezeCamSound = true;
+
+				CLocalPlayerFilter filter;
+				EmitSound_t ep;
+				ep.m_nChannel = CHAN_VOICE;
+				ep.m_pSoundName =  "UI/freeze_cam.wav";
+				ep.m_flVolume = VOL_NORM;
+				ep.m_SoundLevel = SNDLVL_NORM;
+				ep.m_bEmitCloseCaption = false;
+
+				EmitSound( filter, GetSoundSourceIndex(), ep );
+			}
+		}
+		else
+		{
+			m_bPlayingFreezeCamSound = false;
+		}
 	}
 }
 
@@ -1235,7 +1399,7 @@ void C_CSPlayer::PostDataUpdate( DataUpdateType_t updateType )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose:
 // Output : Returns true on success, false on failure.
 //-----------------------------------------------------------------------------
 bool C_CSPlayer::Interpolate( float currentTime )
@@ -1245,7 +1409,7 @@ bool C_CSPlayer::Interpolate( float currentTime )
 
 	if ( CSGameRules()->IsFreezePeriod() )
 	{
-		// don't interpolate players position during freeze periode
+		// don't interpolate players position during freeze period
 		SetAbsOrigin( GetNetworkOrigin() );
 	}
 
@@ -1298,7 +1462,7 @@ void C_CSPlayer::UpdateIDTarget()
 		return;
 
 	// don't show IDs in chase spec mode
-	if ( GetObserverMode() == OBS_MODE_CHASE || 
+	if ( GetObserverMode() == OBS_MODE_CHASE ||
 		 GetObserverMode() == OBS_MODE_DEATHCAM )
 		 return;
 
@@ -1355,7 +1519,7 @@ void C_CSPlayer::UpdateIDTarget()
 
 					/*debugoverlay->AddBoxOverlay( pSmokeGrenade->GetAbsOrigin(), Vector( flRadius, flRadius, flRadius ),
 					 Vector( -flRadius, -flRadius, -flRadius ), QAngle( 0, 0, 0 ), 255, 0, 0, 255, 0.2 );*/
-				
+
 					if ( IntersectInfiniteRayWithSphere( MainViewOrigin(), MainViewForward(), vPos, flRadius, &flHit1, &flHit2 ) )
 					{
 						 return;
@@ -1402,7 +1566,7 @@ CWeaponCSBase* C_CSPlayer::GetActiveCSWeapon() const
 
 CWeaponCSBase* C_CSPlayer::GetCSWeapon( CSWeaponID id ) const
 {
-	for (int i=0;i<MAX_WEAPONS;i++) 
+	for (int i=0;i<MAX_WEAPONS;i++)
 	{
 		CBaseCombatWeapon *weapon = GetWeapon( i );
 		if ( weapon )
@@ -1489,9 +1653,9 @@ void C_CSPlayer::SetFireAnimation( PLAYER_ANIM playerAnim )
 		idealActivity = ACT_WALK;
 		break;
 	}
-	
+
 	CWeaponCSBase *pWeapon = GetActiveCSWeapon();
-				
+
 	if ( pWeapon )
 	{
 		Activity aWeaponActivity = idealActivity;
@@ -1524,7 +1688,7 @@ void C_CSPlayer::SetFireAnimation( PLAYER_ANIM playerAnim )
 }
 */
 
-ShadowType_t C_CSPlayer::ShadowCastType( void ) 
+ShadowType_t C_CSPlayer::ShadowCastType( void )
 {
 	if ( !IsVisible() )
 		 return SHADOWS_NONE;
@@ -1534,13 +1698,13 @@ ShadowType_t C_CSPlayer::ShadowCastType( void )
 
 //-----------------------------------------------------------------------------
 // Purpose: Returns whether or not we can switch to the given weapon.
-// Input  : pWeapon - 
+// Input  : pWeapon -
 //-----------------------------------------------------------------------------
 bool C_CSPlayer::Weapon_CanSwitchTo( CBaseCombatWeapon *pWeapon )
 {
 	if ( !pWeapon->CanDeploy() )
 		return false;
-	
+
 	if ( GetActiveWeapon() )
 	{
 		if ( !GetActiveWeapon()->CanHolster() )
@@ -1554,7 +1718,7 @@ bool C_CSPlayer::Weapon_CanSwitchTo( CBaseCombatWeapon *pWeapon )
 void C_CSPlayer::UpdateClientSideAnimation()
 {
 	// We do this in a different order than the base class.
-	// We need our cycle to be valid for when we call the playeranimstate update code, 
+	// We need our cycle to be valid for when we call the playeranimstate update code,
 	// or else it'll synchronize the upper body anims with the wrong cycle.
 	if ( GetSequence() != -1 )
 	{
@@ -1603,7 +1767,7 @@ void C_CSPlayer::ProcessMuzzleFlashEvent()
 
 	Vector vector;
 	QAngle angles;
-	
+
 	int iAttachment = LookupAttachment( "muzzle_flash" );
 
 	if ( iAttachment >= 0 )
@@ -1616,7 +1780,7 @@ void C_CSPlayer::ProcessMuzzleFlashEvent()
 			{
 				dlight_t *el = effects->CL_AllocDlight( LIGHT_INDEX_MUZZLEFLASH + index );
 				el->origin = vector;
-				el->radius = 70; 
+				el->radius = 70;
 				el->decay = el->radius / 0.05f;
 				el->die = gpGlobals->curtime + 0.05f;
 				el->color.r = 255;
@@ -1626,7 +1790,7 @@ void C_CSPlayer::ProcessMuzzleFlashEvent()
 			}
 
 			int shellType = GetShellForAmmoType( pWeapon->GetCSWpnData().szAmmo1 );
-			
+
 			QAngle playerAngle = EyeAngles();
 			Vector vForward, vRight, vUp;
 
@@ -1646,12 +1810,12 @@ void C_CSPlayer::ProcessMuzzleFlashEvent()
 	if ( hasMuzzleFlash )
 	{
 		iAttachment = pWeapon->GetMuzzleAttachment();
-			
+
 		if ( iAttachment > 0 )
 		{
 			float flScale = pWeapon->GetCSWpnData().m_flMuzzleScale;
 			flScale *= 0.75;
-			FX_MuzzleEffectAttached( flScale, pWeapon->GetRefEHandle(), iAttachment, NULL, false );		
+			FX_MuzzleEffectAttached( flScale, pWeapon->GetRefEHandle(), iAttachment, NULL, false );
 
 		}
 	}
@@ -1731,13 +1895,13 @@ inline bool IsBoneChildOf( CStudioHdr *pHdr, int iBone, int iParent )
 	{
 		if ( iBone == iParent )
 			return true;
-	
+
 		iBone = pHdr->pBone( iBone )->parent;
 	}
 	return false;
 }
 
-void ApplyDifferenceTransformToChildren( 
+void ApplyDifferenceTransformToChildren(
 	C_BaseAnimating *pModel,
 	const matrix3x4_t &mSource,
 	const matrix3x4_t &mDest,
@@ -1811,7 +1975,7 @@ void C_CSPlayer::BuildTransformations( CStudioHdr *pHdr, Vector *pos, Quaternion
 	BaseClass::BuildTransformations( pHdr, pos, q, cameraTransform, boneMask, boneComputed );
 
 	if ( IsLocalPlayer() && !C_BasePlayer::ShouldDrawLocalPlayer() )
-		return;	
+		return;
 
 	if ( !cl_left_hand_ik.GetInt() )
 		return;
@@ -1898,7 +2062,7 @@ void C_CSPlayer::PlayReloadEffect()
 		Assert( false ); // We shouldn't have been sent this message.
 		return;
 	}
-	
+
 	// Get the view model for our current gun.
 	CWeaponCSBase *pWeapon = GetActiveCSWeapon();
 	if ( !pWeapon )
@@ -1917,7 +2081,7 @@ void C_CSPlayer::PlayReloadEffect()
 	for ( int iSeq=0; iSeq < studioHdr.GetNumSeq(); iSeq++ )
 	{
 		mstudioseqdesc_t *pSeq = &studioHdr.pSeqdesc( iSeq );
-		
+
 		if ( pSeq->activity == ACT_VM_RELOAD )
 		{
 			float poseParameters[MAXSTUDIOPOSEPARAM];
@@ -1928,7 +2092,7 @@ void C_CSPlayer::PlayReloadEffect()
 			for ( int iEvent=0; iEvent < pSeq->numevents; iEvent++ )
 			{
 				mstudioevent_t *pEvent = pSeq->pEvent( iEvent );
-				
+
 				if ( pEvent->event == CL_EVENT_SOUND )
 				{
 					CCSSoundEvent event;
@@ -1940,7 +2104,7 @@ void C_CSPlayer::PlayReloadEffect()
 
 			break;
 		}
-	}	
+	}
 }
 
 void C_CSPlayer::DoAnimationEvent( PlayerAnimEvent_t event, int nData )
@@ -1981,18 +2145,18 @@ void C_CSPlayer::FireEvent( const Vector& origin, const QAngle& angles, int even
 			{
 				data.m_vOrigin = origin;
 			}
-			
+
 			data.m_vNormal = Vector( 0,0,1 );
 			data.m_flScale = random->RandomFloat( 4.0f, 5.0f );
 			DispatchEffect( "watersplash", data );
-		}		
+		}
 	}
 	else if( event == 7002 )
 	{
 		bool bInWater = ( enginetrace->GetPointContents(origin) & CONTENTS_WATER );
 
 		//Msg( "walk event ( %d )\n", bInWater ? 1 : 0 );
-		
+
 		if( bInWater )
 		{
 			//walk ripple
@@ -2010,7 +2174,7 @@ void C_CSPlayer::FireEvent( const Vector& origin, const QAngle& angles, int even
 			{
 				data.m_vOrigin = origin;
 			}
-	
+
 			data.m_vNormal = Vector( 0,0,1 );
 			data.m_flScale = random->RandomFloat( 4.0f, 7.0f );
 			DispatchEffect( "waterripple", data );
@@ -2064,7 +2228,7 @@ void C_CSPlayer::Simulate( void )
 			Vector vecOrigin;
 			QAngle dummy;
 			GetAttachment( iAttachment, vecOrigin, dummy );
-				
+
 			trace_t tr;
 			UTIL_TraceLine( vecOrigin, vecOrigin + (vForward * 200), MASK_SHOT, this, COLLISION_GROUP_NONE, &tr );
 
@@ -2092,7 +2256,7 @@ void C_CSPlayer::Simulate( void )
 				beamInfo.m_bRenderable = true;
 				beamInfo.m_flLife = 0.5;
 				beamInfo.m_nFlags = FBEAM_FOREVER | FBEAM_ONLYNOISEONCE | FBEAM_NOTILE | FBEAM_HALOBEAM;
-				
+
 				m_pFlashlightBeam = beams->CreateBeamPoints( beamInfo );
 			}
 
@@ -2109,7 +2273,7 @@ void C_CSPlayer::Simulate( void )
 
 				dlight_t *el = effects->CL_AllocDlight( 0 );
 				el->origin = tr.endpos;
-				el->radius = 50; 
+				el->radius = 50;
 				el->color.r = 200;
 				el->color.g = 200;
 				el->color.b = 200;
@@ -2121,7 +2285,7 @@ void C_CSPlayer::Simulate( void )
 			ReleaseFlashlight();
 		}
 	}
-		
+
 	BaseClass::Simulate();
 }
 
@@ -2150,7 +2314,7 @@ bool C_CSPlayer::HasC4( void )
 	}
 }
 
-void C_CSPlayer::ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomImpactName )
+void C_CSPlayer::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCustomImpactName )
 {
 	static ConVar *violence_hblood = cvar->FindVar( "violence_hblood" );
 	if ( violence_hblood && !violence_hblood->GetBool() )
@@ -2167,7 +2331,7 @@ void C_CSPlayer::CalcObserverView( Vector& eyeOrigin, QAngle& eyeAngles, float& 
 	 * TODO: Fix this!
 	// CS:S standing eyeheight is above the collision volume, so we need to pull it
 	// down when we go into close quarters.
-	float maxEyeHeightAboveBounds = VEC_VIEW.z - VEC_HULL_MAX.z;
+	float maxEyeHeightAboveBounds = VEC_VIEW_SCALED( this ).z - VEC_HULL_MAX_SCALED( this ).z;
 	if ( GetObserverMode() == OBS_MODE_IN_EYE &&
 		maxEyeHeightAboveBounds > 0.0f &&
 		GetObserverTarget() &&
@@ -2179,14 +2343,14 @@ void C_CSPlayer::CalcObserverView( Vector& eyeOrigin, QAngle& eyeAngles, float& 
 
 		Vector offset = eyeOrigin - GetAbsOrigin();
 
-		Vector vHullMin = VEC_HULL_MIN;
+		Vector vHullMin = VEC_HULL_MIN_SCALED( this );
 		vHullMin.z = 0.0f;
-		Vector vHullMax = VEC_HULL_MAX;
+		Vector vHullMax = VEC_HULL_MAX_SCALED( this );
 
 		Vector start = GetAbsOrigin();
 		start.z += vHullMax.z;
 		Vector end = start;
-		end.z += eyeClearance + VEC_VIEW.z - vHullMax.z;
+		end.z += eyeClearance + VEC_VIEW_SCALED( this ).z - vHullMax_SCALED( this ).z;
 
 		vHullMax.z = 0.0f;
 
@@ -2208,7 +2372,7 @@ void C_CSPlayer::CalcObserverView( Vector& eyeOrigin, QAngle& eyeAngles, float& 
 			}
 			else
 			{
-				offset.z = min( est, offset.z );
+				offset.z = MIN( est, offset.z );
 			}
 			eyeOrigin.z = GetAbsOrigin().z + offset.z;
 		}
@@ -2217,4 +2381,173 @@ void C_CSPlayer::CalcObserverView( Vector& eyeOrigin, QAngle& eyeAngles, float& 
 
 	BaseClass::CalcObserverView( eyeOrigin, eyeAngles, fov );
 }
+
+//=============================================================================
+// HPE_BEGIN:
+//=============================================================================
+// [tj] checks if this player has another given player on their Steam friends list.
+bool C_CSPlayer::HasPlayerAsFriend(C_CSPlayer* player)
+{
+    if (!steamapicontext || !steamapicontext->SteamFriends() || !steamapicontext->SteamUtils() || !player)
+    {
+        return false;
+    }
+
+    player_info_t pi;
+    if ( !engine->GetPlayerInfo( player->entindex(), &pi ) )
+    {
+        return false;
+    }
+
+    if ( !pi.friendsID )
+    {
+        return false;
+    }
+
+    // check and see if they're on the local player's friends list
+    CSteamID steamID( pi.friendsID, 1, steamapicontext->SteamUtils()->GetConnectedUniverse(), k_EAccountTypeIndividual );
+    return steamapicontext->SteamFriends()->HasFriend( steamID, k_EFriendFlagImmediate);
+}
+
+// [menglish] Returns whether this player is dominating or is being dominated by the specified player
+bool C_CSPlayer::IsPlayerDominated( int iPlayerIndex )
+{
+	return m_bPlayerDominated.Get( iPlayerIndex );
+}
+
+bool C_CSPlayer::IsPlayerDominatingMe( int iPlayerIndex )
+{
+	return m_bPlayerDominatingMe.Get( iPlayerIndex );
+}
+
+
+// helper interpolation functions
+namespace Interpolators
+{
+	inline float Linear( float t ) { return t; }
+
+	inline float SmoothStep( float t )
+	{
+		t = 3 * t * t - 2.0f * t * t * t;
+		return t;
+	}
+
+	inline float SmoothStep2( float t )
+	{
+		return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+	}
+
+	inline float SmoothStepStart( float t )
+	{
+		t = 0.5f * t;
+		t = 3 * t * t - 2.0f * t * t * t;
+		t = t* 2.0f;
+		return t;
+	}
+
+	inline float SmoothStepEnd( float t )
+	{
+		t = 0.5f * t + 0.5f;
+		t = 3 * t * t - 2.0f * t * t * t;
+		t = (t - 0.5f) * 2.0f;
+		return t;
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Calculate the view for the player while he's in freeze frame observer mode
+//-----------------------------------------------------------------------------
+void C_CSPlayer::CalcFreezeCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov )
+{
+	C_BaseEntity *pTarget = GetObserverTarget();
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [Forrest] Added sv_disablefreezecam check
+	//=============================================================================
+	static ConVarRef sv_disablefreezecam( "sv_disablefreezecam" );
+	if ( !pTarget || cl_disablefreezecam.GetBool() || sv_disablefreezecam.GetBool() )
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+	{
+		return CalcDeathCamView( eyeOrigin, eyeAngles, fov );
+	}
+
+	// pick a zoom camera target
+	Vector vLookAt = pTarget->GetObserverCamOrigin();	// Returns ragdoll origin if they're ragdolled
+	vLookAt += GetChaseCamViewOffset( pTarget );
+
+	// look over ragdoll, not through
+	if ( !pTarget->IsAlive() )
+		vLookAt.z += pTarget->GetBaseAnimating() ? VEC_DEAD_VIEWHEIGHT_SCALED( pTarget->GetBaseAnimating() ).z : VEC_DEAD_VIEWHEIGHT.z;
+
+	// Figure out a view position in front of the target
+	Vector vEyeOnPlane = eyeOrigin;
+	vEyeOnPlane.z = vLookAt.z;
+	Vector vToTarget = vLookAt - vEyeOnPlane;
+	VectorNormalize( vToTarget );
+
+	// goal position of camera is pulled away from target by m_flFreezeFrameDistance
+	Vector vTargetPos = vLookAt - (vToTarget * m_flFreezeFrameDistance);
+
+	// Now trace out from the target, so that we're put in front of any walls
+	trace_t trace;
+	C_BaseEntity::PushEnableAbsRecomputations( false ); // HACK don't recompute positions while doing RayTrace
+	UTIL_TraceHull( vLookAt, vTargetPos, WALL_MIN, WALL_MAX, MASK_SOLID, pTarget, COLLISION_GROUP_NONE, &trace );
+	C_BaseEntity::PopEnableAbsRecomputations();
+	if ( trace.fraction < 1.0 )
+	{
+		// The camera's going to be really close to the target. So we don't end up
+		// looking at someone's chest, aim close freezecams at the target's eyes.
+		vTargetPos = trace.endpos;
+
+		// To stop all close in views looking up at character's chins, move the view up.
+		vTargetPos.z += fabs(vLookAt.z - vTargetPos.z) * 0.85;
+		C_BaseEntity::PushEnableAbsRecomputations( false ); // HACK don't recompute positions while doing RayTrace
+		UTIL_TraceHull( vLookAt, vTargetPos, WALL_MIN, WALL_MAX, MASK_SOLID, pTarget, COLLISION_GROUP_NONE, &trace );
+		C_BaseEntity::PopEnableAbsRecomputations();
+		vTargetPos = trace.endpos;
+	}
+
+	// Look directly at the target
+	vToTarget = vLookAt - vTargetPos;
+	VectorNormalize( vToTarget );
+	VectorAngles( vToTarget, eyeAngles );
+
+	float fCurTime = gpGlobals->curtime - m_flFreezeFrameStartTime;
+	float fInterpolant = clamp( fCurTime / spec_freeze_traveltime.GetFloat(), 0.0f, 1.0f );
+	fInterpolant = Interpolators::SmoothStepEnd( fInterpolant );
+
+	// move the eye toward our killer
+	VectorLerp( m_vecFreezeFrameStart, vTargetPos, fInterpolant, eyeOrigin );
+
+	if ( fCurTime >= spec_freeze_traveltime.GetFloat() && !m_bSentFreezeFrame )
+	{
+		IGameEvent *pEvent = gameeventmanager->CreateEvent( "freezecam_started" );
+		if ( pEvent )
+		{
+			gameeventmanager->FireEventClientSide( pEvent );
+		}
+
+		m_bSentFreezeFrame = true;
+		view->FreezeFrame( spec_freeze_time.GetFloat() );
+	}
+}
+
+float C_CSPlayer::GetDeathCamInterpolationTime()
+{
+	static ConVarRef sv_disablefreezecam( "sv_disablefreezecam" );
+	if ( cl_disablefreezecam.GetBool() || sv_disablefreezecam.GetBool() || !GetObserverTarget() )
+		return spec_freeze_time.GetFloat();
+	else
+		return CS_DEATH_ANIMATION_TIME;
+
+}
+
+
+//=============================================================================
+// HPE_END
+//=============================================================================
 

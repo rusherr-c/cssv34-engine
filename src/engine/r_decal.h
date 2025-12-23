@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -23,6 +23,8 @@ void R_DecalInit();
 void R_DecalTerm( worldbrushdata_t *pBrushData, bool term_permanent_decals );
 void R_DecalTermAll();
 float ComputeDecalLightmapOffset( SurfaceHandle_t surfID );
+// get the max vertex/index to lock in a dynamic VB
+void R_DecalsGetMaxMesh( IMatRenderContext *pRenderContext, int &nDecalSortMaxVerts, int &nDecalSortMaxIndices );
 
 // --------------------------------------------------------------- //
 // Decal functions used for displacements.
@@ -158,17 +160,13 @@ struct DecalMeshList_t
 
 void DecalSurfacesInit( bool bBrushModel );
 void DecalSurfaceAdd( SurfaceHandle_t surfID, int renderGroup );
-void DecalSurfaceDraw( IMatRenderContext *pRenderContext, int renderGroup );
+void DecalSurfaceDraw( IMatRenderContext *pRenderContext, int renderGroup, float flFade = 1.0f );
 void DrawDecalsOnSingleSurface( IMatRenderContext *pRenderContext, SurfaceHandle_t surfID );
-
-void DecalBeginFrame( void );
 
 void R_DecalReSortMaterials( void );
 void R_DecalFlushDestroyList( void );
 
 extern VMatrix g_BrushToWorldMatrix;
-extern CUtlVector<SurfaceHandle_t>	s_DecalSurfaces[MAX_MAT_SORT_GROUPS+1];
-
 #include "tier0/memdbgoff.h"
 
 #endif // R_DECAL_H

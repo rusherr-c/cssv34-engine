@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: client sound i/o functions
 //
@@ -57,6 +57,7 @@ struct StartSoundParams_t
 		soundlevel( SNDLVL_NORM ), 
 		flags( SND_NOFLAGS ), 
 		pitch( PITCH_NORM ), 
+		specialdsp( 0 ),
 		fromserver( false ),
 		delay( 0.0f ),
 		speakerentity( -1 ),
@@ -78,7 +79,8 @@ struct StartSoundParams_t
 	float			fvol;
 	soundlevel_t	soundlevel;
 	int				flags;
-	int				pitch; 
+	int				pitch;
+	int				specialdsp;
 	bool			fromserver;
 	float			delay;
 	int				speakerentity;

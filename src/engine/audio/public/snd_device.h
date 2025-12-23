@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: This abstracts the various hardware dependent implementations of sound
 //			At the time of this writing there are Windows WAVEOUT, Direct Sound,
@@ -24,12 +24,14 @@
 #define SOUND_MIX_WET		0			// mix only samples that don't have channel set to 'dry' or 'speaker' (default)
 #define SOUND_MIX_DRY		1			// mix only samples with channel set to 'dry' (ie: music)
 #define SOUND_MIX_SPEAKER	2			// mix only samples with channel set to 'speaker'
+#define SOUND_MIX_SPECIAL_DSP	3			// mix only samples with channel set to 'special dsp'
 
 #define	SOUND_BUSS_ROOM			(1<<0)		// mix samples using channel dspmix value (based on distance from player)
 #define SOUND_BUSS_FACING		(1<<1)		// mix samples using channel dspface value (source facing)
 #define	SOUND_BUSS_FACINGAWAY	(1<<2)		// mix samples using 1-dspface
 #define SOUND_BUSS_SPEAKER		(1<<3)		// mix ch->bspeaker samples in mono to speaker buffer
 #define SOUND_BUSS_DRY			(1<<4)		// mix ch->bdry samples into dry buffer
+#define SOUND_BUSS_SPECIAL_DSP	(1<<5)		// mix ch->bspecialdsp samples into special dsp buffer
 
 class Vector;
 struct channel_t;
@@ -40,6 +42,11 @@ struct channel_t;
 abstract_class IAudioDevice
 {
 public:
+	// Add a virtual destructor to silence the clang warning.
+	// This is harmless but not important since the only derived class
+	// doesn't have a destructor.
+	virtual ~IAudioDevice() {}
+
 	// Detect the sound hardware and create a compatible device
 	// NOTE: This should NEVER fail.  There is a function called Audio_GetNullDevice
 	// which will create a "null" device that makes no sound.  If we can't create a real 

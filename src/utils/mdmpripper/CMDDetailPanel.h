@@ -1,8 +1,9 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "mdmpRipper.h"
 #include "vgui_controls/MessageMap.h"
 #include "vgui_controls/MenuBar.h"
 #include "vgui_controls/Menu.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui/ISurface.h"
 #include "vgui_controls/EditablePanel.h"
 #include "vgui_controls/HTML.h"

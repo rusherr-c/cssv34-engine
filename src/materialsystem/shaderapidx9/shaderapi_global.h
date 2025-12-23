@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -51,7 +51,7 @@ extern IShaderShadow *g_pShaderShadow;
 //-----------------------------------------------------------------------------
 // Memory debugging 
 //-----------------------------------------------------------------------------
-#define MEM_ALLOC_D3D_CREDIT()	MEM_ALLOC_CREDIT_("D3D:"__FILE__)
+#define MEM_ALLOC_D3D_CREDIT()	MEM_ALLOC_CREDIT_("D3D:" __FILE__)
 #define BEGIN_D3D_ALLOCATION()	MemAlloc_PushAllocDbgInfo("D3D:" __FILE__, __LINE__)
 #define END_D3D_ALLOCATION()	MemAlloc_PopAllocDbgInfo()
 
@@ -91,12 +91,15 @@ extern bool g_bShaderAccessDisallowed;
 
 #ifdef USE_SHADER_DISALLOW
 #define TestShaderPermission() do { if ( (!g_bUseShaderMutex || g_ShaderMutex.GetDepth() == 0) && g_bShaderAccessDisallowed ) { ExecuteOnce( DebuggerBreakIfDebugging() ); } } while (0)
-#else
-#define TestShaderPermission() ((void)0)
-#endif
-
 #define LOCK_SHADERAPI() TestShaderPermission(); AUTO_LOCK_( CShaderMutex, g_ShaderMutex )
 #define LockShaderMutex() TestShaderPermission(); g_ShaderMutex.Lock();
 #define UnlockShaderMutex() TestShaderPermission(); g_ShaderMutex.Unlock();
+#else
+#define TestShaderPermission() ((void)0)
+#define LOCK_SHADERAPI() ((void)0)
+#define LockShaderMutex() ((void)0)
+#define UnlockShaderMutex() ((void)0)
+#endif
+
 
 #endif // SHADERAPI_GLOBAL_H

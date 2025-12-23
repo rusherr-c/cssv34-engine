@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -412,7 +412,7 @@ Vector ClusterCenter( int cluster )
 
 void DumpPortalTrace( pstack_t *pStack )
 {
-	AUTO_LOCK_FM(g_PortalTrace.m_mutex);
+	AUTO_LOCK(g_PortalTrace.m_mutex);
 	if ( g_PortalTrace.m_list.Count() )
 		return;
 

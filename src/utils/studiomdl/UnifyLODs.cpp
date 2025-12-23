@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -317,7 +317,7 @@ s_source_t* GetModelLODSource( const char *pModelName,
 //-----------------------------------------------------------------------------
 // Tolerances for all fields of the vertex
 //-----------------------------------------------------------------------------
-#define POSITION_EPSILON	0.05f
+#define POSITION_EPSILON	0.01f	// Was 0.05f
 #define TEXCOORD_EPSILON	0.01f
 #define NORMAL_EPSILON		10.0f	// in degrees
 #define TANGENT_EPSILON		10.0f	// in degrees

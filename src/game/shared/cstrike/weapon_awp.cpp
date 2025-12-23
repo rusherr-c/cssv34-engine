@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -22,6 +22,8 @@
 
 #define SNIPER_ZOOM_CONTEXT		"SniperRifleThink"
 
+const int cAWPMidZoomFOV = 40;
+const int cAWPMaxZoomFOV = 10;
 
 #ifdef AWP_UNZOOM
 	ConVar sv_awpunzoomdelay( 
@@ -53,16 +55,17 @@ public:
 	virtual void PrimaryAttack();
 	virtual void SecondaryAttack();
 
-	virtual void AWPFire( float flSpread );
-
+ 	virtual float GetInaccuracy() const;
 	virtual float GetMaxSpeed() const;
 	virtual bool IsAwp() const;
+	virtual bool Reload();
+	virtual bool Deploy();
 
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_AWP; }
 
 private:
 
-#ifndef CLIENT_DLL
+#ifdef AWP_UNZOOM
 	void				UnzoomThink( void );
 #endif
 
@@ -83,7 +86,9 @@ PRECACHE_WEAPON_REGISTER( weapon_awp );
 #ifndef CLIENT_DLL
 
 	BEGIN_DATADESC( CWeaponAWP )
+#ifdef AWP_UNZOOM
 		DEFINE_THINKFUNC( UnzoomThink ),
+#endif
 	END_DATADESC()
 
 #endif
@@ -102,38 +107,50 @@ void CWeaponAWP::Spawn()
 
 void CWeaponAWP::SecondaryAttack()
 {
-	#ifndef CLIENT_DLL
-		CCSPlayer *pPlayer = GetPlayerOwner();
+	const float kZoomTime = 0.10f;
 
-		if (pPlayer == NULL)
-		{
-			Assert(pPlayer != NULL);
-			return;
-		}
+	CCSPlayer *pPlayer = GetPlayerOwner();
 
-		if ( pPlayer->GetFOV() == pPlayer->GetDefaultFOV() )
-		{
-			pPlayer->SetFOV( pPlayer, 40, 0.15f );
-		}
-		else if ( pPlayer->GetFOV() == 40 )
-		{
-			pPlayer->SetFOV( pPlayer, 10, 0.08f );
-		}
-		else
-		{
-			pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.1f );
-		}
+	if ( pPlayer == NULL )
+	{
+		Assert( pPlayer != NULL );
+		return;
+	}
 
-		pPlayer->ResetMaxSpeed();
-		
-	#endif
+	if ( pPlayer->GetFOV() == pPlayer->GetDefaultFOV() )
+	{
+			pPlayer->SetFOV( pPlayer, cAWPMidZoomFOV, kZoomTime );
+			m_weaponMode = Secondary_Mode;
+			m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyAltSwitch;
+	}
+	else if ( pPlayer->GetFOV() == cAWPMidZoomFOV )
+	{
+			pPlayer->SetFOV( pPlayer, cAWPMaxZoomFOV, kZoomTime );
+			m_weaponMode = Secondary_Mode;
+	}
+	else
+	{
+		pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), kZoomTime );
+		m_weaponMode = Primary_Mode;
+	}
+
 
 #ifndef CLIENT_DLL
 	// If this isn't guarded, the sound will be emitted twice, once by the server and once by the client.
 	// Let the server play it since if only the client plays it, it's liable to get played twice cause of
-	// a prediction error. joy.
-	EmitSound( "Default.Zoom" );
-
+	// a prediction error. joy.	
+	
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Playing this from the player so that we don't try to play the sound outside the level.
+	//=============================================================================
+	if ( GetPlayerOwner() )
+	{
+		GetPlayerOwner()->EmitSound( "Default.Zoom" );
+	}
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 	// let the bots hear the rifle zoom
 	IGameEvent * event = gameeventmanager->CreateEvent( "weapon_zoom" );
 	if ( event )
@@ -143,11 +160,49 @@ void CWeaponAWP::SecondaryAttack()
 	}
 #endif
 
-	m_flNextSecondaryAttack = gpGlobals->curtime + 0.3;   
+	m_flNextSecondaryAttack = gpGlobals->curtime + 0.3f;
 	m_zoomFullyActiveTime = gpGlobals->curtime + 0.15; // The worst zoom time from above.  
 
 }
 
+float CWeaponAWP::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+	
+		float fSpread = 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			fSpread = 0.85f;
+	
+		else if ( pPlayer->GetAbsVelocity().Length2D() > 140 )
+			fSpread = 0.25f;
+	
+		else if ( pPlayer->GetAbsVelocity().Length2D() > 10 )
+			fSpread = 0.10f;
+	
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			fSpread = 0.0f;
+	
+		else
+			fSpread = 0.001f;
+	
+		// If we are not zoomed in, or we have very recently zoomed and are still transitioning, the bullet diverts more.
+		if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV() || (gpGlobals->curtime < m_zoomFullyActiveTime))
+		{
+			fSpread += 0.08f;
+		}
+	
+		return fSpread;
+	}
+	else
+	{
+		return BaseClass::GetInaccuracy();
+	}
+}
 
 void CWeaponAWP::PrimaryAttack()
 {
@@ -155,61 +210,37 @@ void CWeaponAWP::PrimaryAttack()
 	if ( !pPlayer )
 		return;
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		AWPFire( 0.85 );
-	
-	else if ( pPlayer->GetAbsVelocity().Length2D() > 140 )
-		AWPFire( 0.25 );
-	
-	else if ( pPlayer->GetAbsVelocity().Length2D() > 10 )
-		AWPFire( 0.10 );
-	
-	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
-		AWPFire( 0.0 );
-	
-	else
-		AWPFire( 0.001 );
-}
-
-void CWeaponAWP::AWPFire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-
-	if (pPlayer == NULL)
-	{
-		Assert(pPlayer != NULL);
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, m_weaponMode ) )
 		return;
-	}
 
-	// If we are not zoomed in, or we have very recently zoomed and are still transitioning, the bullet diverts more.
-	if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV() || (gpGlobals->curtime < m_zoomFullyActiveTime))
-	{
-		flSpread += 0.08;
-	}
-
-	if (pPlayer->GetFOV() != pPlayer->GetDefaultFOV())
+	if ( m_weaponMode == Secondary_Mode )
 	{	
-		pPlayer->m_iLastZoom = pPlayer->GetFOV();
+		float	midFOVdistance = fabs( pPlayer->GetFOV() - (float)cAWPMidZoomFOV );
+		float	farFOVdistance = fabs( pPlayer->GetFOV() - (float)cAWPMaxZoomFOV );
+		if ( midFOVdistance < farFOVdistance )
+		{
+			pPlayer->m_iLastZoom = cAWPMidZoomFOV;
+		}
+		else
+		{
+			pPlayer->m_iLastZoom = cAWPMaxZoomFOV;
+		}
 		
-		#ifndef CLIENT_DLL
-			#ifdef AWP_UNZOOM
-				SetContextThink( &CWeaponAWP::UnzoomThink, gpGlobals->curtime + sv_awpunzoomdelay.GetFloat(), SNIPER_ZOOM_CONTEXT );
-			#else
-				pPlayer->m_bResumeZoom = true;
-				pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.1f );
-			#endif
+		#ifdef AWP_UNZOOM
+			SetContextThink( &CWeaponAWP::UnzoomThink, gpGlobals->curtime + sv_awpunzoomdelay.GetFloat(), SNIPER_ZOOM_CONTEXT );
+		#else
+			pPlayer->m_bResumeZoom = true;
+			pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.1f );
+			m_weaponMode = Primary_Mode;
 		#endif
 	}
-
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
-		return;
 
 	QAngle angle = pPlayer->GetPunchAngle();
 	angle.x -= 2;
 	pPlayer->SetPunchAngle( angle );
 }
 
-#ifndef CLIENT_DLL
+#ifdef AWP_UNZOOM
 void CWeaponAWP::UnzoomThink( void )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
@@ -252,3 +283,24 @@ bool CWeaponAWP::IsAwp() const
 	return true;
 }
 
+
+bool CWeaponAWP::Reload()
+{
+	m_weaponMode = Primary_Mode;
+	return BaseClass::Reload();
+}
+
+bool CWeaponAWP::Deploy()
+{
+	// don't allow weapon switching to shortcut cycle time (quickswitch exploit)
+	float fOldNextPrimaryAttack	= m_flNextPrimaryAttack;
+	float fOldNextSecondaryAttack = m_flNextSecondaryAttack;
+
+	if ( !BaseClass::Deploy() )
+		return false;
+
+	m_weaponMode = Primary_Mode;
+	m_flNextPrimaryAttack	= MAX( m_flNextPrimaryAttack, fOldNextPrimaryAttack );
+	m_flNextSecondaryAttack	= MAX( m_flNextSecondaryAttack, fOldNextSecondaryAttack );
+	return true;
+}

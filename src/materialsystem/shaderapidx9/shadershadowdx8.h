@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,6 +13,7 @@
 #pragma once
 #endif
 
+#include "togl/rendermechanism.h"
 #include "locald3dtypes.h"
 #include "shaderapi/ishadershadow.h"
 
@@ -49,6 +50,7 @@ struct SamplerShadowState_t
 	bool	m_TextureEnable : 1;
 	bool	m_SRGBReadEnable : 1;
 	bool	m_Fetch4Enable : 1;
+	bool	m_ShadowFilterEnable : 1;
 };
 
 struct ShadowState_t
@@ -66,10 +68,12 @@ struct ShadowState_t
 	// Alpha state
 	D3DBLEND		m_SrcBlend;
 	D3DBLEND		m_DestBlend;
+	D3DBLENDOP		m_BlendOp;
 
 	// Separate alpha blend state
 	D3DBLEND		m_SrcBlendAlpha;
 	D3DBLEND		m_DestBlendAlpha;
+	D3DBLENDOP		m_BlendOpAlpha;
 
 	D3DCMPFUNC		m_AlphaFunc;
 	int				m_AlphaRef;

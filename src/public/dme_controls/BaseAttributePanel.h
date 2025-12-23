@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: base class for all element attribute panels
 //    An attribute panel is a one line widget that can be used by a list
@@ -102,18 +102,8 @@ protected:
 	void				SetColumnSize( Panel *panel, int width );
 
 	// Returns the element being edited by the panel
-//	CDmElement			*GetPanelElement();
-//	const CDmElement	*GetPanelElement() const;
-
-	inline CDmElement *CBaseAttributePanel::GetPanelElement()
-	{
-		return m_hObject;
-	}
-
-	inline const CDmElement *CBaseAttributePanel::GetPanelElement() const
-	{
-		return m_hObject;
-	}
+	CDmElement			*GetPanelElement();
+	const CDmElement	*GetPanelElement() const;
 
 	// Returns the attribute name
 	const char*			GetAttributeName() const;

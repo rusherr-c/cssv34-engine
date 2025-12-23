@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,22 +7,25 @@
 
 
 #pragma warning( disable: 4018 ) // '==' : signed/unsigned mismatch in rbtree
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include <windows.h>
+#elif defined( POSIX )
+#include <iconv.h>
+
 #endif
 #include <wchar.h>
 
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include "vgui_internal.h"
 #include "vgui/ILocalize.h"
 #include "vgui/ISystem.h"
 #include "vgui/ISurface.h"
 
-#include "tier1/UtlVector.h"
-#include "tier1/UtlRBTree.h"
-#include "tier1/UtlSymbol.h"
-#include "tier1/UtlString.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlrbtree.h"
+#include "tier1/utlsymbol.h"
+#include "tier1/utlstring.h"
 #include "UnicodeFileHelpers.h"
 #include "tier0/icommandline.h"
 #include "byteswap.h"
@@ -33,6 +36,8 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+using namespace vgui;
 
 #define MAX_LOCALIZED_CHARS	4096
 
@@ -45,7 +50,7 @@
 //-----------------------------------------------------------------------------
 // Purpose: Maps token names to localized unicode strings
 //-----------------------------------------------------------------------------
-class CLocalizedStringTable : public ILocalize
+class CLocalizedStringTable : public vgui::ILocalize
 {
 public:
 	CLocalizedStringTable();
@@ -63,24 +68,11 @@ public:
 	// Finds the localized text for pName
 	wchar_t *Find(const char *pName);
 
-	virtual const char *FindAsUTF8( const char *pchTokenName );
-
 	// finds the index of a token by token name
 	StringIndex_t FindIndex(const char *pName);
 	
 	// Remove all strings in the table.
 	void RemoveAll();
-
-	// converts an english string to unicode
-	// returns the number of wchar_t in resulting string, including null terminator
-	int ConvertANSIToUnicode(const char *ansi, wchar_t *unicode, int unicodeBufferSizeInBytes);
-
-	// converts an unicode string to an english string
-	// unrepresentable characters are converted to system default
-	// returns the number of characters in resulting string, including null terminator
-	int ConvertUnicodeToANSI(const wchar_t *unicode, char *ansi, int ansiBufferSize);
-
-	void ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, wchar_t *formatString, int numFormatParameters, ...);
 
 	// iteration functions
 	StringIndex_t GetFirstStringIndex();
@@ -104,14 +96,15 @@ public:
 	// returns whether a file has already been loaded
 	bool LocalizationFileIsLoaded( const char *name );
 
-	void ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, wchar_t *formatString, int numFormatParameters, va_list argList);
+	const char *FindAsUTF8( const char *pchTokenName );
+
+	virtual void ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, const char *tokenName, KeyValues *localizationVariables);
+	virtual void ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, StringIndex_t unlocalizedTextSymbol, KeyValues *localizationVariables);
 
 private:
 	// for development only, reloads localization files
 	virtual void ReloadLocalizationFiles( );
-	virtual void ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, const char *tokenName, KeyValues *dialogVariables);
-	virtual void ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, StringIndex_t unlocalizedTextSymbol, KeyValues *dialogVariables);
-
+	
 	bool AddAllLanguageFiles( const char *baseFileName );
 
 	void BuildFastValueLookup();
@@ -184,7 +177,7 @@ private:
 CLocalizedStringTable g_StringTable;
 
 // expose the interface
-EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CLocalizedStringTable, ILocalize, VGUI_LOCALIZE_INTERFACE_VERSION, g_StringTable);
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR_WITH_NAMESPACE(CLocalizedStringTable, vgui::, ILocalize, VGUI_LOCALIZE_INTERFACE_VERSION, g_StringTable);
 
 
 //-----------------------------------------------------------------------------
@@ -225,6 +218,11 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 
 	Q_strncpy( fileName, szFileName, sizeof( fileName ) );
 
+	// Lowercase the *relative* portion of the filename,
+	// in case people look for "Resource/file.txt" etc.  We always
+	// use lowercase filenames for files in the game filesystem.
+	V_strlower( fileName );
+
 	const char *langptr = strstr(szFileName, LANGUAGE_STRING);
 	if (langptr)
 	{
@@ -253,7 +251,7 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 		bool bValid;
 		if ( IsPC() )
 		{
-			bValid = vgui::g_pSystem->GetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Steam\\Language", language, sizeof(language)-1 );
+			bValid = vgui::g_pSystem->GetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Source\\Language", language, sizeof(language)-1 );
 		}
 		else
 		{
@@ -306,8 +304,9 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 	// This will give us a list of paths from highest to lowest precedence: e.g.:
 	// for "GAME" when running -game episodic, it'll show:
 	// "basedir/episodic/;basedir/hl2"
-	// HACK HACK - why do this? Why not let the filesystem be smart?
-	char searchPaths[ MAX_PATH*50 ]; // allow for 50 search paths 
+	// We do this manually instead of just asking for the first match to support bIncludeFallbackSearchPaths
+	char searchPaths[ MAX_PATH*50 ] = { 0 }; // allow for 50 search paths
+
 	Verify( g_pFullFileSystem->GetSearchPath( pPathID, true, searchPaths, sizeof( searchPaths ) ) < sizeof(searchPaths) );
 
 	CUtlSymbolTable				pathStrings;
@@ -329,16 +328,27 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 			{
 				// only want zip paths
 				continue;
-			} 
+			}
 
 			char fullpath[MAX_PATH];
-			Q_snprintf( fullpath, sizeof( fullpath ), "%s%s", path, fileName );
+			V_strcpy_safe( fullpath, path );
+			V_AppendSlash( fullpath, sizeof(fullpath) );
+			V_strcat_safe( fullpath, fileName );
 			Q_FixSlashes( fullpath );
-			Q_strlower( fullpath );
+			//Q_strlower( fullpath ); // NO! This screws up Linux
 
 			CUtlSymbol sym = pathStrings.AddString( fullpath );
-			// Push them on head so we can walk them in reverse order
-			searchList.AddToHead( sym );
+			// With bIncludeFallbackSearchPaths we iterate overriding as we go, so push them in reverse order so the
+			// highest precendence search paths have the highest precendence. Otherwise push them in order, as we'll
+			// only process the first one.
+			if ( !bIncludeFallbackSearchPaths )
+			{
+				searchList.AddToTail( sym );
+			}
+			else
+			{
+				searchList.AddToHead( sym );
+			}
 		}
 	}
 
@@ -373,19 +383,19 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 		
 		// read into a memory block
 		int fileSize = g_pFullFileSystem->Size(file);
-		int bufferSize = g_pFullFileSystem->GetOptimalReadSize( file, fileSize + sizeof(wchar_t) );
-		wchar_t *memBlock = (wchar_t *)g_pFullFileSystem->AllocOptimalReadBuffer(file, bufferSize);
+		int bufferSize = g_pFullFileSystem->GetOptimalReadSize( file, fileSize + sizeof(ucs2) );
+		ucs2 *memBlock = (ucs2 *)g_pFullFileSystem->AllocOptimalReadBuffer(file, bufferSize);
 		bool bReadOK = ( g_pFullFileSystem->ReadEx(memBlock, bufferSize, fileSize, file) != 0 );
 
 		// finished with file
 		g_pFullFileSystem->Close(file);
 
 		// null-terminate the stream
-		memBlock[fileSize / sizeof(wchar_t)] = 0x0000;
+		memBlock[fileSize / sizeof(ucs2)] = 0x0000;
 
 		// check the first character, make sure this a little-endian unicode file
-		wchar_t *data = memBlock;
-		wchar_t signature = LittleShort( data[0] );
+		ucs2 *data = memBlock;
+		ucs2 signature = LittleShort( data[0] );
 		if ( !bReadOK || signature != 0xFEFF )
 		{
 			Msg( "Ignoring non-unicode close caption file %s\n", fullpath );
@@ -396,7 +406,7 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 		// ensure little-endian unicode reads correctly on all platforms
 		CByteswap byteSwap;
 		byteSwap.SetTargetBigEndian( false );
-		byteSwap.SwapBufferToTargetEndian( data, data, fileSize / sizeof(wchar_t) );
+		byteSwap.SwapBufferToTargetEndian( data, data, fileSize / sizeof(ucs2) );
 
 		// skip past signature
 		data++;
@@ -427,14 +437,15 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 		while (1)
 		{
 			// read the key and the value
-			wchar_t keytoken[128];
-			data = ReadUnicodeToken(data, keytoken, 128, bQuoted);
+			ucs2 keytoken[128];
+			ucs2 *pchNewdata = ReadUnicodeToken(data, keytoken, ARRAYSIZE(keytoken), bQuoted);
 			if (!keytoken[0])
 				break;	// we've hit the null terminator
 
 			// convert the token to a string
 			char key[128];
-			ConvertUnicodeToANSI(keytoken, key, sizeof(key));
+			V_UCS2ToUTF8(keytoken, key, static_cast<int>( sizeof(key) ));
+			data = pchNewdata;
 
 			// if we have a C++ style comment, read to end of line and continue
 			if (!strnicmp(key, "//", 2))
@@ -448,7 +459,7 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 				Msg( "%s\n", key );
 			}
 
-			wchar_t valuetoken[ MAX_LOCALIZED_CHARS ];
+			ucs2 valuetoken[ MAX_LOCALIZED_CHARS ];
 			data = ReadUnicodeToken(data, valuetoken, MAX_LOCALIZED_CHARS, bQuoted);
 			if (!valuetoken[0] && !bQuoted)
 				break;	// we've hit the null terminator
@@ -459,7 +470,7 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 				{
 					// copy out our language setting
 					char value[MAX_LOCALIZED_CHARS];
-					ConvertUnicodeToANSI(valuetoken, value, sizeof(value));
+					V_UCS2ToUTF8(valuetoken, value, sizeof(value));
 					strncpy(m_szLanguage, value, sizeof(m_szLanguage) - 1);
 				}
 				else if (!stricmp(key, "Tokens"))
@@ -486,20 +497,71 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 					{
 						// Check for a conditional tag
 						bool bAccepted = true;
-						wchar_t conditional[ MAX_LOCALIZED_CHARS ];
-						wchar_t *tempData = ReadUnicodeToken(data, conditional, MAX_LOCALIZED_CHARS, bQuoted);
-						if ( !bQuoted && wcsstr( conditional, L"[$" ) )
+						ucs2 conditional[ MAX_LOCALIZED_CHARS ];
+						ucs2 *tempData = ReadUnicodeToken(data, conditional, MAX_LOCALIZED_CHARS, bQuoted);
+						if ( !bQuoted && conditional[0] == L'[' && conditional[1] == L'$' ) // wcsstr( conditional, L"[$" ) )
 						{
 							// Evaluate the conditional tag
 							char cond[MAX_LOCALIZED_CHARS];
-							ConvertUnicodeToANSI(conditional, cond, sizeof(cond));
+							V_UCS2ToUTF8(conditional, cond, sizeof(cond));
 							bAccepted = EvaluateConditional( cond );
+
+							// Robin: HACK: Cheesy support for language-based filtering. Main has much better 
+							// support for this, in all KV files, so this will be obsoleted in post-TF2 products.
+							char *pszKey = &cond[2];
+							bool bNot = false;
+							if ( pszKey[0] == '!' )
+							{
+								bNot = true;
+								pszKey++;
+							}
+							// Trim off the ]
+							if ( pszKey && pszKey[0] )
+							{
+								pszKey[ V_strlen(pszKey)-1 ] = '\0';
+								if ( !V_stricmp( pszKey, "ENGLISH" ) ||
+									!V_stricmp( pszKey, "JAPANESE" ) ||
+									!V_stricmp( pszKey, "GERMAN" ) ||
+									!V_stricmp( pszKey, "FRENCH" ) ||
+									!V_stricmp( pszKey, "SPANISH" ) ||
+									!V_stricmp( pszKey, "ITALIAN" ) ||
+									!V_stricmp( pszKey, "KOREAN" ) ||
+									!V_stricmp( pszKey, "TCHINESE" ) ||
+									!V_stricmp( pszKey, "PORTUGUESE" ) ||
+									!V_stricmp( pszKey, "SCHINESE" ) ||
+									!V_stricmp( pszKey, "POLISH" ) ||
+									!V_stricmp( pszKey, "RUSSIAN" ) )
+								{
+									// the language symbols are true if we are in that language
+									// english is assumed when no language is present
+									const char *pLanguageString;
+#ifdef _X360
+									pLanguageString = XBX_GetLanguageString();
+#else
+									static ConVarRef cl_language( "cl_language" );
+									pLanguageString = cl_language.GetString();
+#endif
+									if ( !pLanguageString || !pLanguageString[0] )
+									{
+										pLanguageString = "english";
+									}
+									bool bMatched = ( !V_stricmp( pszKey, pLanguageString ) );
+									bAccepted = (bMatched && !bNot) || (!bMatched && bNot);
+								}
+							}
+
 							data = tempData;
 						}
 						if ( bAccepted )
 						{
+							wchar_t fullString[MAX_LOCALIZED_CHARS+1];
+							int i = 0;
+							for ( i = 0; i < MAX_LOCALIZED_CHARS && valuetoken[i] != 0; i++ )
+								fullString[i] = valuetoken[i]; // explode the ucs2 into a wchar_t wide buffer
+							fullString[i] = 0;
+							
 							// add the string to the table
-							AddString(key, valuetoken, NULL);
+							AddString(key, fullString, NULL);
 						}
 					}
 				}
@@ -511,7 +573,7 @@ bool CLocalizedStringTable::AddFile( const char *szFileName, const char *pPathID
 
 	if ( !bLoadedAtLeastOne )
 	{
-		Warning("ILocalize::AddFile() failed to load file \"%s\".\n", szFileName );
+		Warning("CLocalizedStringTable::AddFile() failed to load file \"%s\".\n", szFileName );
 	}
 
 	DiscardFastValueLookup();
@@ -685,10 +747,20 @@ wchar_t *CLocalizedStringTable::Find(const char *pName)
 	return &m_Values[m_Lookup[idx].valueIndex];
 }
 
-const char * CLocalizedStringTable::FindAsUTF8( const char * pchTokenName )
+//-----------------------------------------------------------------------------
+// Purpose: Finds a string in the table
+//-----------------------------------------------------------------------------
+const char *CLocalizedStringTable::FindAsUTF8( const char *pchTokenName )
 {
-	return NULL;
+	wchar_t *pwch = Find( pchTokenName );
+	if ( !pwch )
+		return pchTokenName;
+
+	static char rgchT[2048];
+	Q_UnicodeToUTF8( pwch, rgchT, sizeof( rgchT ) );
+	return rgchT;
 }
+
 
 //-----------------------------------------------------------------------------
 // Purpose: finds the index of a token by token name
@@ -951,142 +1023,6 @@ bool CLocalizedStringTable::LocalizationFileIsLoaded(const char *name)
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: converts an english string to unicode
-//-----------------------------------------------------------------------------
-int CLocalizedStringTable::ConvertANSIToUnicode(const char *ansi, wchar_t *unicode, int unicodeBufferSizeInBytes)
-{
-	int chars = ::MultiByteToWideChar(CP_UTF8, 0, ansi, -1, unicode, unicodeBufferSizeInBytes / sizeof(wchar_t));
-	unicode[(unicodeBufferSizeInBytes / sizeof(wchar_t)) - 1] = 0;
-	return chars;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: converts an unicode string to an english string
-//-----------------------------------------------------------------------------
-int CLocalizedStringTable::ConvertUnicodeToANSI(const wchar_t *unicode, char *ansi, int ansiBufferSize)
-{
-	int result = ::WideCharToMultiByte(CP_UTF8, 0, unicode, -1, ansi, ansiBufferSize, NULL, NULL);
-	ansi[ansiBufferSize - 1] = 0;
-	return result;
-}
-
-#define va_argByIndex(ap,t,i)    ( *(t *)(ap + i * _INTSIZEOF(t)) )
-
-//-----------------------------------------------------------------------------
-// Purpose: builds a localized formatted string
-//-----------------------------------------------------------------------------
-void CLocalizedStringTable::ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, wchar_t *formatString, int numFormatParameters, ...)
-{
-	if (!formatString)
-	{
-		unicodeOutput[0] = 0;
-		return;
-	}
-
-	va_list argList;
-	va_start(argList, numFormatParameters);
-	ConstructString( unicodeOutput, unicodeBufferSizeInBytes, formatString, numFormatParameters, argList);
-	va_end(argList);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: construct string helper
-//-----------------------------------------------------------------------------
-void CLocalizedStringTable::ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, wchar_t *formatString, int numFormatParameters, va_list argList)
-{
-	int unicodeBufferSize = unicodeBufferSizeInBytes / sizeof(wchar_t);
-	wchar_t *searchPos = formatString;
-	wchar_t *outputPos = unicodeOutput;
-
-	//assumes we can't have %s10
-	//assume both are 0 terminated?
-	int formatLength = wcslen( formatString );
-
-#ifdef _DEBUG
-	int curArgIdx = 0;
-#endif
-
-	while ( searchPos[0] != '\0' && unicodeBufferSize > 0 )
-	{
-		if ( formatLength >= 3 && searchPos[0] == '%' && searchPos[1] == 's' )
-		{
-			//this is an escape sequence - %s1, %s2 etc, up to %s9
-
-			int argindex = ( searchPos[2] ) - '0' - 1;
-
-			if ( argindex < 0 || argindex > 9 )
-			{
-				Warning( "Bad format string in CLocalizeStringTable::ConstructString\n" );
-				*outputPos = '\0';
-				return;
-			}
-
-			if ( argindex < numFormatParameters )
-			{
-				wchar_t *param = NULL;
-				if ( IsPC() )
-				{
-					param = va_argByIndex( argList, wchar_t *, argindex );
-				}
-				else
-				{
-					// X360TBD: convert string to new %var% format if this assert hits
-					Assert( argindex == curArgIdx++ );
-					param = va_arg( argList, wchar_t* );
-				}
-
-				if (!param)
-				{
-					Assert( !("CLocalizedStringTable::ConstructString - Found a %s# escape sequence who's index was more than the number of args.") );
-					*outputPos = '\0';
-				}
-				
-
-				int paramSize = wcslen(param);
-				if (paramSize > unicodeBufferSize)
-				{
-					paramSize = unicodeBufferSize;
-				}
-
-				wcsncpy(outputPos, param, paramSize);
-
-				unicodeBufferSize -= paramSize;
-				outputPos += paramSize;
-
-				searchPos += 3;
-				formatLength -= 3;
-			}
-			else
-			{
-				//copy it over, char by char
-				*outputPos = *searchPos;
-
-				outputPos++;
-				unicodeBufferSize--;
-
-				searchPos++;
-				formatLength--;
-			}
-		}
-		else
-		{
-			//copy it over, char by char
-			*outputPos = *searchPos;
-
-			outputPos++;
-			unicodeBufferSize--;
-
-			searchPos++;
-			formatLength--;
-		}
-	}
-
-	// ensure null termination
-	*outputPos = '\0';
-}
-
-
-//-----------------------------------------------------------------------------
 // Purpose: Constructs a string, inserting variables where necessary
 //-----------------------------------------------------------------------------
 void CLocalizedStringTable::ConstructString(wchar_t *unicodeOutput, int unicodeBufferSizeInBytes, const char *tokenName, KeyValues *localizationVariables)
@@ -1120,77 +1056,5 @@ void CLocalizedStringTable::ConstructString(wchar_t *unicodeOutput, int unicodeB
 		return;
 	}
 
-	wchar_t *outputPos = unicodeOutput;
-
-	//assumes we can't have %s10
-	//assume both are 0 terminated?
-	int unicodeBufferSize = unicodeBufferSizeInBytes / sizeof(wchar_t);
-
-	while ( *searchPos != '\0' && unicodeBufferSize > 0 )
-	{
-		bool shouldAdvance = true;
-
-		if ( *searchPos == '%' )
-		{
-			// this is an escape sequence that specifies a variable name
-			if ( searchPos[1] == 's' && searchPos[2] >= '0' && searchPos[2] <= '9' )
-			{
-				// old style escape sequence, ignore
-			}
-			else if ( searchPos[1] == '%' )
-			{
-				// just a '%' char, just write the second one
-				searchPos++;
-			}
-			else if ( localizationVariables )
-			{
-				// get out the variable name
-				const wchar_t *varStart = searchPos + 1;
-				const wchar_t *varEnd = wcschr( varStart, '%' );
-
-				if ( varEnd && *varEnd == '%' )
-				{
-					shouldAdvance = false;
-
-					// assume variable names must be ascii, do a quick convert
-					char variableName[32];
-					char *vset = variableName;
-					for ( const wchar_t *pws = varStart; pws < varEnd && (vset < variableName + sizeof(variableName) - 1); ++pws, ++vset )
-					{
-						*vset = (char)*pws;
-					}
-					*vset = 0;
-
-					// look up the variable name
-					const wchar_t *value = localizationVariables->GetWString( variableName, L"[unknown]" );
-					
-					int paramSize = wcslen(value);
-					if (paramSize > unicodeBufferSize)
-					{
-						paramSize = unicodeBufferSize;
-					}
-
-					wcsncpy(outputPos, value, paramSize);
-
-					unicodeBufferSize -= paramSize;
-					outputPos += paramSize;
-					searchPos = varEnd + 1;
-				}
-			}
-		}
-
-		if (shouldAdvance)
-		{
-			//copy it over, char by char
-			*outputPos = *searchPos;
-
-			outputPos++;
-			unicodeBufferSize--;
-
-			searchPos++;
-		}		
-	}
-
-	// ensure null termination
-	*outputPos = '\0';
+	ILocalize::ConstructString( unicodeOutput, unicodeBufferSizeInBytes, searchPos, localizationVariables );
 }

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Represents an entity in a VMF
 //
@@ -13,7 +13,7 @@
 #include "toolutils/dmerenderable.h"
 #include "datamodel/dmelement.h"
 #include "toolframework/itoolentity.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 
 
 //-----------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -630,9 +630,9 @@ CPhysCollide* CEngineTrace::GetCollidableFromDisplacementsInAABB( const Vector& 
 		cleaf_t curLeaf = pBSPData->map_leafs[ pLeafList[i] ];
 
 		// Test box against all displacements in the leaf.
-		for( int i = 0; i < curLeaf.dispCount; i++ )
+		for( int k = 0; k < curLeaf.dispCount; k++ )
 		{
-			int dispIndex = pBSPData->map_dispList[curLeaf.dispListStart + i];
+			int dispIndex = pBSPData->map_dispList[curLeaf.dispListStart + k];
 			CDispCollTree *pDispTree = &g_pDispCollTrees[dispIndex];
 		
 			// make sure we only check this brush once per trace/stab
@@ -757,8 +757,8 @@ bool CEngineTrace::GetBrushInfo( int iBrush, CUtlVector<Vector4D> *pPlanesOut, i
 			stopside += pBrush->numsides;
 			for( cbrushside_t *side = &pBSPData->map_brushsides[pBrush->firstbrushside]; side != stopside; ++side )
 			{
-				Vector4D p( side->plane->normal.x, side->plane->normal.y, side->plane->normal.z, side->plane->dist );
-				pPlanesOut->AddToTail( p );
+				Vector4D pVec( side->plane->normal.x, side->plane->normal.y, side->plane->normal.z, side->plane->dist );
+				pPlanesOut->AddToTail( pVec );
 			}
 		}
 	}
@@ -851,6 +851,10 @@ bool CEngineTrace::ClipRayToVPhysics( const Ray_t &ray, unsigned int fMask, ICol
 
 	// use the vphysics model for rotated brushes and vphysics simulated objects
 	const model_t *pModel = pEntity->GetCollisionModel();
+
+	if ( !pModel )
+		return false;
+
 	if ( pStudioHdr )
 	{
 		CStudioConvexInfo studioConvex( pStudioHdr );
@@ -1334,7 +1338,7 @@ ICollideable *CEngineTraceClient::GetWorldCollideable()
 ICollideable *CEngineTraceServer::GetWorldCollideable()
 {
 	if (!sv.edicts)
-		return false;
+		return NULL;
 	return sv.edicts->GetCollideable();
 }
 
@@ -1671,6 +1675,7 @@ void CEngineTrace::TraceRay( const Ray_t &ray, unsigned int fMask, ITraceFilter 
 	}
 #endif
 
+	tmZone( TELEMETRY_LEVEL1, TMZF_NONE, "%s:%d", __FUNCTION__, __LINE__ );
 	VPROF_INCREMENT_COUNTER( "TraceRay", 1 );
 	m_traceStatCounters[TRACE_STAT_COUNTER_TRACERAY]++;
 //	VPROF_BUDGET( "CEngineTrace::TraceRay", "Ray/Hull Trace" );

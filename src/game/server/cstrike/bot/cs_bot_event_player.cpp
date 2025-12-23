@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -35,7 +35,7 @@ void CCSBot::OnPlayerDeath( IGameEvent *event )
 	CBasePlayer *killer = (other && other->IsPlayer()) ? static_cast<CBasePlayer *>( other ) : NULL;
 
 	// if the human player died in the single player game, tell the team
-	if (CSGameRules()->IsCareer() && !victim->IsBot() && victim->GetTeamNumber() == GetTeamNumber())
+	if (CSGameRules()->IsCareer() && victim && !victim->IsBot() && victim->GetTeamNumber() == GetTeamNumber())
 	{
 		GetChatter()->Say( "CommanderDown", 20.0f );
 	}
@@ -43,11 +43,11 @@ void CCSBot::OnPlayerDeath( IGameEvent *event )
 	// keep track of the last player we killed
 	if (killer == this)
 	{
-		m_lastVictimID = victim->entindex();
+		m_lastVictimID = victim ? victim->entindex() : 0;
 	}
 
 	// react to teammate death
-	if (victim->GetTeamNumber() == GetTeamNumber())
+	if (victim && victim->GetTeamNumber() == GetTeamNumber())
 	{
 		// note time of death
 		m_friendDeathTimestamp = gpGlobals->curtime;
@@ -138,7 +138,7 @@ void CCSBot::OnPlayerDeath( IGameEvent *event )
 				// report if number of enemies left is few and we killed the last one we saw locally
 				GetChatter()->EnemiesRemaining();
 
-				Vector victimOrigin = GetCentroid( victim );
+				Vector victimOrigin = (victim) ? GetCentroid( victim ) : Vector( 0, 0, 0 );
 				if (IsVisible( victimOrigin, CHECK_FOV ))
 				{						
 					// congratulate teammates on their kills

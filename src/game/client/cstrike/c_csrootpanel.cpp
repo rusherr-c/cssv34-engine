@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,9 +6,9 @@
 //=============================================================================//
 
 #include "cbase.h"
-#include "C_CSRootPanel.h"
+#include "c_csrootpanel.h"
 #include <vgui_controls/Controls.h>
-#include <vgui/IVgui.h>
+#include <vgui/IVGui.h>
 #include "clientmode_csnormal.h"
 
 

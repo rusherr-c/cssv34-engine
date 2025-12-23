@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,9 +13,11 @@
 #include "studio.h"
 #include "mouthinfo.h"
 #include "UtlLinkedList.h"
-#include "UtlSymbol.h"
+#include "utlsymbol.h"
 #include "bone_setup.h"
 #include "datacache/imdlcache.h"
+#include "viewersettings.h"
+#include "tier1/utlstring.h"
 
 #define DEFAULT_BLEND_TIME 0.2
 
@@ -74,17 +76,36 @@ struct StudioLookTarget
 	bool					m_bSelf;
 };
 
+struct HitboxInfo_t
+{
+	CUtlString m_Name;
+	mstudiobbox_t m_BBox;
+};
+
+// I'm saving this as internal data because we may add or remove hitboxes
+// I'm using a utllinkedlist so hitbox IDs remain constant on add + remove
+typedef CUtlLinkedList< HitboxInfo_t, unsigned short > HitboxList_t;
+
+
+struct HitboxSet_t
+{
+	CUtlString m_Name;
+	HitboxList_t m_Hitboxes;
+};
+
+
 class StudioModel
 {
 public:
 	StudioModel();
 
 	// memory handling, uses calloc so members are zero'd out on instantiation
-    static void						*operator new( size_t stAllocateBlock );
-	static void						*operator new( size_t stAllocateBlock, int nBlockUse, const char *pFileName, int nLine );
+	static void *operator new( size_t nSize );
+	static void* operator new( size_t size, int nBlockUse, const char *pFileName, int nLine );
 
-	static void						operator delete( void *pMem );
-	static void						operator delete( void *pMem, int nBlockUse, const char *pFileName, int nLine );
+	static void operator delete( void *pData );
+	static void operator delete( void* p, int nBlockUse, const char *pFileName, int nLine );
+
 
 	static void				Init( void );
 	static void				Shutdown( void ); // garymcthack - need to call this.
@@ -134,6 +155,7 @@ public:
 	int								LookupActivity( const char *szActivity );
 	int								SetSequence( int iSequence );
 	int								SetSequence( const char *szSequence );
+	const char*						GetSequenceName( int iSequence );
 	void							ClearOverlaysSequences( void );
 	void							ClearAnimationLayers( void );
 	int								GetNewAnimationLayer( int iPriority = 0 );
@@ -175,7 +197,7 @@ public:
 
 	int								LookupAttachment( char const *szName );
 
-	int								SetBodygroup( int iGroup, int iValue );
+	int								SetBodygroup( int iGroup, int iValue = -1 );
 	int								SetSkin( int iValue );
 	int								FindBone( const char *pName );
 
@@ -222,6 +244,10 @@ public:
 	studiohdr_t						*GetStudioRenderHdr() const;
 	studiohwdata_t					*GetHardwareData( void ) const;
 
+	// Get and set the model transform (i.e. what m_origin and m_angles are used to generate).
+	void GetModelTransform( matrix3x4_t &mat );
+	void SetModelTransform( const matrix3x4_t &mat );
+
 public:
 	// entity settings
 	QAngle							m_angles;	// rot
@@ -267,17 +293,7 @@ protected:
 	mstudiomodel_t					*m_pmodel;
 
 public:
-	// I'm saving this as internal data because we may add or remove hitboxes
-	// I'm using a utllinkedlist so hitbox IDs remain constant on add + remove
-	typedef CUtlLinkedList<mstudiobbox_t, unsigned short> Hitboxes_t;
-	CUtlVector< Hitboxes_t >		m_HitboxSets;
-	struct hbsetname_s
-	{
-		char name[ 128 ];
-	};
-
-	CUtlVector< hbsetname_s >		m_HitboxSetNames;
-
+	CUtlVector< HitboxSet_t >		m_HitboxSets;
 	CUtlVector< CUtlSymbol >		m_SurfaceProps;
 
 protected:
@@ -322,7 +338,6 @@ private:
 	matrix3x4_t						m_pBoneToWorld[MAXSTUDIOBONES];
 
 public:
-	virtual int						FlexVerts( mstudiomesh_t *pmesh );
 	virtual void					RunFlexRules( void );
 	virtual int						BoneMask( void );
 	virtual void					SetUpBones( bool mergeBones );
@@ -340,6 +355,7 @@ private:
 	void DrawHitboxes();
 	void DrawPhysicsModel( );
 	void DrawIllumPosition( );
+	void DrawOriginAxis( );
 
 public:
 	// generic interface to rendering?
@@ -461,7 +477,7 @@ inline const matrix3x4_t* StudioModel::BoneToWorld( int nBoneIndex ) const
 //-----------------------------------------------------------------------------
 extern Vector g_vright;		// needs to be set to viewer's right in order for chrome to work
 extern StudioModel *g_pStudioModel;
-extern StudioModel *g_pStudioExtraModel[4];
+extern StudioModel *g_pStudioExtraModel[HLMV_MAX_MERGED_MODELS];
 
 
 #endif // INCLUDED_STUDIOMODEL

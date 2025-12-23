@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core implementation of vgui
 //
@@ -44,7 +44,7 @@ public:
 	virtual void SetName(const char *name);
 	virtual backgroundtype_e GetBackgroundType();
 
-	virtual bool PaintFirst( void );
+	virtual bool PaintFirst( void ) { return false; }
 
 protected:
 	int _inset[4];

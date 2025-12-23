@@ -1,30 +1,31 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implementation of the VGUI ISurface interface using the 
 // material system to implement it
 //
 //===========================================================================//
 
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include <windows.h>
 #include <zmouse.h>
 #endif
 #include "inputsystem/iinputsystem.h"
 #include "tier2/tier2.h"
-#include "input.h"
-#include "VGuiMatSurface.h"
+#include "Input.h"
+#include "vguimatsurface.h"
 #include "../vgui2/src/VPanel.h"
-#include <vgui/keycode.h>
-#include <vgui/mousecode.h>
+#include <vgui/KeyCode.h>
+#include <vgui/MouseCode.h>
 #include <vgui/IVGui.h>
 #include <vgui/IPanel.h>
 #include <vgui/ISurface.h>
 #include <vgui/IClientPanel.h>
-#include "inputsystem/buttoncode.h"
+#include "inputsystem/ButtonCode.h"
 #include "Cursor.h"
 #include "tier0/dbg.h"
 #include "../vgui2/src/vgui_key_translation.h"
 #include <vgui/IInputInternal.h>
+#include "tier0/icommandline.h"
 #ifdef _X360
 #include "xbox/xbox_win32stubs.h"
 #endif
@@ -55,22 +56,24 @@ enum VguiInputEventType_t
 	IE_IMERecomputeModes,
 };
 
+void InitInput()
+{
+	EnableInput( true );
+}
 
+
+static bool s_bInputEnabled = true;
+#ifdef WIN32
 //-----------------------------------------------------------------------------
 // Translates actual keys into VGUI ids
 //-----------------------------------------------------------------------------
 static WNDPROC s_ChainedWindowProc = NULL;
-static bool s_bInputEnabled = true;
 extern HWND thisWindow;
 
 
 //-----------------------------------------------------------------------------
 // Initializes the input system
 //-----------------------------------------------------------------------------
-void InitInput()
-{
-	EnableInput( true );
-}
 
 static bool s_bIMEComposing = false;
 static HWND s_hLastHWnd = 0;
@@ -105,10 +108,13 @@ static LRESULT CALLBACK MatSurfaceWindowProc( HWND hwnd, UINT uMsg, WPARAM wPara
 
 	case WM_CLOSE:
 		// Handle close messages
-		if ( (LONG)GetWindowLongPtr( hwnd, GWLP_WNDPROC ) == (LONG)MatSurfaceWindowProc )
 		{
-			event.m_nType = IE_Close;
-			g_pInputSystem->PostUserEvent( event );
+			LONG_PTR wndProc = GetWindowLongPtrW( hwnd, GWLP_WNDPROC );
+			if ( wndProc == (LONG_PTR)MatSurfaceWindowProc )
+			{
+				event.m_nType = IE_Close;
+				g_pInputSystem->PostUserEvent( event );
+			}
 		}
 		return 0;
 
@@ -143,7 +149,7 @@ static LRESULT CALLBACK MatSurfaceWindowProc( HWND hwnd, UINT uMsg, WPARAM wPara
 			int nRetVal = 0;
 			if ( s_ChainedWindowProc )
 			{
-				nRetVal = CallWindowProc( s_ChainedWindowProc, hwnd, uMsg, wParam, lParam );
+				nRetVal = CallWindowProcW( s_ChainedWindowProc, hwnd, uMsg, wParam, lParam );
 			}
 
 			// xboxissue - as yet HL2 input hasn't been made aware of analog inputs or ports
@@ -166,7 +172,7 @@ static LRESULT CALLBACK MatSurfaceWindowProc( HWND hwnd, UINT uMsg, WPARAM wPara
 			int nRetVal = 0;
 			if ( s_ChainedWindowProc )
 			{
-				nRetVal = CallWindowProc( s_ChainedWindowProc, hwnd, uMsg, wParam, lParam );
+				nRetVal = CallWindowProcW( s_ChainedWindowProc, hwnd, uMsg, wParam, lParam );
 			}
 
 			int nKeyRepeat = LOWORD( lParam );
@@ -274,13 +280,15 @@ static LRESULT CALLBACK MatSurfaceWindowProc( HWND hwnd, UINT uMsg, WPARAM wPara
 
 chainWndProc:
 	if ( s_ChainedWindowProc )
-		return CallWindowProc( s_ChainedWindowProc, hwnd, uMsg, wParam, lParam );
+		return CallWindowProcW( s_ChainedWindowProc, hwnd, uMsg, wParam, lParam );
 
 	// This means the application is driving the messages (calling our window procedure manually)
 	// rather than us hooking their window procedure. The engine needs to do this in order for VCR 
 	// mode to play back properly.
 	return 0;	
 }
+
+#endif
 
 
 //-----------------------------------------------------------------------------
@@ -296,13 +304,16 @@ void EnableInput( bool bEnable )
 }
 
 
+#ifdef WIN32
 //-----------------------------------------------------------------------------
 // Hooks input listening up to a window
 //-----------------------------------------------------------------------------
 void InputAttachToWindow(void *hwnd)
 {
-	s_ChainedWindowProc = (WNDPROC)GetWindowLongPtr( (HWND)hwnd, GWLP_WNDPROC );
-	SetWindowLongPtr( (HWND)hwnd, GWLP_WNDPROC, (LONG)MatSurfaceWindowProc );
+#if !defined( USE_SDL )
+	s_ChainedWindowProc = (WNDPROC)GetWindowLongPtrW( (HWND)hwnd, GWLP_WNDPROC );
+	SetWindowLongPtrW( (HWND)hwnd, GWLP_WNDPROC, (LONG_PTR)MatSurfaceWindowProc );
+#endif
 }
 
 void InputDetachFromWindow(void *hwnd)
@@ -311,10 +322,35 @@ void InputDetachFromWindow(void *hwnd)
 		return;
 	if ( s_ChainedWindowProc )
 	{
-		SetWindowLongPtr( (HWND)hwnd, GWLP_WNDPROC, (LONG)s_ChainedWindowProc );
+		SetWindowLongPtrW( (HWND)hwnd, GWLP_WNDPROC, (LONG_PTR) s_ChainedWindowProc );
 		s_ChainedWindowProc = NULL;
 	}
 }
+#else
+void InputAttachToWindow(void *hwnd)
+{
+#if !defined( OSX ) && !defined( LINUX )
+	if ( hwnd && !HushAsserts() )
+	{
+		// under OSX we use the Cocoa mgr to route events rather than hooking winprocs
+		// and under Linux we use SDL
+		Assert( !"Implement me" );
+	}
+#endif
+}
+
+void InputDetachFromWindow(void *hwnd)
+{
+#if !defined( OSX ) && !defined( LINUX )
+	if ( hwnd && !HushAsserts() )
+	{
+		// under OSX we use the Cocoa mgr to route events rather than hooking winprocs
+		// and under Linux we use SDL
+		Assert( !"Implement me" );
+	}
+#endif
+}
+#endif
 
 
 //-----------------------------------------------------------------------------
@@ -425,7 +461,11 @@ bool InputHandleInputEvent( const InputEvent_t &event )
 
 	case IE_Quit:
 		g_pVGui->Stop();
+#if defined( USE_SDL )
+		return false; // also let higher layers consume it
+#else
 		return true;
+#endif
 
 	case IE_Close:
 		// FIXME: Change this so we don't stop until 'save' occurs, etc.

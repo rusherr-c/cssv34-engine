@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -41,8 +41,13 @@ public:
 
 		if ( pPlayer->IsDead() == false )
 		{
-			CPASAttenuationFilter filter( pBasePlayer );
+			CPASAttenuationFilter filter( pPlayer );
 			EmitSound( filter, entindex(), "BaseCombatCharacter.ItemPickup2" );
+
+			CSingleUserRecipientFilter user( pPlayer );
+			UserMessageBegin( user, "ItemPickup" );
+			WRITE_STRING( "item_nvgs" );
+			MessageEnd();
 		}
 
 		return true;

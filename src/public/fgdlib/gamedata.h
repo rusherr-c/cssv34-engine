@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@
 #include "GDClass.h"
 #include "InputOutput.h"
 #include "UtlString.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 
 
 class MDkeyvalue;
@@ -28,8 +28,29 @@ class KeyValues;
 enum TEXTUREFORMAT;
 
 
-typedef void (*GameDataMessageFunc_t)(int level, const char *fmt, ...);
+typedef void (*GameDataMessageFunc_t)(int level, PRINTF_FORMAT_STRING const char *fmt, ...);
 
+// FGD-based AutoMaterialExclusion data
+
+struct FGDMatExlcusions_s
+{
+	char szDirectory[MAX_PATH];		// Where we store the material exclusion directories
+	bool bUserGenerated;			// If the user specified this ( default:  false -- FGD defined )
+};
+
+// FGD-based AutoVisGroup data
+
+struct FGDVisGroupsBaseClass_s
+{
+	char szClass[MAX_PATH];				// i.e. Scene Logic, Sounds, etc   "Custom\Point Entities\Lights"
+	CUtlStringList szEntities;			// i.e. func_viscluster
+};
+
+struct FGDAutoVisGroups_s
+{
+	char szParent[MAX_PATH];								// i.e. Custom, SFM, etc
+	CUtlVector< FGDVisGroupsBaseClass_s >	m_Classes;		// i.e. Scene Logic, Sounds, etc
+};
 
 #define MAX_DIRECTORY_SIZE	32
 
@@ -40,6 +61,12 @@ typedef void (*GameDataMessageFunc_t)(int level, const char *fmt, ...);
 class GameData
 {
 	public:
+		typedef enum
+		{
+			NAME_FIXUP_PREFIX = 0,
+			NAME_FIXUP_POSTFIX,
+			NAME_FIXUP_NONE
+		} TNameFixup;
 
 		GameData();
 		~GameData();
@@ -56,12 +83,16 @@ class GameData
 		inline int GetClassCount();
 		inline GDclass *GetClass(int nIndex);
 
-		typedef enum
-		{
-			NAME_FIXUP_PREFIX = 0,
-			NAME_FIXUP_POSTFIX,
-			NAME_FIXUP_NONE
-		} TNameFixup;
+		GDclass *BeginInstanceRemap( const char *pszClassName, const char *pszInstancePrefix, Vector &Origin, QAngle &Angle );
+		bool	RemapKeyValue( const char *pszKey, const char *pszInValue, char *pszOutValue, TNameFixup NameFixup );
+		bool	RemapNameField( const char *pszInValue, char *pszOutValue, TNameFixup NameFixup );
+		bool	LoadFGDMaterialExclusions( TokenReader &tr );
+		bool	LoadFGDAutoVisGroups( TokenReader &tr );
+		
+
+		CUtlVector< FGDMatExlcusions_s >	m_FGDMaterialExclusions;
+
+		CUtlVector< FGDAutoVisGroups_s >	m_FGDAutoVisGroups;
 
 	private:
 
@@ -72,6 +103,12 @@ class GameData
 		int m_nMinMapCoord;		// Min & max map bounds as defined by the FGD.
 		int m_nMaxMapCoord;
 
+		// Instance Remapping
+		Vector		m_InstanceOrigin;			// the origin offset of the instance
+		QAngle		m_InstanceAngle;			// the rotation of the the instance
+		matrix3x4_t	m_InstanceMat;				// matrix of the origin and rotation of rendering
+		char		m_InstancePrefix[ 128 ];	// the prefix used for the instance name remapping
+		GDclass		*m_InstanceClass;			// the entity class that is being remapped
 };
 
 
@@ -113,7 +150,7 @@ int GameData::GetMaxMapCoord(void)
 
 
 void GDSetMessageFunc(GameDataMessageFunc_t pFunc);
-bool GDError(TokenReader &tr, char *error, ...);
+bool GDError(TokenReader &tr, PRINTF_FORMAT_STRING const char *error, ...);
 bool GDSkipToken(TokenReader &tr, trtoken_t ttexpecting = TOKENNONE, const char *pszExpecting = NULL);
 bool GDGetToken(TokenReader &tr, char *pszStore, int nSize, trtoken_t ttexpecting = TOKENNONE, const char *pszExpecting = NULL);
 bool GDGetTokenDynamic(TokenReader &tr, char **pszStore, trtoken_t ttexpecting, const char *pszExpecting = NULL);

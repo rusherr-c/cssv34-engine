@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -166,6 +166,14 @@ void CBaseCombatWeapon::Operator_HandleAnimEvent( animevent_t *pEvent, CBaseComb
 			Operator_ForceNPCFire( pOperator, bSecondary );
 			return;
 		}
+		else if ( pEvent->event == AE_WPN_PLAYWPNSOUND )
+		{
+			int iSnd = GetWeaponSoundFromString(pEvent->options);
+			if ( iSnd != -1 )
+			{
+				WeaponSound( (WeaponSound_t)iSnd );
+			}
+		}
 	}
 
 	DevWarning( 2, "Unhandled animation event %d from %s --> %s\n", pEvent->event, pOperator->GetClassname(), GetClassname() );
@@ -220,7 +228,7 @@ class CWeaponLOSFilter : public CTraceFilterSkipTwoEntities
 {
 	DECLARE_CLASS( CWeaponLOSFilter, CTraceFilterSkipTwoEntities );
 public:
-	CWeaponLOSFilter::CWeaponLOSFilter( IHandleEntity *pHandleEntity, IHandleEntity *pHandleEntity2, int collisionGroup ) :
+	CWeaponLOSFilter( IHandleEntity *pHandleEntity, IHandleEntity *pHandleEntity2, int collisionGroup ) :
 	  CTraceFilterSkipTwoEntities( pHandleEntity, pHandleEntity2, collisionGroup ), m_pVehicle( NULL )
 	{
 		// If the tracing entity is in a vehicle, then ignore it

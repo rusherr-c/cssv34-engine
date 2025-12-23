@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,6 +7,11 @@
 // $NoKeywords: $
 //===========================================================================//
 
+// support QueryPerformanceCounter
+#if defined(_WIN32) && !defined(_X360)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 #include "quakedef.h"						 
 #include "zone.h"
@@ -29,7 +34,9 @@
 #include "cvar.h"
 #include "vstdlib/random.h"
 #include "tier1/utldict.h"
+#include "tier0/etwprof.h"
 #include "tier0/vprof.h"
+#include "gl_matsysiface.h"		// update materialsystem config
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -92,13 +99,62 @@ void Cmd_AddClientCmdCanExecuteVar( const char *pName )
 //=============================================================================
 
 static CUtlVector<int> g_ExecutionMarkers;
+static CUniformRandomStream g_ExecutionMarkerStream;
+static bool g_bExecutionMarkerStreamInitialized = false;
 
 static int CreateExecutionMarker()
 {
-	if ( g_ExecutionMarkers.Count() > 2048 )
-		g_ExecutionMarkers.Remove( 0 );
+	if ( !g_bExecutionMarkerStreamInitialized )
+	{
+		int iSeed;
+		if ( IsPosix() )
+		{
+			float flFloatTime = (float)Plat_FloatTime();
+			iSeed = *(int*)(&flFloatTime);
+		}
+		else
+		{
+#if defined(_WIN32) && !defined(_X360)
+			LARGE_INTEGER CurrentTime;
 
-	int i = g_ExecutionMarkers.AddToTail( RandomInt( 0, 1<<30 ) );
+			QueryPerformanceCounter( &CurrentTime );
+			iSeed = CurrentTime.LowPart ^ CurrentTime.HighPart;
+#else
+			float flFloatTime = (float)Plat_FloatTime();
+			iSeed = *(int*)(&flFloatTime);
+#endif
+		}
+
+		g_ExecutionMarkerStream.SetSeed( iSeed );
+		g_bExecutionMarkerStreamInitialized = true;
+	}
+
+	if ( g_ExecutionMarkers.Count() >= MAX_EXECUTION_MARKERS )
+	{
+		// Callers to this function should call Cbuf_HasRoomForExecutionMarkers first.
+		Host_Error( "CreateExecutionMarker called, but the max has already been reached." );
+	}
+
+	int nRandomNumber;
+	int nIndex = g_ExecutionMarkers.InvalidIndex();
+
+	// Pick a random number that doesn't already exist in the list
+	do
+	{
+		// We don't have CCrypto :(
+		// if ( CCrypto::GenerateRandomBlock( (uint8 *)&nRandomNumber, sizeof(nRandomNumber) ) )
+		// {
+		// 	nRandomNumber = nRandomNumber & 0x7FFFFFFF;
+		// }
+		// else
+		// {
+		nRandomNumber = g_ExecutionMarkerStream.RandomInt( 0, 1<<30 );
+		// }
+
+		nIndex = g_ExecutionMarkers.Find( nRandomNumber );
+	} while ( nIndex != g_ExecutionMarkers.InvalidIndex() );
+
+	int i = g_ExecutionMarkers.AddToTail( nRandomNumber );
 	return g_ExecutionMarkers[i];
 }
 
@@ -149,6 +205,11 @@ CON_COMMAND( BindToggle, "Performs a bind <key> \"increment var <cvar> 0 1 1\"" 
 	Cbuf_InsertText( newCmd );
 }
 
+CON_COMMAND_F( PerfMark, "inserts a telemetry marker into the stream. If args are provided, they will be included.", FCVAR_NONE )
+{
+	// Nothing to do, we had our message written out by Cbuf_ExecuteCommand. 
+}
+
 
 //-----------------------------------------------------------------------------
 // Init, shutdown
@@ -187,6 +248,38 @@ void Cbuf_AddText( const char *pText )
 
 
 //-----------------------------------------------------------------------------
+// Escape an argument for a command. This *can* fail as many characters cannot
+// actually be passed through the old command syntax...
+//-----------------------------------------------------------------------------
+bool Cbuf_EscapeCommandArg( const char *pText, char *pOut, unsigned int nOut )
+{
+	// Okay, so, to be honest, all we can do with the super limited syntax is ensure we don't have quotes or control
+	// characters, and then wrap the string in quotes. Hence escape *argument*. Anything more advanced than that is just
+	// not allowable.
+	if ( !pText || !*pText )
+		return false;
+
+	for (const char *pChar = pText; pChar && *pChar; pChar++ )
+	{
+		// ASCII control characters (codepoints <= 31) are just not sane to pass to this system. This includes \n and
+		// \r.
+		if ( *pChar <= (char)31 )
+			return false;
+
+		// Can't quote these with current syntax.
+		if ( *pChar == '"' )
+			return false;
+	}
+
+	// Room for quotes+null in out?
+	if ( !pOut || nOut < (unsigned int)V_strlen( pText ) + 3 )
+		return false;
+
+	V_snprintf( pOut, nOut, "\"%s\"", pText );
+	return true;
+}
+
+//-----------------------------------------------------------------------------
 // Adds command text at the beginning of the buffer
 //-----------------------------------------------------------------------------
 void Cbuf_InsertText( const char *pText )
@@ -202,17 +295,69 @@ void Cbuf_InsertText( const char *pText )
 
 
 
-void Cbuf_AddExecutionMarker( ECmdExecutionMarker marker )
+bool Cbuf_AddExecutionMarker( ECmdExecutionMarker marker, const char *pszMarkerCode )
 {
-	int iMarkerCode = CreateExecutionMarker();
-	
+	if ( marker == eCmdExecutionMarker_Enable_FCVAR_SERVER_CAN_EXECUTE )
+	{
+		s_CommandBuffer.SetWaitEnabled( false );
+	}
+	else if ( marker == eCmdExecutionMarker_Disable_FCVAR_SERVER_CAN_EXECUTE )
+	{
+		s_CommandBuffer.SetWaitEnabled( true );
+	}
+
+	return s_CommandBuffer.AddText( pszMarkerCode );
+}
+
+
+bool Cbuf_AddTextWithMarkers( ECmdExecutionMarker markerLeft, const char *text, ECmdExecutionMarker markerRight )
+{
+	if ( !Cbuf_HasRoomForExecutionMarkers( 2 ) )
+	{
+		ConMsg( "Cbuf_AddTextWithMarkers: execution marker overflow\n" );
+		return false;
+	}
+
+	int iMarkerCodeLeft = CreateExecutionMarker();
+	int iMarkerCodeRight = CreateExecutionMarker();
+
 	// CMDCHAR_ADD_EXECUTION_MARKER tells us there's a special execution thing here.
 	// (char)marker tells it what to turn on
 	// iRandomCode is for security, so only our code can stuff this command into the buffer.
-	char str[512];
-	Q_snprintf( str, sizeof( str ), ";%s %c %d;", CMDSTR_ADD_EXECUTION_MARKER, (char)marker, iMarkerCode );
-	
-	Cbuf_AddText( str );
+	char szMarkerLeft[512], szMarkerRight[512];
+	V_sprintf_safe( szMarkerLeft, ";%s %c %d;", CMDSTR_ADD_EXECUTION_MARKER, (char)markerLeft, iMarkerCodeLeft );
+	V_sprintf_safe( szMarkerRight, ";%s %c %d;", CMDSTR_ADD_EXECUTION_MARKER, (char)markerRight, iMarkerCodeRight );
+
+	// Due to the behavior of the command buffer, we may be over-estimating the amount of space required.
+	int cTextToBeAdded = strlen( szMarkerLeft ) + strlen( szMarkerRight ) + strlen( text ) + 3;
+
+	LOCK_COMMAND_BUFFER();
+	if ( s_CommandBuffer.GetArgumentBufferSize() + cTextToBeAdded + 1 > s_CommandBuffer.GetMaxArgumentBufferSize() )
+	{
+		// cleanup
+		FindAndRemoveExecutionMarker( iMarkerCodeLeft );
+		FindAndRemoveExecutionMarker( iMarkerCodeRight );
+
+		ConMsg( "Cbuf_AddTextWithMarkers: buffer overflow\n" );
+		return false;
+	}
+
+	bool bSuccess = Cbuf_AddExecutionMarker( markerLeft, szMarkerLeft ) && 
+		s_CommandBuffer.AddText( text ) &&
+		Cbuf_AddExecutionMarker( markerRight, szMarkerRight );
+	if ( !bSuccess )
+	{
+		// If we screwed up the validation, don't allow us to get stuck in a bad state.
+		Host_Error( "Cbuf_AddTextWithMarkers: buffer overflow\n" );
+	}
+
+	return true;
+}
+
+
+bool Cbuf_HasRoomForExecutionMarkers( int cExecutionMarkers )
+{
+	return ( g_ExecutionMarkers.Count() + cExecutionMarkers ) < MAX_EXECUTION_MARKERS;
 }
 
 
@@ -221,6 +366,11 @@ void Cbuf_AddExecutionMarker( ECmdExecutionMarker marker )
 //-----------------------------------------------------------------------------
 static void Cbuf_ExecuteCommand( const CCommand &args, cmd_source_t source )
 {
+	// Note: If you remove this, PerfMark needs to do the same logic--so don't do that.
+	tmMessage( TELEMETRY_LEVEL0, TMMF_SEVERITY_LOG | TMMF_ICON_NOTE, "(source/command) %s", tmDynamicString( TELEMETRY_LEVEL0, args.GetCommandString() ) );
+	// Add the command text to the ETW stream to give better context to traces.
+	ETWMark( args.GetCommandString() );
+
 	// execute the command line
 	const ConCommandBase *pCmd = Cmd_ExecuteCommand( args, source );
 
@@ -239,6 +389,7 @@ static void Cbuf_ExecuteCommand( const CCommand &args, cmd_source_t source )
 void Cbuf_Execute()
 {
 	VPROF("Cbuf_Execute");
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
 
 	if ( !ThreadInMainThread() )
 	{
@@ -252,6 +403,12 @@ void Cbuf_Execute()
 	//  to execute the new commands anyway, so we can ignore this extra execute call here.
 	if ( s_CommandBuffer.IsProcessingCommands() )
 		return;
+
+	// Allow/Don't allow wait commands.
+	if ( sv_allow_wait_command.GetBool() != s_CommandBuffer.IsWaitEnabled() )
+	{
+		s_CommandBuffer.SetWaitEnabled( sv_allow_wait_command.GetBool() );
+	}
 
 	// NOTE: The command buffer knows about execution time related to commands,
 	// but since HL2 doesn't, we're going to spoof the command time to simply
@@ -336,14 +493,15 @@ CON_COMMAND( stuffcmds, "Parses and stuffs command line + commands to command bu
 		if (szParm[0] == '-') 
 		{
 			// skip -XXX options and eat their args
-			const char *szValue = CommandLine()->ParmValue(szParm);
-			if ( szValue ) i++;
+			const char *szValue = CommandLine()->ParmValueByIndex( i );
+			if ( szValue )
+				i++;
 			continue;
 		}
 		if (szParm[0] == '+')
 		{
 			// convert +XXX options and stuff them into the build buffer
-			const char *szValue = CommandLine()->ParmValue(szParm);
+			const char *szValue = CommandLine()->ParmValueByIndex( i );
 			if (szValue)
 			{
 				build.PutString(va("%s %s\n", szParm+1, szValue));
@@ -409,51 +567,28 @@ Cmd_Exec_f
 void Cmd_Exec_f( const CCommand &args )
 {
 	LOCK_COMMAND_BUFFER();
-	char	*f;
-	const char	*s;
 	char	fileName[MAX_OSPATH];
 
 	int argc = args.ArgC();
-	if ( argc < 2 )
+
+	if ( argc != 2 )
 	{
-		ConMsg( "exec <filename> [path id]: execute a script file\n" );
+		ConMsg( "exec <filename>: execute a script file\n" );
 		return;
 	}
 
-	s = args[1];
+	const char *szFile = args[1];
 
-	// Optional path ID. * means no path ID.
-	const char *pPathID = NULL;
-	if ( argc >= 3 )
-	{
-		pPathID = args[2];
-	}
-	else
-	{
-		pPathID = "*";
-	}
+	const char *pPathID = "MOD";
 
-	if ( !Q_stricmp( pPathID, "T" ) )
+	Q_snprintf( fileName, sizeof( fileName ), "//%s/cfg/%s", pPathID, szFile );
+	Q_DefaultExtension( fileName, ".cfg", sizeof( fileName ) );
+
+	// check path validity
+	if ( !COM_IsValidPath( fileName ) )
 	{
-		// Has an extension already?
-		Q_snprintf( fileName, sizeof( fileName ), "T:/cfg/%s", s );
-	}
-	else if ( IsX360() && !Q_stricmp( pPathID, "x360" ) )
-	{
-		Q_snprintf( fileName, sizeof( fileName ), "cfg:/%s", s );
-	}
-	else
-	{
-		// Ensure it has an extension
-		Q_snprintf( fileName, sizeof( fileName ), "//%s/cfg/%s", pPathID, s );
-		Q_DefaultExtension( fileName, ".cfg", sizeof( fileName ) );
-		
-		// check path validity
-		if ( !COM_IsValidPath( fileName ) )
-		{
-			ConMsg( "exec %s: invalid path.\n", fileName );
-			return;
-		}
+		ConMsg( "exec %s: invalid path.\n", fileName );
+		return;
 	}
 
 	// check for invalid file extensions
@@ -464,46 +599,56 @@ void Cmd_Exec_f( const CCommand &args )
 	}
 
 	// 360 doesn't need to do costly existence checks
-	if ( IsPC() && g_pFileSystem->FileExists( fileName ) )
+	if ( IsPC() )
 	{
-		// don't want to exec files larger than 1 MB
-		// probably not a valid file to exec
-		unsigned int size = g_pFileSystem->Size( fileName );
-		if ( size > 1*1024*1024 )
+		if ( g_pFileSystem->FileExists( fileName ) )
 		{
-			ConMsg( "exec %s: file size larger than 1 MB!\n", s );
+			// don't want to exec files larger than 1 MB
+			// probably not a valid file to exec
+			unsigned int size = g_pFileSystem->Size( fileName );
+			if ( size > 1*1024*1024 )
+			{
+				ConMsg( "exec %s: file size larger than 1 MB!\n", szFile );
+				return;
+			}
+		}
+		else
+		{
+			// Many exec files are optional.  make the error message slightly
+			// more informative and less like there is a problem.
+			if ( !V_stristr( szFile, "autoexec.cfg" ) && !V_stristr( szFile, "joystick.cfg" ) && !V_stristr( szFile, "game.cfg" ) )
+			{
+				ConMsg( "'%s' not present; not executing.\n", szFile );
+			}
 			return;
 		}
 	}
 
-	char buf[16384];
-	int len;
-	f = (char *)COM_LoadStackFile( fileName, buf, sizeof( buf ), len );
+	char buf[16384] = { 0 };
+	int len = 0;
+	char *f = (char *)COM_LoadStackFile( fileName, buf, sizeof( buf ), len );
 	if ( !f )
 	{
-		if ( !V_stristr( s, "autoexec.cfg" ) && !V_stristr( s, "joystick.cfg" ) && !V_stristr( s, "game.cfg" ) )
-		{
-			ConMsg( "exec: couldn't exec %s\n", s );
-		}
+		ConMsg( "exec: couldn't exec %s\n", szFile );
 		return;
 	}
-	
+
 	char *original_f = f;
 	VCRHook_Cmd_Exec(&f);
-	
+
 	// In case f was allocated and VCR mode spoofed f, free the old one we allocated earlier.
 	if ( original_f != buf && original_f != f )
 	{
 		free( original_f );
 	}
 
-	ConDMsg( "execing %s\n", s );
-	
+	ConDMsg( "execing %s\n", szFile );
+
 	// check to make sure we're not going to overflow the cmd_text buffer
 	int hCommand = s_CommandBuffer.GetNextCommandHandle();
 
 	// Execute each command immediately
-	char *pszDataPtr = f;
+	const char *pszDataPtr = f;
 	while( true )
 	{
 		// parse a line out of the source
@@ -539,6 +684,8 @@ void Cmd_Exec_f( const CCommand &args )
 			free( f );
 		}
 	}
+	// force any queued convar changes to flush before reading/writing them
+	UpdateMaterialSystemConfig();
 }
 
 
@@ -559,6 +706,13 @@ CON_COMMAND_F( echo, "Echo text to console.", FCVAR_SERVER_CAN_EXECUTE )
 	ConMsg ("\n");
 }
 
+// Users can alias these commands to remove their functionality because the game systems use convars to implement these features
+// The blacklist prevents that exploit
+static const char *g_pBlacklistedCommands[] = 
+{
+	"dsp_player",
+	"room_type",
+};
 /*
 ===============
 Cmd_Alias_f
@@ -570,7 +724,7 @@ CON_COMMAND( alias, "Alias a command." )
 {
 	cmdalias_t	*a;
 	char		cmd[MAX_COMMAND_LENGTH];
-	int			i, c;
+	int			c;
 	const char	*s;
 
 	int argc = args.ArgC();
@@ -591,10 +745,18 @@ CON_COMMAND( alias, "Alias a command." )
 		return;
 	}
 
+	for ( int i = 0; i < ARRAYSIZE(g_pBlacklistedCommands); i++ )
+	{
+		if ( !V_stricmp( g_pBlacklistedCommands[i], s) )
+		{
+			ConMsg("Can't alias %s\n", g_pBlacklistedCommands[i] );
+			return;
+		}
+	}
 // copy the rest of the command line
 	cmd[0] = 0;		// start out with a null string
 	c = argc;
-	for (i=2 ; i< c ; i++)
+	for ( int i=2 ; i< c ; i++)
 	{
 		Q_strncat(cmd, args[i], sizeof( cmd ), COPY_ALL_CHARACTERS);
 		if (i != c)
@@ -820,8 +982,8 @@ const ConCommandBase *Cmd_ExecuteCommand( const CCommand &command, cmd_source_t 
 				// We're actually the server, so set it up locally
 				if ( sv.IsActive() )
 				{
-					g_pServerPluginHandler->SetCommandClient( -1 );
-							
+					g_pServerPluginHandler->SetCommandClient( cmd_source == src_client ? nClientSlot : -1 );
+
 #ifndef SWDS
 					// Special processing for listen server player
 					if ( isServerCommand )
@@ -870,10 +1032,23 @@ const ConCommandBase *Cmd_ExecuteCommand( const CCommand &command, cmd_source_t 
 					return NULL;
 				}
 			}
+			
+			if ( pCommand->IsFlagSet( FCVAR_DEVELOPMENTONLY ) )
+			{
+				Msg( "Unknown command \"%s\"\n", pCommand->GetName() );
+				return NULL;
+			}
 
 			Cmd_Dispatch( pCommand, command );
 			return pCommand;
 		}
+	}
+
+	// Bail out before we update convars if we're runnign in default mode.
+	if ( pCommand && src == src_command && CommandLine()->CheckParm( "-default" ) && !pCommand->IsFlagSet( FCVAR_EXEC_DESPITE_DEFAULT ) )
+	{
+		Msg( "Ignoring cvar \"%s\" due to -default on command line\n", pCommand->GetName() );
+		return NULL;
 	}
 
 	// check cvars

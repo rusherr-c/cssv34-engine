@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "movieobjects/dmetimeselection.h"
 #include "interpolatortypes.h"
 #include "datamodel/dmelementfactoryhelper.h"
@@ -149,14 +150,14 @@ void CDmeTimeSelection::GetAlphaForTime( DmeTime_t t, DmeTime_t curtime, byte& a
 	if ( dt1 > DmeTime_t( 0 ) &&
 		t >= times[ 0 ] && t < times[ 1 ] )
 	{
-		float frac = GetFractionOfTime( t - times[ 0 ], dt1 );
+		float frac = GetFractionOfTime( t - times[ 0 ], dt1, false );
 		alpha = clamp( alpha * frac, minAlpha, 255 );
 		return;
 	}
 	if ( dt2 > DmeTime_t( 0 ) &&
 		t > times[ 2 ] && t <= times[ 3 ] )
 	{
-		float frac = GetFractionOfTime( times[ 3 ] - t, dt2 );
+		float frac = GetFractionOfTime( times[ 3 ] - t, dt2, false );
 		alpha = clamp( alpha * frac, minAlpha, 255 );
 		return;
 	}

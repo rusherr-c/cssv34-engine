@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //-----------------------------------------------------------------------------
 // NOTE! This should never be called directly from leaf code
 // Just use new,delete,malloc,free etc. They will call into this eventually
@@ -31,20 +32,44 @@
 #define USE_PHYSICAL_SMALL_BLOCK_HEAP 1
 #endif
 
+
+// #define NO_SBH	1
+
+
 #define MIN_SBH_BLOCK	8
 #define MIN_SBH_ALIGN	8
 #define MAX_SBH_BLOCK	2048
 #define MAX_POOL_REGION (4*1024*1024)
 #if !defined(_X360)
-#define PAGE_SIZE		(4*1024)
-#define COMMIT_SIZE		(16*PAGE_SIZE)
+#define SBH_PAGE_SIZE		(4*1024)
+#define COMMIT_SIZE		(16*SBH_PAGE_SIZE)
 #else
-#define PAGE_SIZE		(64*1024)
-#define COMMIT_SIZE		(PAGE_SIZE)
+#define SBH_PAGE_SIZE		(64*1024)
+#define COMMIT_SIZE		(SBH_PAGE_SIZE)
 #endif
+#if _M_X64
+#define NUM_POOLS		34
+#else
 #define NUM_POOLS		42
+#endif
 
-class CSmallBlockPool
+// SBH not enabled for LINUX right now. Unlike on Windows, we can't globally hook malloc. Well,
+//  we can and did in override_init_hook(), but that unfortunately causes all malloc functions
+//	to get hooked - including the nVidia driver, etc. And these hooks appear to happen after
+//	nVidia has alloc'd some memory and it crashes when they try to free that.
+// So we need things to work without this global hook - which means we rely on memdbgon.h / memdbgoff.h.
+//  Unfortunately, that stuff always comes in source files after the headers are included, and
+//  that means any alloc calls in the header files call the real libc functions. It's a mess.
+// I believe I've cleaned most of it up, and it appears to be working. However right now we are totally
+// 	gated on other performance issues, and the SBH doesn't give us any win, so I've disabled it for now.
+// Once those perf issues are worked out, it might make sense to do perf tests with SBH, libc, and tcmalloc.
+//
+//$ #if defined( _WIN32 ) || defined( _PS3 ) || defined( LINUX )
+#if defined( _WIN32 ) || defined( _PS3 )
+#define MEM_SBH_ENABLED 1
+#endif
+
+class ALIGN16 CSmallBlockPool
 {
 public:
 	void Init( unsigned nBlockSize, byte *pBase, unsigned initialCommit = 0 );
@@ -77,10 +102,10 @@ private:
 	byte *			m_pBase;
 
 	CThreadFastMutex m_CommitMutex;
-};
+} ALIGN16_POST;
 
 
-class CSmallBlockHeap
+class ALIGN16 CSmallBlockHeap
 {
 public:
 	CSmallBlockHeap();
@@ -101,7 +126,7 @@ private:
 	CSmallBlockPool m_Pools[NUM_POOLS];
 	byte *m_pBase;
 	byte *m_pLimit;
-};
+} ALIGN16_POST;
 
 #ifdef USE_PHYSICAL_SMALL_BLOCK_HEAP
 #define BYTES_X360_SBH (32*1024*1024)
@@ -179,13 +204,15 @@ private:
 #endif
 
 
-class CStdMemAlloc : public IMemAlloc
+class ALIGN16 CStdMemAlloc : public IMemAlloc
 {
 public:
 	CStdMemAlloc()
 	  :	m_pfnFailHandler( DefaultFailHandler ),
 		m_sMemoryAllocFailed( (size_t)0 )
 	{
+		// Make sure that we return 64-bit addresses in 64-bit builds.
+		ReserveBottomMemory();
 	}
 	// Release versions
 	virtual void *Alloc( size_t nSize );
@@ -221,6 +248,7 @@ public:
 
 	virtual void DumpStats();
 	virtual void DumpStatsFileBase( char const *pchFileBase );
+	virtual void GlobalMemoryStatus( size_t *pUsedMemory, size_t *pFreeMemory );
 
 	virtual bool IsDebugHeap() { return false; }
 
@@ -235,9 +263,14 @@ public:
 	virtual MemAllocFailHandler_t SetAllocFailHandler( MemAllocFailHandler_t pfnMemAllocFailHandler );
 	size_t CallAllocFailHandler( size_t nBytes ) { return (*m_pfnFailHandler)( nBytes); }
 
+	virtual uint32 GetDebugInfoSize() { return 0; }
+	virtual void SaveDebugInfo( void *pvDebugInfo ) { }
+	virtual void RestoreDebugInfo( const void *pvDebugInfo ) {}	
+	virtual void InitDebugInfo( void *pvDebugInfo, const char *pchRootFileName, int nLine ) {}
+
 	static size_t DefaultFailHandler( size_t );
 	void DumpBlockStats( void *p ) {}
-#ifdef _WIN32
+#ifdef MEM_SBH_ENABLED
 	CSmallBlockHeap m_SmallBlockHeap;
 #ifdef USE_PHYSICAL_SMALL_BLOCK_HEAP
 	CX360SmallBlockHeap m_LargePageSmallBlockHeap;
@@ -250,17 +283,10 @@ public:
 
 	virtual size_t MemoryAllocFailed();
 
-	virtual uint32 GetDebugInfoSize() { return 0; }
-	virtual void SaveDebugInfo( void *pvDebugInfo ) {}
-	virtual void RestoreDebugInfo( const void *pvDebugInfo ) {}
-	virtual void InitDebugInfo( void *pvDebugInfo, const char *pchRootFileName, int nLine ) {}
-
-	virtual void GlobalMemoryStatus( size_t *pUsedMemory, size_t *pFreeMemory ) {}
-
 	void		SetCRTAllocFailed( size_t nMemSize );
 
 	MemAllocFailHandler_t m_pfnFailHandler;
 	size_t				m_sMemoryAllocFailed;
-};
+} ALIGN16_POST;
 
 

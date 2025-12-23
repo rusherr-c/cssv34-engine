@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,10 +19,14 @@
 #include <vgui_controls/CheckButton.h>
 #include <vgui_controls/ComboBox.h>
 #include <vgui_controls/TextEntry.h>
+#include "cvarslider.h"
 #include "PanelListPanel.h"
 #include <vgui/IInput.h>
+#include <steam/steam_api.h>
+#include "EngineInterface.h"
+#include "fmtstr.h"
 
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include <tier0/vcrmode.h>
 
@@ -55,7 +59,7 @@ CMultiplayerAdvancedDialog::CMultiplayerAdvancedDialog(vgui::Panel *parent) : Ba
 
 	m_pList = NULL;
 
-	m_pDescription = new CInfoDescription( m_pListPanel );
+	m_pDescription = new CInfoDescription();
 	m_pDescription->InitFromFile( DEFAULT_OPTIONS_FILE );
 	m_pDescription->InitFromFile( OPTIONS_FILE );
 	m_pDescription->TransferCurrentValues( NULL );
@@ -137,6 +141,7 @@ void CMultiplayerAdvancedDialog::GatherCurrentValues()
 	CheckButton *pBox;
 	TextEntry *pEdit;
 	ComboBox *pCombo;
+	CCvarSlider *pSlider;
 
 	mpcontrol_t *pList;
 
@@ -150,6 +155,12 @@ void CMultiplayerAdvancedDialog::GatherCurrentValues()
 	while ( pList )
 	{
 		pObj = pList->pScrObj;
+
+		if ( pObj->type == O_CATEGORY )
+		{
+			pList = pList->next;
+			continue;
+		}
 
 		if ( !pList->pControl )
 		{
@@ -175,30 +186,36 @@ void CMultiplayerAdvancedDialog::GatherCurrentValues()
 			sprintf( szValue, "%s", strValue );
 			break;
 		case O_LIST:
-			pCombo = (ComboBox *)pList->pControl;
-			// pCombo->GetText( strValue, sizeof( strValue ) );
-			int activeItem = pCombo->GetActiveItem();
-			
-			pItem = pObj->pListItems;
-//			int n = (int)pObj->fdefValue;
-
-			while ( pItem )
 			{
-				if (!activeItem--)
-					break;
+				pCombo = (ComboBox *)pList->pControl;
+				// pCombo->GetText( strValue, sizeof( strValue ) );
+				int activeItem = pCombo->GetActiveItem();
+				
+				pItem = pObj->pListItems;
+	//			int n = (int)pObj->fdefValue;
 
-				pItem = pItem->pNext;
-			}
+				while ( pItem )
+				{
+					if (!activeItem--)
+						break;
 
-			if ( pItem )
-			{
-				sprintf( szValue, "%s", pItem->szValue );
+					pItem = pItem->pNext;
+				}
+
+				if ( pItem )
+				{
+					sprintf( szValue, "%s", pItem->szValue );
+				}
+				else  // Couln't find index
+				{
+					//assert(!("Couldn't find string in list, using default value"));
+					sprintf( szValue, "%s", pObj->defValue );
+				}
+				break;
 			}
-			else  // Couln't find index
-			{
-				//assert(!("Couldn't find string in list, using default value"));
-				sprintf( szValue, "%s", pObj->defValue );
-			}
+		case O_SLIDER:
+			pSlider = ( CCvarSlider * )pList->pControl;
+			sprintf( szValue, "%.2f", pSlider->GetSliderValue() );
 			break;
 		}
 
@@ -225,18 +242,39 @@ void CMultiplayerAdvancedDialog::CreateControls()
 
 	pObj = m_pDescription->pObjList;
 
+	// Build out the clan dropdown
+	CScriptObject *pClanObj = m_pDescription->FindObject( "cl_clanid" );
+	ISteamFriends *pFriends = steamapicontext->SteamFriends();
+	if ( pFriends && pClanObj )
+	{
+		pClanObj->RemoveAndDeleteAllItems();
+		int iGroupCount = pFriends->GetClanCount();
+		pClanObj->AddItem( new CScriptListItem( "#Cstrike_ClanTag_None", "0" ) );
+		for ( int k = 0; k < iGroupCount; ++ k )
+		{
+			CSteamID clanID = pFriends->GetClanByIndex( k );
+			const char *pName = pFriends->GetClanName( clanID );
+			const char *pTag = pFriends->GetClanTag( clanID );
+
+			char id[12];
+			Q_snprintf( id, sizeof( id ), "%d", clanID.GetAccountID() );
+			pClanObj->AddItem( new CScriptListItem( CFmtStr( "%s (%s)", pTag, pName ), id ) );
+		}
+	}
+
 	mpcontrol_t	*pCtrl;
 
 	CheckButton *pBox;
 	TextEntry *pEdit;
 	ComboBox *pCombo;
+	CCvarSlider *pSlider;
 	CScriptListItem *pListItem;
 
 	Panel *objParent = m_pListPanel;
 
 	while ( pObj )
 	{
-		if ( pObj->type == O_OBSOLETE )
+		if ( pObj->type == O_OBSOLETE || pObj->type == O_CATEGORY )
 		{
 			pObj = pObj->pNext;
 			continue;
@@ -260,18 +298,32 @@ void CMultiplayerAdvancedDialog::CreateControls()
 			pCtrl->pControl = (Panel *)pEdit;
 			break;
 		case O_LIST:
+			{
 			pCombo = new ComboBox( pCtrl, "DescComboBox", 5, false );
 
+			// track which row matches the current value
+			int iRow = -1;
+			int iCount = 0;
 			pListItem = pObj->pListItems;
 			while ( pListItem )
 			{
+				if ( iRow == -1 && !Q_stricmp( pListItem->szValue, pObj->curValue ) )
+					iRow = iCount;
+
 				pCombo->AddItem( pListItem->szItemText, NULL );
 				pListItem = pListItem->pNext;
+				++iCount;
 			}
 
-			pCombo->ActivateItemByRow((int)pObj->fdefValue);
+
+			pCombo->ActivateItemByRow( iRow );
 
 			pCtrl->pControl = (Panel *)pCombo;
+			}
+			break;
+		case O_SLIDER:
+			pSlider = new CCvarSlider( pCtrl, "DescSlider", "Test", pObj->fMin, pObj->fMax, pObj->cvarname, false );
+			pCtrl->pControl = (Panel *)pSlider;
 			break;
 		default:
 			break;
@@ -286,7 +338,21 @@ void CMultiplayerAdvancedDialog::CreateControls()
 		}
 
 		pCtrl->pScrObj = pObj;
-		pCtrl->SetSize( 100, 28 );
+
+		switch ( pCtrl->type )
+		{
+		case O_BOOL:
+		case O_STRING:
+		case O_NUMBER:
+		case O_LIST:
+			pCtrl->SetSize( 100, 28 );
+			break;
+		case O_SLIDER:
+			pCtrl->SetSize( 100, 40 );
+			break;
+		default:
+			break;
+		}
 		//pCtrl->SetBorder( scheme()->GetBorder(1, "DepressedButtonBorder") );
 		m_pListPanel->AddItem( pCtrl );
 
@@ -363,79 +429,3 @@ void CMultiplayerAdvancedDialog::SaveValues()
 	}
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Constructor, load/save client settings object
-//-----------------------------------------------------------------------------
-CInfoDescription::CInfoDescription( CPanelListPanel *panel )
-: CDescription( panel )
-{
-	setHint( "// NOTE:  THIS FILE IS AUTOMATICALLY REGENERATED, \r\n\
-//DO NOT EDIT THIS HEADER, YOUR COMMENTS WILL BE LOST IF YOU DO\r\n\
-// User options script\r\n\
-//\r\n\
-// Format:\r\n\
-//  Version [float]\r\n\
-//  Options description followed by \r\n\
-//  Options defaults\r\n\
-//\r\n\
-// Option description syntax:\r\n\
-//\r\n\
-//  \"cvar\" { \"Prompt\" { type [ type info ] } { default } }\r\n\
-//\r\n\
-//  type = \r\n\
-//   BOOL   (a yes/no toggle)\r\n\
-//   STRING\r\n\
-//   NUMBER\r\n\
-//   LIST\r\n\
-//\r\n\
-// type info:\r\n\
-// BOOL                 no type info\r\n\
-// NUMBER       min max range, use -1 -1 for no limits\r\n\
-// STRING       no type info\r\n\
-// LIST         "" delimited list of options value pairs\r\n\
-//\r\n\
-//\r\n\
-// default depends on type\r\n\
-// BOOL is \"0\" or \"1\"\r\n\
-// NUMBER is \"value\"\r\n\
-// STRING is \"value\"\r\n\
-// LIST is \"index\", where index \"0\" is the first element of the list\r\n\r\n\r\n" );
-
-	setDescription( "INFO_OPTIONS" );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CInfoDescription::WriteScriptHeader( FileHandle_t fp )
-{
-    char am_pm[] = "AM";
-	tm newtime;
-	VCRHook_LocalTime( &newtime );
-
-	g_pFullFileSystem->FPrintf( fp, (char *)getHint() );
-
-// Write out the comment and Cvar Info:
-	g_pFullFileSystem->FPrintf( fp, "// Half-Life User Info Configuration Layout Script (stores last settings chosen, too)\r\n" );
-	g_pFullFileSystem->FPrintf( fp, "// File generated:  %.19s %s\r\n", asctime( &newtime ), am_pm );
-	g_pFullFileSystem->FPrintf( fp, "//\r\n//\r\n// Cvar\t-\tSetting\r\n\r\n" );
-	g_pFullFileSystem->FPrintf( fp, "VERSION %.1f\r\n\r\n", SCRIPT_VERSION );
-	g_pFullFileSystem->FPrintf( fp, "DESCRIPTION INFO_OPTIONS\r\n{\r\n" );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CInfoDescription::WriteFileHeader( FileHandle_t fp )
-{
-    char am_pm[] = "AM";
-	tm newtime;
-	VCRHook_LocalTime( &newtime );
-
-	g_pFullFileSystem->FPrintf( fp, "// Half-Life User Info Configuration Settings\r\n" );
-	g_pFullFileSystem->FPrintf( fp, "// DO NOT EDIT, GENERATED BY HALF-LIFE\r\n" );
-	g_pFullFileSystem->FPrintf( fp, "// File generated:  %.19s %s\r\n", asctime( &newtime ), am_pm );
-	g_pFullFileSystem->FPrintf( fp, "//\r\n//\r\n// Cvar\t-\tSetting\r\n\r\n" );
-}
-
-//-----------------------------------------------------------------------------

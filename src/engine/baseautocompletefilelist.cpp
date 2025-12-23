@@ -1,10 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose:	  
 //
 // $NoKeywords: $
 //=============================================================================//
 
+#include "tier0/platform.h"
 #include "qlimits.h"
 #include "sys.h"
 #include "baseautocompletefilelist.h"

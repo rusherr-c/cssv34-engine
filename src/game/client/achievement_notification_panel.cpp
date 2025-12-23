@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #include "ienginevgui.h"
 #include <vgui/ILocalize.h>
 #include <vgui/ISurface.h>
-#include <vgui/IVGUI.h>
+#include <vgui/IVGui.h>
 #include <vgui_controls/EditablePanel.h>
 #include <vgui_controls/Label.h>
 #include <vgui_controls/ImagePanel.h>
@@ -103,16 +103,16 @@ void CAchievementNotificationPanel::FireGameEvent( IGameEvent * event )
 
 		if ( IsPC() )
 		{
-#ifndef NO_STEAM
 			// shouldn't ever get achievement progress if steam not running and user logged in, but check just in case
-			if ( !SteamUserStats() )
+			if ( !steamapicontext->SteamUserStats() )
 			{				
 				Msg( "Steam not running, achievement progress notification not displayed\n" );
 			}
-
-			// use Steam to show achievement progress UI
-			SteamUserStats()->IndicateAchievementProgress( pchName, iCur, iMax );
-#endif
+			else 
+			{
+				// use Steam to show achievement progress UI
+				steamapicontext->SteamUserStats()->IndicateAchievementProgress( pchName, iCur, iMax );
+			}
 		}
 		else 
 		{
@@ -137,7 +137,7 @@ void CAchievementNotificationPanel::FireGameEvent( IGameEvent * event )
 				return;
 			Q_wcsncpy( szFmt, pchFmt, sizeof( szFmt ) );
 
-			g_pVGuiLocalize->ConstructString( szText, sizeof( szText ), szFmt, 3, szLocalizedName, szNumFound, szNumTotal );
+			g_pVGuiLocalize->ConstructString_safe( szText, szFmt, 3, szLocalizedName, szNumFound, szNumTotal );
 			AddNotification( pchName, g_pVGuiLocalize->Find( "#GameUI_Achievement_Progress" ), szText );
 		}
 	}
@@ -216,9 +216,9 @@ void CAchievementNotificationPanel::ShowNextNotification()
 	int iHeadingWidth = UTIL_ComputeStringWidth( hFontHeading, notification.szHeading );
 	int iTitleWidth = UTIL_ComputeStringWidth( hFontTitle, notification.szTitle );
 	// use the widest string
-	int iTextWidth = max( iHeadingWidth, iTitleWidth );
+	int iTextWidth = MAX( iHeadingWidth, iTitleWidth );
 	// don't let it be insanely wide
-	iTextWidth = min( iTextWidth, XRES( 300 ) );
+	iTextWidth = MIN( iTextWidth, XRES( 300 ) );
 	int iIconWidth = m_pIcon->GetWide();
 	int iSpacing = XRES( 10 );
 	int iPanelWidth = iSpacing + iIconWidth + iSpacing + iTextWidth + iSpacing;

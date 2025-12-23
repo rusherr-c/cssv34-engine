@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 
 #include "soundent.h"
 #include "entitylist.h"
-#include "GameStats.h"
+#include "gamestats.h"
 
 #endif
 

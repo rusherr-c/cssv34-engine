@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -25,7 +25,7 @@
 #include "ExpressionTool.h"
 #include "faceposer_models.h"
 #include "tier0/icommandline.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #define MAX_THUMBNAILSIZE 256
 #define MIN_THUMBNAILSIZE 64
@@ -1150,6 +1150,7 @@ void mxExpressionTray::ReloadBitmaps( void )
 {
 	CExpClass *cl;
 	int c = expressions->GetNumClasses();
+	EnableStickySnapshotMode();
 	for ( int i = 0 ; i < c; i++ )
 	{
 		cl = expressions->GetClass( i );
@@ -1158,6 +1159,7 @@ void mxExpressionTray::ReloadBitmaps( void )
 
 		cl->ReloadBitmaps();
 	}
+	DisableStickySnapshotMode();
 	redraw();
 }
 

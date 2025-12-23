@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "stdafx.h"
 #include <stdio.h>
 #include <process.h>
@@ -10,14 +11,15 @@
 
 #include "interface.h"
 #include "imysqlwrapper.h"
-#include "tier1/UtlVector.h"
-#include "tier1/UtlBuffer.h"
-#include "tier1/UtlSymbol.h"
-#include "tier1/UtlString.h"
-#include "tier1/UtlDict.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlbuffer.h"
+#include "tier1/utlsymbol.h"
+#include "tier1/utlstring.h"
+#include "tier1/utldict.h"
 #include "tier2/tier2.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
+#include "cbase.h"
 #include "gamestats.h"
 #include "episodic/ep2_gamestats.h"
 #include "base_gamestats_parse.h"

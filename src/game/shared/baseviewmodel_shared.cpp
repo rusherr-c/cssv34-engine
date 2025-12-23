@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,18 +11,24 @@
 #if defined( CLIENT_DLL )
 #include "iprediction.h"
 #include "prediction.h"
+#include "client_virtualreality.h"
+#include "sourcevr/isourcevirtualreality.h"
 #else
 #include "vguiscreen.h"
 #endif
 
+#if defined( CLIENT_DLL ) && defined( SIXENSE )
+#include "sixense/in_sixense.h"
+#include "sixense/sixense_convars_extern.h"
+#endif
+
+#ifdef SIXENSE
+extern ConVar in_forceuser;
+#include "iclientmode.h"
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
-
-#if defined( CLIENT_DLL )
-	ConVar viewmodel_offset_x( "viewmodel_offset_x", "0.0", FCVAR_ARCHIVE, "the viewmodel offset from default in X" );
-	ConVar viewmodel_offset_y( "viewmodel_offset_y", "0.0", FCVAR_ARCHIVE, "the viewmodel offset from default in Y" );
-	ConVar viewmodel_offset_z( "viewmodel_offset_z", "0.0", FCVAR_ARCHIVE, "the viewmodel offset from default in Z" );
-#endif
 
 #define VIEWMODEL_ANIMATION_PARITY_BITS 3
 #define SCREEN_OVERLAY_MATERIAL "vgui/screens/vgui_overlay"
@@ -383,14 +389,6 @@ void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePos
 	QAngle vmangoriginal = eyeAngles;
 	QAngle vmangles = eyeAngles;
 	Vector vmorigin = eyePosition;
-	// add more commands to change these
-
-	Vector vecRight;
-	Vector vecUp;
-	Vector vecForward;
-	AngleVectors( vmangoriginal, &vecForward, &vecRight, &vecUp );
-	//Vector vecOffset = Vector( viewmodel_offset_x.GetFloat(), viewmodel_offset_y.GetFloat(), viewmodel_offset_z.GetFloat() ); 
-	vmorigin += (vecForward * viewmodel_offset_y.GetFloat()) + (vecUp * viewmodel_offset_z.GetFloat()) + (vecRight * viewmodel_offset_x.GetFloat());
 
 	CBaseCombatWeapon *pWeapon = m_hWeapon.Get();
 	//Allow weapon lagging
@@ -402,12 +400,18 @@ void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePos
 		{
 			// add weapon-specific bob 
 			pWeapon->AddViewmodelBob( this, vmorigin, vmangles );
+#if defined ( CSTRIKE_DLL )
+			CalcViewModelLag( vmorigin, vmangles, vmangoriginal );
+#endif
 		}
 	}
 	// Add model-specific bob even if no weapon associated (for head bob for off hand models)
 	AddViewModelBob( owner, vmorigin, vmangles );
+#if !defined ( CSTRIKE_DLL )
+	// This was causing weapon jitter when rotating in updated CS:S; original Source had this in above InPrediction block  07/14/10
 	// Add lag
 	CalcViewModelLag( vmorigin, vmangles, vmangoriginal );
+#endif
 
 #if defined( CLIENT_DLL )
 	if ( !prediction->InPrediction() )
@@ -417,10 +421,42 @@ void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePos
 	}
 #endif
 
+	if( UseVR() )
+	{
+		g_ClientVirtualReality.OverrideViewModelTransform( vmorigin, vmangles, pWeapon && pWeapon->ShouldUseLargeViewModelVROverride() );
+	}
+
 	SetLocalOrigin( vmorigin );
 	SetLocalAngles( vmangles );
 
+#ifdef SIXENSE
+	if( g_pSixenseInput->IsEnabled() && (owner->GetObserverMode()==OBS_MODE_NONE) && !UseVR() )
+	{
+		const float max_gun_pitch = 20.0f;
+
+		float viewmodel_fov_ratio = g_pClientMode->GetViewModelFOV()/owner->GetFOV();
+		QAngle gun_angles = g_pSixenseInput->GetViewAngleOffset() * -viewmodel_fov_ratio;
+
+		// Clamp pitch a bit to minimize seeing back of viewmodel
+		if( gun_angles[PITCH] < -max_gun_pitch )
+		{ 
+			gun_angles[PITCH] = -max_gun_pitch; 
+		}
+
+#ifdef WIN32 // ShouldFlipViewModel comes up unresolved on osx? Mabye because it's defined inline? fixme
+		if( ShouldFlipViewModel() ) 
+		{
+			gun_angles[YAW] *= -1.0f;
+		}
 #endif
+
+		vmangles = EyeAngles() +  gun_angles;
+
+		SetLocalAngles( vmangles );
+	}
+#endif
+#endif
+
 }
 
 //-----------------------------------------------------------------------------
@@ -457,13 +493,7 @@ void CBaseViewModel::CalcViewModelLag( Vector& origin, QAngle& angles, QAngle& o
 		VectorMA( m_vecLastFacing, flSpeed * gpGlobals->frametime, vDifference, m_vecLastFacing );
 		// Make sure it doesn't grow out of control!!!
 		VectorNormalize( m_vecLastFacing );
-
-		static ConVar viewmodel_lag_scale( "viewmodel_lag_scale", "1.0", FCVAR_ARCHIVE, "How much to scale the Viewmodel lag. Default of 5.0" );
-		static ConVar viewmodel_lag_dir( "viewmodel_lag_dir", "-1.0", FCVAR_ARCHIVE, "The Direction the Viewmodel goes when it lags" );
-
-		//VectorMA( origin, 5.0f, vDifference * -1.0f, origin );
-		VectorMA( origin, viewmodel_lag_scale.GetFloat(), vDifference * viewmodel_lag_dir.GetFloat(), origin );
-		//VectorMA( origin, 1.0f, vDifference * -1.0f, origin );
+		VectorMA( origin, 5.0f, vDifference * -1.0f, origin );
 
 		Assert( m_vecLastFacing.IsValid() );
 	}
@@ -586,7 +616,7 @@ BEGIN_PREDICTION_DATA( CBaseViewModel )
 	DEFINE_FIELD( m_hOwner, FIELD_EHANDLE ),
 	DEFINE_FIELD( m_flTimeWeaponIdle, FIELD_FLOAT ),
 	DEFINE_FIELD( m_Activity, FIELD_INTEGER ),
-	DEFINE_FIELD( m_flCycle, FIELD_FLOAT ),
+	DEFINE_PRED_FIELD( m_flCycle, FIELD_FLOAT, FTYPEDESC_PRIVATE | FTYPEDESC_OVERRIDE | FTYPEDESC_NOERRORCHECK ),
 
 END_PREDICTION_DATA()
 
@@ -601,6 +631,61 @@ void RecvProxy_SequenceNum( const CRecvProxyData *pData, void *pStruct, void *pO
 		model->m_flAnimTime = gpGlobals->curtime;
 		model->SetCycle(0);
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+int	CBaseViewModel::LookupAttachment( const char *pAttachmentName )
+{
+	if ( m_hWeapon.Get() && m_hWeapon.Get()->WantsToOverrideViewmodelAttachments() )
+		return m_hWeapon.Get()->LookupAttachment( pAttachmentName );
+
+	return BaseClass::LookupAttachment( pAttachmentName );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CBaseViewModel::GetAttachment( int number, matrix3x4_t &matrix )
+{
+	if ( m_hWeapon.Get() && m_hWeapon.Get()->WantsToOverrideViewmodelAttachments() )
+		return m_hWeapon.Get()->GetAttachment( number, matrix );
+
+	return BaseClass::GetAttachment( number, matrix );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CBaseViewModel::GetAttachment( int number, Vector &origin )
+{
+	if ( m_hWeapon.Get() && m_hWeapon.Get()->WantsToOverrideViewmodelAttachments() )
+		return m_hWeapon.Get()->GetAttachment( number, origin );
+
+	return BaseClass::GetAttachment( number, origin );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CBaseViewModel::GetAttachment( int number, Vector &origin, QAngle &angles )
+{
+	if ( m_hWeapon.Get() && m_hWeapon.Get()->WantsToOverrideViewmodelAttachments() )
+		return m_hWeapon.Get()->GetAttachment( number, origin, angles );
+
+	return BaseClass::GetAttachment( number, origin, angles );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CBaseViewModel::GetAttachmentVelocity( int number, Vector &originVel, Quaternion &angleVel )
+{
+	if ( m_hWeapon.Get() && m_hWeapon.Get()->WantsToOverrideViewmodelAttachments() )
+		return m_hWeapon.Get()->GetAttachmentVelocity( number, originVel, angleVel );
+
+	return BaseClass::GetAttachmentVelocity( number, originVel, angleVel );
 }
 
 #endif

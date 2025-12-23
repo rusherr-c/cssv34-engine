@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,10 +8,17 @@
 #include <dsound.h>
 #pragma warning(disable : 4201)		// nameless struct/union
 #include <ks.h>
+// Fix for VS 2010 build errors copied from Dota
+#if !defined( NEW_DXSDK ) && ( _MSC_VER >= 1600 )
+#undef KSDATAFORMAT_SUBTYPE_WAVEFORMATEX
+#undef KSDATAFORMAT_SUBTYPE_PCM
+#undef KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+#endif
 #include <ksmedia.h>
 #include "iprediction.h"
 #include "eax.h"
 #include "tier0/icommandline.h"
+#include "video//ivideoservices.h"
 #include "../../sys_dll.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -35,11 +42,15 @@ typedef enum {SIS_SUCCESS, SIS_FAILURE, SIS_NOTAVAIL} sndinitstat;
 #define SECONDARY_BUFFER_SIZE			0x10000		// output buffer size in bytes
 #define SECONDARY_BUFFER_SIZE_SURROUND	0x04000		// output buffer size in bytes, one per channel
 
+#if !defined( NEW_DXSDK )
 // hack - need to include latest dsound.h
 #undef DSSPEAKER_5POINT1
 #undef DSSPEAKER_7POINT1
 #define DSSPEAKER_5POINT1		6
 #define DSSPEAKER_7POINT1		7
+#define DSSPEAKER_7POINT1_SURROUND 8
+#define DSSPEAKER_5POINT1_SURROUND 9
+#endif
 
 HRESULT (WINAPI *pDirectSoundCreate)(GUID FAR *lpGUID, LPDIRECTSOUND FAR *lplpDS, IUnknown FAR *pUnkOuter);
 
@@ -47,11 +58,16 @@ extern void ReleaseSurround(void);
 extern bool MIX_ScaleChannelVolume( paintbuffer_t *ppaint, channel_t *pChannel, int volume[CCHANVOLUMES], int mixchans );
 void OnSndSurroundCvarChanged( IConVar *var, const char *pOldString, float flOldValue );
 void OnSndSurroundLegacyChanged( IConVar *var, const char *pOldString, float flOldValue );
+void OnSndVarChanged( IConVar *var, const char *pOldString, float flOldValue );
 
-LPDIRECTSOUND pDS;
-LPDIRECTSOUNDBUFFER pDSBuf, pDSPBuf;
+static LPDIRECTSOUND pDS = NULL;
+static LPDIRECTSOUNDBUFFER pDSBuf = NULL, pDSPBuf = NULL;
 
-GUID IID_IDirectSound3DBufferDef = {0x279AFA86, 0x4981, 0x11CE, {0xA5, 0x21, 0x00, 0x20, 0xAF, 0x0B, 0xE5, 0x60}};
+static GUID IID_IDirectSound3DBufferDef = {0x279AFA86, 0x4981, 0x11CE, {0xA5, 0x21, 0x00, 0x20, 0xAF, 0x0B, 0xE5, 0x60}};
+static ConVar windows_speaker_config("windows_speaker_config", "-1", FCVAR_ARCHIVE);
+static DWORD g_ForcedSpeakerConfig = 0;
+
+extern ConVar snd_mute_losefocus;
 
 //-----------------------------------------------------------------------------
 // Purpose: Implementation of direct sound
@@ -146,11 +162,17 @@ bool CAudioDirectSound::Init( void )
 	{
 		snd_surround.InstallChangeCallback( &OnSndSurroundCvarChanged );
 		snd_legacy_surround.InstallChangeCallback( &OnSndSurroundLegacyChanged );
+		snd_mute_losefocus.InstallChangeCallback( &OnSndVarChanged );
 		first = false;
 	}
 
 	if ( SNDDMA_InitDirect() == SIS_SUCCESS)
 	{
+		if ( g_pVideo != NULL )
+		{
+			g_pVideo->SoundDeviceCommand( VideoSoundDeviceOperation::SET_DIRECT_SOUND_DEVICE, pDS );
+		}
+
 		return true;
 	}
 
@@ -324,16 +346,25 @@ int CAudioDirectSound::PaintBegin( float mixAheadTime, int soundtime, int lpaint
 	if ( endtime <= lpaintedtime )
 		return endtime;
 
-	int fullsamps = DeviceSampleCount() / DeviceChannels();
-
-	if ((endtime - soundtime) > fullsamps)
-		endtime = soundtime + fullsamps;
-	
-	if ((endtime - lpaintedtime) & 0x3)
+	uint nSamples = endtime - lpaintedtime;
+	if ( nSamples & 0x3 )
 	{
 		// The difference between endtime and painted time should align on 
 		// boundaries of 4 samples.  This is important when upsampling from 11khz -> 44khz.
-		endtime -= (endtime - lpaintedtime) & 0x3;
+		nSamples += (4 - (nSamples & 3));
+	}
+	// clamp to min 512 samples per mix
+	if ( nSamples > 0 && nSamples < 512 )
+	{
+		nSamples = 512;
+	}
+	endtime = lpaintedtime + nSamples;
+
+	int fullsamps = DeviceSampleCount() / DeviceChannels();
+	if ( (endtime - soundtime) > fullsamps)
+	{
+		endtime = soundtime + fullsamps;
+		endtime += (4 - (endtime & 3));
 	}
 
 	DWORD	dwStatus;
@@ -583,23 +614,6 @@ void CAudioDirectSound::StopAllSounds( void )
 {
 }
 
-static bool IsRunningWindowsVista()
-{
-	if ( IsPC() )
-	{
-		OSVERSIONINFOEX osvi;
-		ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
-		osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-
-		if ( GetVersionEx ((OSVERSIONINFO *)&osvi) )
-		{
-			if ( osvi.dwMajorVersion >= 6 )
-				return true;
-		}
-	}
-	return false;
-}
-
 bool CAudioDirectSound::SNDDMA_InitInterleaved( LPDIRECTSOUND lpDS, WAVEFORMATEX* lpFormat, int channelCount )
 {
 	WAVEFORMATEXTENSIBLE    wfx = { 0 } ;     // DirectSoundBuffer wave format (extensible)
@@ -640,18 +654,38 @@ bool CAudioDirectSound::SNDDMA_InitInterleaved( LPDIRECTSOUND lpDS, WAVEFORMATEX
     // setup the DirectSound
     DSBUFFERDESC            dsbdesc = { 0 };  // DirectSoundBuffer descriptor	
     dsbdesc.dwSize = sizeof(DSBUFFERDESC);
-	dsbdesc.dwFlags = DSBCAPS_LOCHARDWARE;
-
-	if ( IsRunningWindowsVista() )
-	{
-		// vista doesn't support hardware buffers, but does support surround on software (XP does not)
-		dsbdesc.dwFlags = DSBCAPS_LOCSOFTWARE; 
-	}
+	dsbdesc.dwFlags = 0;
 
     dsbdesc.dwBufferBytes = SECONDARY_BUFFER_SIZE_SURROUND * channelCount;
  
     dsbdesc.lpwfxFormat = (WAVEFORMATEX*)&wfx;
-    if(FAILED(lpDS->CreateSoundBuffer(&dsbdesc, &pDSBuf, NULL)))
+	bool bSuccess = false;
+	for ( int i = 0; i < 3; i++ )
+	{
+		switch(i)
+		{
+		case 0:
+			dsbdesc.dwFlags = DSBCAPS_LOCHARDWARE;
+			break;
+		case 1:
+			dsbdesc.dwFlags = DSBCAPS_LOCSOFTWARE;
+			break;
+		case 2:
+			dsbdesc.dwFlags = 0;
+			break;
+		}
+		if ( !snd_mute_losefocus.GetBool() )
+		{
+			dsbdesc.dwFlags |= DSBCAPS_GLOBALFOCUS;
+		}
+
+		if(!FAILED(lpDS->CreateSoundBuffer(&dsbdesc, &pDSBuf, NULL)))
+		{
+			bSuccess = true;
+			break;
+		}
+	}
+	if ( !bSuccess )
 		return false;
 
 	DWORD dwSize = 0, dwWrite;
@@ -869,6 +903,10 @@ sndinitstat CAudioDirectSound::SNDDMA_InitDirect( void )
 			dsbuf.dwFlags = DSBCAPS_LOCSOFTWARE;		// NOTE: don't use CTRLFREQUENCY (slow)
 			dsbuf.dwBufferBytes = SECONDARY_BUFFER_SIZE;
 			dsbuf.lpwfxFormat = &format;
+			if ( !snd_mute_losefocus.GetBool() )
+			{
+				dsbuf.dwFlags |= DSBCAPS_GLOBALFOCUS;
+			}
 
 			if (DS_OK != pDS->CreateSoundBuffer(&dsbuf, &pDSBuf, NULL))
 			{
@@ -963,96 +1001,15 @@ sndinitstat CAudioDirectSound::SNDDMA_InitDirect( void )
 	m_deviceSampleCount = m_bufferSizeBytes/(DeviceSampleBytes());
 
 	return SIS_SUCCESS;
+
 }
 
-/*
- Sets the snd_surround_speakers cvar based on the windows setting
-*/
-void CAudioDirectSound::DetectWindowsSpeakerSetup()
+static DWORD GetSpeakerConfigForSurroundMode( int surroundMode, const char **pConfigDesc )
 {
-	// detect speaker settings from windows
-	DWORD speaker_config = DSSPEAKER_STEREO;
-	DWORD speaker_geometry = 0;
-	if (DS_OK == pDS->GetSpeakerConfig( &speaker_config ))
-	{
-		// split out settings
-		speaker_geometry = DSSPEAKER_GEOMETRY(speaker_config);
-		speaker_config = DSSPEAKER_CONFIG(speaker_config);
-
-		// DEBUG
-		if (speaker_config == DSSPEAKER_MONO)
-			DevMsg( "DS:mono configuration detected\n");
-
-		if (speaker_config == DSSPEAKER_HEADPHONE)
-			DevMsg( "DS:headphone configuration detected\n");
-
-		if (speaker_config == DSSPEAKER_STEREO)
-			DevMsg( "DS:stereo speaker configuration detected\n");
-
-		if (speaker_config == DSSPEAKER_QUAD)
-			DevMsg( "DS:quad speaker configuration detected\n");
-
-		if (speaker_config == DSSPEAKER_SURROUND)
-			DevMsg( "DS:surround speaker configuration detected\n");
-
-		if (speaker_config == DSSPEAKER_5POINT1)
-			DevMsg( "DS:5.1 speaker configuration detected\n");
-
-		if (speaker_config == DSSPEAKER_7POINT1)
-			DevMsg( "DS:7.1 speaker configuration detected\n");
-
-		// set the cvar to be the windows setting
-		switch (speaker_config)
-		{
-		case DSSPEAKER_HEADPHONE:
-			snd_surround.SetValue(0);
-			break;
-
-		case DSSPEAKER_MONO:
-		case DSSPEAKER_STEREO:
-		default:
-			snd_surround.SetValue( 2 );
-			break;
-
-		case DSSPEAKER_QUAD:
-			snd_surround.SetValue(4);
-			break;
-
-		case DSSPEAKER_5POINT1:
-			snd_surround.SetValue(5);
-			break;
-
-		case DSSPEAKER_7POINT1:
-			snd_surround.SetValue(7);
-			break;
-		}
-	}
-}
-
-/*
- Updates windows settings based on snd_surround_speakers cvar changing
- This should only happen if the user has changed it via the console or the UI
- Changes won't take effect until the engine has restarted
-*/
-void OnSndSurroundCvarChanged( IConVar *pVar, const char *pOldString, float flOldValue )
-{
-	if (!pDS)
-		return;
-
-	// get the user's previous speaker config
-	DWORD speaker_config = DSSPEAKER_STEREO;
-	if (DS_OK == pDS->GetSpeakerConfig( &speaker_config ))
-	{
-		// remove geometry setting
-		speaker_config = DSSPEAKER_CONFIG(speaker_config);
-	}
-
-	// get the new config
-	DWORD newSpeakerConfig = 0;
+	DWORD newSpeakerConfig = DSSPEAKER_STEREO;
 	const char *speakerConfigDesc = "";
 
-	ConVarRef var( pVar );
-	switch ( var.GetInt() )
+	switch ( surroundMode )
 	{
 	case 0:
 		newSpeakerConfig = DSSPEAKER_HEADPHONE;
@@ -1080,13 +1037,124 @@ void OnSndSurroundCvarChanged( IConVar *pVar, const char *pOldString, float flOl
 		speakerConfigDesc = "7.1 speaker";
 		break;
 	}
+	if ( pConfigDesc )
+	{
+		*pConfigDesc = speakerConfigDesc;
+	}
+	return newSpeakerConfig;
+}
 
+// Read the speaker config from windows
+static DWORD GetWindowsSpeakerConfig()
+{
+	DWORD speaker_config = windows_speaker_config.GetInt();
+	if ( windows_speaker_config.GetInt() < 0 )
+	{
+		speaker_config = DSSPEAKER_STEREO;
+		if (DS_OK == pDS->GetSpeakerConfig( &speaker_config ))
+		{
+			// split out settings
+			speaker_config = DSSPEAKER_CONFIG(speaker_config);
+			if ( speaker_config == DSSPEAKER_7POINT1_SURROUND )
+				speaker_config = DSSPEAKER_7POINT1;
+			if ( speaker_config == DSSPEAKER_5POINT1_SURROUND)
+				speaker_config = DSSPEAKER_5POINT1;
+		}
+		windows_speaker_config.SetValue((int)speaker_config);
+	}
+
+	return speaker_config;
+}
+
+// Writes snd_surround convar given a directsound speaker config
+static void SetSurroundModeFromSpeakerConfig( DWORD speakerConfig )
+{
+	// set the cvar to be the windows setting
+	switch (speakerConfig)
+	{
+	case DSSPEAKER_HEADPHONE:
+		snd_surround.SetValue(0);
+		break;
+
+	case DSSPEAKER_MONO:
+	case DSSPEAKER_STEREO:
+	default:
+		snd_surround.SetValue( 2 );
+		break;
+
+	case DSSPEAKER_QUAD:
+		snd_surround.SetValue(4);
+		break;
+
+	case DSSPEAKER_5POINT1:
+		snd_surround.SetValue(5);
+		break;
+
+	case DSSPEAKER_7POINT1:
+		snd_surround.SetValue(7);
+		break;
+	}
+}
+/*
+ Sets the snd_surround_speakers cvar based on the windows setting
+*/
+
+void CAudioDirectSound::DetectWindowsSpeakerSetup()
+{
+	// detect speaker settings from windows
+	DWORD speaker_config = GetWindowsSpeakerConfig();
+	SetSurroundModeFromSpeakerConfig(speaker_config);
+
+	// DEBUG
+	if (speaker_config == DSSPEAKER_MONO)
+		DevMsg( "DS:mono configuration detected\n");
+
+	if (speaker_config == DSSPEAKER_HEADPHONE)
+		DevMsg( "DS:headphone configuration detected\n");
+
+	if (speaker_config == DSSPEAKER_STEREO)
+		DevMsg( "DS:stereo speaker configuration detected\n");
+
+	if (speaker_config == DSSPEAKER_QUAD)
+		DevMsg( "DS:quad speaker configuration detected\n");
+
+	if (speaker_config == DSSPEAKER_SURROUND)
+		DevMsg( "DS:surround speaker configuration detected\n");
+
+	if (speaker_config == DSSPEAKER_5POINT1)
+		DevMsg( "DS:5.1 speaker configuration detected\n");
+
+	if (speaker_config == DSSPEAKER_7POINT1)
+		DevMsg( "DS:7.1 speaker configuration detected\n");
+}
+
+/*
+ Updates windows settings based on snd_surround_speakers cvar changing
+ This should only happen if the user has changed it via the console or the UI
+ Changes won't take effect until the engine has restarted
+*/
+void OnSndSurroundCvarChanged( IConVar *pVar, const char *pOldString, float flOldValue )
+{
+	// if the old value is -1, we're setting this from the detect routine for the first time
+	// no need to reset the device
+	if (!pDS || flOldValue == -1 )
+		return;
+
+	// get the user's previous speaker config
+	DWORD speaker_config = GetWindowsSpeakerConfig();
+
+	// get the new config
+	DWORD newSpeakerConfig = 0;
+	const char *speakerConfigDesc = "";
+
+	ConVarRef var( pVar );
+	newSpeakerConfig = GetSpeakerConfigForSurroundMode( var.GetInt(), &speakerConfigDesc );
 	// make sure the config has changed
 	if (newSpeakerConfig == speaker_config)
 		return;
 
 	// set new configuration
-	pDS->SetSpeakerConfig(DSSPEAKER_COMBINED(newSpeakerConfig, 0));
+	windows_speaker_config.SetValue( (int)newSpeakerConfig );
 
 	Msg("Speaker configuration has been changed to %s.\n", speakerConfigDesc);
 
@@ -1106,6 +1174,16 @@ void OnSndSurroundLegacyChanged( IConVar *pVar, const char *pOldString, float fl
 			// restart sound system so it takes effect
 			g_pSoundServices->RestartSoundSystem();
 		}
+	}
+}
+
+void OnSndVarChanged( IConVar *pVar, const char *pOldString, float flOldValue )
+{
+	ConVarRef var(pVar);
+	// restart sound system so the change takes effect
+	if ( var.GetInt() != int(flOldValue) )
+	{
+		g_pSoundServices->RestartSoundSystem();
 	}
 }
 
@@ -1172,7 +1250,7 @@ void ReleaseSurround(void)
 void DEBUG_DS_FillSquare( void *lpData, DWORD dwSize )
 {
 	short *lpshort = (short *)lpData;
-	DWORD j = min(10000, dwSize/2);
+	DWORD j = min((DWORD)10000, dwSize/2);
  
 	for (DWORD i = 0; i < j; i++)
 		lpshort[i] = 8000;
@@ -1181,7 +1259,7 @@ void DEBUG_DS_FillSquare( void *lpData, DWORD dwSize )
 void DEBUG_DS_FillSquare2( void *lpData, DWORD dwSize )
 {
 	short *lpshort = (short *)lpData;
-	DWORD j = min(1000, dwSize/2);
+	DWORD j = min((DWORD)1000, dwSize/2);
  
 	for (DWORD i = 0; i < j; i++)
 		lpshort[i] = 16000;
@@ -1240,6 +1318,10 @@ bool CAudioDirectSound::SNDDMA_InitSurround(LPDIRECTSOUND lpDS, WAVEFORMATEX* lp
 	dsbuf.dwSize = sizeof(DSBUFFERDESC);
 														 // NOTE: LOCHARDWARE causes SB AWE64 to crash in it's DSOUND driver
 	dsbuf.dwFlags = DSBCAPS_CTRL3D;						 // don't use CTRLFREQUENCY (slow)
+	if ( !snd_mute_losefocus.GetBool() )
+	{
+		dsbuf.dwFlags |= DSBCAPS_GLOBALFOCUS;
+	}
 
 	// reserve space for each buffer
 

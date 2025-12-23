@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,7 +26,6 @@
 
 #define RCON_MAX_OUTSTANDING_SENDS 100 // max packets to queue before dropping connection
 
-
 //-----------------------------------------------------------------------------
 // container class to handle network streams
 //-----------------------------------------------------------------------------
@@ -45,8 +44,9 @@ public:
 	void RunFrame();
 	bool IsConnected();
 	void FinishRedirect( const char *msg, const netadr_t &adr );
-	void HandleFailedRconAuth( const netadr_t &adr );
+	bool HandleFailedRconAuth( const netadr_t &adr );
 	void SetRequestID( ra_listener_id listener, int iRequestID );
+	bool BCloseAcceptedSocket( ra_listener_id nIndex );
 
 	// Allows a server to request a listening client to connect to it
 	bool ConnectToListeningClient( const netadr_t &adr, bool bSingleSocket );
@@ -86,6 +86,7 @@ private:
 	CUtlVector< FailedRCon_t >	m_failedRcons;
 	CUtlString m_Password;
 	netadr_t m_Address;
+	bool m_bSocketDeleted;
 };
 
 
@@ -95,6 +96,8 @@ inline CRConServer::ConnectedRConSocket_t* CRConServer::GetSocketData( int nInde
 }
 
 CRConServer & RCONServer();
+#ifdef ENABLE_RPT
 CRConServer & RPTServer();
+#endif // ENABLE_RPT
 
 #endif // SV_RCON_H

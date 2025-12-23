@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,11 +6,13 @@
 //
 //===========================================================================//
 
+#define DISABLE_PROTECTED_THINGS
+#include "togl/rendermechanism.h"
 #include "locald3dtypes.h"
-#include "ColorFormatDX8.h"
-#include "ShaderAPIDX8_Global.h"
+#include "colorformatdx8.h"
+#include "shaderapidx8_global.h"
 #include "bitmap/imageformat.h"
-#include "shaderapi/IShaderUtil.h"
+#include "shaderapi/ishaderutil.h"
 #include "tier0/dbg.h"
 #include "tier1/strtools.h"
 #include "shaderdevicedx8.h"
@@ -231,6 +233,7 @@ D3DFORMAT GetNearestD3DColorFormat( ImageFormat fmt,
 
 	case IMAGE_FORMAT_DXT1:
 	case IMAGE_FORMAT_DXT1_ONEBITALPHA:
+	case IMAGE_FORMAT_DXT1_RUNTIME:
 		if (TestTextureFormat(D3DFMT_DXT1, isRenderTarget, bIsVertexTexture, bIsFilterableRequired))
 			return D3DFMT_DXT1;
 		break;
@@ -241,6 +244,7 @@ D3DFORMAT GetNearestD3DColorFormat( ImageFormat fmt,
 		break;
 
 	case IMAGE_FORMAT_DXT5:
+	case IMAGE_FORMAT_DXT5_RUNTIME:
 		if (TestTextureFormat(D3DFMT_DXT5, isRenderTarget, bIsVertexTexture, bIsFilterableRequired ))
 			return D3DFMT_DXT5;
 		break;

@@ -1,15 +1,10 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// The copyright to the contents herein is the property of Valve, L.L.C.
-// The contents may be used and/or copied only with the written permission of
-// Valve, L.L.C., or in accordance with the terms and conditions stipulated in
-// the agreement/contract under which the contents have been supplied.
+// Purpose: 
 //
-// $Header: $
 // $NoKeywords: $
 //
-// Program calculates binned histogram of data
-//=============================================================================
+//=============================================================================//
 
 
 
@@ -18,7 +13,6 @@
 
 #include "CardStats.h"
 
-#define stristr V_strcmp
 
 //-----------------------------------------------------------------------------
 // Main stats loop
@@ -35,12 +29,12 @@ int main( int argc, char* argv[] )
 	char* pszCardtype = argv[1]; // video card type we are looking for
 	char* pszFilename = argv[2]; // file containing the data
 
-	CUtlBuffer buf( 0, 0, (int)true );
+	CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
 	int nFileSize = LoadFileIntoBuffer(buf, pszFilename);
 
 	ParseHeader ( buf );
 
-	CUtlBuffer output ( 0, 255, (int)true );
+	CUtlBuffer output ( 0, 255, CUtlBuffer::TEXT_BUFFER );
 
 	int binwidth=100; 
 	// video card stats over time
@@ -92,6 +86,7 @@ int LoadFileIntoBuffer(CUtlBuffer &buf, char *pszFilename)
 	buf.EnsureCapacity( nFileSize );
 	int result=fread( buf.Base(), sizeof( char ), nFileSize, fh );
 	fclose( fh );
+	buf.SeekPut( CUtlBuffer::SEEK_HEAD, result );
 
 	return nFileSize;
 
@@ -128,7 +123,7 @@ void WriteOutputToFile( CUtlBuffer &buf, char *pszFilename, char *pszCardtype )
 void ParseHeader( CUtlBuffer &buf )
 {
 	// remove first line of data (field labels)
-	char pszTrash[100];
+	char pszTrash[256];
 	buf.Scanf( "%s ", pszTrash);
 	buf.Scanf( "%s ", pszTrash);
 	buf.Scanf( "%s ", pszTrash);
@@ -181,7 +176,7 @@ void ParseFile( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, in
 			continue;
 
 		// if card is our type
-		if ( nofilter || stristr ( pszCard, pszSearchString ) != NULL )
+		if ( nofilter || Q_stristr ( pszCard, pszSearchString ) != NULL )
 		{	  
 			InsertResult(nCpu, nCpuList, nQuantity);
 		}
@@ -197,7 +192,7 @@ void ParseFile( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, in
 	// write results to an output buffer
 	int total=0;
 	outbuf.Printf ( "Cpu\tQuantity\n" ); // headers
-	for (int i=0; i < nCpuList.Size(); ++i )
+	for ( int i=0; i < nCpuList.Size(); ++i )
 	{
 		outbuf.Printf ( "%d\t%d\n", nCpuList[i], nQuantity[i] );
 		total+=nQuantity[i];
@@ -221,7 +216,6 @@ void ParseFile( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, in
 
 void ParseFile2( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, int size, int binwidth)
 {
-	int membinwidth=500;
 	binwidth=100;
 
 	// Each bin is how many computers with the given card had cpus > cpubin 
@@ -235,7 +229,7 @@ void ParseFile2( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, i
 			nQuantity[i][j]=0;
 	}
 
-	for (int i=0; i <= 2400 ; i+=binwidth)	 // a reasonable cpu range 
+	for ( int i=0; i <= 2400 ; i+=binwidth)	 // a reasonable cpu range 
 	{
 		nCpuList.AddToTail(i);
 	}
@@ -254,9 +248,9 @@ void ParseFile2( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, i
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		// scan through the rest of the junk
 		char chSentinel = ' ';
@@ -311,10 +305,9 @@ void ParseFile2( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, i
 	printf("Max ram %d\n", maxram);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "Cpu" ); // headers
 	for (int j=1; j < nMemList.Size(); ++j)
-			outbuf.Printf ("\tMemoryBin%d", nMemList[j]);
+		outbuf.Printf ("\tMemoryBin%d", nMemList[j]);
 	outbuf.Printf ("\n");
 
 	for ( int i=0; i < NCPUBINS; ++i )
@@ -373,9 +366,9 @@ void ParseFile3( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, i
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		// scan through the rest of the junk
 		char chSentinel = ' ';
@@ -430,10 +423,9 @@ void ParseFile3( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString, i
 	printf("Max ram %d\n", maxspeed);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "Cpu" ); // headers
 	for (int j=0; j < nNetList.Size()-1; ++j)
-			outbuf.Printf ("\t%d-%d", nNetList[j], nNetList[j+1]);
+		outbuf.Printf ("\t%d-%d", nNetList[j], nNetList[j+1]);
 	outbuf.Printf ("\n");
 
 	for (int i=0; i < NCPUBINS; ++i )
@@ -476,12 +468,13 @@ void TimeSeriesCPU( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString
 					
 	nTimeList.AddToTail(0);
 	int bin=10000;
-	for (int i=bin; i<=MAXUSERS; i=bin)
+	int i=bin;
+	for (i; i<=MAXUSERS; i=bin)
 	{
 		nTimeList.AddToTail(i);
 		bin<<=1;
 	}
-	nTimeList.AddToTail(bin);
+	nTimeList.AddToTail(i);
 
 	// for unequal bins
 	int currentTimeBin=1;
@@ -491,9 +484,9 @@ void TimeSeriesCPU( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		char pszCard[300]; 
 		char chSentinel = ' ';
@@ -520,15 +513,15 @@ void TimeSeriesCPU( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString
 		pszCard[i] = '\0';
 
 		int cpuIndex=2; // default is unknown
-		if ( stristr ( pszCard, "SSE" ) != NULL )
+		if ( Q_stristr ( pszCard, "SSE" ) != NULL )
 		{
 		   cpuIndex=1; // intel
 		}
-		else if ( stristr ( pszCard, "KNI" ) != NULL )
+		else if ( Q_stristr ( pszCard, "KNI" ) != NULL )
 		{
 			cpuIndex=1; // intel
 		}
-		else if ( stristr ( pszCard, "3DNOW" ) != NULL )
+		else if ( Q_stristr ( pszCard, "3DNOW" ) != NULL )
 		{
 			cpuIndex=0;
 		}
@@ -548,10 +541,9 @@ void TimeSeriesCPU( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString
 	printf("TotalUsers %d\n", totalUsers);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "CPU" ); // headers
 	for (int j=1; j < nTimeList.Size(); ++j)
-			outbuf.Printf ("\tUsersSoFar%d", nTimeList[j]);
+		outbuf.Printf ("\tUsersSoFar%d", nTimeList[j]);
 	outbuf.Printf ("\n");
 
 	for (int i=0; i < CPUBINS; ++i )
@@ -596,12 +588,13 @@ void TimeSeriesVCard( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchStri
 					
 	nTimeList.AddToTail(0);
 	int bin=10000;
-	for (int i=bin; i<=MAXUSERS; i=bin)
+	int i=bin;
+	for (i; i<=MAXUSERS; i=bin)
 	{
 		nTimeList.AddToTail(i);
 		bin<<=1;
 	}
-	nTimeList.AddToTail(bin);
+	nTimeList.AddToTail(i);
 
 	//int currentTimeBin=1;
 
@@ -614,9 +607,9 @@ void TimeSeriesVCard( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchStri
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		char pszCard[300]; 
 		char chSentinel = ' ';
@@ -651,35 +644,35 @@ void TimeSeriesVCard( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchStri
 		// 6=GeForce3
 		// 7=All others
 		int cardIndex=7; // default is other
-		if ( stristr ( pszCard, "RIVA TNT2" ) != NULL )
+		if ( Q_stristr ( pszCard, "RIVA TNT2" ) != NULL )
 		{
 			//printf ("%s", pszCard);
 			cardIndex=0; 
 		}
-		else if ( stristr ( pszCard, "GeForce2 MX" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce2 MX" ) != NULL )
 		{
 			cardIndex=1; 
 		}
-		else if ( stristr ( pszCard, "Microsoft Corporation GDI Generic" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Microsoft Corporation GDI Generic" ) != NULL )
 		{
 			cardIndex=2;
 		}
-		else if ( stristr ( pszCard, "GeForce2 GTS" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce2 GTS" ) != NULL )
 		{
 			cardIndex=3;
 		}
 
-		else if ( stristr ( pszCard, "Voodoo3" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Voodoo3" ) != NULL )
 		{
 			cardIndex=4;
 		}
 
-		else if ( stristr ( pszCard, "Intel 810" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Intel 810" ) != NULL )
 		{
 			cardIndex=5;
 		}
 
-		else if ( stristr ( pszCard, "GeForce3" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce3" ) != NULL )
 		{
 			cardIndex=6;
 		}
@@ -698,10 +691,9 @@ void TimeSeriesVCard( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchStri
 	printf("TotalUsers %d\n", totalUsers);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "Video Card" ); // headers
 	for (int j=1; j < nTimeList.Size(); ++j)
-			outbuf.Printf ("\tUsersSoFar%d", nTimeList[j]);
+		outbuf.Printf ("\tUsersSoFar%d", nTimeList[j]);
 	outbuf.Printf ("\n");
 
 	for (int i=0; i < CARDBINS; ++i )
@@ -755,9 +747,9 @@ void HistogramVidCards( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchSt
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		char pszCard[300]; 
 		char chSentinel = ' ';
@@ -800,62 +792,62 @@ void HistogramVidCards( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchSt
 		// 14=All others
 		
 		int cardIndex=14; // default is other
-		if ( stristr ( pszCard, "RIVA TNT2" ) != NULL )
+		if ( Q_stristr ( pszCard, "RIVA TNT2" ) != NULL )
 		{
 			//printf ("%s", pszCard);
 			cardIndex=0; 
 		}
-		else if ( stristr ( pszCard, "GeForce2 MX" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce2 MX" ) != NULL )
 		{
 			cardIndex=1; 
 		}
-		else if ( stristr ( pszCard, "Microsoft Corporation GDI Generic" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Microsoft Corporation GDI Generic" ) != NULL )
 		{
 			cardIndex=2;
 		}
-		else if ( stristr ( pszCard, "GeForce2 GTS" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce2 GTS" ) != NULL )
 		{
 			cardIndex=3;
 		}
 
-		else if ( stristr ( pszCard, "Voodoo3" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Voodoo3" ) != NULL )
 		{
 			cardIndex=4;
 		}
 
-		else if ( stristr ( pszCard, "Intel 810" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Intel 810" ) != NULL )
 		{
 			cardIndex=5;
 		}
-		else if ( stristr ( pszCard, "GeForce3" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce3" ) != NULL )
 		{
 			cardIndex=6;
 		}
-		else if ( stristr ( pszCard, "Riva TNT" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Riva TNT" ) != NULL )
 		{
 				cardIndex=7;
 		}
-		else if ( stristr ( pszCard, "GeForce 256" ) != NULL )
+		else if ( Q_stristr ( pszCard, "GeForce 256" ) != NULL )
 		{
 			cardIndex=8;
 		}
-		else if ( stristr ( pszCard, "Rage 128 Pro" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Rage 128 Pro" ) != NULL )
 		{
 			cardIndex=13;
 		}
-		else if ( stristr ( pszCard, "Rage 128" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Rage 128" ) != NULL )
 		{
 			cardIndex=9;
 		}
-		else if ( stristr ( pszCard, "S3 Savage4" ) != NULL )
+		else if ( Q_stristr ( pszCard, "S3 Savage4" ) != NULL )
 		{
 			cardIndex=10;
 		}
-		else if ( stristr ( pszCard, "SiS 630" ) != NULL )
+		else if ( Q_stristr ( pszCard, "SiS 630" ) != NULL )
 		{
 			cardIndex=11;
 		}
-		else if ( stristr ( pszCard, "Radeon DDR" ) != NULL )
+		else if ( Q_stristr ( pszCard, "Radeon DDR" ) != NULL )
 		{
 			cardIndex=12;
 		}
@@ -868,7 +860,6 @@ void HistogramVidCards( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchSt
 	printf("TotalUsers %d\n", totalUsers);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "Video Card" ); // headers
 	outbuf.Printf ("\tNumber of Users\n");
 	outbuf.Printf ("\n");
@@ -906,9 +897,9 @@ void HistogramNetSpeed( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchSt
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		char pszCard[300]; 
 		char chSentinel = ' ';
@@ -953,7 +944,6 @@ void HistogramNetSpeed( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchSt
 	printf("TotalUsers %d\n", totalUsers);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "Network Speed" ); // headers
 	for (int j=0; j < nNetList.Size()-1; ++j)
 			outbuf.Printf ("\t%d-%d", nNetList[j], nNetList[j+1]);
@@ -992,9 +982,9 @@ void HistogramRam( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString,
 	{	
 		// Now parse the utlbuffer
 		// file has fields of version, netspeed, ram, cpu and card type
-		char pszVersion[30];
+		char pszVersion[256];
 		int nNetSpeed, nRam, nCpu;
-		int nRead=inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
+		inbuf.Scanf( "%s %d %d %d", pszVersion, &nNetSpeed, &nRam, &nCpu );
 
 		char pszCard[300]; 
 		char chSentinel = ' ';
@@ -1039,10 +1029,9 @@ void HistogramRam( CUtlBuffer &inbuf, CUtlBuffer &outbuf, char *pszSearchString,
 	printf("TotalUsers %d\n", totalUsers);
 	
 	// write results to an output buffer
-	int total=0;
 	outbuf.Printf ( "RAM" ); // headers
 	for (int j=0; j < nRamList.Size()-1; ++j)
-			outbuf.Printf ("\t%d-%d", nRamList[j], nRamList[j+1]);
+		outbuf.Printf ("\t%d-%d", nRamList[j], nRamList[j+1]);
 	outbuf.Printf ("\n");
 
 	for ( int i=0; i < nRamList.Size(); ++i )

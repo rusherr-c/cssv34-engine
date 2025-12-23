@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defines the interface to a game class as defined by the game data
 //			file (FGD). Each class is type of entity that can be placed in
@@ -56,6 +56,7 @@ class GDclass
 		void GetHelperForGDVar( GDinputvariable *pVar, CUtlVector<const char *> *helperName );
 		GDinputvariable *VarForName(const char *pszName, int *piIndex = NULL);
 		BOOL AddVariable(GDinputvariable *pVar, GDclass *pBase, int iBaseIndex, int iVarIndex);
+		void AddBase(GDclass *pBase);
 
 		//
 		// Interface to input information:
@@ -126,7 +127,6 @@ class GDclass
 
 	private:
 
-		void AddBase(GDclass *pBase);
 		bool ParseBase(TokenReader &tr);
 		bool ParseColor(TokenReader &tr);
 		bool ParseHelper(TokenReader &tr, char *pszHelperName);

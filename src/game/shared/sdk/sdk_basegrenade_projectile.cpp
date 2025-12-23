@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 #include "cbase.h"
 #include "sdk_basegrenade_projectile.h"
 
-extern ConVar sv_gravity;
+float GetCurrentGravity( void );
 
 
 #ifdef CLIENT_DLL

@@ -1,6 +1,8 @@
 // DYNAMIC: "MODE"				"0..9"
 
-// STATIC: "CONVERT_TO_SRGB"	"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()]
+// STATIC: "CONVERT_TO_SRGB"	"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()] [PC]
+// STATIC: "CONVERT_TO_SRGB"	"0..0"	[= 0] [XBOX]
+// STATIC: "LINEAR_TO_SRGB"		"0..1"	[ps20b]
 
 #define HDRTYPE HDR_TYPE_NONE
 #include "common_ps_fxc.h"
@@ -23,7 +25,7 @@ float3 RGBtoHSV( in float3 rgb )
 	fmax = max( max( rgb.r, rgb.g) , rgb.b );
 	hsv.b = fmax;				// v
 	delta = fmax - fmin;
-//	if( fmax != 0 )
+	if( delta != 0 )
 	{
 		hsv.g = delta / fmax;		// s
 		if( rgb.r == fmax )
@@ -36,12 +38,12 @@ float3 RGBtoHSV( in float3 rgb )
 		if( hsv.r < 0 )
 			hsv.r += 360;
 	}
-//	else 
-// {
-//		// r = g = b = 0		// s = 0, v is undefined
-//		hsv.g = 0;
-//		hsv.r = -1;
-//	}
+	else 
+	{
+		// r = g = b = 0		// s = 0, v is undefined
+		hsv.g = 0;
+		hsv.r = -1;
+	}
 	return hsv;
 }
 
@@ -66,37 +68,37 @@ float3 HSVtoRGB( in float3 hsv )
 		p = v * ( 1 - s );
 		q = v * ( 1 - s * f );
 		t = v * ( 1 - s * ( 1 - f ) );
-		if( i == 0 )
+		if( h < 1)
 		{
 			rgb.r = v;
 			rgb.g = t;
 			rgb.b = p;
 		}
-		else if( i == 1 )
+		else if( h >= 1 && h < 2 )
 		{
 			rgb.r = q;
 			rgb.g = v;
 			rgb.b = p;
 		}
-		else if( i == 2 )
+		else if( h >= 2 && h < 3 )
 		{
 			rgb.r = p;
 			rgb.g = v;
 			rgb.b = t;
 		}
-		else if( i == 3 )
+		else if( h >= 3 && h < 4 )
 		{
 			rgb.r = p;
 			rgb.g = q;
 			rgb.b = v;
 		}
-		else if( i == 4 )
+		else if( h >= 4 && h < 5 )
 		{
 			rgb.r = t;
 			rgb.g = p;
 			rgb.b = v;
 		}
-		else // if( i == 5 )
+		else // if ( h >= 5 )
 		{
 			rgb.r = v;
 			rgb.g = p;
@@ -106,57 +108,72 @@ float3 HSVtoRGB( in float3 hsv )
 	return rgb;
 }
 
-HALF4 main( PS_INPUT i ) : COLOR
+// We have to run through this input converter on OpenGL if the
+// rest of the shader code is expecting sRGB values
+float3 SampleTexture( sampler texSampler, float2 tc )
 {
-#if MODE == 0
+	float3 c = tex2D( texSampler, tc ).xyz;
+
+	#if ( LINEAR_TO_SRGB )
+	{
+		c = LinearToGamma( c );
+	}
+	#endif
+
+	return c;
+}
+
+// We have to run through this output converter on OpenGL if we
+// expect to be writing out sRGB values (since sRGB will be forced on)
+float3 OutputColor( float3 result )
+{
+	#if ( LINEAR_TO_SRGB )
+	{
+		return GammaToLinear( result );
+	}
+	#endif
+
+	return result;
+}
+
+
+float4 main( PS_INPUT i ) : COLOR
+{
 	float3 result;
-	float3 baseColor, baseColor2; 
-	float maxValue;
-
+#if MODE == 0
 	// negative greyscale of scene * gman
-	
-	// scene
-	baseColor = tex2D( BaseTextureSampler, i.baseTexCoord );
-	// gman
-	baseColor2 = tex2D( BaseTextureSampler2, i.baseTexCoord );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
 
-//	float scale = 1.0f;
 	float scale = 1.0f / 3.0f;
-	baseColor.xyz = dot( float3( scale, scale, scale), baseColor.xyz );
-	baseColor = 1.0f - baseColor;
+	scene.xyz = dot( float3( scale, scale, scale), scene.xyz );
+	scene = float3( 1, 1, 1 ) - scene;
 
-	return FinalOutput( float4( baseColor * baseColor2, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	return FinalOutput( float4( OutputColor( scene * gman ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 1
-	float3 scene, gman; 
-
-	// if gmanLuminance < .3
-	//		1 - gman
-	// else
-	//      ( 1 - gman ) * ( scene greyscale )
-	
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
 	float scale = 1.0f / 3.0f;
 	scene.xyz = dot( float3( scale, scale, scale ), scene.xyz );
 
 	float gmanLum = dot( float3( scale, scale, scale ), gman );
 	if( gmanLum < 0.3 )
 	{
-		return FinalOutput( float4( 1.0f - gman, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+		result = OutputColor( float3( 1, 1, 1 ) - gman );
+		return FinalOutput( float4( result, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 	}
 	else
 	{
-		return FinalOutput( float4( ( 1.0f - gman ) * scene, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+		result = OutputColor( ( float3( 1, 1, 1 ) - gman ) * scene );
+		return FinalOutput( float4( result, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 	}
 #endif
 
 #if MODE == 2
-	float3 scene, gman; 
-
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
 
 	float startRamp = .2;
 	float endRamp = .5;
@@ -169,14 +186,14 @@ HALF4 main( PS_INPUT i ) : COLOR
 	blend = saturate( blend );
 	
 //	return gmanLum * ( 1.0f - blend ) + scene * blend;
-	return FinalOutput( float4( min( gmanLum, scene ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+
+	result = OutputColor( min( gmanLum.xxx, scene ) );
+	return FinalOutput( float4( result, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 3
-	float3 scene, gman; 
-
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
 	float scale = 1.0f / 3.0f;
 	float gmanLum = dot( float3( scale, scale, scale ), gman );
 	float sceneLum = dot( float3( scale, scale, scale ), scene );
@@ -202,14 +219,13 @@ HALF4 main( PS_INPUT i ) : COLOR
 
 	blend = saturate( blend );
 	
-	return FinalOutput( float4( gmanLum * ( 1.0f - blend ) + scene * blend, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	result = OutputColor( gmanLum.xxx * ( float3( 1, 1, 1 ) - blend.xxx ) + scene * blend.xxx );
+	return FinalOutput( float4( result, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 4
-	float3 scene, gman; 
-
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
 	float scale = 1.0f / 3.0f;
 	float gmanLum = dot( float3( scale, scale, scale ), gman );
 	float sceneLum = dot( float3( scale, scale, scale ), scene );
@@ -234,22 +250,21 @@ HALF4 main( PS_INPUT i ) : COLOR
 	}
 
 	blend = saturate( blend );
-	
-	return FinalOutput( float4( gman * ( 1.0f - blend ) + scene * blend, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+
+	result = OutputColor( gman * ( float3( 1, 1, 1 ) - blend.xxx ) + scene * blend.xxx );
+	return FinalOutput( float4( result, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 5
-	float3 scene, gman; 
-
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
 	float scale = 1.0f / 3.0f;
 //	float sceneLum = dot( float3( scale, scale, scale ), scene );
 	float sceneLum = scene.r;
 
 	if( sceneLum > 0.0f )
 	{
-		return FinalOutput( float4( scene, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+		return FinalOutput( float4( OutputColor( scene ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 	}
 	else
 	{
@@ -260,34 +275,30 @@ HALF4 main( PS_INPUT i ) : COLOR
 		
 		hsv.b *= 1.0f + blend;
 		hsv.g *= 1.0f - blend;
-		return FinalOutput( float4( HSVtoRGB( hsv ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+		return FinalOutput( float4( OutputColor( HSVtoRGB( hsv ) ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 	}
 #endif
 
 #if MODE == 6
-	float3 scene, gman; 
-
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
-	return FinalOutput( float4( scene + gman, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
+	return FinalOutput( float4( OutputColor( scene + gman ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 7
-	float3 scene; 
-	scene = tex2D( BaseTextureSampler, i.baseTexCoord );
-	return FinalOutput( float4( scene, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	float3 scene = SampleTexture( BaseTextureSampler, i.baseTexCoord );
+	return FinalOutput( float4( OutputColor( scene ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 8
-	float3 gman; 
-	gman = tex2D( BaseTextureSampler2, i.baseTexCoord );
-	return FinalOutput( float4( gman, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	float3 gman = SampleTexture( BaseTextureSampler2, i.baseTexCoord );
+	return FinalOutput( float4( OutputColor( gman ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 
 #if MODE == 9
 	// Fetch textures
-	float3 cLayer1 = tex2D( BaseTextureSampler, i.baseTexCoord.xy );
-	float3 cLayer2 = tex2D( BaseTextureSampler2, i.baseTexCoord.xy );
+	float3 cLayer1 = SampleTexture( BaseTextureSampler, i.baseTexCoord.xy );
+	float3 cLayer2 = SampleTexture( BaseTextureSampler2, i.baseTexCoord.xy );
 
 	/*
 	// Put colors roughly back into gamma space
@@ -323,6 +334,6 @@ HALF4 main( PS_INPUT i ) : COLOR
 	float3 cLinearOverlayResult = cLayer1.rgb + cLayer2.rgb * saturate( 1.0f - flLayer1Brightness * 2.0f );
 
 	// Tonemap, fog, etc.
-	return FinalOutput( float4( cLinearOverlayResult.rgb, g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	return FinalOutput( float4( OutputColor( cLinearOverlayResult.rgb ), g_Alpha ), 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
 #endif
 }

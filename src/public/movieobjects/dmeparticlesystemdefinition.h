@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A particle system definition
 //
@@ -11,6 +11,8 @@
 #endif
 
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "datamodel/dmehandle.h"
 #include "particles/particles.h"
 
@@ -108,6 +110,7 @@ public:
 	CDmeParticleFunction* AddOperator( ParticleFunctionType_t type, const char *pFunctionName );
 	CDmeParticleFunction* AddChild( CDmeParticleSystemDefinition *pChild );
 	void RemoveFunction( ParticleFunctionType_t type, CDmeParticleFunction *pParticleFunction );
+	void RemoveFunction( ParticleFunctionType_t type, int nIndex );
 
 	// Find
 	int FindFunction( ParticleFunctionType_t type, CDmeParticleFunction *pParticleFunction );

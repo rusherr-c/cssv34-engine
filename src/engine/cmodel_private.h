@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -179,7 +179,7 @@ public:
 private:
 	T *m_pArray;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	int m_nCount;
 #endif
 };
@@ -203,7 +203,7 @@ inline void CRangeValidatedArray<T>::Attach( int nCount, T* pData )
 {
 	m_pArray = pData;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	m_nCount = nCount;
 #endif
 }
@@ -213,7 +213,7 @@ inline void CRangeValidatedArray<T>::Detach()
 {
 	m_pArray = NULL;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	m_nCount = 0;
 #endif
 }
@@ -247,11 +247,11 @@ public:
 	{
 		if ( m_buf.TellPut() )
 		{
-			Discard();
+			m_buf.Purge();
 		}
 
 		m_nCount = nCount;
-		Q_strcpy( m_pFilename, pFilename );
+		V_strcpy_safe( m_pFilename, pFilename );
 		m_nOffset = nOffset;
 
 		// can preload as required
@@ -279,7 +279,11 @@ public:
 
 	void Discard()
 	{
-		m_buf.Purge();
+		// TODO(johns): Neutered -- Tear this class out. This can no longer be discarded with transparently compressed
+		//              BSPs. This is on the range of 500k of memory, and is probably overly complex for the savings in
+		//              the current era.
+		DevMsg("TODO: Refusing to discard %u bytes\n", sizeof(T) * m_nCount);
+		// m_buf.Purge();
 	}
 
 protected:

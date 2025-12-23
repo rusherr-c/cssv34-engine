@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Basic BOT handling.
 //
@@ -268,7 +268,7 @@ void Bot_UpdateDirection( CSDKBot *pBot )
 
 		vecEnd = vecSrc + forward * 10;
 
-		UTIL_TraceHull( vecSrc, vecEnd, VEC_HULL_MIN, VEC_HULL_MAX, 
+		UTIL_TraceHull( vecSrc, vecEnd, VEC_HULL_MIN_SCALED( pBot ), VEC_HULL_MAX_SCALED( pBot ), 
 			MASK_PLAYERSOLID, pBot, COLLISION_GROUP_NONE, &trace );
 
 		if ( trace.fraction == 1.0 )
@@ -460,16 +460,10 @@ void Bot_Think( CSDKBot *pBot )
 
 		Bot_FlipOut( pBot, cmd );
 
-		// Fix up the m_fEffects flags
-		pBot->PostClientMessagesSent();
-
-		
-		
 		cmd.viewangles = pBot->GetLocalAngles();
 		cmd.upmove = 0;
 		cmd.impulse = 0;
 	}
-
 
 	float frametime = gpGlobals->frametime;
 	RunPlayerMove( pBot, cmd, frametime );

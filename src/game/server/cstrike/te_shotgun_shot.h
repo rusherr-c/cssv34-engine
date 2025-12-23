@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,10 +18,11 @@ void TE_FireBullets(
 	int	iWeaponID,
 	int	iMode,
 	int iSeed,
-	float flSpread 
+	float fInaccuracy,
+	float fSpread
 	);
 
-void TE_PlantBomb( int iPlayerIndex, const Vector &vOrigin );
+void TE_PlantBomb( int iPlayerIndex, const Vector &vOrigin, PlantBombOption_t option );
 
 
 #endif // TE_SHOTGUN_SHOT_H

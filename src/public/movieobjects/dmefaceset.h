@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing an abstract shape (ie drawable object)
 //
@@ -11,7 +11,9 @@
 #endif
 
 #include "datamodel/dmelement.h"
-#include "tier1/UtlVector.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
+#include "tier1/utlvector.h"
 
 
 //-----------------------------------------------------------------------------

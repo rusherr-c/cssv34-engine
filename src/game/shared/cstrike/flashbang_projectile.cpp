@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,6 +11,10 @@
 #include "cs_player.h"
 #include "dlight.h"
 #include "KeyValues.h"
+#include "weapon_csbase.h"
+#include "collisionutils.h"
+#include "particle_smokegrenade.h"
+#include "smoke_fog_overlay_shared.h"
 
 #define GRENADE_MODEL "models/Weapons/w_eq_flashbang_thrown.mdl"
 
@@ -25,7 +29,8 @@ float PercentageOfFlashForPlayer(CBaseEntity *player, Vector flashPos, CBaseEnti
 	trace_t tr;
 
 	Vector pos = player->EyePosition();
-	Vector vecRight, vecUp;
+	Vector vecRight, vecUp, vecForward;
+	AngleVectors( player->EyeAngles(), &vecForward );
 
 	QAngle tempAngle;
 	VectorAngles(player->EyePosition() - flashPos, tempAngle);
@@ -40,70 +45,49 @@ float PercentageOfFlashForPlayer(CBaseEntity *player, Vector flashPos, CBaseEnti
 
 	if ((tr.fraction == 1.0) || (tr.m_pEnt == player))
 	{
-		return 1.0;
+		retval = 1.0;
 	}
-
-	if (!(player->IsPlayer()))
+	else
 	{
-		// if this entity isn't a player, it's a hostage or some other entity, then don't bother with the expensive checks
-		// that come below.
 		return 0.0;
 	}
 
-	// check the point straight up.
-	pos = flashPos + vecUp*50;
+	CBaseEntity *pSGren;
 
-	UTIL_TraceLine(flashPos, pos,
-		(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_DEBRIS|CONTENTS_MONSTER),
-		pevInflictor, COLLISION_GROUP_NONE, &tr );
-
-	pos = player->EyePosition();
-
-	UTIL_TraceLine( tr.endpos, pos,
-		(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_DEBRIS|CONTENTS_MONSTER),
-		pevInflictor, COLLISION_GROUP_NONE, &tr );
-
-	if ((tr.fraction == 1.0) || (tr.m_pEnt == player))
+	for( pSGren = gEntList.FindEntityByClassname( NULL, "env_particlesmokegrenade" );
+		pSGren;
+		pSGren = gEntList.FindEntityByClassname( pSGren, "env_particlesmokegrenade" ) )
 	{
-		retval += 0.167;
-	}
+		ParticleSmokeGrenade *pPSG =( ParticleSmokeGrenade* ) pSGren;
 
-	// check the point up and right.
-	pos = flashPos + vecRight*75 + vecUp*10;
+		if ( gpGlobals->curtime > pPSG->m_flSpawnTime + pPSG->m_FadeStartTime )		// ignore the smoke grenade if it's fading.
+			continue;
 
-	UTIL_TraceLine( flashPos, pos,
-		(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_DEBRIS|CONTENTS_MONSTER),
-		pevInflictor, COLLISION_GROUP_NONE, &tr );
+		float flHit1, flHit2;
 
-	pos = player->EyePosition();
+		float flInnerRadius = SMOKEGRENADE_PARTICLERADIUS;
+//		float flOutterRadius = flInnerRadius + ( 0.5 * SMOKEPARTICLE_SIZE );
 
-	UTIL_TraceLine( tr.endpos, pos,
-		(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_DEBRIS|CONTENTS_MONSTER),
-		pevInflictor, COLLISION_GROUP_NONE, &tr );
+		Vector vPos = pSGren->GetAbsOrigin();
 
-	if ((tr.fraction == 1.0) || (tr.m_pEnt == player))
-	{
-		retval += 0.167;
-	}
+		/*debugoverlay->AddBoxOverlay( pSGren->GetAbsOrigin(), Vector( flInnerRadius, flInnerRadius, flInnerRadius ),
+			Vector( -flInnerRadius, -flInnerRadius, -flInnerRadius ), QAngle( 0, 0, 0 ), 0, 255, 0, 30, 10 );
+		debugoverlay->AddBoxOverlay( pSGren->GetAbsOrigin(), Vector( flOutterRadius, flOutterRadius, flOutterRadius ),
+			Vector( -flOutterRadius, -flOutterRadius, -flOutterRadius ), QAngle( 0, 0, 0 ), 255, 0, 0, 30, 10 ); */
 
-	pos = flashPos - vecRight*75 + vecUp*10;
-
-	UTIL_TraceLine( flashPos, pos,
-		(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_DEBRIS|CONTENTS_MONSTER),
-		pevInflictor, COLLISION_GROUP_NONE, &tr );
-
-	pos = player->EyePosition();
-
-	UTIL_TraceLine( tr.endpos, pos,
-		(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_DEBRIS|CONTENTS_MONSTER),
-		pevInflictor, COLLISION_GROUP_NONE, &tr );
-
-	if ((tr.fraction == 1.0) || (tr.m_pEnt == player))
-	{
-		retval += 0.167;
+		if ( IntersectInfiniteRayWithSphere( pos, vecForward, vPos, flInnerRadius, &flHit1, &flHit2 ) )
+		{
+			retval *= 0.8;
+		}
+/*		else if ( IntersectInfiniteRayWithSphere( pos, vecForward, vPos, flOutterRadius, &flHit1, &flHit2 ) )
+		{
+			retval *= 0.9;
+		}
+*/
 	}
 
 	return retval;
+
 }
 
 // --------------------------------------------------------------------------------------------------- //
@@ -209,6 +193,24 @@ void RadiusFlash(
 				{
     				// blind players and bots
 					CCSPlayer *player = static_cast< CCSPlayer * >( pEntity );
+
+                    //=============================================================================
+                    // HPE_BEGIN:
+                    // [tj] Store who was responsible for the most recent flashbang blinding.
+                    //=============================================================================
+                     
+                    CCSPlayer *attacker = ToCSPlayer (pevAttacker);
+                    if (attacker && player)
+                    {
+                        player->SetLastFlashbangAttacker(attacker);
+                    }
+                     
+                    //=============================================================================
+                    // HPE_END
+                    //=============================================================================
+                    
+
+                                         
 					player->Blind( fadeHold, fadeTime, startingAlpha );
 
 					// deafen players and bots
@@ -261,6 +263,9 @@ CFlashbangProjectile* CFlashbangProjectile::Create(
 	pGrenade->SetGravity( BaseClass::GetGrenadeGravity() );
 	pGrenade->SetFriction( BaseClass::GetGrenadeFriction() );
 	pGrenade->SetElasticity( BaseClass::GetGrenadeElasticity() );
+
+	pGrenade->m_pWeaponInfo = GetWeaponInfo( WEAPON_FLASHBANG );
+
 
 	return pGrenade;
 }

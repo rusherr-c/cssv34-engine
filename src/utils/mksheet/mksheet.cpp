@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: build a sheet data file and a large image out of multiple images
 //

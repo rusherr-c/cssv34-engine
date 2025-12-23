@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2006, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Functions which do things to a DmeMesh
 //
@@ -17,9 +17,11 @@
 #include "movieobjects/dmmeshcomp.h"	// TODO: This has to be included before dmmeshutils.h
 #include "movieobjects/dmmeshutils.h"
 #include "tier1/utlstack.h"
+#include "tier2/p4helpers.h"
 #include "tier1/utlstring.h"
 #include "tier1/utlstringmap.h"
 #include "tier1/utlbuffer.h"
+#include "tier1/fmtstr.h"
 #include "filesystem.h"
 
 
@@ -904,7 +906,7 @@ bool CDmMeshUtils::MirrorVertices( CDmeMesh *pMesh, CDmeVertexData *pBase, int a
 	const int nBaseState = pMesh->BaseStateCount();
 	for ( int i = 0; i < nBaseState; ++i )
 	{
-		CDmeVertexData *pBase = pMesh->GetBaseState( i );
+		pBase = pMesh->GetBaseState( i );
 		const int nVertexCount = pBase->VertexCount();
 		MirrorVertices( pBase, axis, nVertexCount, mirrorCount, mirrorMap, posMirrorMap, normalMirrorMap, uvMirrorMap );
 	}
@@ -975,8 +977,8 @@ void MirrorVertexData(
 			if ( dataMirrorMap[ origIndices[ i ] ] != origIndices[ i ] )
 			{
 				// Data referred to by vertex i must be mirror (this may be done a redundant number of times)
-				const T_t &origData( origData[ origIndices[ i ] ] );
-				mirrorData = origData;
+				const T_t &origDataRef( origData[ origIndices[ i ] ] );
+				mirrorData = origDataRef;
 				MirrorData( mirrorData, axis );
 				pMirrorData[ dataMirrorMap[ origIndices[ i ] ] - nData ] = mirrorData;
 				if ( ( dataMirrorMap[ origIndices[ i ] ] - nData ) > nMirrorDataCount )
@@ -1284,7 +1286,7 @@ int CDmMeshUtils::FindMergeSocket(
 {
 	CDmMeshComp dstComp( pDstMesh );
 
-	const CUtlFixedLinkedList< CDmMeshComp::CEdge > &edgeList = dstComp.m_edges;
+	const CUtlVector< CDmMeshComp::CEdge * > &edgeList = dstComp.m_edges;
 
 	for ( int i = srcBorderEdgesList.Count() - 1; i >= 0; --i )
 	{
@@ -1292,9 +1294,9 @@ int CDmMeshUtils::FindMergeSocket(
 
 		int nEdgeMatch = 0;
 
-		for ( int j = edgeList.Head(); j != edgeList.InvalidIndex(); j = edgeList.Next( j ) )
+		for ( int j = 0; j != edgeList.Count(); j++ )
 		{
-			const CDmMeshComp::CEdge &e = edgeList[ j ];
+			const CDmMeshComp::CEdge &e = *edgeList[ j ];
 
 			for ( int k = srcBorderEdges.Count() - 1; k >= 0; --k )
 			{
@@ -1370,8 +1372,8 @@ bool CDmMeshUtils::Merge( CDmeMesh *pSrcMesh, CDmElement *pRoot )
 		if ( !pMesh )
 			continue;
 
-		nEdgeListIndex = FindMergeSocket( srcBorderEdgesList, pMesh );
-		if ( nEdgeListIndex < 0 )
+		int eli = FindMergeSocket( srcBorderEdgesList, pMesh );
+		if ( eli < 0 )
 			continue;
 
 		pMesh->GetBoundingSphere( dstCenter, dstRadius );
@@ -1381,6 +1383,7 @@ bool CDmMeshUtils::Merge( CDmeMesh *pSrcMesh, CDmElement *pRoot )
 		{
 			sqDist = dstRadius;
 			pDstMesh = pMesh;
+			nEdgeListIndex = eli;
 		}
 	}
 
@@ -1661,6 +1664,7 @@ int MergeBaseState(
 		}
 	}
 
+	pDstBase->Resolve();
 
 	return nRetVal;
 }
@@ -1669,11 +1673,15 @@ int MergeBaseState(
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-void MergeDeltaState( CDmeVertexDeltaData *pSrcDelta, CDmeVertexDeltaData *pDstDelta, int &nPositionOffset, int &nNormalOffset, int &nWrinkleOffset )
+void MergeDeltaState( CDmeMesh *pDmeMesh, CDmeVertexDeltaData *pSrcDelta, CDmeVertexDeltaData *pDstDelta, int &nPositionOffset, int &nNormalOffset, int &nWrinkleOffset )
 {
-	const int nSrcPositionIndex = pSrcDelta->FindFieldIndex( CDmeVertexData::FIELD_POSITION );
-	const int nSrcNormalIndex = pSrcDelta->FindFieldIndex( CDmeVertexData::FIELD_NORMAL );
-	const int nSrcWrinkleIndex = pSrcDelta->FindFieldIndex( CDmeVertexData::FIELD_WRINKLE );
+	if ( !pDstDelta )
+	{
+		// No destination delta... copy it
+		pDstDelta = pDmeMesh->FindOrCreateDeltaState( pSrcDelta->GetName() );
+		if ( !pDstDelta )
+			return;
+	}
 
 	for ( int i = 0; i < pSrcDelta->FieldCount(); ++i )
 	{
@@ -1696,6 +1704,10 @@ void MergeDeltaState( CDmeVertexDeltaData *pSrcDelta, CDmeVertexDeltaData *pDstD
 		}
 	}
 
+	const int nSrcPositionIndex = pSrcDelta->FindFieldIndex( CDmeVertexData::FIELD_POSITION );
+	const int nSrcNormalIndex = pSrcDelta->FindFieldIndex( CDmeVertexData::FIELD_NORMAL );
+	const int nSrcWrinkleIndex = pSrcDelta->FindFieldIndex( CDmeVertexData::FIELD_WRINKLE );
+
 	for ( int i = 0; i < pSrcDelta->FieldCount(); ++i )
 	{
 		int nOffset = 0;
@@ -1711,6 +1723,11 @@ void MergeDeltaState( CDmeVertexDeltaData *pSrcDelta, CDmeVertexDeltaData *pDstD
 		else if ( i == nSrcWrinkleIndex )
 		{
 			nOffset = nWrinkleOffset;
+		}
+
+		if ( nOffset < 0 )
+		{
+			nOffset = 0;
 		}
 
 		for ( int j = 0; j < pDstDelta->FieldCount(); ++j )
@@ -1762,6 +1779,46 @@ void MergeDeltaState( CDmeVertexDeltaData *pSrcDelta, CDmeVertexDeltaData *pDstD
 			break;
 		}
 	}
+
+	// TODO: Centralize all of the '_' for corrector business...
+	const char *pszDeltaName = pDstDelta->GetName();
+	if ( strchr( pszDeltaName, '_' ) )
+		return;	// No controls for deltas with '_''s
+
+	if ( !pDmeMesh )
+		return;
+
+	CDmeCombinationOperator *pDmeCombo = FindReferringElement< CDmeCombinationOperator >( pDmeMesh, "targets" );
+	if ( !pDmeCombo )
+		return;
+
+	if ( pDmeCombo->HasRawControl( pszDeltaName ) )
+		return;
+
+	pDmeCombo->FindOrCreateControl( pDstDelta->GetName(), false, true );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void GetAbsTransform( CDmeDag *pDmeDag, matrix3x4_t &m )
+{
+	matrix3x4_t mParentAbsTransform;
+	pDmeDag->GetParentWorldMatrix( mParentAbsTransform );
+
+	matrix3x4_t mLocal;
+	CDmeTransform *pDmeTransform = pDmeDag->GetTransform();
+	if ( pDmeTransform )
+	{
+		pDmeTransform->GetTransform( mLocal );
+	}
+	else
+	{
+		SetIdentityMatrix( mLocal );
+	}
+
+	ConcatTransforms( mParentAbsTransform, mLocal, m );
 }
 
 
@@ -1780,9 +1837,9 @@ bool CDmMeshUtils::Merge( CDmeMesh *pSrcMesh, CDmeMesh *pDstMesh, int nSkinningJ
 		return false;
 
 	matrix3x4_t nMat;
-	pSrcDag->GetWorldMatrix( nMat );
+	GetAbsTransform( pSrcDag, nMat );
 	matrix3x4_t pMat;
-	pDstDag->GetWorldMatrix( pMat );
+	GetAbsTransform( pDstDag, pMat );
 	matrix3x4_t dMatInv;
 
 	MatrixInvert( pMat, dMatInv );
@@ -1848,23 +1905,8 @@ bool CDmMeshUtils::Merge( CDmeMesh *pSrcMesh, CDmeMesh *pDstMesh, int nSkinningJ
 	for ( int i = 0; i < pSrcMesh->DeltaStateCount(); ++i )
 	{
 		CDmeVertexDeltaData *pSrcDelta = pSrcMesh->GetDeltaState( i );
-		bool bMerged = false;
-
-		for ( int j = 0; j < pDstMesh->DeltaStateCount(); ++j )
-		{
-			CDmeVertexDeltaData *pDstDelta = pDstMesh->GetDeltaState( j );
-
-			if ( Q_strcmp( pSrcDelta->GetName(), pDstDelta->GetName() ) )
-				continue;
-
-			bMerged = true;
-			MergeDeltaState( pSrcDelta, pDstDelta, nPositionOffset, nNormalOffset, nWrinkleOffset );
-		}
-
-		if ( !bMerged )
-		{
-			MergeDeltaState( pSrcDelta, pDstMesh->FindOrCreateDeltaState( pSrcDelta->GetName() ), nPositionOffset, nNormalOffset, nWrinkleOffset );
-		}
+		CDmeVertexDeltaData *pDstDelta = pDstMesh->FindDeltaState( pSrcDelta->GetName() );
+		MergeDeltaState( pDstMesh, pSrcDelta, pDstDelta, nPositionOffset, nNormalOffset, nWrinkleOffset );
 	}
 
 	return true;
@@ -2038,7 +2080,7 @@ CDmeMesh *ReplaceMesh(
 			pDstRoot->SetValue( "combinationOperator", pNewComboOp );
 			pNewComboOp->RemoveAllTargets();
 			pNewComboOp->AddTarget( pNewMesh );
-			pNewComboOp->GenerateWrinkleDeltas();
+			pNewComboOp->GenerateWrinkleDeltas( false );
 
 		}
 	}
@@ -2398,12 +2440,22 @@ bool CreateExpressionFile( const char *pExpressionFile, const CUtlVector< CUtlSt
 	Q_FixSlashes( buf1 );
 	g_pFullFileSystem->CreateDirHierarchy( buf1 );
 
+	if ( !g_p4factory->AccessFile( buf )->Edit() )
+	{
+		g_p4factory->AccessFile( buf )->Add();
+	}
+
 	pDstPresetGroup->ExportToTXT( buf, NULL, pComboOp );
 
 	Q_SetExtension( buf, ".vfe", sizeof( buf ) );
 	Q_ExtractFilePath( buf, buf1, sizeof( buf1 ) );
 	Q_FixSlashes( buf1 );
 	g_pFullFileSystem->CreateDirHierarchy( buf1 );
+
+	if ( !g_p4factory->AccessFile( buf )->Edit() )
+	{
+		g_p4factory->AccessFile( buf )->Add();
+	}
 
 	pDstPresetGroup->ExportToVFE( buf, NULL, pComboOp );
 
@@ -2450,6 +2502,7 @@ bool CDmMeshUtils::CreateDeltasFromPresets(
 
 		// Load the preset file
 		CDmElement *pRoot = NULL;
+		g_p4factory->AccessFile( pPresetFilename )->Add();
 		g_pDataModel->RestoreFromFile( pPresetFilename, NULL, NULL, &pRoot );
 		CDmePresetGroup *pPresetGroup = CastElement< CDmePresetGroup >( pRoot );
 
@@ -2581,6 +2634,7 @@ bool CDmMeshUtils::PurgeUnusedDeltas( CDmeMesh *pMesh )
 bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 	CDmeVertexDeltaData *pDelta,
 	float flScale /* = 1.0f */,
+	WrinkleOp wrinkleOp /* = kReplace */,
 	CDmeMesh *pPassedMesh /* = NULL */,
 	CDmeVertexData *pPassedBind /* = NULL */,
 	CDmeVertexData *pPassedCurrent /* = NULL */ )
@@ -2590,7 +2644,7 @@ bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 
 	const CDmeMesh *pMesh = pPassedMesh ? pPassedMesh : pBind ? FindReferringElement< CDmeMesh >( pBind, "baseStates" ) : NULL;
 	const CDmeMesh *pBindMesh = pBind ? FindReferringElement< CDmeMesh >( pBind, "baseStates" ) : NULL;
-	const CDmeMesh *pCurrMesh = pCurr ? FindReferringElement< CDmeMesh >( pCurr, "baseStates" ) : NULL;
+	const CDmeMesh *pCurrMesh = pCurr ? FindReferringElement< CDmeMesh >( pCurr, "baseStates", false ) : NULL;
 	const CDmeMesh *pDeltaMesh = pDelta ? FindReferringElement< CDmeMesh >( pDelta, "deltaStates" ) : NULL;
 
 	if ( !pDelta || !pBind || !pCurr || pBind == pCurr || !pMesh || pMesh != pBindMesh || pMesh != pCurrMesh || pMesh != pDeltaMesh )
@@ -2613,14 +2667,45 @@ bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 	if ( nPosCount != currPos.Count() )
 		return false;
 
+	const CDmrArrayConst< Vector2D > texData( pBind->GetVertexData( nBindTexIndex ) );
+	const int nBaseTexCoordCount = texData.Count();
+
 	FieldIndex_t nWrinkleIndex = pDelta->FindFieldIndex( CDmeVertexDeltaData::FIELD_WRINKLE );
 	if ( nWrinkleIndex < 0 )
 	{
 		nWrinkleIndex = pDelta->CreateField( CDmeVertexDeltaData::FIELD_WRINKLE );
 	}
 
+	float *pOldWrinkleData = NULL;
+
+	if ( wrinkleOp == kAdd )
+	{
+		// Copy the old wrinkle data
+		CDmAttribute *pWrinkleDeltaAttr = pDelta->GetVertexData( nWrinkleIndex );
+		if ( pWrinkleDeltaAttr )
+		{
+			CDmrArrayConst< float > wrinkleDeltaArray( pWrinkleDeltaAttr );
+			if ( wrinkleDeltaArray.Count() )
+			{
+				const CUtlVector< int > &wrinkleDeltaIndices = pDelta->GetVertexIndexData( nWrinkleIndex );
+				Assert( wrinkleDeltaIndices.Count() == wrinkleDeltaArray.Count() );
+
+				pOldWrinkleData = reinterpret_cast< float * >( alloca( nBaseTexCoordCount * sizeof( float ) ) );
+				memset( pOldWrinkleData, 0, nBaseTexCoordCount * sizeof( float ) );
+
+				for ( int i = 0; i < wrinkleDeltaIndices.Count(); ++i )
+				{
+					if ( i < nPosCount )
+					{
+						*( pOldWrinkleData + wrinkleDeltaIndices[i]) = wrinkleDeltaArray[ i ];
+					}
+				}
+			}
+		}
+	}
+
 	pDelta->RemoveAllVertexData( nWrinkleIndex );
-	if ( flScale == 0.0f )
+	if ( flScale == 0.0f && wrinkleOp != kAdd )
 		return true;
 
 	float flMaxDeflection = 0.0f;
@@ -2630,19 +2715,52 @@ bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 
 	float flDelta;
 	Vector v;
-	for ( int i = 0; i < nPosCount; ++i )
+
+	if ( pOldWrinkleData )
 	{
-		v = bindPos[ i ] - currPos[ i ];
-		if ( fabs( v.x ) >= ( 1 / 4096.0f ) || fabs( v.y ) >= ( 1 / 4096.0f ) || fabs( v.z ) >= ( 1 / 4096.0f ) )
+		for ( int i = 0; i < nPosCount; ++i )
 		{
-			flDelta = v.Length();
-			if ( flDelta > flMaxDeflection )
+			v = bindPos[ i ] - currPos[ i ];
+
+			// Figure out the texture indices for this position index
+			const CUtlVector< int > &baseVerts = pBind->FindVertexIndicesFromDataIndex( CDmeVertexData::FIELD_POSITION, i );
+
+			for ( int j = 0; j < baseVerts.Count(); ++j )
 			{
-				flMaxDeflection = flDelta;
+				// See if we have a delta for this texcoord...
+				const int nTexCoordIndex = baseTexCoordIndices[ baseVerts[ j ] ];
+
+				if ( fabs( pOldWrinkleData[ nTexCoordIndex ] ) > 0.0001 || fabs( v.x ) >= ( 1 / 4096.0f ) || fabs( v.y ) >= ( 1 / 4096.0f ) || fabs( v.z ) >= ( 1 / 4096.0f ) )
+				{
+					flDelta = v.Length();
+					if ( flDelta > flMaxDeflection )
+					{
+						flMaxDeflection = flDelta;
+					}
+					pWrinkleDelta[ nWrinkleCount ] = flDelta;
+					pWrinkleIndices[ nWrinkleCount ] = i;
+					++nWrinkleCount;
+					break;
+				}
 			}
-			pWrinkleDelta[ nWrinkleCount ] = flDelta;
-			pWrinkleIndices[ nWrinkleCount ] = i;
-			++nWrinkleCount;
+		}
+	}
+	else
+	{
+		for ( int i = 0; i < nPosCount; ++i )
+		{
+			v = bindPos[ i ] - currPos[ i ];
+			if ( fabs( v.x ) >= ( 1 / 4096.0f ) || fabs( v.y ) >= ( 1 / 4096.0f ) || fabs( v.z ) >= ( 1 / 4096.0f ) )
+			{
+				flDelta = v.Length();
+				if ( flDelta > flMaxDeflection )
+				{
+					flMaxDeflection = flDelta;
+				}
+				pWrinkleDelta[ nWrinkleCount ] = flDelta;
+				pWrinkleIndices[ nWrinkleCount ] = i;
+				++nWrinkleCount;
+			}
 		}
 	}
 
@@ -2651,8 +2769,6 @@ bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 
 	const double scaledInverseMaxDeflection = static_cast< double >( flScale ) / static_cast< double >( flMaxDeflection );
 
-	CDmrArrayConst< Vector2D > texData( pBind->GetVertexData( nBindTexIndex ) );
-	const int nBaseTexCoordCount = texData.Count();
 	const int nBufSize = ( ( nBaseTexCoordCount + 7 ) >> 3 );
 	unsigned char * const pUsedBits = reinterpret_cast< unsigned char* >( alloca( nBufSize * sizeof( unsigned char ) ) );
 	memset( pUsedBits, 0, nBufSize );
@@ -2660,6 +2776,7 @@ bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 	for ( int i = 0; i < nWrinkleCount; ++i )
 	{
 		float flWrinkleDelta = static_cast< float >( static_cast< double >( pWrinkleDelta[ i ] ) * scaledInverseMaxDeflection );
+
 		Assert( fabs( flWrinkleDelta ) <= fabs( flScale ) );
 
 		// NOTE: This will produce bad behavior in cases where two positions share the
@@ -2674,6 +2791,11 @@ bool CDmMeshUtils::CreateWrinkleDeltaFromBaseState(
 				continue;
 
 			pUsedBits[ nTexCoordIndex >> 3 ] |= 1 << ( nTexCoordIndex & 0x7 );
+
+			if ( pOldWrinkleData )
+			{
+				flWrinkleDelta += pOldWrinkleData[ nTexCoordIndex ];
+			}
 
 			int nDeltaIndex = pDelta->AddVertexData( nWrinkleIndex, 1 );
 			pDelta->SetVertexIndices( nWrinkleIndex, nDeltaIndex, 1, &nTexCoordIndex );
@@ -2946,6 +3068,38 @@ int CDmMeshFaceIt::GetVertexIndex( int nFaceRelativeVertexIndex ) const
 		return -1;
 
 	return pVertexIndices[ nFaceRelativeVertexIndex ];
+}
+
+
+//-----------------------------------------------------------------------------
+// Copied from dmeanimationset.cpp, remove this function
+// after further integrations
+//-----------------------------------------------------------------------------
+ControlIndex_t FindComboOpControlIndexForAnimSetControl( CDmeCombinationOperator *pComboOp, const char *pControlName, bool *pIsMulti /*= NULL*/ )
+{
+	const char *pMultiControlBaseName = pControlName ? StringAfterPrefix( pControlName, "multi_" ) : NULL;
+	if ( pIsMulti )
+	{
+		*pIsMulti = pMultiControlBaseName != NULL;
+	}
+
+	if ( !pComboOp || !pControlName )
+		return -1;
+
+	ControlIndex_t index = pComboOp->FindControlIndex( pControlName );
+	if ( index >= 0 )
+		return index;
+
+	if ( !pMultiControlBaseName )
+		return -1;
+
+	index = pComboOp->FindControlIndex( pMultiControlBaseName );
+	if ( index < 0 )
+		return -1;
+
+	Assert( pComboOp->IsMultiControl( index ) );
+
+	return index;
 }
 
 

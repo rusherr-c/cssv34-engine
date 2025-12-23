@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,6 +12,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include "platform.h"
 #include "tier0/dbg.h"
 
 
@@ -41,6 +42,8 @@ public:
 
 	DmeFramerate_t operator*( int i ) const { return DmeFramerate_t( m_num * i, m_den ); }
 	DmeFramerate_t operator/( int i ) const { return DmeFramerate_t( m_num, m_den * i ); }
+
+	unsigned short abs( unsigned short i ) { return i >= 0 ? i : -i; }
 
 	DmeFramerate_t operator*=( int i ) { Assert( abs( m_num * i ) <= USHRT_MAX ); m_num *= ( unsigned short )i; return *this; }
 	DmeFramerate_t operator/=( int i ) { Assert( abs( m_den * i ) <= USHRT_MAX ); m_den *= ( unsigned short )i; return *this; }
@@ -123,9 +126,7 @@ public:
 
 
 	// helper functions
-
-	friend float GetFractionOfTimeBetween( DmeTime_t t, DmeTime_t start, DmeTime_t end, bool bClamp = false );
-	friend float GetFractionOfTime( DmeTime_t t, DmeTime_t duration, bool bClamp = false );
+	friend float GetFractionOfTime( DmeTime_t t, DmeTime_t duration, bool bClamp );
 	friend int FrameForTime( DmeTime_t t, DmeFramerate_t framerate );
 
 
@@ -142,7 +143,7 @@ public:
 	DmeTime_t TimeAtPrevFrame( DmeFramerate_t framerate ) const;
 
 private:
-	DmeTime_t( __int64 tms ) : m_tms( int( tms ) ) {}
+	DmeTime_t( int64 tms ) : m_tms( int( tms ) ) {}
 
 	// conversion helper methods - implementation
 	static int RoundSecondsToTMS( float sec );
@@ -150,5 +151,8 @@ private:
 
 	int m_tms;
 };
+
+float GetFractionOfTimeBetween( DmeTime_t t, DmeTime_t start, DmeTime_t end, bool bClamp = false );
+
 
 #endif // TIMEUTILS_H

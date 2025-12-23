@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,7 @@
 
 #include <inetmessage.h>
 #include <checksum_crc.h>
+#include <checksum_md5.h>
 #include <const.h>
 #include <utlvector.h>
 #include "qlimits.h"
@@ -35,6 +36,7 @@
 
 class SendTable;
 class KeyValue;
+class KeyValues;
 class INetMessageHandler;
 class IServerMessageHandler;
 class IClientMessageHandler;
@@ -83,6 +85,7 @@ public:
 	virtual void    SetNetChannel(INetChannel * netchan) { m_NetChannel = netchan; }	
 	virtual bool	Process() { Assert( 0 ); return false; };	// no handler set
 
+protected:
 	bool				m_bReliable;	// true if message should be send reliable
 	INetChannel			*m_NetChannel;	// netchannel this message is from/for
 };
@@ -102,10 +105,10 @@ class NET_SetConVar : public CNetMessage
 	NET_SetConVar() {}
 	NET_SetConVar( const char * name, const char * value)
 	{
-		cvar_t cvar;
-		Q_strncpy( cvar.name, name, MAX_OSPATH );
-		Q_strncpy( cvar.value, value, MAX_OSPATH );
-		m_ConVars.AddToTail( cvar );	
+		cvar_t localCvar;
+		Q_strncpy( localCvar.name, name, MAX_OSPATH );
+		Q_strncpy( localCvar.value, value, MAX_OSPATH );
+		m_ConVars.AddToTail( localCvar );	
 	}
 
 public:	
@@ -149,25 +152,25 @@ class NET_Tick : public CNetMessage
 #endif
 	};
 
-	NET_Tick( int tick, float host_frametime, float host_frametime_stddeviation ) 
+	NET_Tick( int tick, float hostFrametime, float hostFrametime_stddeviation ) 
 	{ 
 		m_bReliable = false; 
 		m_nTick = tick; 
 #if PROTOCOL_VERSION > 10
-		m_flHostFrameTime			= host_frametime;
-		m_flHostFrameTimeStdDeviation	= host_frametime_stddeviation;
+		m_flHostFrameTime			= hostFrametime;
+		m_flHostFrameTimeStdDeviation	= hostFrametime_stddeviation;
 #else
-		NOTE_UNUSED( host_frametime );
-		NOTE_UNUSED( host_frametime_stddeviation );
-		m_flHostFrameTime = 0.0f;
-		m_flHostFrameTimeStdDeviation = 0.0f;
+		NOTE_UNUSED( hostFrametime );
+		NOTE_UNUSED( hostFrametime_stddeviation );
 #endif
 	};
 	
 public:
 	int			m_nTick; 
+#if PROTOCOL_VERSION > 10
 	float		m_flHostFrameTime;
 	float		m_flHostFrameTimeStdDeviation;
+#endif
 };
 
 class NET_SignonState : public CNetMessage
@@ -197,6 +200,9 @@ public:
 	CRC32_t			m_nSendTableCRC;
 	int				m_nServerCount;
 	bool			m_bIsHLTV;
+#if defined( REPLAY_ENABLED )
+	bool			m_bIsReplay;
+#endif
 	uint32			m_nFriendsID;
 	char			m_FriendsName[MAX_PLAYER_NAME_LENGTH];
 	CRC32_t			m_nCustomFiles[MAX_CUSTOM_FILES];
@@ -259,6 +265,19 @@ public:
 	CBitVec<MAX_EVENT_NUMBER> m_EventArray;
 };
 
+#if defined( REPLAY_ENABLED )
+class CLC_SaveReplay : public CNetMessage
+{
+	DECLARE_CLC_MESSAGE( SaveReplay );
+
+	CLC_SaveReplay() {}
+
+	int		m_nStartSendByte;
+	char	m_szFilename[ MAX_OSPATH ];
+	float	m_flPostDeathRecordTime;
+};
+#endif
+
 class CLC_RespondCvarValue : public CNetMessage
 {
 public:
@@ -280,12 +299,62 @@ class CLC_FileCRCCheck : public CNetMessage
 {
 public:
 	DECLARE_CLC_MESSAGE( FileCRCCheck );
+	char		m_szPathID[MAX_PATH];
+	char		m_szFilename[MAX_PATH];
+	MD5Value_t	m_MD5;
+	CRC32_t		m_CRCIOs;
+	int			m_eFileHashType;
+	int			m_cbFileLen;
+	int			m_nPackFileNumber;
+	int			m_PackFileID;
+	int			m_nFileFraction;
+};
+
+class CLC_FileMD5Check : public CNetMessage
+{
+public:
+	DECLARE_CLC_MESSAGE( FileMD5Check );
 
 	char		m_szPathID[MAX_PATH];
 	char		m_szFilename[MAX_PATH];
-	CRC32_t		m_CRC;
+	MD5Value_t	m_MD5;
 };
 
+class Base_CmdKeyValues : public CNetMessage
+{
+protected:
+	explicit Base_CmdKeyValues( KeyValues *pKeyValues = NULL ); // takes ownership
+	~Base_CmdKeyValues();
+
+public:
+	KeyValues * GetKeyValues() const { return m_pKeyValues; }
+
+public:
+	bool ReadFromBuffer( bf_read &buffer );
+	bool WriteToBuffer( bf_write &buffer );
+	const char * ToString() const;
+
+protected:
+	KeyValues *m_pKeyValues;
+};
+
+class CLC_CmdKeyValues : public Base_CmdKeyValues
+{
+public:
+	DECLARE_CLC_MESSAGE( CmdKeyValues );
+
+public:
+	explicit CLC_CmdKeyValues( KeyValues *pKeyValues = NULL );	// takes ownership
+};
+
+class SVC_CmdKeyValues : public Base_CmdKeyValues
+{
+public:
+	DECLARE_SVC_MESSAGE( CmdKeyValues );
+
+public:
+	explicit SVC_CmdKeyValues( KeyValues *pKeyValues = NULL );	// takes ownership
+};
 
 ///////////////////////////////////////////////////////////////////////////////////////
 // server messages:
@@ -319,9 +388,12 @@ public:	// member vars are public for faster handling
 	int			m_nServerCount;	// number of changelevels since server start
 	bool		m_bIsDedicated;  // dedicated server ?	
 	bool		m_bIsHLTV;		// HLTV server ?
+#if defined( REPLAY_ENABLED )
+	bool		m_bIsReplay;	// Replay server ?
+#endif
 	char		m_cOS;			// L = linux, W = Win32
-	CRC32_t		m_nMapCRC;		// server map CRC
-	CRC32_t		m_nClientCRC;	// client.dll CRC server is using
+	CRC32_t		m_nMapCRC;		// server map CRC (only used by older demos)
+	MD5Value_t	m_nMapMD5;		// server map MD5
 	int			m_nMaxClients;	// max number of clients on server
 	int			m_nMaxClasses;	// max number of server classes
 	int			m_nPlayerSlot;	// our client slot number
@@ -382,10 +454,22 @@ class SVC_SetPause : public CNetMessage
 	DECLARE_SVC_MESSAGE( SetPause );
 	
 	SVC_SetPause() {}
-	SVC_SetPause( bool state ) { m_bPaused = state; }
+	SVC_SetPause( bool state, float end = -1.f ) { m_bPaused = state; }
 	
 public:
 	bool		m_bPaused;		// true or false, what else
+};
+
+class SVC_SetPauseTimed : public CNetMessage
+{
+	DECLARE_SVC_MESSAGE( SetPauseTimed );
+
+	SVC_SetPauseTimed() {}
+	SVC_SetPauseTimed( bool bState, float flExpireTime = -1.f ) { m_bPaused = bState; m_flExpireTime = flExpireTime; }
+
+public:
+	bool		m_bPaused;
+	float		m_flExpireTime;
 };
 
 
@@ -413,6 +497,7 @@ public:
 	int			m_nLength;
 	bf_read		m_DataIn;
 	bf_write	m_DataOut;
+	bool		m_bDataCompressed;
 
 private:
 	char		m_szTableNameBuffer[256];
@@ -424,7 +509,7 @@ class SVC_UpdateStringTable : public CNetMessage
 
 	int	GetGroup() const { return INetChannelInfo::STRINGTABLE; }
 
-public:	
+public:
 	int				m_nTableID;	// table to be updated
 	int				m_nChangedEntries; // number of how many entries has changed
 	int				m_nLength;	// data length in bits
@@ -432,21 +517,54 @@ public:
 	bf_write		m_DataOut;
 };
 
+// SVC_VoiceInit
+//   v2 - 2017/02/07
+//     - Can detect v2 packets by nLegacyQuality == 255 and presence of additional nSampleRate field.
+//     - Added nSampleRate field. Previously, nSampleRate was hard-coded per codec type. ::ReadFromBuffer does a
+//       one-time conversion of these old types (which can no longer change)
+//     - Marked quality field as deprecated. This was already being ignored. v2 clients send 255
+//     - Prior to this the sv_use_steam_voice convar was used to switch to steam voice. With this, we properly set
+//       szVoiceCodec to "steam".  See ::ReadFromBuffer for shim to fallback to the convar for old streams.
+//     - We no longer pass "svc_voiceinit NULL" as szVoiceCodec if it is not selected, just the empty string.  Nothing
+//       used this that I could find.
 class SVC_VoiceInit : public CNetMessage
 {
 	DECLARE_SVC_MESSAGE( VoiceInit );
 
 	int	GetGroup() const { return INetChannelInfo::SIGNON; }
 
-	SVC_VoiceInit() {}
-	SVC_VoiceInit( const char * codec, int quality) { m_szVoiceCodec = codec; m_nQuality = quality; }
-	
-public:	
-	const char 	*m_szVoiceCodec;	// used voice codec .DLL
-	int			m_nQuality;	// custom quality seeting
+	SVC_VoiceInit()
+		: m_nSampleRate( 0 )
+	{
+		V_memset( m_szVoiceCodec, 0, sizeof( m_szVoiceCodec ) );
+	}
 
-private:
-	char 		m_szVoiceCodecBuffer[MAX_OSPATH];	// used voice codec .DLL
+	SVC_VoiceInit( const char * codec, int nSampleRate )
+		: m_nSampleRate( nSampleRate )
+	{
+		V_strncpy( m_szVoiceCodec, codec ? codec : "", sizeof( m_szVoiceCodec ) );
+	}
+
+
+public:
+	// Used voice codec for voice_init.
+	//
+	// This used to be a DLL name, then became a whitelisted list of codecs.
+	char		m_szVoiceCodec[MAX_OSPATH];
+
+	// DEPRECATED:
+	//
+	// This field used to be a custom quality setting, but it was not honored for a long time: codecs use their own
+	// pre-configured quality settings. We never sent anything besides 5, which was then ignored for some codecs.
+	//
+	// New clients always set 255 here, old clients probably send 5. This could be re-purposed in the future, but beware
+	// that very old demos may have non-5 values. It would take more archaeology to determine how to properly interpret
+	// those packets -- they're probably using settings we simply don't support any longer.
+	//
+	// int m_nQuality;
+
+	// The sample rate we are using
+	int			m_nSampleRate;
 };
 
 class SVC_VoiceData : public CNetMessage
@@ -662,7 +780,6 @@ public:
 	bf_read		m_DataIn;
 	bf_write	m_DataOut;
 };
-
 
 ///////////////////////////////////////////////////////////////////////////////////////
 // Matchmaking messages:

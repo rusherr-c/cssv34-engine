@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		Player for HL2.
 //
@@ -304,8 +304,6 @@ void CHL2MP_Player::Spawn(void)
 		GiveDefaultItems();
 	}
 
-	RemoveEffects( EF_NOINTERP );
-
 	SetNumAnimOverlays( 3 );
 	ResetAnimation();
 
@@ -596,7 +594,7 @@ void CHL2MP_Player::FireBullets ( const FireBulletsInfo_t &info )
 
 	if ( pWeapon )
 	{
-		modinfo.m_iPlayerDamage = modinfo.m_iDamage = pWeapon->GetHL2MPWpnData().m_iPlayerDamage;
+		modinfo.m_iPlayerDamage = modinfo.m_flDamage = pWeapon->GetHL2MPWpnData().m_iPlayerDamage;
 	}
 
 	NoteWeaponFired();

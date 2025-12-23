@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -228,10 +228,10 @@ void CChannelGraphPanel::Paint()
 	for ( int i = nMinValueIndex; i <= nMaxValueIndex; ++i, flValue += flValueIncrement )
 	{
 		wchar_t pFormat[ 32 ];
-		_snwprintf( pFormat, sizeof( pFormat ), L"%%.%df", nDecimalPlaces );
+		V_swprintf_safe( pFormat, L"%%.%df", nDecimalPlaces );
 
 		wchar_t wstring[ 32 ];
-		_snwprintf( wstring, sizeof( wstring ), pFormat, flValue );
+		V_swprintf_safe( wstring, pFormat, flValue );
 
 		int tw = 0, th = 0;
 		surface()->GetTextSize( m_font, wstring, tw, th );
@@ -251,10 +251,10 @@ void CChannelGraphPanel::Paint()
 	for ( int i = nMinTimeIndex; i <= nMaxTimeIndex; ++i, flTime += flTimeIncrement )
 	{
 		wchar_t pFormat[ 32 ];
-		_snwprintf( pFormat, sizeof( pFormat ), L"%%.%df", nDecimalPlaces );
+		V_swprintf_safe( pFormat, L"%%.%df", nDecimalPlaces );
 
 		wchar_t wstring[ 32 ];
-		_snwprintf( wstring, sizeof( wstring ), pFormat, flTime );
+		V_swprintf_safe( wstring, pFormat, flTime );
 
 		int tw = 0, th = 0;
 		surface()->GetTextSize( m_font, wstring, tw, th );

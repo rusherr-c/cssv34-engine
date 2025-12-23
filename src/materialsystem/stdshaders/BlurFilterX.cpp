@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,9 +6,9 @@
 //===========================================================================//
 
 #include "BaseVSShader.h"
-#include "blurfilter_vs20.inc"
-#include "blurfilter_ps20.inc"
-#include "blurfilter_ps20b.inc"
+#include "BlurFilter_vs20.inc"
+#include "BlurFilter_ps20.inc"
+#include "BlurFilter_ps20b.inc"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -43,16 +43,21 @@ BEGIN_VS_SHADER_FLAGS( BlurFilterX, "Help for BlurFilterX", SHADER_NOT_EDITABLE 
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, 0, 0 );
 
-			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, false );
-			pShaderShadow->EnableSRGBWrite( false );
+			// Render targets are pegged as sRGB on POSIX, so just force these reads and writes
+			bool bForceSRGBReadAndWrite = IsOSX() && g_pHardwareConfig->CanDoSRGBReadFromRTs();
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, bForceSRGBReadAndWrite );
+			pShaderShadow->EnableSRGBWrite( bForceSRGBReadAndWrite );
 
 			// Pre-cache shaders
 			blurfilter_vs20_Static_Index vshIndex;
 			pShaderShadow->SetVertexShader( "BlurFilter_vs20", vshIndex.GetIndex() );
 			
-			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() )
 			{
 				DECLARE_STATIC_PIXEL_SHADER( blurfilter_ps20b );
+#ifndef _X360
+				SET_STATIC_PIXEL_SHADER_COMBO( APPROX_SRGB_ADAPTER, bForceSRGBReadAndWrite );
+#endif
 				SET_STATIC_PIXEL_SHADER( blurfilter_ps20b );
 			}
 			else
@@ -100,8 +105,8 @@ BEGIN_VS_SHADER_FLAGS( BlurFilterX, "Help for BlurFilterX", SHADER_NOT_EDITABLE 
 			pShaderAPI->SetPixelShaderConstant( 3, v, 1 );
 
 			pShaderAPI->SetVertexShaderIndex( 0 );
-
-			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			
+			if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() )
 			{
 				DECLARE_DYNAMIC_PIXEL_SHADER( blurfilter_ps20b );
 				SET_DYNAMIC_PIXEL_SHADER( blurfilter_ps20b );

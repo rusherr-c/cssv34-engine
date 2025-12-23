@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,9 +20,9 @@ using namespace vgui;
 #include <vgui_controls/Label.h>
 #include <vgui_controls/TextEntry.h>
 
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "PanelListPanel.h"
-#include "ScriptObject.h"
+#include "scriptobject.h"
 #include <tier0/vcrmode.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -38,7 +38,7 @@ using namespace vgui;
 class CServerDescription : public CDescription
 {
 public:
-	CServerDescription( CPanelListPanel *panel );
+	CServerDescription( void );
 
 	void WriteScriptHeader( FileHandle_t fp );
 	void WriteFileHeader( FileHandle_t fp ); 
@@ -49,9 +49,10 @@ public:
 //-----------------------------------------------------------------------------
 CCreateMultiplayerGameGameplayPage::CCreateMultiplayerGameGameplayPage(vgui::Panel *parent, const char *name) : PropertyPage(parent, name)
 {
+	SetSize( 10, 10 ); // Quiet "parent not sized yet" spew
 	m_pOptionsList = new CPanelListPanel(this, "GameOptions");
 
-	m_pDescription = new CServerDescription(m_pOptionsList);
+	m_pDescription = new CServerDescription();
 	m_pDescription->InitFromFile( DEFAULT_OPTIONS_FILE );
 	m_pDescription->InitFromFile( OPTIONS_FILE );
 	m_pList = NULL;
@@ -343,7 +344,7 @@ void CCreateMultiplayerGameGameplayPage::GatherCurrentValues()
 				if ( wLocalizedString )
 				{
 					// Copy the string we found into our temp array
-					wcsncpy( w_szStrTemp, wLocalizedString, sizeof( w_szStrTemp ) / sizeof( wchar_t ) );
+					V_wcscpy_safe( w_szStrTemp, wLocalizedString );
 				}
 				else
 				{
@@ -386,7 +387,7 @@ void CCreateMultiplayerGameGameplayPage::GatherCurrentValues()
 //-----------------------------------------------------------------------------
 // Purpose: Constructor, load/save server settings object
 //-----------------------------------------------------------------------------
-CServerDescription::CServerDescription(CPanelListPanel *panel) : CDescription(panel)
+CServerDescription::CServerDescription( void ) : CDescription()
 {
 	setHint( "// NOTE:  THIS FILE IS AUTOMATICALLY REGENERATED, \r\n"
 "//DO NOT EDIT THIS HEADER, YOUR COMMENTS WILL BE LOST IF YOU DO\r\n"

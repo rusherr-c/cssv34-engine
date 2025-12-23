@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 
 #include <mxtk/mx.h>
 #include "studio.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "tier1/utldict.h"
 #include "faceposertoolwindow.h"
 

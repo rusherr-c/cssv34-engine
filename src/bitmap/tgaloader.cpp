@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -455,6 +455,7 @@ static OutputRowFunc_t GetOutputRowFunc( ImageFormat imageFormat )
 	}
 }
 
+#if 0
 static void InitSourceGammaConversionTable( float srcGamma )
 {
 	static float lastSrcGamma = -1;
@@ -474,7 +475,7 @@ static void InitDestGammaConversionTable( float dstGamma )
 	lastDstGamma = dstGamma;
 	ImageLoader::ConstructGammaTable( g_DstGammaTable, 1.0f, dstGamma );
 }
-
+#endif
 
 //-----------------------------------------------------------------------------
 // Reads an 8-bit palettized TGA image
@@ -591,11 +592,11 @@ static void DecompressRow( CUtlBuffer& buf, TGAHeader_t const& header, unsigned 
 	int pixelsLeftInRow = header.width;
 	int numPixelsToProcess;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	unsigned char *pLast = pDst + header.width * bytesPerPixel;
 #endif
 
-	unsigned char repeat[4];
+	unsigned char repeat[4] = {};
 	do
 	{
 		if( !g_PixelsLeftInPacket )
@@ -845,7 +846,7 @@ static bool ReadSourceImage( CUtlBuffer& buf, TGAHeader_t& header, CTempImage& i
 	return true;
 }
 
-
+#if 0
 //-----------------------------------------------------------------------------
 // Outputs the final image
 //-----------------------------------------------------------------------------
@@ -868,7 +869,7 @@ static bool OutputImage( CTempImage& image, TGAHeader_t& header,
 
 	return true;
 }
-
+#endif
 
 //-----------------------------------------------------------------------------
 // Parses the lovely bits previously read from disk

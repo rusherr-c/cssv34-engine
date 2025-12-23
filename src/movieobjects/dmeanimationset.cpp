@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -390,9 +390,9 @@ static int BuildExportedControlList( CDmeAnimationSet *pAnimationSet, const CDme
 	int nGlobalIndex = 0;
 	const CDmrElementArrayConst< CDmePreset > &presets = pPresetGroup->GetPresets();
 	int nPresetCount = presets.Count();
-	for ( int i = 0; i < nPresetCount; ++i )
+	for ( int iPreset = 0; iPreset < nPresetCount; ++iPreset )
 	{
-		CDmePreset *pPreset = presets[i];
+		CDmePreset *pPreset = presets[iPreset];
 		const CDmrElementArray< CDmElement > &controls = pPreset->GetControlValues();
 
 		int nControlCount = controls.Count();
@@ -486,9 +486,9 @@ bool CDmePresetGroup::ExportToTXT( const char *pFileName, CDmeAnimationSet *pAni
 	// Output all presets
 	const CDmrElementArrayConst< CDmePreset > &presets = pPresetGroup->GetPresets();
 	int nPresetCount = presets.Count();
-	for ( int i = 0; i < nPresetCount; ++i )
+	for ( int iPreset = 0; iPreset < nPresetCount; ++iPreset )
 	{
-		CDmePreset *pPreset = presets[i];
+		CDmePreset *pPreset = presets[iPreset];
 		const char *pPresetName = pPreset->GetName();
 
 		// Hack for 'silence' and for p_ naming scheme
@@ -599,7 +599,9 @@ bool CDmePresetGroup::ExportToTXT( const char *pFileName, CDmeAnimationSet *pAni
 	return g_pFullFileSystem->WriteFile( pFileName, NULL, buf );
 }
 
-
+#ifdef ALIGN4
+#undef ALIGN4
+#endif // #ifdef ALIGN4
 #define ALIGN4( a ) a = (byte *)((int)((byte *)a + 3) & ~ 3)
 
 
@@ -825,7 +827,7 @@ bool CDmePresetGroup::ExportToVFE( const char *pFileName, CDmeAnimationSet *pAni
 		{
 			pKeynames[j++] = (char *)(pData - pDataStart);
 			strcpy( (char *)pData, control.m_Name );
-			pData += control.m_Name.Length() + 1;
+			pData += Q_strlen( control.m_Name ) + 1;
 		}
 		else
 		{
@@ -1053,7 +1055,7 @@ void CDmeAnimationSet::MovePresetGroupInFrontOf( CDmePresetGroup *pPresetGroup, 
 	if ( pPresetGroup == pInFrontOf )
 		return;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	int nStart = FindPresetGroupIndex( pPresetGroup );
 #endif
 

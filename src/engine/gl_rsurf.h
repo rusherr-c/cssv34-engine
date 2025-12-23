@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -91,7 +91,7 @@ void R_DrawBrushModel(
 	model_t *model, 
 	const Vector& origin, 
 	const QAngle& angles, 
-	bool bSort, bool bShadowDepth );
+	ERenderDepthMode DepthMode, bool bDrawOpaque, bool bDrawTranslucent );
 
 void R_DrawBrushModelShadow( IClientRenderable* pRender );
 void R_BrushBatchInit( void );

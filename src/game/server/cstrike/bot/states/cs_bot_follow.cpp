@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -118,7 +118,7 @@ public:
 		else
 		{
 			const float k = 1.5f; // 2.0f;
-			float trimSpeed = min( speed, 200.0f );
+			float trimSpeed = MIN( speed, 200.0f );
 			m_cutoff.x = playerOrigin.x + k * trimSpeed * m_forward.x;
 			m_cutoff.y = playerOrigin.y + k * trimSpeed * m_forward.y;
 		}
@@ -349,7 +349,7 @@ void FollowState::OnUpdate( CCSBot *me )
 				}
 			}
 						
-			if (target == NULL || me->ComputePath( target->GetCenter(), FASTEST_ROUTE ) == NULL)
+			if (target == NULL || me->ComputePath( target->GetCenter(), FASTEST_ROUTE ) == false)
 				me->PrintIfWatched( "Pathfind to leader failed.\n" );
 
 			// throttle how often we repath

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,6 +9,7 @@
 #include "soundent.h"
 #include "cs_player.h"
 #include "KeyValues.h"
+#include "weapon_csbase.h"
 
 #define GRENADE_MODEL "models/Weapons/w_eq_fraggrenade_thrown.mdl"
 
@@ -46,6 +47,8 @@ CHEGrenadeProjectile* CHEGrenadeProjectile::Create(
 	// make NPCs afaid of it while in the air
 	pGrenade->SetThink( &CHEGrenadeProjectile::DangerSoundThink );
 	pGrenade->SetNextThink( gpGlobals->curtime );
+
+	pGrenade->m_pWeaponInfo = GetWeaponInfo( WEAPON_HEGRENADE );
 
 	return pGrenade;
 }

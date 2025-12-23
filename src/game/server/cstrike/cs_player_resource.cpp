@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: CS's custom CPlayerResource
 //
@@ -32,7 +32,13 @@ IMPLEMENT_SERVERCLASS_ST(CCSPlayerResource, DT_CSPlayerResource)
 	SendPropArray3( SENDINFO_ARRAY3(m_hostageRescueZ), SendPropInt( SENDINFO_ARRAY(m_hostageRescueZ), COORD_INTEGER_BITS+1, 0 ) ),
 	SendPropBool( SENDINFO( m_bBombSpotted ) ),
 	SendPropArray3( SENDINFO_ARRAY3(m_bPlayerSpotted), SendPropInt( SENDINFO_ARRAY(m_bPlayerSpotted), 1, SPROP_UNSIGNED ) ),
+	SendPropArray3( SENDINFO_ARRAY3(m_iMVPs), SendPropInt( SENDINFO_ARRAY(m_iMVPs), COORD_INTEGER_BITS+1, SPROP_UNSIGNED ) ),
+	SendPropArray3( SENDINFO_ARRAY3(m_bHasDefuser), SendPropInt( SENDINFO_ARRAY(m_bHasDefuser), 1, SPROP_UNSIGNED ) ),
+	SendPropArray3( SENDINFO_ARRAY3(m_szClan), SendPropStringT( SENDINFO_ARRAY(m_szClan) ) ),
 END_SEND_TABLE()
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 BEGIN_DATADESC( CCSPlayerResource )
 	// DEFINE_ARRAY( m_iPing, FIELD_INTEGER, MAX_PLAYERS+1 ),
@@ -114,7 +120,6 @@ private:
 	bool m_spotted;
 };
 
-
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
@@ -143,6 +148,18 @@ void CCSPlayerResource::UpdatePlayerData( void )
 				// we should only have one bomb
 				m_iPlayerC4 = i;
 			}
+
+			m_szClan.Set(i, AllocPooledString( pPlayer->GetClanTag() ) );
+
+			m_iMVPs.Set(i, pPlayer->GetNumMVPs());
+
+			m_bHasDefuser.Set(i, pPlayer->HasDefuser());
+
+		}
+		else
+		{
+			m_szClan.Set( i, MAKE_STRING( "" ) );
+			m_iMVPs.Set( i, 0 );
 		}
 	}
 
@@ -199,7 +216,7 @@ void CCSPlayerResource::UpdatePlayerData( void )
 		while ( ( ent = gEntList.FindEntityByClassname( ent, "func_bomb_target" ) ) != NULL )
 		{
 			const Vector &pos = ent->WorldSpaceCenter();
-			CNavArea *area = TheNavMesh->GetNearestNavArea( pos, true );
+			CNavArea *area = TheNavMesh->GetNearestNavArea( pos, true, 10000.0f, false, false );
 			const char *placeName = (area) ? TheNavMesh->PlaceToName( area->GetPlace() ) : NULL;
 			if ( placeName == NULL )
 			{
@@ -255,6 +272,7 @@ void CCSPlayerResource::UpdatePlayerData( void )
 	for ( int i=0; i < MAX_PLAYERS+1; i++ )
 	{
 		CCSPlayer *target = ToCSPlayer( UTIL_PlayerByIndex( i ) );
+
 		if ( !target || !target->IsAlive() )
 		{
 			m_bPlayerSpotted.Set( i, 0 );
@@ -316,6 +334,9 @@ void CCSPlayerResource::Spawn( void )
 	for ( int i=0; i < MAX_PLAYERS+1; i++ )
 	{
 		m_bPlayerSpotted.Set( i, 0 );
+		m_szClan.Set( i, MAKE_STRING( "" ) );
+		m_iMVPs.Set( i, 0 );
+		m_bHasDefuser.Set(i, false);
 	}
 
 	BaseClass::Spawn();

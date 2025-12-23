@@ -1,13 +1,30 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //===========================================================================//
+#define DISABLE_PROTECTED_THINGS
+
+#if defined( USE_SDL )
+#include "appframework/ilaunchermgr.h"
+#endif
 
 #if defined( _WIN32 ) && !defined( _X360 )
 #include "winlite.h"
+#include <Psapi.h>
 #endif
+
+#if defined( OSX )
+#include <sys/sysctl.h>
+#endif
+
+#if defined( POSIX )
+#include <setjmp.h>
+#include <signal.h>
+#endif
+
+#include <stdarg.h>
 #include "quakedef.h"
 #include "idedicatedexports.h"
 #include "engine_launcher_api.h"
@@ -19,15 +36,18 @@
 #include "traceinit.h"
 #include "iengine.h"
 #include "igame.h"
+#include "tier0/etwprof.h"
 #include "tier0/vcrmode.h"
+#include "tier0/icommandline.h"
+#include "tier0/minidump.h"
 #include "engine_hlds_api.h"
 #include "filesystem_engine.h"
-#include "tier0/icommandline.h"
 #include "cl_main.h"
 #include "client.h"
 #include "tier3/tier3.h"
 #include "MapReslistGenerator.h"
 #include "toolframework/itoolframework.h"
+#include "sourcevr/isourcevirtualreality.h"
 #include "DevShotGenerator.h"
 #include "gl_shader.h"
 #include "l_studio.h"
@@ -35,31 +55,41 @@
 #include "sys_dll.h"
 #include "materialsystem/materialsystem_config.h"
 #include "server.h"
-#include "video/iavi.h"
+#include "video/ivideoservices.h"
 #include "datacache/idatacache.h"
 #include "vphysics_interface.h"
 #include "inputsystem/iinputsystem.h"
 #include "appframework/IAppSystemGroup.h"
 #include "tier0/systeminformation.h"
+#include "host_cmd.h"
 #ifdef _WIN32
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
+#endif
+
+#ifdef GPROFILER
+#include "gperftools/profiler.h"
 #endif
 
 // This is here just for legacy support of older .dlls!!!
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "eiface.h"
+#include "tier1/fmtstr.h"
+#include "steam/steam_api.h"
 
 #ifndef SWDS
 #include "sys_mainwind.h"
-#include "vgui/isystem.h"
-#include "vgui_controls/controls.h"
-#include "igameuifuncs.h"
+#include "vgui/ISystem.h"
+#include "vgui_controls/Controls.h"
+#include "IGameUIFuncs.h"
 #include "cl_steamauth.h"
-
 #endif // SWDS
 
 #if defined(_WIN32)
 #include <eh.h>
+#endif
+
+#if POSIX
+#include <dlfcn.h>
 #endif
 
 #if defined( _X360 )
@@ -71,7 +101,6 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-
 //-----------------------------------------------------------------------------
 // Globals
 //-----------------------------------------------------------------------------
@@ -79,10 +108,26 @@ IDedicatedExports *dedicated = NULL;
 extern CreateInterfaceFn g_AppSystemFactory;
 IHammer *g_pHammer = NULL;
 IPhysics *g_pPhysics = NULL;
-IAvi *avi = NULL;
+ISourceVirtualReality *g_pSourceVR = NULL;
+#if defined( USE_SDL )
+ILauncherMgr *g_pLauncherMgr = NULL;
+#endif
+
 #ifndef SWDS
 extern CreateInterfaceFn g_ClientFactory;
 #endif
+
+static SteamInfVersionInfo_t g_SteamInfIDVersionInfo;
+const SteamInfVersionInfo_t& GetSteamInfIDVersionInfo()
+{
+	Assert( g_SteamInfIDVersionInfo.AppID != k_uAppIdInvalid );
+	return g_SteamInfIDVersionInfo;
+}
+
+int build_number( void )
+{
+	return GetSteamInfIDVersionInfo().ServerVersion;
+}
 
 //-----------------------------------------------------------------------------
 // Forward declarations
@@ -92,21 +137,10 @@ const char *Key_BindingForKey( int keynum );
 void COM_ShutdownFileSystem( void );
 void COM_InitFilesystem( const char *pFullModPath );
 void Host_ReadPreStartupConfiguration();
-void EditorToggle_f();
-
-#ifdef _WIN32
-HWND *pmainwindow = NULL;
-#endif
 
 //-----------------------------------------------------------------------------
 // ConVars and console commands
 //-----------------------------------------------------------------------------
-#if !defined(SWDS)
-static ConCommand editor_toggle( "editor_toggle", EditorToggle_f, "Disables the simulation and returns focus to the editor", FCVAR_CHEAT );
-#endif
-
-
-
 #ifndef SWDS
 //-----------------------------------------------------------------------------
 // Purpose: exports an interface that can be used by the launcher to run the engine
@@ -118,57 +152,6 @@ void EXPORT F( IEngineAPI **api )
 	*api = ( IEngineAPI * )(factory(VENGINE_LAUNCHER_API_VERSION, NULL));
 }
 #endif // SWDS
-
-extern bool cs_initialized;
-extern int			lowshift;
-static char	*empty_string = "";
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-extern void SCR_UpdateScreen(void);
-extern bool g_bMajorMapChange; 
-extern bool g_bPrintingKeepAliveDots;
-
-void Sys_ShowProgressTicks(char* specialProgressMsg)
-{
-#ifdef LATER
-#define MAX_NUM_TICS 40
-
-	static long numTics = 0;
-
-	// Nothing to do if not using Steam
-	if ( !g_pFileSystem->IsSteam() )
-		return;
-
-	// Update number of tics to show...
-	numTics++;
-	if ( isDedicated )
-	{
-		if ( g_bMajorMapChange )
-		{
-			g_bPrintingKeepAliveDots = TRUE;
-			Msg(".");
-		}
-	}
-	else
-	{
-		int i;
-		int numTicsToPrint = numTics % (MAX_NUM_TICS-1);
-		char msg[MAX_NUM_TICS+1];
-
-		Q_strncpy(msg, ".", sizeof(msg));
-
-		// Now add in the growing number of tics...
-		for ( i = 1 ; i < numTicsToPrint ; i++ )
-		{
-			Q_strncat(msg, ".", sizeof(msg), COPY_ALL_CHARACTERS);
-		}
-
-		SCR_UpdateScreen();
-	}
-#endif
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -182,117 +165,6 @@ void ClearIOStates( void )
 	}
 #endif
 }
-
-void MoveConsoleWindowToFront()
-{
-#ifdef _WIN32
-// TODO: remove me!!!!!
-
-	// Move the window to the front.
-	HINSTANCE hInst = LoadLibrary( "kernel32.dll" );
-	if ( hInst )
-	{
-		typedef HWND (*GetConsoleWindowFn)();
-		GetConsoleWindowFn fn = (GetConsoleWindowFn)GetProcAddress( hInst, "GetConsoleWindow" );
-		if ( fn )
-		{
-			HWND hwnd = fn();
-			ShowWindow( hwnd, SW_SHOW );
-			UpdateWindow( hwnd );
-			SetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW );
-		}
-		FreeLibrary( hInst );
-	}
-#endif
-}
-
-#if defined( _WIN32 ) && !defined( _X360 )
-#include <conio.h>
-#endif
-CUtlVector<char> g_TextModeLine;
-
-char NextGetch()
-{
-	return -1;
-	// NOTE: for some reason, kbhit() KILLS performance on the client.. when using it, the client
-	// goes so slow that it's player's motion is all jerky. If we need input, probably the
-	// best thing to do is to hook the console window's wndproc and get the keydown messages.
-	/*
-	// Sort of hacky to overload the gamemsg loop with these messages, but it does the trick.
-	if ( VCRGetMode() == VCR_Playback )
-	{
-		unsigned int uMsg, wParam;
-		long lParam;
-		if ( VCRHook_PlaybackGameMsg( uMsg, wParam, lParam ) )
-		{
-			Assert( uMsg == 0xFFFF );
-			return (char)wParam;
-		}
-		else
-		{
-			return -1;
-		}
-	}
-	else
-	{
-		if ( kbhit() )
-		{
-			char ch = getch();
-			VCRHook_RecordGameMsg( 0xFFFF, ch, 0 );
-			return ch;
-		}
-		else
-		{
-			VCRHook_RecordEndGameMsg();
-			return -1;
-		}
-	}
-	*/
-}
-
-void EatTextModeKeyPresses()
-{
-	if ( !g_bTextMode )
-		return;
-	
-	static bool bFirstRun = true;
-	if ( bFirstRun )
-	{
-		bFirstRun = false;
-		MoveConsoleWindowToFront();
-	}
-
-	char ch;
-	while ( (ch = NextGetch()) != -1 )
-	{
-		if ( ch == 8 )
-		{
-			// Backspace..
-			if ( g_TextModeLine.Count() )
-			{
-				g_TextModeLine.Remove( g_TextModeLine.Count() - 1 );
-			}
-		}
-		else if ( ch == '\r' )
-		{
-			// Finish the line.
-			if ( g_TextModeLine.Count() )
-			{
-				g_TextModeLine.AddMultipleToTail( 2, "\n" );
-				Cbuf_AddText( g_TextModeLine.Base() );
-				g_TextModeLine.Purge();
-			}
-			printf( "\n" );
-		}
-		else
-		{
-			g_TextModeLine.AddToTail( ch );
-		}
-
-		printf( "%c", ch );
-	}	
-}
-
 
 //-----------------------------------------------------------------------------
 // The SDK launches the game with the full path to gameinfo.txt, so we need
@@ -359,7 +231,684 @@ private:
 	bool	m_bServerOnly;
 };
 
+#if defined( STAGING_ONLY )
+CON_COMMAND( bigalloc, "huge alloc crash" )
+{
+	Msg( "pre-crash %d\n", MemAlloc_MemoryAllocFailed() );
+	// Alloc a bit less than UINT_MAX so there is room for heap headers in the malloc functions.
+	void *buf = malloc( UINT_MAX - 0x4000 );
+	Msg( "post-alloc %d. buf: %p\n", MemAlloc_MemoryAllocFailed(), buf );
+	*(int *)buf = 0;
+}
+#endif
+
+extern void S_ClearBuffer();
+extern char g_minidumpinfo[ 4096 ];
+extern PAGED_POOL_INFO_t g_pagedpoolinfo;
+extern bool g_bUpdateMinidumpComment;
+void GetSpew( char *buf, size_t buflen );
+
+extern int gHostSpawnCount;
+extern int g_nMapLoadCount;
+extern int g_HostServerAbortCount;
+extern int g_HostErrorCount;
+extern int g_HostEndDemo;
+
+// Turn this to 1 to allow for expanded spew in minidump comments.
+static ConVar sys_minidumpexpandedspew( "sys_minidumpexpandedspew", "1" );
+
+#ifdef IS_WINDOWS_PC
+
+extern "C" void __cdecl FailSafe( unsigned int uStructuredExceptionCode, struct _EXCEPTION_POINTERS * pExceptionInfo	)
+{
+	// Nothing, this just catches a crash when creating the comment block
+}
+
+#endif
+
+#if defined( POSIX )
+
+static sigjmp_buf g_mark;
+static void posix_signal_handler( int i )
+{
+	siglongjmp( g_mark, -1 );
+}
+
+#define DO_TRY		if ( sigsetjmp( g_mark, 1 ) == 0 )
+#define DO_CATCH	else
+
+#if defined( OSX )
+#define __sighandler_t sig_t
+#endif
+
+#else
+
+#define DO_TRY		try
+#define DO_CATCH	catch ( ... )
+
+#endif // POSIX
+
+//-----------------------------------------------------------------------------
+// Purpose: Check whether any mods are loaded.
+//  Currently looks for metamod and sourcemod.
+//-----------------------------------------------------------------------------
+static bool IsSourceModLoaded()
+{
+#if defined( _WIN32 )
+	static const char *s_pFileNames[] = { "metamod.2.tf2.dll", "sourcemod.2.tf2.dll", "sdkhooks.ext.2.ep2v.dll", "sdkhooks.ext.2.tf2.dll" };
+
+	for ( size_t i = 0; i < Q_ARRAYSIZE( s_pFileNames ); i++ )
+	{
+		// GetModuleHandle function returns a handle to a mapped module
+		//  without incrementing its reference count.
+		if ( GetModuleHandleA( s_pFileNames[ i ] ) )
+			return true;
+	}
+#else
+	FILE *fh = fopen( "/proc/self/maps", "r" );
+
+	if ( fh )
+	{
+		char buf[ 1024 ];
+		static const char *s_pFileNames[] = { "metamod.2.tf2.so", "sourcemod.2.tf2.so", "sdkhooks.ext.2.ep2v.so", "sdkhooks.ext.2.tf2.so" };
+
+		while ( fgets( buf, sizeof( buf ), fh ) )
+		{
+			for ( size_t i = 0; i < Q_ARRAYSIZE( s_pFileNames ); i++ )
+			{
+				if ( strstr( buf, s_pFileNames[ i ] ) )
+				{
+					fclose( fh );
+					return true;
+				}
+			}
+		}
+
+		fclose( fh );
+	}
+#endif
+
+	return false;
+}
+
+template< int _SIZE >
+class CErrorText
+{
+public:
+	CErrorText() : m_bIsDedicatedServer( false ) {}
+	~CErrorText() {}
+
+	void Steam_SetMiniDumpComment()
+	{
+#if !defined( NO_STEAM )
+		SteamAPI_SetMiniDumpComment( m_errorText );
+#endif
+	}
+
+	void CommentCat( const char * str )
+	{
+		V_strcat_safe( m_errorText, str );
+	}
+
+	void CommentPrintf( const char *fmt, ... )
+	{
+		va_list args;
+		va_start( args, fmt );
+		
+		size_t len = strlen( m_errorText );
+		vsnprintf( m_errorText + len, sizeof( m_errorText ) - len - 1, fmt, args );
+		m_errorText[ sizeof( m_errorText ) - 1 ] = 0;
+
+		va_end( args );
+	}
+
+	void BuildComment( char const *pchSysErrorText, bool bRealCrash )
+	{
+		// Try and detect whether this
+		bool bSourceModLoaded = false;
+		if ( m_bIsDedicatedServer )
+		{
+			bSourceModLoaded = IsSourceModLoaded();
+			if ( bSourceModLoaded )
+			{
+				AppId_t AppId = GetSteamInfIDVersionInfo().ServerAppID;
+				// Bump up the number and report the crash. This should be something
+				//  like 232251 (instead of 232250). 232251 is for the TF2 Windows client,
+				//  but we actually report those crashes under ID 440, so this should be ok.
+				SteamAPI_SetBreakpadAppID( AppId + 1 );
+			}
+		}
+
+#ifdef IS_WINDOWS_PC
+		// This warning only applies if you want to catch structured exceptions (crashes)
+		// using C++ exceptions. We do not want to do that so we can build with C++ exceptions
+		// completely disabled, and just suppress this warning.
+		// warning C4535: calling _set_se_translator() requires /EHa
+		#pragma warning( suppress : 4535 )
+		_se_translator_function curfilter = _set_se_translator( &FailSafe );
+#elif defined( POSIX )
+		// Only need to worry about this function crashing when we're dealing with a real crash.
+		__sighandler_t curfilter = bRealCrash ? signal( SIGSEGV, posix_signal_handler ) : 0;
+#endif
+
+		DO_TRY
+		{
+			Q_memset( m_errorText, 0x00, sizeof( m_errorText ) );
+
+			if ( pchSysErrorText )
+			{
+				CommentCat( "Sys_Error( " );
+				CommentCat( pchSysErrorText );
+
+				// Trim trailing \n.
+				int len = V_strlen( m_errorText );
+				if ( len > 0 && m_errorText[ len - 1 ] == '\n' )
+					m_errorText[ len - 1 ] = 0;
+
+				CommentCat( " )\n" );
+			}
+			else
+			{
+				CommentCat( "Crash\n" );
+			}
+			CommentPrintf( "Uptime( %f )\n", Plat_FloatTime() );
+			CommentPrintf( "SourceMod:%d,DS:%d,Crash:%d\n\n", bSourceModLoaded, m_bIsDedicatedServer, bRealCrash );
+
+			// Add g_minidumpinfo from CL_SetSteamCrashComment().
+			CommentCat( g_minidumpinfo );
+
+			// Latch in case extended stuff below crashes
+			Steam_SetMiniDumpComment();
+
+			// Add Memory Status
+			BuildCommentMemStatus();
+
+			// Spew out paged pool stuff, etc.
+			PAGED_POOL_INFO_t ppi_info;
+			if ( Plat_GetPagedPoolInfo( &ppi_info ) != SYSCALL_UNSUPPORTED )
+			{
+				CommentPrintf( "\nPaged Pool\nprev PP PAGES: used: %lu, free %lu\nfinal PP PAGES: used: %lu, free %lu\n",
+				            g_pagedpoolinfo.numPagesUsed, g_pagedpoolinfo.numPagesFree, 
+				            ppi_info.numPagesUsed, ppi_info.numPagesFree );
+			}
+
+			CommentPrintf( "memallocfail? = %u\nActive: %s\nSpawnCount %d MapLoad Count %d\nError count %d, end demo %d, abort count %d\n",
+			            MemAlloc_MemoryAllocFailed(),
+			            ( game && game->IsActiveApp() ) ? "active" : "inactive", 
+			            gHostSpawnCount, 
+			            g_nMapLoadCount,
+			            g_HostErrorCount,
+			            g_HostEndDemo,
+			            g_HostServerAbortCount );
+
+			// Latch in case extended stuff below crashes
+			Steam_SetMiniDumpComment();
+
+			// Add user comment strings. 4096 is just a large sanity number we should
+			//  never ever reach (currently our minidump supports 32 of these.)
+			for( int i = 0; i < 4096; i++ )
+			{
+				const char *pUserStreamInfo = MinidumpUserStreamInfoGet( i );
+				if( !pUserStreamInfo )
+					break;
+
+				if ( pUserStreamInfo[ 0 ] )
+					CommentPrintf( "%s", pUserStreamInfo );
+			}
+
+			bool bExtendedSpew = sys_minidumpexpandedspew.GetBool();
+			if ( bExtendedSpew )
+			{
+				BuildCommentExtended();
+				Steam_SetMiniDumpComment();
+
+#if defined( LINUX )
+				if ( bRealCrash )
+				{
+					// bRealCrash is set when we're actually making a comment for a dump or error.
+					AddFileToComment( "/proc/meminfo" );
+					AddFileToComment( "/proc/self/status" );
+					Steam_SetMiniDumpComment();
+
+					// Useful, but really big, so disable for now.
+					//$ AddFileToComment( "/proc/self/maps" );
+				}
+#endif
+			}
+		}
+		DO_CATCH
+		{
+			// Oh oh
+		}
+		
+#ifdef IS_WINDOWS_PC
+		_set_se_translator( curfilter );
+#elif defined( POSIX )
+		if ( bRealCrash )
+			signal( SIGSEGV, curfilter );
+#endif
+	}
+
+	void BuildCommentMemStatus()
+	{
+#ifdef _WIN32
+		const double MbDiv = 1024.0 * 1024.0;
+
+		MEMORYSTATUSEX	memStat;
+		ZeroMemory( &memStat, sizeof( MEMORYSTATUSEX ) );
+		memStat.dwLength = sizeof( MEMORYSTATUSEX );
+
+		if ( GlobalMemoryStatusEx( &memStat ) )
+		{
+			CommentPrintf( "\nMemory\nmemusage( %d %% )\ntotalPhysical Mb(%.2f)\nfreePhysical Mb(%.2f)\ntotalPaging Mb(%.2f)\nfreePaging Mb(%.2f)\ntotalVirtualMem Mb(%.2f)\nfreeVirtualMem Mb(%.2f)\nextendedVirtualFree Mb(%.2f)\n",
+				memStat.dwMemoryLoad,
+				(double)memStat.ullTotalPhys / MbDiv,
+				(double)memStat.ullAvailPhys / MbDiv,
+				(double)memStat.ullTotalPageFile / MbDiv,
+				(double)memStat.ullAvailPageFile / MbDiv,
+				(double)memStat.ullTotalVirtual / MbDiv,
+				(double)memStat.ullAvailVirtual / MbDiv,
+				(double)memStat.ullAvailExtendedVirtual / MbDiv);
+		}
+
+		HINSTANCE hInst = LoadLibrary( "Psapi.dll" );
+		if ( hInst )
+		{
+			typedef BOOL (WINAPI *GetProcessMemoryInfoFn)(HANDLE, PPROCESS_MEMORY_COUNTERS, DWORD);
+			GetProcessMemoryInfoFn fn = (GetProcessMemoryInfoFn)GetProcAddress( hInst, "GetProcessMemoryInfo" );
+			if ( fn )
+			{
+				PROCESS_MEMORY_COUNTERS counters;
+
+				ZeroMemory( &counters, sizeof( PROCESS_MEMORY_COUNTERS ) );
+				counters.cb = sizeof( PROCESS_MEMORY_COUNTERS );
+
+				if ( fn( GetCurrentProcess(), &counters, sizeof( PROCESS_MEMORY_COUNTERS ) ) )
+				{
+					CommentPrintf( "\nProcess Memory\nWorkingSetSize Mb(%.2f)\nQuotaPagedPoolUsage Mb(%.2f)\nQuotaNonPagedPoolUsage: Mb(%.2f)\nPagefileUsage: Mb(%.2f)\n",
+						(double)counters.WorkingSetSize / MbDiv,
+						(double)counters.QuotaPagedPoolUsage / MbDiv,
+						(double)counters.QuotaNonPagedPoolUsage / MbDiv,
+						(double)counters.PagefileUsage / MbDiv );
+				}
+			}
+
+			FreeLibrary( hInst );
+		}
+
+#elif defined( OSX )
+
+		static const struct
+		{
+			int ctl;
+			const char *name;
+		} s_ctl_names[] =
+		{
+		#define _XTAG( _x ) { _x, #_x }
+			_XTAG( HW_PHYSMEM ),
+			_XTAG( HW_USERMEM ),
+			_XTAG( HW_MEMSIZE ),
+			_XTAG( HW_AVAILCPU ),
+		#undef _XTAG
+		};
+
+		for ( size_t i = 0; i < Q_ARRAYSIZE( s_ctl_names ); i++ )
+		{
+			uint64_t val = 0;
+			size_t len = sizeof( val );
+			int mib[] = { CTL_HW, s_ctl_names[ i ].ctl };
+
+			if ( sysctl( mib, Q_ARRAYSIZE( mib ), &val, &len, NULL, 0 ) == 0 )
+			{
+				CommentPrintf( " %s: %" PRIu64 "\n", s_ctl_names[ i ].name, val );
+			}
+		}
+
+#endif
+	}
+
+	void BuildCommentExtended()
+	{
+		try
+		{
+			CommentCat( "\nConVars (non-default)\n\n" );
+			CommentPrintf( "%s %s %s\n", "var", "value", "default" );
+
+			for ( const ConCommandBase *var = g_pCVar->GetCommands() ; var ; var = var->GetNext())
+			{
+				if ( var->IsCommand() )
+					continue;
+
+				ConVar *pCvar = ( ConVar * )var;
+				if ( pCvar->IsFlagSet( FCVAR_SERVER_CANNOT_QUERY | FCVAR_PROTECTED ) )
+					continue;
+
+				if ( !(pCvar->IsFlagSet( FCVAR_NEVER_AS_STRING ) ) )
+				{
+					char var1[ MAX_OSPATH ];
+					char var2[ MAX_OSPATH ];
+
+					Q_strncpy( var1, Host_CleanupConVarStringValue( pCvar->GetString() ), sizeof( var1 ) );
+					Q_strncpy( var2, Host_CleanupConVarStringValue( pCvar->GetDefault() ), sizeof( var2 ) );
+
+					if ( !Q_stricmp( var1, var2 ) )
+						continue;
+				}
+				else
+				{
+					if ( pCvar->GetFloat() == Q_atof( pCvar->GetDefault() ) )
+						continue;
+				}
+
+				if ( !(pCvar->IsFlagSet( FCVAR_NEVER_AS_STRING ) ) )
+					CommentPrintf( "%s '%s' '%s'\n", pCvar->GetName(), Host_CleanupConVarStringValue( pCvar->GetString() ), pCvar->GetDefault() );
+				else
+					CommentPrintf( "%s '%f' '%f'\n", pCvar->GetName(), pCvar->GetFloat(), Q_atof( pCvar->GetDefault() ) );
+			}
+
+			CommentCat( "\nConsole History (reversed)\n\n" );
+
+			// Get console
+			int len = V_strlen( m_errorText );
+			if ( len < sizeof( m_errorText ) )
+			{
+				GetSpew( m_errorText + len, sizeof( m_errorText ) - len - 1 );
+				m_errorText[ sizeof( m_errorText ) - 1 ] = 0;
+			}
+		}
+		catch ( ... )
+		{
+			CommentCat( "Exception thrown building console/convar history.\n" );
+		}
+	}
+
+#if defined( LINUX )
+
+	void AddFileToComment( const char *filename )
+	{
+		CommentPrintf( "\n%s:\n", filename );
+
+		int nStart = Q_strlen( m_errorText );
+		int nMaxLen = sizeof( m_errorText ) - nStart - 1;
+
+		if ( nMaxLen > 0 )
+		{
+			FILE *fh = fopen( filename, "r" );
+
+			if ( fh )
+			{
+				size_t ret = fread( m_errorText + nStart, 1, nMaxLen, fh );
+				fclose( fh );
+
+				// Replace tab characters with spaces.
+				for ( size_t i = 0; i < ret; i++ )
+				{
+					if ( m_errorText[ nStart + i ] == '\t' )
+						m_errorText[ nStart + i ] = ' ';
+				}
+			}
+
+			// Entire buffer should have been zeroed out, but just super sure...
+			m_errorText[ sizeof( m_errorText ) - 1 ] = 0;
+		}
+	}
+
+#endif // LINUX
+
+public:
+	char m_errorText[ _SIZE ];
+	bool m_bIsDedicatedServer;
+};
+
+#if defined( _X360 )
+static CErrorText<3500> errorText;
+#else
+static CErrorText<95000> errorText;
+#endif
+
+void BuildMinidumpComment( char const *pchSysErrorText, bool bRealCrash )
+{
+#if !defined(NO_STEAM)
+	/*
+	// Uncomment this code if you are testing max minidump comment length issues
+	// It allows you to asked for a dummy comment of a certain length
+	int nCommentLength = CommandLine()->ParmValue( "-commentlen", 0 );
+	if ( nCommentLength > 0 )
+	{
+		nCommentLength = MIN( nCommentLength, 128*1024 );
+		char *cbuf = new char[ nCommentLength + 1 ];
+		for ( int i = 0; i < nCommentLength; ++i )
+		{
+			cbuf[ i ] = (char)('0' + (i % 10));
+		}
+		cbuf[ nCommentLength ] = 0;
+		SteamAPI_SetMiniDumpComment( cbuf );
+		delete[] cbuf;
+		return;
+	}
+	*/
+	errorText.BuildComment( pchSysErrorText, bRealCrash );
+#endif
+}
+
+#if defined( POSIX )
+
+static void PosixPreMinidumpCallback( void *context )
+{
+	BuildMinidumpComment( NULL, true );
+}
+
+#endif
+
+//-----------------------------------------------------------------------------
+// Purpose: Attempt to initialize appid/steam.inf/minidump information. May only return partial information if called
+//          before Filesystem is ready.
+//
+//          The desire is to be able to call this ASAP to init basic minidump and AppID info, then re-call later on when
+//          the filesystem is setup, so full version # information and such can be propagated to the minidump system.
+//          (Currently, SDK mods will generally only have partial information prior to filesystem init)
+//-----------------------------------------------------------------------------
+// steam.inf keys.
+#define VERSION_KEY				"PatchVersion="
+#define PRODUCT_KEY				"ProductName="
+#define SERVER_VERSION_KEY		"ServerVersion="
+#define APPID_KEY				"AppID="
+#define SERVER_APPID_KEY		"ServerAppID="
+enum eSteamInfoInit
+{
+	eSteamInfo_Uninitialized,
+	eSteamInfo_Partial,
+	eSteamInfo_Initialized
+};
+static eSteamInfoInit Sys_TryInitSteamInfo( void *pvAPI, SteamInfVersionInfo_t& VerInfo, const char *pchMod, const char *pchBaseDir, bool bDedicated )
+{
+	static eSteamInfoInit initState = eSteamInfo_Uninitialized;
+
+	eSteamInfoInit previousInitState = initState;
+
+	//
+	//
+	// Initialize with some defaults.
+	VerInfo.ClientVersion = 0;
+	VerInfo.ServerVersion = 0;
+	V_strcpy_safe( VerInfo.szVersionString, "valve" );
+	V_strcpy_safe( VerInfo.szProductString, "1.0.1.0" );
+	VerInfo.AppID = k_uAppIdInvalid;
+	VerInfo.ServerAppID = k_uAppIdInvalid;
+
+	// Filesystem may or may not be up
+	CUtlBuffer infBuf;
+	bool bFoundInf = false;
+	if ( g_pFileSystem )
+	{
+		FileHandle_t fh;
+		fh = g_pFileSystem->Open( "steam.inf", "rb", "GAME" );
+		bFoundInf = fh && g_pFileSystem->ReadToBuffer( fh, infBuf );
+	}
+
+	if ( !bFoundInf )
+	{
+		// We may try to load the steam.inf BEFORE we turn on the filesystem, so use raw filesystem API's here.
+		char szFullPath[ MAX_PATH ] = { 0 };
+		char szModSteamInfPath[ MAX_PATH ] = { 0 };
+		V_ComposeFileName( pchMod, "steam.inf", szModSteamInfPath, sizeof( szModSteamInfPath ) );
+		V_MakeAbsolutePath( szFullPath, sizeof( szFullPath ), szModSteamInfPath, pchBaseDir );
+
+		// Try opening steam.inf
+		FILE *fp = fopen( szFullPath, "rb" );
+		if ( fp )
+		{
+			// Read steam.inf data.
+			fseek( fp, 0, SEEK_END );
+			size_t bufsize = ftell( fp );
+			fseek( fp, 0, SEEK_SET );
+
+			infBuf.EnsureCapacity( bufsize + 1 );
+
+			size_t iBytesRead = fread( infBuf.Base(), 1, bufsize, fp );
+			((char *)infBuf.Base())[iBytesRead] = 0;
+			infBuf.SeekPut( CUtlBuffer::SEEK_CURRENT, iBytesRead + 1 );
+			fclose( fp );
+
+			bFoundInf = ( iBytesRead == bufsize );
+		}
+	}
+
+	if ( bFoundInf )
+	{
+		const char *pbuf = (const char*)infBuf.Base();
+		while ( 1 )
+		{
+			pbuf = COM_Parse( pbuf );
+			if ( !pbuf || !com_token[ 0 ] )
+				break;
+
+			if ( !Q_strnicmp( com_token, VERSION_KEY, Q_strlen( VERSION_KEY ) ) )
+			{
+				V_strcpy_safe( VerInfo.szVersionString, com_token + Q_strlen( VERSION_KEY ) );
+				VerInfo.ClientVersion = atoi( VerInfo.szVersionString );
+			}
+			else if ( !Q_strnicmp( com_token, PRODUCT_KEY, Q_strlen( PRODUCT_KEY ) ) )
+			{
+				V_strcpy_safe( VerInfo.szProductString, com_token + Q_strlen( PRODUCT_KEY ) );
+			}
+			else if ( !Q_strnicmp( com_token, SERVER_VERSION_KEY, Q_strlen( SERVER_VERSION_KEY ) ) )
+			{
+				VerInfo.ServerVersion = atoi( com_token + Q_strlen( SERVER_VERSION_KEY ) );
+			}
+			else if ( !Q_strnicmp( com_token, APPID_KEY, Q_strlen( APPID_KEY ) ) )
+			{
+				VerInfo.AppID = atoi( com_token + Q_strlen( APPID_KEY ) );
+			}
+			else if ( !Q_strnicmp( com_token, SERVER_APPID_KEY, Q_strlen( SERVER_APPID_KEY ) ) )
+			{
+				VerInfo.ServerAppID = atoi( com_token + Q_strlen( SERVER_APPID_KEY ) );
+			}
+		}
+
+		// If we found a steam.inf we're as good as we're going to get, but don't tell callers we're fully initialized
+		// if it doesn't at least have an AppID
+		initState = ( VerInfo.AppID != k_uAppIdInvalid ) ? eSteamInfo_Initialized : eSteamInfo_Partial;
+	}
+	else if ( !bDedicated )
+	{
+		// Opening steam.inf failed - try to open gameinfo.txt and read in just SteamAppId from that.
+		// (gameinfo.txt lacks the dedicated server steamid, so we'll just have to live until filesystem init to setup
+		// breakpad there when we hit this case)
+		char szModGameinfoPath[ MAX_PATH ] = { 0 };
+		char szFullPath[ MAX_PATH ] = { 0 };
+		V_ComposeFileName( pchMod, "gameinfo.txt", szModGameinfoPath, sizeof( szModGameinfoPath ) );
+		V_MakeAbsolutePath( szFullPath, sizeof( szFullPath ), szModGameinfoPath, pchBaseDir );
+
+		// Try opening gameinfo.txt
+		FILE *fp = fopen( szFullPath, "rb" );
+		if( fp )
+		{
+			fseek( fp, 0, SEEK_END );
+			size_t bufsize = ftell( fp );
+			fseek( fp, 0, SEEK_SET );
+
+			char *buffer = ( char * )_alloca( bufsize + 1 );
+
+			size_t iBytesRead = fread( buffer, 1, bufsize, fp );
+			buffer[ iBytesRead ] = 0;
+			fclose( fp );
+
+			KeyValuesAD pkvGameInfo( "gameinfo" );
+			if ( pkvGameInfo->LoadFromBuffer( "gameinfo.txt", buffer ) )
+			{
+				VerInfo.AppID = (AppId_t)pkvGameInfo->GetInt( "FileSystem/SteamAppId", k_uAppIdInvalid );
+			}
+		}
+
+		initState = eSteamInfo_Partial;
+	}
+
+	// In partial state the ServerAppID might be unknown, but if we found the full steam.inf and it's not set, it shares AppID.
+	if ( initState == eSteamInfo_Initialized && VerInfo.ServerAppID == k_uAppIdInvalid )
+		VerInfo.ServerAppID = VerInfo.AppID;
+
+#if !defined(_X360)
+	if ( VerInfo.AppID )
+	{
+		// steamclient.dll doesn't know about steam.inf files in mod folder,
+		// it accepts a steam_appid.txt in the root directory if the game is
+		// not started through Steam. So we create one there containing the
+		// current AppID
+		FILE *fh = fopen( "steam_appid.txt", "wb" );
+		if ( fh  )
+		{
+			CFmtStrN< 128 > strAppID( "%u\n", VerInfo.AppID );
+
+			fwrite( strAppID.Get(), strAppID.Length() + 1, 1, fh );
+			fclose( fh );
+		}
+	}
+#endif // !_X360
+
+	//
+	// Update minidump info if we have more information than before
+	//
+
+#ifndef NO_STEAM
+	// If -nobreakpad was specified or we found metamod or sourcemod, don't register breakpad.
+	bool bUseBreakpad = !CommandLine()->FindParm( "-nobreakpad" ) && ( !bDedicated || !IsSourceModLoaded() );
+	AppId_t BreakpadAppId = bDedicated ? VerInfo.ServerAppID : VerInfo.AppID;
+	Assert( BreakpadAppId != k_uAppIdInvalid || initState < eSteamInfo_Initialized );
+	if ( BreakpadAppId != k_uAppIdInvalid && initState > previousInitState && bUseBreakpad )
+	{
+		void *pvMiniDumpContext = NULL;
+		PFNPreMinidumpCallback pfnPreMinidumpCallback = NULL;
+		bool bFullMemoryDump = !bDedicated && IsWindows() && CommandLine()->FindParm( "-full_memory_dumps" );
+
+#if defined( POSIX )
+		// On Windows we're relying on the try/except to build the minidump comment. On Linux, we don't have that
+		//	so we need to register the minidumpcallback handler here.
+		pvMiniDumpContext = pvAPI;
+		pfnPreMinidumpCallback = PosixPreMinidumpCallback;
+#endif
+
+		CFmtStrN<128> pchVersion( "%d", build_number() );
+		Msg( "Using Breakpad minidump system. Version: %s AppID: %u\n", pchVersion.Get(), BreakpadAppId );
+
+		// We can filter various crash dumps differently in the Socorro backend code:
+		//    Steam/min/web/crash_reporter/socorro/scripts/config/collectorconfig.py
+		SteamAPI_SetBreakpadAppID( BreakpadAppId );
+		SteamAPI_UseBreakpadCrashHandler( pchVersion, __DATE__, __TIME__, bFullMemoryDump, pvMiniDumpContext, pfnPreMinidumpCallback );
+
+		// Tell errorText class if this is dedicated server.
+		errorText.m_bIsDedicatedServer = bDedicated;
+	}
+#endif // NO_STEAM
+
+	MinidumpUserStreamInfoSetHeader( "%sLaunching \"%s\"\n", ( bDedicated ? "DedicatedServerAPI " : "" ), CommandLine()->GetCmdLine() );
+
+
+	return initState;
+}
+
 #ifndef SWDS
+
 //-----------------------------------------------------------------------------
 //
 // Main engine interface exposed to launcher
@@ -398,8 +947,9 @@ public:
 
 	bool MainLoop();
 
-private:
 	int RunListenServer();
+
+private:
 
 	// Hooks a particular mod up to the registry
 	void SetRegistryMod( const char *pModName );
@@ -420,6 +970,10 @@ private:
 	// Handles there being an error setting up the video mode
 	InitReturnVal_t HandleSetModeError();
 
+	// Initializes, shuts down VR
+	bool InitVR();
+	void ShutdownVR();
+
 	// Purpose: Message pump when running stand-alone
 	void PumpMessages();
 
@@ -432,6 +986,7 @@ private:
 private:
 	void *m_hEditorHWnd;
 	bool m_bRunningSimulation;
+	bool m_bSupportsVR;
 	StartupInfo_t m_StartupInfo;
 };
 
@@ -465,14 +1020,7 @@ bool CEngineAPI::Connect( CreateInterfaceFn factory )
 
 	g_pPhysics = (IPhysics*)factory( VPHYSICS_INTERFACE_VERSION, NULL );
 
-	if ( IsPC() )
-	{
-		avi = (IAvi*)factory( AVI_INTERFACE_VERSION, NULL );
-		if ( !avi )
-			return false;
-	}
-	
-	if ( !g_pStudioRender || !g_pDataCache || !g_pPhysics || !g_pMDLCache || !g_pMatSystemSurface || !g_pInputSystem )
+	if ( !g_pStudioRender || !g_pDataCache || !g_pPhysics || !g_pMDLCache || !g_pMatSystemSurface || !g_pInputSystem /* || !g_pVideo */ )
 	{
 		Warning( "Engine wasn't able to acquire required interfaces!\n" );
 		return false;
@@ -486,6 +1034,10 @@ bool CEngineAPI::Connect( CreateInterfaceFn factory )
 
 	g_pHammer = (IHammer*)factory( INTERFACEVERSION_HAMMER, NULL );
 
+#if defined( USE_SDL )
+	g_pLauncherMgr = (ILauncherMgr *)factory( SDLMGR_INTERFACE_VERSION, NULL );
+#endif
+	
 	ConnectMDLCacheNotify();
 
 	return true; 
@@ -494,6 +1046,10 @@ bool CEngineAPI::Connect( CreateInterfaceFn factory )
 void CEngineAPI::Disconnect() 
 {
 	DisconnectMDLCacheNotify();
+
+#if !defined( SWDS )
+	TRACESHUTDOWN( Steam3Client().Shutdown() );
+#endif
 
 	g_pHammer = NULL;
 	g_pPhysics = NULL;
@@ -522,8 +1078,12 @@ void *CEngineAPI::QueryInterface( const char *pInterfaceName )
 //-----------------------------------------------------------------------------
 // Sets startup info
 //-----------------------------------------------------------------------------
-void CEngineAPI::SetStartupInfo( StartupInfo_t &info ) 
+void CEngineAPI::SetStartupInfo( StartupInfo_t &info )
 {
+	// Setup and write out steam_appid.txt before we launch
+	bool bDedicated = false; // Dedicated comes through CDedicatedServerAPI
+	eSteamInfoInit steamInfo = Sys_TryInitSteamInfo( this, g_SteamInfIDVersionInfo, info.m_pInitialMod, info.m_pBaseDirectory, bDedicated );
+
 	g_bTextMode = info.m_bTextMode;
 
 	// Set up the engineparms_t which contains global information about the mod
@@ -532,8 +1092,69 @@ void CEngineAPI::SetStartupInfo( StartupInfo_t &info )
 	// Copy off all the startup info
 	m_StartupInfo = info;
 
+#if !defined( SWDS )
+	// turn on the Steam3 API early so we can query app data up front
+	TRACEINIT( Steam3Client().Activate(), Steam3Client().Shutdown() );
+#endif
+
 	// Needs to be done prior to init material system config
 	TRACEINIT( COM_InitFilesystem( m_StartupInfo.m_pInitialMod ), COM_ShutdownFileSystem() );
+
+	if ( steamInfo != eSteamInfo_Initialized )
+	{
+		// Try again with filesystem available. This is commonly needed for SDK mods which need the filesystem to find
+		// their steam.inf, due to mounting SDK search paths.
+		steamInfo = Sys_TryInitSteamInfo( this, g_SteamInfIDVersionInfo, info.m_pInitialMod, info.m_pBaseDirectory, bDedicated );
+		Assert( steamInfo == eSteamInfo_Initialized );
+		if ( steamInfo != eSteamInfo_Initialized )
+		{
+			Warning( "Failed to find steam.inf or equivalent steam info. May not have proper information to connect to Steam.\n" );
+		}
+	}
+
+	m_bSupportsVR = false;
+	if ( IsPC() )
+	{
+		KeyValues *modinfo = new KeyValues("ModInfo");
+		if ( modinfo->LoadFromFile( g_pFileSystem, "gameinfo.txt" ) )
+		{
+			// Enable file tracking - client always does this in case it connects to a pure server.
+			// server only does this if sv_pure is set
+			// If it's not singleplayer_only
+			if ( V_stricmp( modinfo->GetString("type", "singleplayer_only"), "singleplayer_only") == 0 )
+			{
+				DevMsg( "Disabling whitelist file tracking in filesystem...\n" );
+				g_pFileSystem->EnableWhitelistFileTracking( false, false, false );
+			}
+			else
+			{
+				DevMsg( "Enabling whitelist file tracking in filesystem...\n" );
+				g_pFileSystem->EnableWhitelistFileTracking( true, false, false );
+			}
+
+			m_bSupportsVR = modinfo->GetInt( "supportsvr" ) > 0 && CommandLine()->CheckParm( "-vr" );
+			if ( m_bSupportsVR )
+			{
+				// This also has to happen before CreateGameWindow to know where to put
+				// the window and how big to make it
+				if ( InitVR() )
+				{
+					if ( Steam3Client().SteamUtils() )
+					{
+						if ( Steam3Client().SteamUtils()->IsSteamRunningInVR() && g_pSourceVR->IsHmdConnected() )
+						{
+							int nForceVRAdapterIndex = g_pSourceVR->GetVRModeAdapter();
+							materials->SetAdapter( nForceVRAdapterIndex, 0 );
+
+							g_pSourceVR->SetShouldForceVRMode();
+						}
+					}
+				}
+			}
+
+		}
+		modinfo->deleteThis();
+	}
 }
 
 
@@ -542,6 +1163,11 @@ void CEngineAPI::SetStartupInfo( StartupInfo_t &info )
 //-----------------------------------------------------------------------------
 InitReturnVal_t CEngineAPI::Init() 
 {
+	if ( CommandLine()->FindParm( "-sv_benchmark" ) != 0 )
+	{
+		Plat_SetBenchmarkMode( true );
+	}
+
 	InitReturnVal_t nRetVal = BaseClass::Init();
 	if ( nRetVal != INIT_OK )
 		return nRetVal;
@@ -549,7 +1175,7 @@ InitReturnVal_t CEngineAPI::Init()
 	m_bRunningSimulation = false;
 
 	// Initialize the FPU control word
-#if !defined( SWDS )
+#if defined(WIN32) && !defined( SWDS ) && !defined( _X360 )
 	_asm
 	{
 		fninit
@@ -664,29 +1290,73 @@ void CEngineAPI::ActivateSimulation( bool bActive )
 	}
 }
 
-	
+static void MoveConsoleWindowToFront()
+{
+#ifdef _WIN32
+	// Move the window to the front.
+	HINSTANCE hInst = LoadLibrary( "kernel32.dll" );
+	if ( hInst )
+	{
+		typedef HWND (*GetConsoleWindowFn)();
+		GetConsoleWindowFn fn = (GetConsoleWindowFn)GetProcAddress( hInst, "GetConsoleWindow" );
+		if ( fn )
+		{
+			HWND hwnd = fn();
+			ShowWindow( hwnd, SW_SHOW );
+			UpdateWindow( hwnd );
+			SetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW );
+		}
+		FreeLibrary( hInst );
+	}
+#endif
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Message pump when running stand-alone
 //-----------------------------------------------------------------------------
 void CEngineAPI::PumpMessages()
 {
+	// This message pumping happens in SDL if SDL is enabled.
+#if defined( PLATFORM_WINDOWS ) && !defined( USE_SDL )
 	MSG msg;
 	while ( PeekMessage( &msg, NULL, 0, 0, PM_REMOVE ) )
 	{
 		TranslateMessage( &msg );
 		DispatchMessage( &msg );
 	}
+#endif
+
+#if defined( USE_SDL )
+	g_pLauncherMgr->PumpWindowsMessageLoop();
+#endif
 
 	// Get input from attached devices
 	g_pInputSystem->PollInputState();
 
+	if ( IsX360() )
+	{
+		// handle Xbox system messages
+		XBX_ProcessEvents();
+	}
+
 	// NOTE: Under some implementations of Win9x, 
 	// dispatching messages can cause the FPU control word to change
-	SetupFPUControlWord();
+	if ( IsPC() )
+	{
+		SetupFPUControlWord();
+	}
 
 	game->DispatchAllStoredGameMessages();
 
-	EatTextModeKeyPresses();
+	if ( IsPC() )
+	{
+		static bool s_bFirstRun = true;
+		if ( s_bFirstRun )
+		{
+			s_bFirstRun = false;
+			MoveConsoleWindowToFront();
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -694,7 +1364,6 @@ void CEngineAPI::PumpMessages()
 //-----------------------------------------------------------------------------
 void CEngineAPI::PumpMessagesEditMode( bool &bIdle, long &lIdleCount )
 {
-	MSG msg;
 
 	if ( bIdle && !g_pHammer->HammerOnIdle( lIdleCount++ ) )
 	{
@@ -704,6 +1373,8 @@ void CEngineAPI::PumpMessagesEditMode( bool &bIdle, long &lIdleCount )
 	// Get input from attached devices
 	g_pInputSystem->PollInputState();
 
+#ifdef WIN32
+	MSG msg;
 	while ( PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) )
 	{
 		if ( msg.message == WM_QUIT )
@@ -725,6 +1396,12 @@ void CEngineAPI::PumpMessagesEditMode( bool &bIdle, long &lIdleCount )
 			lIdleCount = 0;
 		}
 	}
+#elif defined( USE_SDL )
+	Error( "Not supported" );
+#else
+#error
+#endif
+
 
 	// NOTE: Under some implementations of Win9x, 
 	// dispatching messages can cause the FPU control word to change
@@ -747,6 +1424,73 @@ void CEngineAPI::ActivateEditModeShaders( bool bActive )
 }
 
 
+#ifdef GPROFILER
+static bool g_gprofiling = false;
+
+CON_COMMAND( gprofilerstart, "Starts the gperftools profiler recording to the specified file." )
+{
+	if ( g_gprofiling )
+	{
+		Msg( "Profiling is already started.\n" );
+		return;
+	}
+
+	char buffer[500];
+	const char* profname = buffer;
+	if ( args.ArgC() < 2 )
+	{
+		static const char *s_pszHomeDir = getenv("HOME");
+		if ( !s_pszHomeDir )
+		{
+			Msg( "Syntax: gprofile <outputfilename>\n" );
+			return;
+		}
+
+		// Use the current date and time to create a unique file name.time_t t = time(NULL);
+		time_t t = time(NULL);
+		struct tm tm = *localtime(&t);
+
+		V_sprintf_safe( buffer, "%s/valveprofile_%4d_%02d_%02d_%02d.%02d.%02d.prof", s_pszHomeDir,
+					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec );
+		// profname already points to buffer.
+	}
+	else
+	{
+		profname = args[1];
+	}
+
+	int result = ProfilerStart( profname );
+	if ( result )
+	{
+		Msg( "Profiling started successfully. Recording to %s. Stop profiling with gprofilerstop.\n", profname );
+		g_gprofiling = true;
+	}
+	else
+	{
+		Msg( "Profiling to %s failed to start - errno = %d.\n", profname, errno );
+	}
+}
+
+CON_COMMAND( gprofilerstop, "Stops the gperftools profiler." )
+{
+	if ( g_gprofiling )
+	{
+		ProfilerStop();
+		Msg( "Stopped profiling.\n" );
+		g_gprofiling = false;
+	}
+}
+#endif
+
+
+void StopGProfiler()
+{
+#ifdef GPROFILER
+	gprofilerstop( CCommand() );
+#endif
+}
+
+
 //-----------------------------------------------------------------------------
 // Purpose: Message pump
 //-----------------------------------------------------------------------------
@@ -761,6 +1505,9 @@ bool CEngineAPI::MainLoop()
 		// Pump messages unless someone wants to quit
 		if ( eng->GetQuitting() != IEngine::QUIT_NOTQUITTING )
 		{
+			// We have to explicitly stop the profiler since otherwise symbol
+			// resolution doesn't work correctly.
+			StopGProfiler();
 			if ( eng->GetQuitting() != IEngine::QUIT_TODESKTOP )
 				return true;
 			return false;
@@ -781,13 +1528,13 @@ bool CEngineAPI::MainLoop()
 		{
 			VCRSyncToken( "Frame" );
 
-			// Deactivate edit mode shaders
-			ActivateEditModeShaders( false );
+		// Deactivate edit mode shaders
+		ActivateEditModeShaders( false );
 
-			eng->Frame();
+		eng->Frame();
 
-			// Reactivate edit mode shaders (in Edit mode only...)
-			ActivateEditModeShaders( true );
+		// Reactivate edit mode shaders (in Edit mode only...)
+		ActivateEditModeShaders( true );
 		}
 
 		if ( InEditMode() )
@@ -824,6 +1571,34 @@ void CEngineAPI::ShutdownRegistry( )
 
 
 //-----------------------------------------------------------------------------
+// Initializes, shuts down VR (via sourcevr.dll)
+//-----------------------------------------------------------------------------
+bool CEngineAPI::InitVR()
+{
+	if ( m_bSupportsVR )
+	{
+		g_pSourceVR = (ISourceVirtualReality *)g_AppSystemFactory( SOURCE_VIRTUAL_REALITY_INTERFACE_VERSION, NULL );
+		if ( g_pSourceVR )
+		{
+			// make sure that the sourcevr DLL we loaded is secure. If not, don't 
+			// let this client connect to secure servers.
+			if ( !Host_AllowLoadModule( "sourcevr" DLL_EXT_STRING, "EXECUTABLE_PATH", false ) )
+			{
+				Warning( "Preventing connections to secure servers because sourcevr.dll is not signed.\n" );
+				Host_DisallowSecureServers();
+			}
+		}
+	}
+	return true;
+}
+
+
+void CEngineAPI::ShutdownVR()
+{
+}
+
+
+//-----------------------------------------------------------------------------
 // One-time setup, based on the initially selected mod
 // FIXME: This should move into the launcher!
 //-----------------------------------------------------------------------------
@@ -832,10 +1607,12 @@ bool CEngineAPI::OnStartup( void *pInstance, const char *pStartupModName )
 	// This fixes a bug on certain machines where the input will 
 	// stop coming in for about 1 second when someone hits a key.
 	// (true means to disable priority boost)
+#ifdef WIN32
 	if ( IsPC() )
 	{
 		SetThreadPriorityBoost( GetCurrentThread(), true ); 
 	}
+#endif
 
 	// FIXME: Turn videomode + game into IAppSystems?
 
@@ -858,7 +1635,7 @@ bool CEngineAPI::OnStartup( void *pInstance, const char *pStartupModName )
 	{
 		goto onStartupShutdownGame;
 	}
-	
+
 	// We need to access the registry to get various settings (specifically,
 	// InitMaterialSystemConfig requires it).
 	if ( !InitRegistry( pStartupModName ) )
@@ -902,6 +1679,8 @@ void CEngineAPI::OnShutdown()
 		videomode->Shutdown();
 	}
 
+	ShutdownVR();
+
 	// Shut down the game
 	game->Shutdown();
 
@@ -915,7 +1694,8 @@ static bool IsValveMod( const char *pModName )
 	return ( Q_stricmp( GetCurrentMod(), "cstrike" ) == 0 ||
 		Q_stricmp( GetCurrentMod(), "dod" ) == 0 ||
 		Q_stricmp( GetCurrentMod(), "hl1mp" ) == 0 ||
-		Q_stricmp( GetCurrentMod(), "tf" ) == 0 ||
+		Q_stricmp( GetCurrentMod(), "tf" ) == 0 || 
+		Q_stricmp( GetCurrentMod(), "tf_beta" ) == 0 ||
 		Q_stricmp( GetCurrentMod(), "hl2mp" ) == 0 );
 }
 
@@ -944,9 +1724,16 @@ bool CEngineAPI::ModInit( const char *pModName, const char *pGameDir )
 	// Slam cvars based on mod/config.cfg
 	Host_ReadPreStartupConfiguration();
 
+	bool bWindowed = g_pMaterialSystemConfig->Windowed();
+	if( g_pMaterialSystemConfig->m_nVRModeAdapter != -1 )
+	{
+		// at init time we never want to start up full screen
+		bWindowed = true;
+	}
+
 	// Create the game window now that we have a search path
 	// FIXME: Deal with initial window width + height better
-	if ( !videomode || !videomode->CreateGameWindow( g_pMaterialSystemConfig->m_VideoMode.m_Width, g_pMaterialSystemConfig->m_VideoMode.m_Height, g_pMaterialSystemConfig->Windowed(), g_pMaterialSystemConfig->NoBorderWindow() ) )
+	if ( !videomode || !videomode->CreateGameWindow( g_pMaterialSystemConfig->m_VideoMode.m_Width, g_pMaterialSystemConfig->m_VideoMode.m_Height, bWindowed ) )
 	{
 		return false;
 	}
@@ -1044,47 +1831,28 @@ int CEngineAPI::RunListenServer()
 	return nRunResult;
 }
 
-#if 0
-CON_COMMAND( bigalloc, "huge alloc crash" )
+static void StaticRunListenServer( void *arg )
 {
-	Msg( "pre-crash %d\n", g_pMemAlloc->MemoryAllocFailed() );
-	void *buf = malloc( UINT_MAX );
-	Msg( "post-alloc %d\n", g_pMemAlloc->MemoryAllocFailed() );
-	*(int *)buf = 0;
+	*(int *)arg = s_EngineAPI.RunListenServer();
 }
-#endif
 
-extern void S_ClearBuffer();
-extern char g_minidumpinfo[ 4096 ];
-extern PAGED_POOL_INFO_t g_pagedpoolinfo;
-extern bool g_bUpdateMinidumpComment;
-static char errorText[4096];
-static char ppi[ 512 ];
-static PAGED_POOL_INFO_t final;
 
-extern "C" void __cdecl WriteMiniDumpUsingExceptionInfo( unsigned int uStructuredExceptionCode, struct _EXCEPTION_POINTERS * pExceptionInfo	)
+
+// This function is set as the crash handler for unhandled exceptions and as the minidump
+// handler for to be used by all of tier0's crash recording. This function
+// adds a game-specific minidump comment and ensures that the SteamAPI function is
+// used to save the minidump so that crashes are uploaded. SteamAPI has previously
+// been configured to use breakpad by calling SteamAPI_UseBreakpadCrashHandler.
+extern "C" void __cdecl WriteSteamMiniDumpWithComment( unsigned int uStructuredExceptionCode,
+			struct _EXCEPTION_POINTERS * pExceptionInfo,
+			const char *pszFilenameSuffix )
 {
 	// TODO: dynamically set the minidump comment from contextual info about the crash (i.e current VPROF node)?
 #if !defined( NO_STEAM )
 
-	if ( g_bUpdateMinidumpComment  )
+	if ( g_bUpdateMinidumpComment )
 	{
-		try 
-		{
-			V_strcpy(errorText,"Crash: ");
-			V_strncat( errorText, g_minidumpinfo, sizeof(errorText) );
-			
-			Plat_GetPagedPoolInfo( &final );
-
-			V_snprintf( ppi, sizeof(ppi), "prev PP PAGES: used: %d, free %d\nfinal PP PAGES: used: %d, free %d\nmemalloc = %u\n", g_pagedpoolinfo.numPagesUsed, g_pagedpoolinfo.numPagesFree, final.numPagesUsed, final.numPagesFree, g_pMemAlloc->MemoryAllocFailed() );
-			V_strncat( errorText, ppi, sizeof(errorText) );
-
-			SteamAPI_SetMiniDumpComment( errorText );
-		}
-		catch ( ... )
-		{
-			// Oh oh
-		}
+		BuildMinidumpComment( NULL, true );
 	}
 
 	SteamAPI_WriteMiniDump( uStructuredExceptionCode, pExceptionInfo, build_number() );
@@ -1099,34 +1867,58 @@ extern "C" void __cdecl WriteMiniDumpUsingExceptionInfo( unsigned int uStructure
 #endif
 } 
 
-
+ 
 //-----------------------------------------------------------------------------
 // Purpose: Main 
 //-----------------------------------------------------------------------------
 int CEngineAPI::Run()
 {
+	if ( CommandLine()->FindParm( "-insecure" ) || CommandLine()->FindParm( "-textmode" ) )
+	{
+		Host_DisallowSecureServers();
+	}
+
 #ifdef _X360
 	return RunListenServer(); // don't handle exceptions on 360 (because if we do then minidumps won't work at all)
 #elif defined ( _WIN32 )
-	if ( !Plat_IsInDebugSession() && !CommandLine()->FindParm( "-nominidumps") )
-	{
-		_set_se_translator( WriteMiniDumpUsingExceptionInfo );
+	// Ensure that we crash when we do something naughty in a callback
+	// such as a window proc. Otherwise on a 64-bit OS the crashes will be
+	// silently swallowed.
+	EnableCrashingOnCrashes();
 
-		try  // this try block allows the SE translator to work
-		{
-			return RunListenServer();
-		}
-		catch( ... )
-		{
-			return RUN_OK;
-		}
+	// Set the default minidump handling function. This is necessary so that Steam
+	// will upload crashes, with comments.
+	SetMiniDumpFunction( WriteSteamMiniDumpWithComment );
+
+	// Catch unhandled crashes. A normal __try/__except block will not work across
+	// the kernel callback boundary, but this does. To be clear, __try/__except
+	// and try/catch will usually not catch exceptions in a WindowProc or other
+	// callback that is called from kernel mode because 64-bit Windows cannot handle
+	// throwing exceptions across that boundary. See this article for details:
+	// http://blog.paulbetts.org/index.php/2010/07/20/the-case-of-the-disappearing-onload-exception-user-mode-callback-exceptions-in-x64/
+	// Note that the unhandled exception function is not called when running
+	// under a debugger, but that's fine because in that case we don't care about
+	// recording minidumps.
+	// The try/catch block still makes sense because it is a more reliable way
+	// of catching exceptions that aren't in callbacks.
+	// The unhandled exception filter will also catch crashes in threads that
+	// don't have a try/catch or __try/__except block.
+	bool noMinidumps = CommandLine()->FindParm( "-nominidumps");
+	if ( !noMinidumps )
+		MinidumpSetUnhandledExceptionFunction( WriteSteamMiniDumpWithComment );
+
+	if ( !Plat_IsInDebugSession() && !noMinidumps )
+	{
+		int nRetVal = RUN_OK;
+		CatchAndWriteMiniDumpForVoidPtrFn( StaticRunListenServer, &nRetVal, true );
+		return nRetVal;
 	}
 	else
 	{
 		return RunListenServer();
 	}
 #else
-	return RUN_OK; // linux doesn't do this
+	return RunListenServer();
 #endif
 }
 #endif // SWDS
@@ -1146,10 +1938,11 @@ bool CModAppSystemGroup::AddLegacySystems()
 	if ( !AddSystems( appSystems ) ) 
 		return false;
 
-#if !defined( _LINUX )
+#if !defined( DEDICATED )
 //	if ( CommandLine()->FindParm( "-tools" ) )
 	{
-		AppModule_t toolFrameworkModule = LoadModule( "engine.dll" );
+		AppModule_t toolFrameworkModule = LoadModule( "engine" DLL_EXT_STRING );
+
 		if ( !AddSystem( toolFrameworkModule, VTOOLFRAMEWORK_INTERFACE_VERSION ) )
 			return false;
 	}
@@ -1165,13 +1958,13 @@ bool CModAppSystemGroup::Create()
 {
 #ifndef SWDS
 	if ( !IsServerOnly() )
-	{
+{
 		if ( !ClientDLL_Load() )
-			return false;
-	}
-#endif
+	return false;
+}
+#endif 
 
-	if ( !ServerDLL_Load() )
+	if ( !ServerDLL_Load( IsServerOnly() ) )
 		return false;
 
 	IClientDLLSharedAppSystems *clientSharedSystems = 0;
@@ -1185,29 +1978,29 @@ bool CModAppSystemGroup::Create()
 	}
 #endif
 
-	IServerDLLSharedAppSystems *serverSharedSystems = ( IServerDLLSharedAppSystems * )g_ServerFactory( SERVER_DLL_SHARED_APPSYSTEMS, NULL );
-	if ( !serverSharedSystems )
-	{
-		Assert( !"Expected both game and client .dlls to have or not have shared app systems interfaces!!!" );
-		return AddLegacySystems();
-	}
-
+		IServerDLLSharedAppSystems *serverSharedSystems = ( IServerDLLSharedAppSystems * )g_ServerFactory( SERVER_DLL_SHARED_APPSYSTEMS, NULL );
+		if ( !serverSharedSystems )
+		{
+			Assert( !"Expected both game and client .dlls to have or not have shared app systems interfaces!!!" );
+			return AddLegacySystems();
+		}
+	
 	// Load game and client .dlls and build list then
 	CUtlVector< AppSystemInfo_t >	systems;
 
 	int i;
-	int serverCount = serverSharedSystems->Count();
+		int serverCount = serverSharedSystems->Count();
 	for ( i = 0 ; i < serverCount; ++i )
-	{
-		const char *dllName = serverSharedSystems->GetDllName( i );
-		const char *interfaceName = serverSharedSystems->GetInterfaceName( i );
-
-		AppSystemInfo_t info;
-		info.m_pModuleName = dllName;
-		info.m_pInterfaceName = interfaceName;
-
-		systems.AddToTail( info );
-	}
+		{
+			const char *dllName = serverSharedSystems->GetDllName( i );
+			const char *interfaceName = serverSharedSystems->GetInterfaceName( i );
+	
+			AppSystemInfo_t info;
+			info.m_pModuleName = dllName;
+			info.m_pInterfaceName = interfaceName;
+	
+			systems.AddToTail( info );
+		}
 
 	if ( !IsServerOnly() )
 	{
@@ -1236,10 +2029,11 @@ bool CModAppSystemGroup::Create()
 	if ( !AddSystems( systems.Base() ) ) 
 		return false;
 
-#if !defined( _LINUX )
+#if !defined( DEDICATED )
 //	if ( CommandLine()->FindParm( "-tools" ) )
 	{
-		AppModule_t toolFrameworkModule = LoadModule( "engine.dll" );
+		AppModule_t toolFrameworkModule = LoadModule( "engine" DLL_EXT_STRING );
+
 		if ( !AddSystem( toolFrameworkModule, VTOOLFRAMEWORK_INTERFACE_VERSION ) )
 			return false;
 	}
@@ -1288,20 +2082,6 @@ int CModAppSystemGroup::Main()
 		if ( eng->Load( true, host_parms.basedir ) )
 		{
 			// If we're using STEAM, pass the map cycle list as resource hints...
-#if LATER
-			if ( g_pFileSystem->IsSteam() )
-			{
-				char *hints;
-				if ( BuildMapCycleListHints(&hints) )
-				{
-					g_pFileSystem->HintResourceNeed(hints, true);
-				}
-				if ( hints )
-				{
-					free(hints);
-				}
-			}
-#endif
 			// Dedicated server drives frame loop manually
 			dedicated->RunServer();
 
@@ -1315,9 +2095,12 @@ int CModAppSystemGroup::Main()
 		COM_TimestampedLog( "eng->Load" );
 
 		// Start up the game engine
+		static const char engineLoadMessage[] = "Calling CEngine::Load";
+		int64 nStartTime = ETWBegin( engineLoadMessage );
 		if ( eng->Load( false, host_parms.basedir ) )					
 		{
 #if !defined(SWDS)
+			ETWEnd( engineLoadMessage, nStartTime );
 			toolframework->ServerInit( g_ServerFactory );
 
 			if ( s_EngineAPI.MainLoop() )
@@ -1354,20 +2137,6 @@ void CModAppSystemGroup::Destroy()
 }
 
 //-----------------------------------------------------------------------------
-// Console command to toggle back and forth between the engine running or not
-//-----------------------------------------------------------------------------
-#ifndef SWDS
-void EditorToggle_f()
-{
-	// Will switch back to the editor
-	bool bActive = (eng->GetState() != IEngine::DLL_PAUSED);
-	s_EngineAPI.ActivateSimulation( !bActive );
-}
-#endif // SWDS
-
-
-
-//-----------------------------------------------------------------------------
 //
 // Purpose: Expose engine interface to launcher	for dedicated servers
 //
@@ -1394,23 +2163,135 @@ public:
 	virtual void UpdateStatus(float *fps, int *nActive, int *nMaxPlayers, char *pszMap, int maxlen );
 	virtual void UpdateHostname(char *pszHostname, int maxlen);
 
-private:
-	int BuildMapCycleListHints( char **hints );
-
 	CModAppSystemGroup *m_pDedicatedServer;
 };
-
 
 //-----------------------------------------------------------------------------
 // Singleton
 //-----------------------------------------------------------------------------
 EXPOSE_SINGLE_INTERFACE( CDedicatedServerAPI, IDedicatedServerAPI, VENGINE_HLDS_API_VERSION );
 
+#define LONG_TICK_TIME					0.12f // about 8/66ths of a second
+#define MIN_TIME_BETWEEN_DUMPED_TICKS	5.0f;
+#define MAX_DUMPS_PER_LONG_TICK			10
+void Sys_Sleep ( int msec );
+
+bool g_bLongTickWatcherThreadEnabled = false;
+bool g_bQuitLongTickWatcherThread = false;
+int g_bTotalDumps = 0;
+
+DWORD __stdcall LongTickWatcherThread( void *voidPtr )
+{
+	int nLastTick = 0;
+	double flWarnTickTime = 0.0f;
+	double flNextPossibleDumpTime = Plat_FloatTime() + MIN_TIME_BETWEEN_DUMPED_TICKS;
+	int nNumDumpsThisTick = 0;
+
+	while ( eng->GetQuitting() == IEngine::QUIT_NOTQUITTING && !g_bQuitLongTickWatcherThread )
+	{
+		if ( sv.m_State == ss_active && sv.m_bSimulatingTicks )
+		{
+			int curTick = sv.m_nTickCount;
+			double curTime = Plat_FloatTime();
+			if ( nLastTick > 0 && nLastTick == curTick )
+			{
+				if ( curTime > flNextPossibleDumpTime && curTime > flWarnTickTime && nNumDumpsThisTick < MAX_DUMPS_PER_LONG_TICK )
+				{
+					nNumDumpsThisTick++;
+					g_bTotalDumps++;
+					Warning( "Long tick after tick %i. Writing minidump #%i (%i total).\n", nLastTick, nNumDumpsThisTick, g_bTotalDumps );
+
+					if ( nNumDumpsThisTick == MAX_DUMPS_PER_LONG_TICK )
+					{
+						Msg( "Not writing any more minidumps for this tick.\n" );
+					}
+
+					// If you're debugging a minidump and you ended up here, you probably want to switch to the main thread.
+					WriteMiniDump( "longtick" );
+				}
+			}
+
+			if ( nLastTick != curTick )
+			{
+				if ( nNumDumpsThisTick )
+				{
+					Msg( "Long tick lasted about %.1f seconds.\n", curTime - (flWarnTickTime - LONG_TICK_TIME) );
+					nNumDumpsThisTick = 0;
+					flNextPossibleDumpTime = curTime + MIN_TIME_BETWEEN_DUMPED_TICKS;
+				}
+
+				nLastTick = curTick;
+				flWarnTickTime = curTime + LONG_TICK_TIME;
+			}
+		}
+		else
+		{
+			nLastTick = 0;
+		}
+
+		if ( nNumDumpsThisTick )
+		{
+			// We'll write the next minidump 0.06 seconds from now.
+			Sys_Sleep( 60 );
+		}
+		else
+		{
+			// Check tick progress every 1/100th of a second.
+			Sys_Sleep( 10 );
+		}
+	}
+
+	g_bLongTickWatcherThreadEnabled = false;
+	g_bQuitLongTickWatcherThread = false;
+
+	return 0;
+}
+
+bool EnableLongTickWatcher()
+{
+	bool bRet = false;
+	if ( !g_bLongTickWatcherThreadEnabled )
+	{
+		g_bQuitLongTickWatcherThread = false;
+		g_bLongTickWatcherThreadEnabled = true;
+
+		DWORD nThreadID;
+		VCRHook_CreateThread(NULL, 0,
+#ifdef POSIX
+			(void*)
+#endif
+			LongTickWatcherThread, NULL, 0, (unsigned long int *)&nThreadID );
+
+		bRet = true;
+	}
+	else if ( g_bQuitLongTickWatcherThread )
+	{
+		Msg( "Cannot create a new long tick watcher while waiting for an old one to terminate.\n" );
+	}
+	else
+	{
+		Msg( "The long tick watcher thread is already running.\n" );
+	}
+
+	return bRet;
+}
+
 //-----------------------------------------------------------------------------
-// Connect, disconnect
+// Dedicated server entrypoint
 //-----------------------------------------------------------------------------
 bool CDedicatedServerAPI::Connect( CreateInterfaceFn factory ) 
 { 
+	if ( CommandLine()->FindParm( "-sv_benchmark" ) != 0 )
+	{
+		Plat_SetBenchmarkMode( true );
+	}
+
+	if ( CommandLine()->FindParm( "-dumplongticks" ) )
+	{
+		Msg( "-dumplongticks found on command line. Activating long tick watcher thread.\n" );
+		EnableLongTickWatcher();
+	}
+
 	// Store off the app system factory...
 	g_AppSystemFactory = factory;
 
@@ -1475,95 +2356,6 @@ void *CDedicatedServerAPI::QueryInterface( const char *pInterfaceName )
 }
 
 //-----------------------------------------------------------------------------
-// Creates the hint list for a multiplayer map rotation from the map cycle.
-// The map cycle message is a text string with CR/CRLF separated lines.
-//	-removes comments
-//	-removes arguments
-//-----------------------------------------------------------------------------
-const char *szCommonPreloads  = "MP_Preloads";
-const char *szReslistsBaseDir = "reslists2";
-const char *szReslistsExt     = ".lst";
-
-int CDedicatedServerAPI::BuildMapCycleListHints(char **hints)
-{
-	char szMap[ MAX_OSPATH + 2 ]; // room for one path plus <CR><LF>
-	unsigned int length;
-	char szMod[MAX_OSPATH];
-
-	// Determine the mod directory.
-	Q_FileBase(com_gamedir, szMod, sizeof( szMod ) );
-
-	// Open mapcycle.txt
-	char cszMapCycleTxtFile[MAX_OSPATH];
-	Q_snprintf(cszMapCycleTxtFile, sizeof( cszMapCycleTxtFile ), "%s\\mapcycle.txt", szMod);
-	FileHandle_t pFile = g_pFileSystem->Open(cszMapCycleTxtFile, "rb");
-	if ( pFile == FILESYSTEM_INVALID_HANDLE )
-	{
-		ConMsg("Unable to open %s", cszMapCycleTxtFile);
-		return 0;
-	}
-
-	// Start off with the common preloads.
-	Q_snprintf(szMap, sizeof( szMap ), "%s\\%s\\%s%s\r\n", szReslistsBaseDir, szMod, szCommonPreloads, szReslistsExt);
-	int hintsSize = strlen(szMap) + 1;
-	*hints = (char*)malloc( hintsSize );
-	if ( *hints == NULL )
-	{
-		ConMsg("Unable to allocate memory for map cycle hints list");
-		g_pFileSystem->Close( pFile );
-		return 0;
-	}
-	Q_strncpy( *hints, szMap, hintsSize );
-		
-	// Read in and parse mapcycle.txt
-	length = g_pFileSystem->Size(pFile);
-	if ( length )
-	{
-		char *pStart = (char *)malloc(length);
-		if ( pStart && ( 1 == g_pFileSystem->Read(pStart, length, pFile) )
-		   )
-		{
-			const char *pFileList = pStart;
-
-			while ( 1 )
-			{
-				pFileList = COM_Parse( pFileList );
-				if ( strlen( com_token ) <= 0 )
-					break;
-
-				Q_strncpy(szMap, com_token, sizeof(szMap));
-
-				// Any more tokens on this line?
-				if ( COM_TokenWaiting( pFileList ) )
-				{
-					pFileList = COM_Parse( pFileList );
-				}
-
-				char mapLine[sizeof(szMap)];
-				Q_snprintf(mapLine, sizeof(mapLine), "%s\\%s\\%s%s\r\n", szReslistsBaseDir, szMod, szMap, szReslistsExt);
-				*hints = (char*)realloc(*hints, strlen(*hints) + 1 + strlen(mapLine) + 1); // count NULL string terminators
-				if ( *hints == NULL )
-				{
-					ConMsg("Unable to reallocate memory for map cycle hints list");
-					g_pFileSystem->Close( pFile );
-					return 0;
-				}
-				Q_strncat(*hints, mapLine, hintsSize, COPY_ALL_CHARACTERS);
-			}
-		}
-	}
-
-	g_pFileSystem->Close(pFile);
-
-	// Tack on <moddir>\mp_maps.txt to the end to make sure we load reslists for all multiplayer maps we know of
-	Q_snprintf(szMap, sizeof( szMap ), "%s\\%s\\mp_maps.txt\r\n", szReslistsBaseDir, szMod);
-	*hints = (char*)realloc(*hints, strlen(*hints) + 1 + strlen(szMap) + 1); // count NULL string terminators
-	Q_strncat( *hints, szMap, hintsSize, COPY_ALL_CHARACTERS );
-
-	return 1;
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: 
 // Input  : type - 0 == normal, 1 == dedicated server
 //			*instance - 
@@ -1571,9 +2363,12 @@ int CDedicatedServerAPI::BuildMapCycleListHints(char **hints)
 //			*cmdline - 
 //			launcherFactory - 
 //-----------------------------------------------------------------------------
-
 bool CDedicatedServerAPI::ModInit( ModInfo_t &info )
 {
+	// Setup and write out steam_appid.txt before we launch
+	bool bDedicated = true;
+	eSteamInfoInit steamInfo = Sys_TryInitSteamInfo( this, g_SteamInfIDVersionInfo, info.m_pInitialMod, info.m_pBaseDirectory, bDedicated );
+
 	eng->SetQuitting( IEngine::QUIT_NOTQUITTING );
 
 	// Set up the engineparms_t which contains global information about the mod
@@ -1584,6 +2379,33 @@ bool CDedicatedServerAPI::ModInit( ModInfo_t &info )
 	g_bTextMode = info.m_bTextMode;
 
 	TRACEINIT( COM_InitFilesystem( info.m_pInitialMod ), COM_ShutdownFileSystem() );
+
+	if ( steamInfo != eSteamInfo_Initialized )
+	{
+		// Try again with filesystem available. This is commonly needed for SDK mods which need the filesystem to find
+		// their steam.inf, due to mounting SDK search paths.
+		steamInfo = Sys_TryInitSteamInfo( this, g_SteamInfIDVersionInfo, info.m_pInitialMod, info.m_pBaseDirectory, bDedicated );
+		Assert( steamInfo == eSteamInfo_Initialized );
+		if ( steamInfo != eSteamInfo_Initialized )
+		{
+			Warning( "Failed to find steam.inf or equivalent steam info. May not have proper information to connect to Steam.\n" );
+		}
+	}
+
+	// set this up as early as possible, if the server isn't going to run pure, stop CRCing bits as we load them
+	// this happens even before the ConCommand's are processed, but we need to be sure to either CRC every file
+	// that is loaded, or not bother doing any
+	// Note that this mirrors g_sv_pure_mode from sv_main.cpp
+	int pure_mode = 1; // default to on, +sv_pure 0 or -sv_pure 0 will turn it off
+	if ( CommandLine()->CheckParm("+sv_pure") )
+		pure_mode = CommandLine()->ParmValue( "+sv_pure", 1 );
+	else if ( CommandLine()->CheckParm("-sv_pure") )
+		pure_mode = CommandLine()->ParmValue( "-sv_pure", 1 );
+	if ( pure_mode )
+		g_pFullFileSystem->EnableWhitelistFileTracking( true, true, CommandLine()->FindParm( "-sv_pure_verify_hashes" ) ? true : false );
+	else
+		g_pFullFileSystem->EnableWhitelistFileTracking( false, false, false );
+
 	materials->ModInit();
 
 	// Setup the material system config record, CreateGameWindow depends on it
@@ -1721,3 +2543,29 @@ public:
 EXPOSE_SINGLE_INTERFACE( CGameUIFuncs, IGameUIFuncs, VENGINE_GAMEUIFUNCS_VERSION );
 
 #endif
+
+CON_COMMAND( dumplongticks, "Enables generating minidumps on long ticks." )
+{
+	int enable = atoi( args[1] );
+	if ( args.ArgC() == 1 || enable )
+	{
+		if ( EnableLongTickWatcher() )
+		{
+			Msg( "Long tick watcher thread created. Use \"dumplongticks 0\" to disable.\n" );
+		}
+	}
+	else
+	{
+		// disable watcher thread if enabled
+		if ( g_bLongTickWatcherThreadEnabled && !g_bQuitLongTickWatcherThread )
+		{
+			Msg( "Disabling the long tick watcher.\n" );
+			g_bQuitLongTickWatcherThread = true;
+		}
+		else
+		{
+			Msg( "The long tick watcher is already disabled.\n" );
+		}
+	}
+}
+

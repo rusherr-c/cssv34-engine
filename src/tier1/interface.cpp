@@ -123,7 +123,7 @@ void *GetModuleHandle(const char *name)
 }
 #endif
 
-#if defined( _WIN32 ) || defined(WIN64)
+#if defined( _WIN32 ) && !defined( _X360 )
 #define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 #endif
@@ -175,23 +175,8 @@ static HMODULE InternalLoadLibrary( const char *pName, Sys_Flags flags )
 #else
 	if ( flags & SYS_NOLOAD )
 		return GetModuleHandle( pName );
-	else {
-		auto hret = LoadLibraryEx(pName, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-		if (!hret) {
-			DWORD err = GetLastError();
-
-			char buf[256];
-			wsprintfA(buf, "[InternalLoadLibrary] Failed! Additional information:\npDllName = %s\nSys_Flags = SYS_NOFLAGS\nError %lu (0x%08lX)\n",pName, err, err);
-
-			OutputDebugStringA(buf);
-			return NULL;
-		}
-		char buf[256];
-		wsprintfA(buf, "[InternalLoadLibrary] Successfully loaded %s!\n", pName);
-		OutputDebugStringA(buf);
-
-		return hret;
-	}
+	else
+		return LoadLibraryEx( pName, NULL, LOAD_WITH_ALTERED_SEARCH_PATH );
 #endif
 }
 unsigned ThreadedLoadLibraryFunc( void *pParam )

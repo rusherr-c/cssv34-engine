@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: HUD Target ID element
 //
@@ -9,7 +9,8 @@
 #include "hudelement.h"
 #include "c_cs_player.h"
 #include "c_playerresource.h"
-#include "vgui_EntityPanel.h"
+#include "c_cs_playerresource.h"
+#include "vgui_entitypanel.h"
 #include "iclientmode.h"
 #include "vgui/ILocalize.h"
 
@@ -23,8 +24,8 @@
 
 extern CUtlVector< C_CHostage* > g_Hostages;
 
-static ConVar hud_centerid( "hud_centerid", "1" );
-static ConVar hud_showtargetid( "hud_showtargetid", "1" );
+static ConVar hud_showtargetpos( "hud_showtargetpos", "0", FCVAR_ARCHIVE, "0: center, 1: upper left, 2 upper right, 3: lower left, 4: lower right" );
+static ConVar hud_showtargetid( "hud_showtargetid", "1", FCVAR_ARCHIVE, "Enables display of target names" );
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -98,6 +99,9 @@ void CTargetID::VidInit()
 {
 	CHudElement::VidInit();
 
+	// set our size to the current viewport size
+	SetSize(g_pClientMode->GetViewport()->GetWide(), g_pClientMode->GetViewport()->GetTall());
+
 	m_flLastChangeTime = 0;
 	m_iLastEntIndex = 0;
 }
@@ -125,6 +129,9 @@ Color CTargetID::GetColorForTargetTeam( int iTeamNumber )
 //-----------------------------------------------------------------------------
 void CTargetID::Paint()
 {
+	if ( hud_showtargetid.GetBool() == false )
+		return;
+
 #define MAX_ID_STRING 256
 	wchar_t sIDString[ MAX_ID_STRING ];
 	sIDString[0] = 0;
@@ -139,6 +146,18 @@ void CTargetID::Paint()
 	// don't show target IDs when flashed
 	if ( pPlayer->m_flFlashBangTime > (gpGlobals->curtime+0.5) )
 		return;
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Don't show target ID's when in freezecam mode
+	//=============================================================================
+	
+	if ( pPlayer->GetObserverMode() == OBS_MODE_FREEZECAM )
+		return;
+	 
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 
 	// Get our target's ent index
 	int iEntIndex = pPlayer->GetIDTarget();
@@ -170,6 +189,7 @@ void CTargetID::Paint()
 		C_BasePlayer *pLocalPlayer = C_BasePlayer::GetLocalPlayer();
 
 		const char *printFormatString = NULL;
+		wchar_t wszClanTag[ MAX_PLAYER_NAME_LENGTH ];
 		wchar_t wszPlayerName[ MAX_PLAYER_NAME_LENGTH ];
 		wchar_t wszHealthText[ 10 ];
 		bool bShowHealth = false;
@@ -191,7 +211,20 @@ void CTargetID::Paint()
 				c = GetColorForTargetTeam( pPlayer->GetTeamNumber() );
 
 				bShowPlayerName = true;
-				g_pVGuiLocalize->ConvertANSIToUnicode( pPlayer->GetPlayerName(),  wszPlayerName, sizeof(wszPlayerName) );
+ 				g_pVGuiLocalize->ConvertANSIToUnicode( pPlayer->GetPlayerName(), wszPlayerName, sizeof(wszPlayerName) );
+
+				C_CS_PlayerResource *cs_PR = dynamic_cast<C_CS_PlayerResource *>( g_PR );
+
+				char szClan[MAX_PLAYER_NAME_LENGTH];
+				if ( cs_PR && Q_strlen( cs_PR->GetClanTag( iEntIndex ) ) > 1 )
+				{
+					Q_snprintf( szClan, sizeof( szClan ), "%s ", cs_PR->GetClanTag( iEntIndex ) );
+				}
+				else
+				{
+					szClan[ 0 ] = 0;
+				}
+				g_pVGuiLocalize->ConvertANSIToUnicode( szClan, wszClanTag, sizeof( wszClanTag ) );
 				
 				if ( pPlayer->InSameTeam(pLocalPlayer) )
 				{
@@ -285,11 +318,11 @@ void CTargetID::Paint()
 		{
 			if ( bShowPlayerName && bShowHealth )
 			{
-				g_pVGuiLocalize->ConstructString( sIDString, sizeof(sIDString), g_pVGuiLocalize->Find(printFormatString), 2, wszPlayerName, wszHealthText );
+				g_pVGuiLocalize->ConstructString( sIDString, sizeof(sIDString), g_pVGuiLocalize->Find(printFormatString), 3, wszClanTag, wszPlayerName, wszHealthText );
 			}
 			else if ( bShowPlayerName )
 			{
-				g_pVGuiLocalize->ConstructString( sIDString, sizeof(sIDString), g_pVGuiLocalize->Find(printFormatString), 1, wszPlayerName );
+				g_pVGuiLocalize->ConstructString( sIDString, sizeof(sIDString), g_pVGuiLocalize->Find(printFormatString), 2, wszClanTag, wszPlayerName );
 			}
 			else if ( bShowHealth )
 			{
@@ -303,21 +336,40 @@ void CTargetID::Paint()
 
 		if ( sIDString[0] )
 		{
-			int wide, tall;
-			int ypos = YRES(260);
-			int xpos = XRES(10);
+			C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
+			bool bObserverMode = pPlayer && pPlayer->IsObserver();
 
+			int wide, tall;
 			vgui::surface()->GetTextSize( m_hFont, sIDString, wide, tall );
 
-			if( hud_centerid.GetInt() == 0 )
+			int ypos;
+			int xpos;
+
+			switch ( hud_showtargetpos.GetInt() )
 			{
-				ypos = YRES(420);
-			}
-			else
-			{
+			case 0: // center
+			default:
 				xpos = (ScreenWidth() - wide) / 2;
+				ypos = YRES(260) - tall / 2;
+				break;
+			case 1: // upper left
+				xpos = XRES(10);
+				ypos = bObserverMode ? YRES(55) : YRES(5);
+				break;
+			case 2: // upper right
+				xpos = XRES(630) - wide;
+				ypos = bObserverMode ? YRES(55) : YRES(5);
+				break;
+			case 3: // lower left
+				xpos = XRES(10);
+				ypos = bObserverMode ? YRES(415) : YRES(445) - tall;
+				break;
+			case 4: // lower right
+				xpos = XRES(630) - wide;
+				ypos = bObserverMode ? YRES(415) : YRES(410) - tall;
+				break;
 			}
-			
+
 			vgui::surface()->DrawSetTextFont( m_hFont );
 			vgui::surface()->DrawSetTextPos( xpos, ypos );
 			vgui::surface()->DrawSetTextColor( c );

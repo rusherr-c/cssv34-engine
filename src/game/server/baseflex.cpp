@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -113,7 +113,7 @@ CBaseFlex::CBaseFlex( void ) :
 CBaseFlex::~CBaseFlex( void )
 {
 	m_LocalToGlobal.RemoveAll();
-	Assert( m_SceneEvents.Count() == 0 );
+	AssertMsg( m_SceneEvents.Count() == 0, "m_ScenesEvent.Count != 0: %d", m_SceneEvents.Count() );
 }
 
 void CBaseFlex::SetModel( const char *szModelName )
@@ -147,7 +147,7 @@ void CBaseFlex::SetFlexWeight( LocalFlexController_t index, float value )
 		if (pflexcontroller->max != pflexcontroller->min)
 		{
 			value = (value - pflexcontroller->min) / (pflexcontroller->max - pflexcontroller->min);
-			value = clamp( value, 0.0, 1.0 );
+			value = clamp( value, 0.0f, 1.0f );
 		}
 
 		m_flexWeight.Set( index, value );
@@ -508,7 +508,7 @@ bool CBaseFlex::HandleStartSequenceSceneEvent( CSceneEventInfo *info, CChoreoSce
 		float seq_duration = SequenceDuration( info->m_nSequence );
 		float flCycle = dt / seq_duration;
 		flCycle = flCycle - (int)flCycle; // loop
-		SetLayerCycle( info->m_iLayer, flCycle, flCycle );
+		SetLayerCycle( info->m_iLayer, flCycle, flCycle, 0.f );
 
 		SetLayerPlaybackRate( info->m_iLayer, 0.0 );
 	}
@@ -569,11 +569,11 @@ bool CBaseFlex::HandleStartGestureSceneEvent( CSceneEventInfo *info, CChoreoScen
 		{
 			if (!stricmp( pkvFaceposer->GetName(), "startloop" ))
 			{
-				strcpy( szStartLoop, pkvFaceposer->GetString() );
+				V_strcpy_safe( szStartLoop, pkvFaceposer->GetString() );
 			}
 			else if (!stricmp( pkvFaceposer->GetName(), "endloop" ))
 			{
-				strcpy( szEndLoop, pkvFaceposer->GetString() );
+				V_strcpy_safe( szEndLoop, pkvFaceposer->GetString() );
 			}
 		}
 
@@ -669,7 +669,7 @@ bool CBaseFlex::HandleStartGestureSceneEvent( CSceneEventInfo *info, CChoreoScen
 	if ( looping )
 	{
 		DevMsg( 1, "vcd error, gesture %s of model %s is marked as STUDIO_LOOPING!\n", 
-			event->GetParameters(), GetModelName() );
+			event->GetParameters(), STRING(GetModelName()) );
 	}
 
 	SetLayerLooping( info->m_iLayer, false ); // force to not loop
@@ -801,7 +801,6 @@ void CBaseFlex::RemoveSceneEvent( CChoreoScene *scene, CChoreoEvent *event, bool
 			info->m_bStarted	= false;
 
 			m_SceneEvents.Remove( i );
-			return;
 		}
 	}
 
@@ -1197,8 +1196,10 @@ bool CBaseFlex::ProcessFlexAnimationSceneEvent( CSceneEventInfo *info, CChoreoSc
 					// only check occasionally
 					else if (info->m_flNext <= gpGlobals->curtime)
 					{
+						CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+
 						// if not in view, disable
-						info->m_bHasArrived = UTIL_IsAnyPlayerLookingAtEntity(this);
+						info->m_bHasArrived = (pPlayer && !pPlayer->FInViewCone( this ) );
 						info->m_flNext = gpGlobals->curtime + RandomFloat( 0.7, 1.2 );
 					}
 
@@ -1316,9 +1317,9 @@ static Activity DetermineExpressionMoveActivity( CChoreoEvent *event, CAI_BaseNP
 
 	// Custom distance styles are appended to param2 with a space as a separator
 	const char *pszAct = Q_strstr( sParam2, " " );
+	char szActName[256];
 	if ( pszAct )
 	{
-		char szActName[256];
 		Q_strncpy( szActName, sParam2, sizeof(szActName) );
 		szActName[ (pszAct-sParam2) ] = '\0';
 		pszAct = szActName;
@@ -1410,7 +1411,7 @@ bool CBaseFlex::ProcessMoveToSceneEvent( CSceneEventInfo *info, CChoreoScene *sc
 
 			float flDist = (info->m_hTarget->EyePosition() - GetAbsOrigin()).Length2D();
 
-			if (flDist > max( max( flDistTolerance, 0.1 ), event->GetDistanceToTarget()))
+			if (flDist > MAX( MAX( flDistTolerance, 0.1 ), event->GetDistanceToTarget()))
 			{
 				// Msg("flDist %.1f\n", flDist );
 				int result = false;
@@ -1835,11 +1836,11 @@ bool CBaseFlex::ProcessGestureSceneEvent( CSceneEventInfo *info, CChoreoScene *s
 		{
 			if (IsMoving())
 			{
-				info->m_flWeight = max( info->m_flWeight - 0.2, 0.0 );
+				info->m_flWeight = MAX( info->m_flWeight - 0.2, 0.0 );
 			}
 			else
 			{
-				info->m_flWeight = min( info->m_flWeight + 0.2, 1.0 );
+				info->m_flWeight = MIN( info->m_flWeight + 0.2, 1.0 );
 			}
 		}
 
@@ -1913,11 +1914,11 @@ bool CBaseFlex::ProcessSequenceSceneEvent( CSceneEventInfo *info, CChoreoScene *
 
 		if (bFadeOut)
 		{
-			info->m_flWeight = max( info->m_flWeight - 0.2, 0.0 );
+			info->m_flWeight = MAX( info->m_flWeight - 0.2, 0.0 );
 		}
 		else
 		{
-			info->m_flWeight = min( info->m_flWeight + 0.2, 1.0 );
+			info->m_flWeight = MIN( info->m_flWeight + 0.2, 1.0 );
 		}
 
 		float spline = 3 * info->m_flWeight * info->m_flWeight - 2 * info->m_flWeight * info->m_flWeight * info->m_flWeight;
@@ -1929,7 +1930,7 @@ bool CBaseFlex::ProcessSequenceSceneEvent( CSceneEventInfo *info, CChoreoScene *
 			float dt =  scene->GetTime() - event->GetStartTime();
 			float seq_duration = SequenceDuration( info->m_nSequence );
 			float flCycle = dt / seq_duration;
-			flCycle = clamp( flCycle, 0, 1.0 );
+			flCycle = clamp( flCycle, 0.f, 1.0f );
 			SetLayerCycle( info->m_iLayer, flCycle );
 		}
 
@@ -2016,10 +2017,16 @@ bool CBaseFlex::EnterSceneSequence( CChoreoScene *scene, CChoreoEvent *event, bo
 	CAI_BaseNPC *myNpc = MyNPCPointer( );
 
 	if (!myNpc)
+	{
+		// In multiplayer, we allow players to play scenes
+		if ( IsPlayer() )
+			return true;
+
 		return false;
+	}
 
 	// 2 seconds past current event, or 0.2 seconds past end of scene, whichever is shorter
-	float flDuration = min( 2.0, min( event->GetEndTime() - scene->GetTime() + 2.0, scene->FindStopTime() - scene->GetTime() + 0.2 ) );
+	float flDuration = MIN( 2.0, MIN( event->GetEndTime() - scene->GetTime() + 2.0, scene->FindStopTime() - scene->GetTime() + 0.2 ) );
 
 	if (myNpc->IsCurSchedule( SCHED_SCENE_GENERIC ))
 	{
@@ -2194,11 +2201,11 @@ float CSceneEventInfo::UpdateWeight( CBaseFlex *pActor )
 	// decay if this is a background scene and there's other flex animations playing
 	if (pActor->IsSuppressedFlexAnimation( this ))
 	{
-		m_flWeight = max( m_flWeight - 0.2, 0.0 );
+		m_flWeight = MAX( m_flWeight - 0.2, 0.0 );
 	}
 	else
 	{
-		m_flWeight = min( m_flWeight + 0.1, 1.0 );
+		m_flWeight = MIN( m_flWeight + 0.1, 1.0 );
 	}
 	return m_flWeight;
 }
@@ -2547,7 +2554,7 @@ void CFlexCycler::Think( void )
 						{
 							m_flexnum = LookupFlex( szTemp );
 
-							if (m_flexnum != -1 && m_flextarget[m_flexnum] != 1)
+							if (m_flexnum != LocalFlexController_t(-1) && m_flextarget[m_flexnum] != 1)
 							{
 								m_flextarget[m_flexnum] = 1.0;
 								// SetFlexTarget( m_flexnum );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ====
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // An entity that allows level designer control over the fog parameters.
 //
@@ -240,11 +240,11 @@ int CFogController::DrawDebugTextOverlays(void)
 		EntityText(text_offset,tempstr,0);
 		text_offset++;
 
-		Q_snprintf(tempstr,sizeof(tempstr),"Start: %3.0f",m_fog.start);
+		Q_snprintf(tempstr,sizeof(tempstr),"Start: %3.0f",m_fog.start.Get());
 		EntityText(text_offset,tempstr,0);
 		text_offset++;
 
-		Q_snprintf(tempstr,sizeof(tempstr),"End  : %3.0f",m_fog.end);
+		Q_snprintf(tempstr,sizeof(tempstr),"End  : %3.0f",m_fog.end.Get());
 		EntityText(text_offset,tempstr,0);
 		text_offset++;
 
@@ -375,17 +375,16 @@ void CFogSystem::LevelInitPostEntity( void )
 		}
 	} while ( pFogController );
 
-	// HACK: Coop and Singleplayer games don't get a call to CBasePlayer::Spawn on level transitions.
+	// HACK: Singleplayer games don't get a call to CBasePlayer::Spawn on level transitions.
 	// CBasePlayer::Activate is called before this is called so that's too soon to set up the fog controller.
 	// We don't have a hook similar to Activate that happens after LevelInitPostEntity
 	// is called, or we could just do this in the player itself.
-	if ( gpGlobals->maxClients == 1 || gpGlobals->coop )
+	if ( gpGlobals->maxClients == 1 )
 	{
-		for (int i = 1; i <= gpGlobals->maxClients; i++)
+		CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+		if ( pPlayer && ( pPlayer->m_Local.m_PlayerFog.m_hCtrl.Get() == NULL ) )
 		{
-			CBasePlayer* pPlayer = UTIL_PlayerByIndex(i);
-			if ( pPlayer && ( pPlayer->m_Local.m_PlayerFog.m_hCtrl.Get() == NULL ) )
-				pPlayer->InitFogController();
+			pPlayer->InitFogController();
 		}
 	}
 }

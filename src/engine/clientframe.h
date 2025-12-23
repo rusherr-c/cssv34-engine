@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -60,8 +60,8 @@ private:
 class CClientFrameManager
 {
 public:
-	CClientFrameManager(void)  : m_ClientFramePool( MAX_CLIENT_FRAMES, CUtlMemoryPool::GROW_SLOW ) {	m_Frames = NULL; }
-	virtual ~CClientFrameManager(void) { DeleteClientFrames(-1); }
+	CClientFrameManager(void);
+	virtual ~CClientFrameManager(void);
 
 	int				AddClientFrame( CClientFrame *pFrame ); // returns current count
 	CClientFrame	*GetClientFrame( int nTick, bool bExact = true );
@@ -75,6 +75,8 @@ private:
 	void			FreeFrame( CClientFrame* pFrame );
 
 	CClientFrame	*m_Frames;		// updates can be delta'ed from here
+	CClientFrame	*m_LastFrame;
+	int				m_nFrames;
 	CClassMemoryPool< CClientFrame >	m_ClientFramePool;
 };
 

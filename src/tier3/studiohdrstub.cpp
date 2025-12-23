@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,27 +21,27 @@
 const studiohdr_t *studiohdr_t::FindModel( void **cache, char const *pModelName ) const
 {
 	MDLHandle_t handle = g_pMDLCache->FindMDL( pModelName );
-	*cache = (void*)handle;
+	*cache = (void*)(uintp)handle;
 	return g_pMDLCache->GetStudioHdr( handle );
 }
 
 virtualmodel_t *studiohdr_t::GetVirtualModel( void ) const
 {
-	return g_pMDLCache->GetVirtualModel( (MDLHandle_t)virtualModel );
+	return g_pMDLCache->GetVirtualModel( (MDLHandle_t)((int)virtualModel&0xffff) );
 }
 
 byte *studiohdr_t::GetAnimBlock( int i ) const
 {
-	return g_pMDLCache->GetAnimBlock( (MDLHandle_t)virtualModel, i );
+	return g_pMDLCache->GetAnimBlock( (MDLHandle_t)((int)virtualModel&0xffff), i );
 }
 
 int studiohdr_t::GetAutoplayList( unsigned short **pOut ) const
 {
-	return g_pMDLCache->GetAutoplayList( (MDLHandle_t)virtualModel, pOut );
+	return g_pMDLCache->GetAutoplayList( (MDLHandle_t)((int)virtualModel&0xffff), pOut );
 }
 
 const studiohdr_t *virtualgroup_t::GetStudioHdr( void ) const
 {
-	return g_pMDLCache->GetStudioHdr( (MDLHandle_t)cache );
+	return g_pMDLCache->GetStudioHdr( (MDLHandle_t)((int)cache&0xffff) );
 }
 

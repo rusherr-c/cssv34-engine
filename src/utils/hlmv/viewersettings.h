@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,10 +34,11 @@ enum // render modes
 	RM_SMOOTHSHADED,
 	RM_TEXTURED,
 	RM_BONEWEIGHTS,
-	RM_SHOWBADVERTEXDATA
+	RM_SHOWBADVERTEXDATA,
+	RM_TEXCOORDS,
 };
 
-
+#define HLMV_MAX_MERGED_MODELS 12
 
 struct ViewerSettings
 {
@@ -85,10 +86,14 @@ struct ViewerSettings
 	bool showShadow;
 	int texture;
 	int skin;
+	int materialIndex;
+	bool showOriginAxis;
+	float originAxisLength;
 
 	// animation
 	float speedScale;
 	bool blendSequenceChanges;
+	bool animateWeapons;
 
 	// bodyparts and bonecontrollers
 	//int submodels[32];
@@ -129,7 +134,7 @@ struct ViewerSettings
 
 	bool faceposerToolsDriveMouth;
 
-	char mergeModelFile[4][256];
+	char mergeModelFile[HLMV_MAX_MERGED_MODELS][256];
 
 	ViewerSettings();
 

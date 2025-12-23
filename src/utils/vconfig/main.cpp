@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Configuration utility
 //
@@ -19,6 +19,8 @@
 #include "vconfig_main.h"
 #include "VConfigDialog.h"
 #include "ConfigManager.h"
+#include "steam/steam_api.h"
+#include <iregistry.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
@@ -26,6 +28,8 @@
 #define VCONFIG_MAIN_PATH_ID	"MAIN"
 
 CVConfigDialog *g_pMainFrame = 0;
+char g_engineDir[50];
+
 
 // Dummy window
 static WNDCLASS staticWndclass = { NULL };
@@ -36,6 +40,8 @@ static HWND staticHwnd = 0;
 CGameConfigManager			g_ConfigManager;
 CUtlVector<CGameConfig *>	g_Configs;
 HANDLE g_dwChangeHandle = NULL;
+CSteamAPIContext g_SteamAPIContext;
+CSteamAPIContext *steamapicontext = &g_SteamAPIContext;
 
 //-----------------------------------------------------------------------------
 // Purpose: Copy a string into a CUtlVector of characters
@@ -62,6 +68,14 @@ const char *GetBaseDirectory( void )
 	return path;
 }
 
+// Fetch the engine version for when running in steam.
+void GetEngineVersion(char* pcEngineVer, int nSize)
+{
+	IRegistry *reg = InstanceRegistry( "Source SDK" );
+	Assert( reg );
+	V_strncpy( pcEngineVer, reg->ReadString( "EngineVer", "orangebox" ), nSize );
+	ReleaseInstancedRegistry( reg );
+}
 //-----------------------------------------------------------------------------
 // Purpose: Add a new configuration with proper defaults to a keyvalue block
 //-----------------------------------------------------------------------------
@@ -102,7 +116,7 @@ bool AddConfig( int configID )
 	Q_StripTrailingSlash( szPath );
 
 	char fullDir[MAX_PATH];
-	g_ConfigManager.GetRootGameDirectory( fullDir, sizeof( fullDir ), g_ConfigManager.GetRootDirectory(), "half-life 2" );
+	g_ConfigManager.GetRootGameDirectory( fullDir, sizeof( fullDir ), g_ConfigManager.GetRootDirectory() );
 	
 	return g_ConfigManager.AddDefaultConfig( newInfo, gameBlock, szPath, fullDir );
 }
@@ -358,7 +372,7 @@ bool InitializeVGUI( void )
 
 	// localization
 	g_pVGuiLocalize->AddFile( "resource/platform_%language%.txt");
-	g_pVGuiLocalize->AddFile( "resource/vgui_%language%.txt");
+	g_pVGuiLocalize->AddFile( "vgui/resource/vgui_%language%.txt" );
 	g_pVGuiLocalize->AddFile( "vconfig_english.txt");
 
 	// Start vgui
@@ -392,7 +406,7 @@ void ShutdownVGUI( void )
 void SetMayaScriptSettings( )
 {
 	char pMayaScriptPath[ MAX_PATH ];
-	Q_snprintf( pMayaScriptPath, sizeof(pMayaScriptPath), "%%VPROJECT%%\\..\\sdktools\\maya\\7.0\\modules\\utilities\\scripts" );
+	Q_snprintf( pMayaScriptPath, sizeof(pMayaScriptPath), "%%VPROJECT%%\\..\\sdktools\\maya\\scripts" );
 	SetVConfigRegistrySetting( "MAYA_SCRIPT_PATH", pMayaScriptPath, false );
 }
 
@@ -579,7 +593,7 @@ bool CVConfigApp::PreInit()
 	g_pFullFileSystem->AddSearchPath( GetBaseDirectory(), VCONFIG_MAIN_PATH_ID );	
 
 	// the main platform dir
-	g_pFullFileSystem->AddSearchPath( "platform", "PLATFORM", PATH_ADD_TO_HEAD );
+	g_pFullFileSystem->AddSearchPath( "platform","PLATFORM", PATH_ADD_TO_HEAD );
 
 	return true;
 }
@@ -610,6 +624,12 @@ int CVConfigApp::Main()
 {
 	if ( !InitializeVGUI() )
 		return 0;
+
+	SteamAPI_InitSafe();
+	SteamAPI_SetTryCatchCallbacks( false ); // We don't use exceptions, so tell steam not to use try/catch in callback handlers
+	g_SteamAPIContext.Init();
+
+	GetEngineVersion( g_engineDir, sizeof( g_engineDir ) );
 
 	// Run the app
 	while ( vgui::ivgui()->IsRunning() )

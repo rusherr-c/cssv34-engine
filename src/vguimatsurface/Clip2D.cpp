@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Contains 2D clipping routines
 //
@@ -6,10 +6,10 @@
 // $NoKeywords: $
 //=============================================================================//
 
-#include <vgui/isurface.h>
+#include <vgui/ISurface.h>
 #include "Clip2D.h"
 #include "tier0/dbg.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #if defined( _X360 )
 #include "materialsystem/imaterialsystem.h"
 #endif
@@ -60,6 +60,10 @@ void SetScissorRect( int left, int top, int right, int bottom )
 	// Check for a valid rectangle...
 	Assert( left <= right );
 	Assert( top <= bottom );
+
+	if ( g_ScissorRect.left == left && g_ScissorRect.right == right &&
+		 g_ScissorRect.top == top && g_ScissorRect.bottom == bottom )
+		 return;
 
 	g_ScissorRect.left   = left;
 	g_ScissorRect.top    = top;

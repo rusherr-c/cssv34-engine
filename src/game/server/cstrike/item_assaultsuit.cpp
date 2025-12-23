@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -40,6 +40,11 @@ class CItemAssaultSuit : public CItem
 		{
 			CPASAttenuationFilter filter( pBasePlayer );
 			EmitSound( filter, entindex(), "BaseCombatCharacter.ItemPickup2" );
+
+			CSingleUserRecipientFilter user( pPlayer );
+			UserMessageBegin( user, "ItemPickup" );
+			WRITE_STRING( "item_assaultsuit" );
+			MessageEnd();
 		}
 
 		return true;		

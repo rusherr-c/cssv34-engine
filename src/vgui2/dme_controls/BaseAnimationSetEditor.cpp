@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2006, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,7 @@
 #include "vgui_controls/ComboBox.h"
 #include "vgui_controls/FileOpenDialog.h"
 #include "vgui_controls/MessageBox.h"
+#include "vgui_controls/perforcefilelistframe.h"
 #include "studio.h"
 #include "dme_controls/BaseAnimSetAttributeSliderPanel.h"
 #include "dme_controls/BaseAnimSetPresetFaderPanel.h"
@@ -616,6 +617,11 @@ void CBaseAnimationSetEditor::ImportAnimation( CDmeChannelsClip *pChannelsClip, 
 	CUtlVector< LogPreview_t > controls;
 	int nCount = bVisibleOnly ? BuildVisibleControlList( controls ) : BuildFullControlList( controls );
 
+	COperationFileListFrame *pStatusFrame = new COperationFileListFrame( this, 
+		"Import the Following Channels?", "Target Control", false );
+	pStatusFrame->SetCloseButtonVisible( false );
+	pStatusFrame->SetOperationColumnHeaderText( "Source Channel" );
+
 	int nSrcCount = pChannelsClip->m_Channels.Count();
 	CDmeChannel** ppFoundChannels = (CDmeChannel**)_alloca( nSrcCount * sizeof(CDmeChannel*) );
 	int nFoundCount = 0;
@@ -635,6 +641,7 @@ void CBaseAnimationSetEditor::ImportAnimation( CDmeChannelsClip *pChannelsClip, 
 			CDmeChannel *pImportChannel = FindImportChannel( pChannel, pChannelsClip );
 			if ( !pImportChannel )
 			{
+				pStatusFrame->AddOperation( "No source channel", pChannelInfo, Color( 255, 0, 0, 255 ) ); 
 				continue;
 			}
 
@@ -643,6 +650,7 @@ void CBaseAnimationSetEditor::ImportAnimation( CDmeChannelsClip *pChannelsClip, 
 			char pImportInfo[512];
 			Q_snprintf( pImportInfo, sizeof(pImportInfo), "\"%s\" : %s", 
 				pImportChannel->GetToElement()->GetName(), pImportChannel->GetToAttribute()->GetName() );
+			pStatusFrame->AddOperation( pImportInfo, pChannelInfo, Color( 0, 255, 0, 255 ) );
 		}
 	}
 
@@ -663,11 +671,13 @@ void CBaseAnimationSetEditor::ImportAnimation( CDmeChannelsClip *pChannelsClip, 
 		char pImportInfo[512];
 		Q_snprintf( pImportInfo, sizeof(pImportInfo), "\"%s\" : %s", 
 			pMissingChannel->GetToElement()->GetName(), pMissingChannel->GetToAttribute()->GetName() );
+		pStatusFrame->AddOperation( pImportInfo, "No destination control", Color( 255, 255, 0, 255 ) );
 	}
 
 	KeyValues *pContext = new KeyValues( "context" );
 	SetElementKeyValue( pContext, "channelsClip", pChannelsClip );
 	pContext->SetInt( "visibleOnly", bVisibleOnly );
+	pStatusFrame->DoModal( pContext, "ImportConfirmed" );
 }
 
 
@@ -824,7 +834,7 @@ void CBaseAnimationSetEditor::OnImportAnimation( KeyValues *pParams )
 	{
 		char pModelName[ MAX_PATH ];
 		studiohdr_t *pStudioHdr = pGameModel->GetStudioHdr();
-		Q_StripExtension( pStudioHdr->name, pModelName, sizeof(pModelName) );
+		Q_StripExtension( pStudioHdr->pszName(), pModelName, sizeof(pModelName) );
 
 		char pRelativePath[ MAX_PATH ];
 		Q_snprintf( pRelativePath, sizeof(pRelativePath), "models/%s/animations/dmx", pModelName );
@@ -896,7 +906,7 @@ bool CBaseAnimationSetEditor::OnWriteFileToDisk( const char *pFileName, const ch
 void CBaseAnimationSetEditor::OnExportFacialAnimation()
 {
 	KeyValues *pContextKeyValues = new KeyValues( "ExportFacialAnimation" );
-	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, "facial_animation", 0 );
+	m_hFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, "facial_animation", FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 

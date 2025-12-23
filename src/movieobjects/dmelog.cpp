@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -915,7 +915,7 @@ bool CDmeLogLayer::ValidateKeys() const
 	{
 		if ( m_times[i] <= m_times[i-1] )
 		{
-			Warning( "Error in log %s! Key times are out of order [keys %d->%d: %f->%f]!\n",
+			Warning( "Error in log %s! Key times are out of order [keys %d->%d: %d->%d]!\n",
 				GetName(), i-1, i, m_times[i-1], m_times[i] );
 			return false;
 		}
@@ -3409,24 +3409,66 @@ static void SpewEvents( CUtlRBTree< LayerEvent_t< T > > &events )
 	{
 		LayerEvent_t< T > *pEvent = &events[ idx ];
 		Msg( "Event %u layer %i at time %i type %s\n",
-			(unsigned)idx, pEvent->m_nLayer, pEvent->m_Time, pEvent->m_Type == LayerEvent_t< T >::LE_START ? "start" : "end" );
+			(unsigned)idx, pEvent->m_nLayer, pEvent->m_Time.GetTenthsOfMS(), pEvent->m_Type == LayerEvent_t< T >::LE_START ? "start" : "end" );
 	}
 }
 
 template< class T >
-static void SpewKey( const T& val )
+inline void SpewKey( const T& )
+{
+	Msg( "GenericType" );
+}
+
+template<>
+inline void SpewKey<float>( const float& val )
 {
 	Msg( "%f", val );
 }
 
+template<>
+inline void SpewKey<int>( const int& val )
+{
+	Msg( "%d", val );
+}
+
+template<>
+inline void SpewKey<Vector2D>( const Vector2D& val )
+{
+	Msg( "%f,%f", val.x, val.y );
+}
+
+template<>
+inline void SpewKey<Vector4D>( const Vector4D& val )
+{
+	Msg( "%f,%f,%f,%f", val.x, val.y, val.z, val.w );
+}
+
+template<>
+inline void SpewKey<DmeTime_t>( const DmeTime_t& val )
+{
+	Msg( "%d", val.GetTenthsOfMS() );
+}
+
+template<>
+inline void SpewKey<bool>( const bool& val )
+{
+	Msg( "%s", val ? "true" : "false" );
+}
+
+template<>
+inline void SpewKey<Color>( const Color& val )
+{
+	Msg( "%08x", val.GetRawColor() );
+}
+
 template< >
-void SpewKey( const Vector& val )
+inline void SpewKey( const Vector& val )
 {
 	Msg( "[%f %f %f]", val.x, val.y, val.z );
 }
 
 template< >
-void SpewKey( const Quaternion& val )
+inline void SpewKey( const Quaternion& val )
 {
 	Msg( "[%f %f %f %f]", val.x, val.y, val.z, val.w );
 }
@@ -3435,7 +3477,7 @@ template< class T >
 static void SpewFlattenedKey( CDmeTypedLogLayer< T > *pLogLayer, ActiveLayer_t< T > *pActiveLayer, DmeTime_t t, const T& val )
 {
 	Msg( "Layer %d:  adding key at time %f [%d -> %d], value ", 
-		pActiveLayer->priority, t.GetSeconds(), pActiveLayer->firstTime, pActiveLayer->lastTime );
+		pActiveLayer->priority, t.GetSeconds(), pActiveLayer->firstTime.GetTenthsOfMS(), pActiveLayer->lastTime.GetTenthsOfMS() );
 	SpewKey( val );
 	Msg( "\n" );
 }
@@ -3504,7 +3546,7 @@ static void AddDiscontinitySample( CDmeTypedLogLayer< T > *pTargetLayer, CDmeTyp
 	{
 		if ( pSpewLabel )
 		{
-			Msg( "Adding %s helper key at %d value ", pSpewLabel, tKeyTime );
+			Msg( "Adding %s helper key at %d value ", pSpewLabel, tKeyTime.GetTenthsOfMS() );
 			SpewKey( val );
 			Msg( " [curvetype %s]\n", Interpolator_NameForCurveType( pLog->GetDefaultCurveType(), false ) );
 		}
@@ -3514,7 +3556,7 @@ static void AddDiscontinitySample( CDmeTypedLogLayer< T > *pTargetLayer, CDmeTyp
 	{
 		if ( pSpewLabel )
 		{
-			Msg( "Adding %s helper key at %d value ", pSpewLabel, tKeyTime );
+			Msg( "Adding %s helper key at %d value ", pSpewLabel, tKeyTime.GetTenthsOfMS() );
 			SpewKey( val );
 			Msg( "\n" );
 		}
@@ -4315,10 +4357,15 @@ void CDmeTypedLog< T >::_StampKeyAtHeadResample( DmeTime_t tHeadPosition, const 
 			// NOTE: This is necessary because each blend region has different 'deltas'
 			// to avoid overdriving in the falloff regions. Therefore, the 'previous value'
 			// used in the clamping operation will be different 
-			blend[nNextTransition].UpdateClampHelper( tCurrent, pReadLayer, params.m_flIntensity, clampHelper, pInterpTarget );
+			if ( nNextTransition < ARRAYSIZE(blend) )
+			{
+				blend[nNextTransition].UpdateClampHelper( tCurrent, pReadLayer, params.m_flIntensity, clampHelper, pInterpTarget );
+			}
 
 			// Also need to update the 'previous' value stored in the 
 			++nNextTransition;
+			if ( nNextTransition >= ARRAYSIZE(tResampleStartTime) )
+				break;
 
 			// Update the first resample time
 			tResampleTime = tResampleStartTime[nNextTransition];
@@ -4661,7 +4708,7 @@ void CDmeTypedLog< T >::GetValue( DmeTime_t time, CDmAttribute *pAttr, uint inde
 }
 
 template< class T >
-void CDmeTypedLog< T >::GetValueSkippingTopmostLayer( DmeTime_t time, CDmAttribute *pAttr, uint index /*= 0*/ ) const 
+void CDmeTypedLog< T >::GetValueSkippingTopmostLayer( DmeTime_t time, CDmAttribute *pAttr, uint index = 0 ) const 
 {
 	CUtlVector< int > layers;
 	FindLayersForTime( time, layers );
@@ -5700,9 +5747,9 @@ void CDmeTypedLog< T >::PasteAndRescaleSamples(
 			oldDist.y = LengthOf( Subtract( baseValue, pBlendBase[ nBlendIndex ] ) );
 
 			float flDistance = oldDist.Length();
-			float flFactor = flDistance * pOOBlendLength[ nBlendIndex ];
-			flFactor = destParams.AdjustFactorForInterpolatorType( flFactor, nBlendIndex );
-			val = Interpolate( flFactor, baseValue, val );
+			float flFactorBlend = flDistance * pOOBlendLength[ nBlendIndex ];
+			flFactorBlend = destParams.AdjustFactorForInterpolatorType( flFactorBlend, nBlendIndex );
+			val = Interpolate( flFactorBlend, baseValue, val );
 		}
 
 		// Force key insertion when we transition between states

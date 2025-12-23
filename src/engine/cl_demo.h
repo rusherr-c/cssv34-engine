@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,6 +24,14 @@ struct DemoCommandQueue
 	int				filepos;
 };
 
+// When skipping forward through a replay it is important to stop
+// occasionally and process the backlog of packets. Otherwise if you
+// skip forward too far you will cause data structures to grow far
+// beyond their intended size. This can lead to overflows and out-of-memory
+// errors, and it can waste memory because some of these data structures
+// never release their memory after hitting a high-water mark.
+const unsigned nMaxConsecutiveSkipPackets = 100;
+
 class CDemoPlayer : public IDemoPlayer
 {
 
@@ -31,29 +39,36 @@ public: // IDemoPlayer interface implementation:
 	CDemoPlayer();
 	~CDemoPlayer();
 
-	CDemoFile *GetDemoFile();
+	virtual CDemoFile *GetDemoFile();
 
-	bool	StartPlayback( const char *filename, bool bAsTimeDemo );
-	void	PausePlayback( float seconds );
-	void	SkipToTick( int tick, bool bRelative, bool bPause );
-	void	ResumePlayback( void );
-	void	StopPlayback( void );
+	virtual bool	StartPlayback( const char *filename, bool bAsTimeDemo );
+	virtual void	PausePlayback( float seconds );
+	virtual void	SkipToTick( int tick, bool bRelative, bool bPause );
+	virtual void	SetEndTick( int tick );
+	virtual void	ResumePlayback( void );
+	virtual void	StopPlayback( void );
 
-	int		GetPlaybackTick( void );
-	float	GetPlaybackTimeScale( void );
-	int		GetTotalTicks( void );
+	virtual int		GetPlaybackStartTick( void );
+	virtual int		GetPlaybackTick( void );
+	virtual float	GetPlaybackTimeScale( void );
+	virtual int		GetTotalTicks( void );
 
-	bool	IsPlayingBack( void );
-	bool	IsPlaybackPaused( void );
-	bool	IsPlayingTimeDemo( void );
-	bool	IsSkipping( void );
-	bool	CanSkipBackwards( void ) { return false; }
+	virtual bool	IsPlayingBack( void );
+	virtual bool	IsPlaybackPaused( void );
+	virtual bool	IsPlayingTimeDemo( void );
+	virtual bool	IsSkipping( void );
+	virtual bool	CanSkipBackwards( void ) { return false; }
 	
-	void	SetPlaybackTimeScale( float timescale );
-	void	InterpolateViewpoint(); // override viewpoint
-	netpacket_t *ReadPacket( void );
-	void	ResetDemoInterpolation( void );
+	virtual void	SetPlaybackTimeScale( float timescale );
+	virtual void	InterpolateViewpoint(); // override viewpoint
+	virtual netpacket_t *ReadPacket( void );
+	virtual void	ResetDemoInterpolation( void );
+	virtual int		GetProtocolVersion();
 
+	virtual bool	ShouldLoopDemos() { return true; }
+	virtual void	OnLastDemoInLoopPlayed() {}
+
+	virtual bool	IsLoading( void );
 
 public:	// other public functions
 	void	MarkFrame( float flFPSVariability );
@@ -67,6 +82,8 @@ public:	// other public functions
 protected:
 	bool	OverrideView( democmdinfo_t& info );
 
+	virtual void	OnStopCommand();
+
 public:
 	
 	CDemoFile		m_DemoFile;
@@ -78,7 +95,10 @@ public:
 	float			m_flAutoResumeTime; // how long do we pause demo playback
 	float			m_flPlaybackRateModifier;
 	int				m_nSkipToTick;	// skip to tick ASAP, -1 = off
-	
+	int				m_nEndTick; // if nonzero, stop playback once we reach this tick
+	bool			m_bLoading; // true if demo is loading
+
+	unsigned		m_nSkipPacketsPlayed; // Track consecutive skip packets returned to avoid excess
 
 	// view origin/angle interpolation:
 	CUtlVector< DemoCommandQueue >	m_DestCmdInfo;
@@ -120,6 +140,7 @@ public:
 	void	RecordMessages( bf_read &data, int bits ); // add messages to current packet
 	void	RecordPacket( void ); // packet finished, write all recorded stuff to file
 	void	RecordServerClasses( ServerClass *pClasses ); // packet finished, write all recorded stuff to file
+	void	RecordStringTables(); 
 
 	void	ResetDemoInterpolation( void );
 
@@ -158,7 +179,11 @@ public:
 	bool			m_bResetInterpolation;
 };
 
-extern CDemoPlayer *g_pClientDemoPlayer;
 extern CDemoRecorder *g_pClientDemoRecorder;
+
+inline CDemoPlayer *ToClientDemoPlayer( IDemoPlayer *pDemoPlayer )
+{
+	return static_cast< CDemoPlayer * >( pDemoPlayer );
+}
 
 #endif // CL_DEMO_H

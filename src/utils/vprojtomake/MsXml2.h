@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 
 #pragma warning( disable: 4049 )  /* more than 64k source lines */
 

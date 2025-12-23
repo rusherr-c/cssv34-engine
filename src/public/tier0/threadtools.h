@@ -9,11 +9,14 @@
 #ifndef THREADTOOLS_H
 #define THREADTOOLS_H
 
+#include "tier0/type_traits.h"
+
 #include <limits.h>
 
 #include "tier0/platform.h"
 #include "tier0/dbg.h"
 #include "tier0/vcrmode.h"
+#include "tier0/vprof_telemetry.h"
 
 #ifdef PLATFORM_WINDOWS_PC
 #include <intrin.h>
@@ -46,6 +49,37 @@
 #ifdef _WIN32
 typedef void *HANDLE;
 #endif
+
+// Start thread running  - error if already running
+enum ThreadPriorityEnum_t
+{
+#if defined( PLATFORM_PS3 )
+	TP_PRIORITY_NORMAL  = 1001,
+	TP_PRIORITY_HIGH = 100,
+	TP_PRIORITY_LOW = 2001,
+	TP_PRIORITY_DEFAULT = 1001
+#error "Need PRIORITY_LOWEST/HIGHEST"
+#elif defined( PLATFORM_LINUX )
+    // We can use nice on Linux threads to change scheduling.
+    // pthreads on Linux only allows priority setting on
+    // real-time threads.
+    // NOTE: Lower numbers are higher priority, thus the need
+    // for TP_IS_PRIORITY_HIGHER.
+	TP_PRIORITY_DEFAULT = 0,
+	TP_PRIORITY_NORMAL = 0,
+	TP_PRIORITY_HIGH = -10,
+	TP_PRIORITY_LOW = 10,
+	TP_PRIORITY_HIGHEST = -20,
+	TP_PRIORITY_LOWEST = 19,
+#else  // PLATFORM_PS3
+	TP_PRIORITY_DEFAULT = 0,	//	THREAD_PRIORITY_NORMAL
+	TP_PRIORITY_NORMAL = 0,	//	THREAD_PRIORITY_NORMAL
+	TP_PRIORITY_HIGH = 1,	//	THREAD_PRIORITY_ABOVE_NORMAL
+	TP_PRIORITY_LOW = -1,	//	THREAD_PRIORITY_BELOW_NORMAL
+	TP_PRIORITY_HIGHEST = 2,	//	THREAD_PRIORITY_HIGHEST
+	TP_PRIORITY_LOWEST = -2,	//	THREAD_PRIORITY_LOWEST 
+#endif // PLATFORM_PS3
+};
 
 //-----------------------------------------------------------------------------
 //
@@ -762,6 +796,11 @@ private:
 	int				m_depth;
 };
 
+#ifdef COMPILER_CLANG
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wunused-private-field"
+#endif // Q_CC_CLANG
+
 class ALIGN128 CAlignedThreadFastMutex : public CThreadFastMutex
 {
 public:
@@ -773,6 +812,10 @@ public:
 private:
 	uint8 pad[128-sizeof(CThreadFastMutex)];
 } ALIGN128_POST;
+
+#ifdef COMPILER_CLANG
+#  pragma clang diagnostic pop
+#endif
 
 #else
 typedef CThreadMutex CThreadFastMutex;
@@ -844,66 +887,75 @@ template <class MUTEX_TYPE = CThreadMutex>
 class CAutoLockT
 {
 public:
-	FORCEINLINE CAutoLockT( MUTEX_TYPE &lock)
-		: m_lock(lock)
+	FORCEINLINE CAutoLockT( MUTEX_TYPE &lock, const char* pMutexName, const char* pFilename, int nLineNum, uint64 minReportDurationUs )
+	: m_lock( const_cast< typename V_remove_const< MUTEX_TYPE >::type & >( lock ) )
+	, m_pMutexName( pMutexName )
+	, m_pFilename( pFilename )
+	, m_nLineNum( nLineNum )
+	, m_bOwned( true )
 	{
+		tmTryLockEx( TELEMETRY_LEVEL0, &m_uLockMatcher, minReportDurationUs, pFilename, nLineNum, &m_lock, pMutexName );
 		m_lock.Lock();
+		tmEndTryLockEx( TELEMETRY_LEVEL0, m_uLockMatcher, pFilename, nLineNum, &m_lock, TMLR_SUCCESS );
+		tmSetLockStateEx( TELEMETRY_LEVEL0, pFilename, nLineNum, &m_lock, TMLS_LOCKED, pMutexName );
 	}
 
-	FORCEINLINE CAutoLockT(const MUTEX_TYPE &lock)
-		: m_lock(const_cast<MUTEX_TYPE &>(lock))
+	FORCEINLINE CAutoLockT<MUTEX_TYPE>( CAutoLockT<MUTEX_TYPE> && rhs )
+	: m_lock( const_cast< typename V_remove_const< MUTEX_TYPE >::type &>( rhs.m_lock ) )
 	{
-		m_lock.Lock();
+		m_pMutexName = rhs.m_pMutexName;
+		m_pFilename = rhs.m_pFilename;
+		m_nLineNum = rhs.m_nLineNum;
+		#ifdef RAD_TELEMETRY_ENABLED
+			m_uLockMatcher = rhs.m_uLockMatcher;
+		#endif
+		m_bOwned = true;
+		rhs.m_bOwned = false;
 	}
 
 	FORCEINLINE ~CAutoLockT()
 	{
-		m_lock.Unlock();
+		if ( m_bOwned ) 
+		{
+			m_lock.Unlock();
+			tmSetLockStateEx( TELEMETRY_LEVEL0, m_pFilename, m_nLineNum, &m_lock, TMLS_RELEASED, m_pMutexName );
+		}
 	}
 
-
 private:
-	MUTEX_TYPE &m_lock;
+	typename V_remove_const< MUTEX_TYPE >::type &m_lock;
+	const char* m_pMutexName;
+	const char* m_pFilename;
+	int m_nLineNum;
+	bool m_bOwned;	 // Did owenership of the lock pass to another instance?
+
+#ifdef RAD_TELEMETRY_ENABLED
+	TmU64 m_uLockMatcher;
+#endif
 
 	// Disallow copying
 	CAutoLockT<MUTEX_TYPE>( const CAutoLockT<MUTEX_TYPE> & );
 	CAutoLockT<MUTEX_TYPE> &operator=( const CAutoLockT<MUTEX_TYPE> & );
+
+	// No move assignment because no default construction.
+	CAutoLockT<MUTEX_TYPE> &operator=( CAutoLockT<MUTEX_TYPE> && );
 };
 
 typedef CAutoLockT<CThreadMutex> CAutoLock;
 
+template < typename MUTEX_TYPE >
+inline CAutoLockT<MUTEX_TYPE> make_auto_lock( MUTEX_TYPE& lock, const char* pMutexname, const char* pFilename, int nLineNum, int nMinReportDurationUs = 1 )
+{
+	return CAutoLockT<MUTEX_TYPE>( lock, pMutexname, pFilename, nLineNum, nMinReportDurationUs );
+}
+
 //---------------------------------------------------------
 
-template <int size>	struct CAutoLockTypeDeducer {};
-template <> struct CAutoLockTypeDeducer<sizeof(CThreadMutex)> {	typedef CThreadMutex Type_t; };
-template <> struct CAutoLockTypeDeducer<sizeof(CThreadNullMutex)> {	typedef CThreadNullMutex Type_t; };
-#if !defined(THREAD_PROFILER)
-template <> struct CAutoLockTypeDeducer<sizeof(CThreadFastMutex)> {	typedef CThreadFastMutex Type_t; };
-template <> struct CAutoLockTypeDeducer<sizeof(CAlignedThreadFastMutex)> {	typedef CAlignedThreadFastMutex Type_t; };
-#endif
-
-#define AUTO_LOCK_( type, mutex ) \
-	CAutoLockT< type > UNIQUE_ID( static_cast<const type &>( mutex ) )
-
-#if defined(GNUC)
-
-template<typename T> T strip_cv_quals_for_mutex(T&);
-template<typename T> T strip_cv_quals_for_mutex(const T&);
-template<typename T> T strip_cv_quals_for_mutex(volatile T&);
-template<typename T> T strip_cv_quals_for_mutex(const volatile T&);
-
 #define AUTO_LOCK( mutex ) \
-    AUTO_LOCK_( typeof(::strip_cv_quals_for_mutex(mutex)), mutex )
+	auto UNIQUE_ID = make_auto_lock( mutex, #mutex, __FILE__, __LINE__ );
 
-#else // GNUC
-
-#define AUTO_LOCK( mutex ) \
-	AUTO_LOCK_( CAutoLockTypeDeducer<sizeof(mutex)>::Type_t, mutex )
-
-#endif
-
-#define AUTO_LOCK_FM( mutex ) \
-	AUTO_LOCK_( CThreadFastMutex, mutex )
+#define AUTO_LOCK_D( mutex, minDurationUs ) \
+	auto UNIQUE_ID = make_auto_lock( mutex, #mutex, __FILE__, __LINE__, minDurationUs );
 
 #define LOCAL_THREAD_LOCK_( tag ) \
 	; \
@@ -1075,7 +1127,7 @@ inline int ThreadWaitForEvents( int nEvents, CThreadEvent * const *pEvents, bool
 	return WAIT_TIMEOUT;
 #else
 	HANDLE handles[64];
-	for ( unsigned int i = 0; i < min( nEvents, ARRAYSIZE(handles) ); i++ )
+	for ( int i = 0; i < min( nEvents, (int)ARRAYSIZE(handles) ); i++ )
 		handles[i] = pEvents[i]->GetHandle();
 	return ThreadWaitForObjects( nEvents, handles, bWaitAll, timeout );
 #endif
@@ -1306,7 +1358,7 @@ private:
 		bool *        pfInitSuccess;
 	};
 
-	static unsigned int __stdcall ThreadProc( void * pv );
+	static unsigned __stdcall ThreadProc( void * pv );
 
 	// make copy constructor and assignment operator inaccessible
 	CThread( const CThread & );

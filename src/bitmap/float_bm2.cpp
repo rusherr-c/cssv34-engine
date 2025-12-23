@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -22,7 +22,7 @@ static float ScaleValue(float f, float overbright)
 static float IScaleValue(float f, float overbright)
 {
 	f*=(1.0/overbright);
-	int ival=min(255,ceil(f*255.0));
+	int ival=min(255,(int)ceil(f*255.0));
 	return ival;
 }
 

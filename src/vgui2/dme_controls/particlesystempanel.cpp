@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,9 +10,9 @@
 #include "movieobjects/dmeparticlesystemdefinition.h"
 #include "materialsystem/imesh.h"
 #include "materialsystem/imaterial.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "matsys_controls/matsyscontrols.h"
-#include "vgui/ivgui.h"
+#include "vgui/IVGui.h"
 #include "vgui_controls/propertypage.h"
 #include "vgui_controls/propertysheet.h"
 #include "vgui_controls/textentry.h"
@@ -20,7 +20,7 @@
 #include "vgui_controls/checkbutton.h"
 #include "matsys_controls/colorpickerpanel.h"
 #include "particles/particles.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "tier2/renderutils.h"
 
@@ -58,13 +58,10 @@ CParticleSystemPanel::CParticleSystemPanel( vgui::Panel *pParent, const char *pN
 
 	m_pLightmapTexture.Init( "//platform/materials/debug/defaultlightmap", "editor" );
 	m_DefaultEnvCubemap.Init( "editor/cubemap", "editor", true );
-
 	for ( int i = 0; i < MAX_PARTICLE_CONTROL_POINTS; ++i )
 	{
 		SetControlPointValue( i, Vector( 0, 0, 10.0f * i ) );
 	}
-
-	UseEngineCoordinateSystem( true );
 }
 
 CParticleSystemPanel::~CParticleSystemPanel()
@@ -128,6 +125,20 @@ void CParticleSystemPanel::SetRenderedHelper( CDmeParticleFunction *pOp )
 
 
 
+static bool IsValidHierarchy( CParticleCollection *pCollection )
+{
+	if ( !pCollection->IsValid() )
+		return false;
+
+	for( CParticleCollection *pChild = pCollection->m_Children.m_pHead; pChild; pChild = pChild->m_pNext )
+	{
+		if ( !IsValidHierarchy( pChild ) )
+			return false;
+	}
+	return true;
+}
+
+
 //-----------------------------------------------------------------------------
 // Simulate the particle system
 //-----------------------------------------------------------------------------
@@ -156,10 +167,14 @@ void CParticleSystemPanel::OnTick()
 		m_pParticleSystem->SetControlPointParent( i, i );
 	}
 
-	m_pParticleSystem->Simulate( flDt );
-
 	// Restart the particle system if it's finished
-	bool bIsInvalid = !m_pParticleSystem->IsValid();
+	bool bIsInvalid = !IsValidHierarchy( m_pParticleSystem );
+
+	if ( !bIsInvalid )
+	{
+		m_pParticleSystem->Simulate( flDt, false );
+	}
+
 	if ( m_pParticleSystem->IsFinished() || bIsInvalid )
 	{
 		delete m_pParticleSystem;
@@ -281,6 +296,9 @@ void CParticleSystemPanel::OnPaint3D()
 {
 	if ( !m_pParticleSystem )
 		return;
+
+	// This needs calling to reset various counters.
+	g_pParticleSystemMgr->SetLastSimulationTime( m_pParticleSystem->m_flCurTime );
 
 	CMatRenderContextPtr pRenderContext( MaterialSystem() );
 	pRenderContext->BindLightmapTexture( m_pLightmapTexture );

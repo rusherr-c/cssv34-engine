@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //////////////////////////////////////////////////////////////////////////////////////
 //
 // Written by Zoltan Csizmadia, zoltan_csizmadia@yahoo.com
@@ -25,7 +26,7 @@
 #define TRACEF									         TRACE
 #else
 #define TRACEF									         OutputDebugStringFormat
-void OutputDebugStringFormat( LPCTSTR, ... );
+void OutputDebugStringFormat( PRINTF_FORMAT_STRING LPCTSTR, ... );
 #endif
 
 #define EXTENDEDTRACEINITIALIZE( IniSymbolPath )	InitSymInfo( IniSymbolPath )

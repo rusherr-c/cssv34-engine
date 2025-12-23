@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -173,9 +173,12 @@ void CPlayerPanel::OnServerDataResponse(const char *value, const char *response)
 		{
 			// first should be the size of the player name
 			char name[64];
+			name[0] = '\0';
 			char authID[64];
+			authID[0] = '\0';
 			char netAdr[32];
-			int ping, packetLoss, frags, connectTime;
+			netAdr[0] = '\0';
+			int ping = 0, packetLoss = 0, frags = 0, connectTime = 0;
 
 			ivgui()->DPrintf2("orig:  %s\n", parse);
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,6 +36,17 @@
 #include "engine/view_sharedv1.h"
 #include "ispatialpartitioninternal.h"
 #include "toolframework/itoolframework.h"
+#include "icommandline.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
+#include "sourcevr/isourcevirtualreality.h"
+#include "materialsystem/itexture.h"
+#include "render.h"
+#include "iclientvirtualreality.h"
+
+#if defined( REPLAY_ENABLED )
+#include "replay/iclientreplay.h"
+#include "replay_internal.h"
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -51,6 +62,8 @@ bool g_bIsRenderingVGuiOnly = false;
 colorVec R_LightPoint (Vector& p);
 void R_DrawLightmaps( IWorldRenderList *pList, int pageId );
 void R_DrawIdentityBrushModel( IWorldRenderList *pRenderList, model_t *model );
+
+static ConVar mat_color_projection( "mat_color_projection", "0", FCVAR_ARCHIVE );
 
 /*
 
@@ -75,6 +88,8 @@ bool V_CheckGamma( void )
 {
 	if ( IsX360() )
 		return false;
+
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
 
 	static int lastLightmap = -1;
 	extern void GL_RebuildLightmaps( void );
@@ -106,21 +121,32 @@ void V_Shutdown( void )
 	// TODO, cleanup
 }
 
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Input  :  - 
 //-----------------------------------------------------------------------------
 void V_RenderVGuiOnly_NoSwap()
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	// Need to clear the screen in this case, cause we're not drawing
 	// the loading screen.
 	UpdateMaterialSystemConfig();
 
-	CMatRenderContextPtr pRenderContext( materials );
+	if( UseVR() && g_pClientVR )
+	{
+		g_pClientVR->DrawMainMenu();
+	}
+	else
+	{
+		CMatRenderContextPtr pRenderContext( materials );
 		   
-	pRenderContext->ClearBuffers( true, true );
+		pRenderContext->ClearBuffers( true, true );
 
-	EngineVGui()->Paint( PAINT_UIPANELS );
+
+		EngineVGui()->Paint( (PaintMode_t)(PAINT_UIPANELS | PAINT_CURSOR ));
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -146,6 +172,39 @@ void V_RenderVGuiOnly( void )
 }
 
 
+void FullViewColorAdjustment( )
+{
+	if ( mat_color_projection.GetInt() == 0 )
+	{
+		return;
+	}
+
+	CMatRenderContextPtr pRenderContext( materials );
+
+	ITexture *pFullFrameFB1 = materials->FindTexture( "_rt_FullFrameFB1", TEXTURE_GROUP_RENDER_TARGET );
+
+	pRenderContext->CopyRenderTargetToTextureEx( pFullFrameFB1, 0, NULL, NULL );
+
+	IMaterial *color_correction = materials->FindMaterial( "dev/red_green_projection", TEXTURE_GROUP_OTHER, true );
+	if ( color_correction )
+	{
+		color_correction->IncrementReferenceCount();
+	}
+
+	int nViewportX, nViewportY, nViewportWidth, nViewportHeight;
+	pRenderContext->GetViewport( nViewportX, nViewportY, nViewportWidth, nViewportHeight );
+
+	pRenderContext->DrawScreenSpaceRectangle( color_correction, 0, 0, nViewportWidth, nViewportHeight,
+		nViewportX, nViewportY,
+		nViewportX + nViewportWidth - 1, nViewportY + nViewportHeight - 1,
+		nViewportWidth, nViewportHeight );
+
+ 	if ( color_correction )
+ 	{
+ 		color_correction->DecrementReferenceCount();
+ 	}
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Render the world
@@ -157,10 +216,19 @@ void V_RenderView( void )
 
 	bool bCanRenderWorld = ( host_state.worldmodel != NULL ) && cl.IsActive();
 
+#if defined( REPLAY_ENABLED )
+	if ( g_pClientReplay && Replay_IsSupportedModAndPlatform() )
+	{
+		bCanRenderWorld = bCanRenderWorld && g_pClientReplay->ShouldRender();
+	}
+#endif
+
 	bCanRenderWorld = bCanRenderWorld && toolframework->ShouldGameRenderView();
 
 	if ( IsPC() && bCanRenderWorld && g_bTextMode )
 	{	
+		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "SysSleep()" );
+
 		// Sleep to let the other textmode clients get some cycles.
 		Sys_Sleep( 15 );
 		bCanRenderWorld = false;
@@ -174,11 +242,16 @@ void V_RenderView( void )
 	}
 	else if ( !g_LostVideoMemory )
 	{
+		// since we know we're going to render the world, check for lightmap updates while it is easy
+		// to tear down and rebuild
+		R_CheckForLightingConfigChanges();
 		// We can get into situations where some other material system app
 		// is trying to start up; in those cases, we shouldn't render...
 		vrect_t scr_vrect = videomode->GetClientViewRect();
 		g_ClientDLL->View_Render( &scr_vrect );
 	}
+
+	FullViewColorAdjustment();
 }
 
 void Linefile_Draw( void );
@@ -206,9 +279,16 @@ public:
 		model_t *model, 
 		const Vector& origin, 
 		const QAngle& angles, 
-		bool bSort )
+		bool bUnused )
 	{
-		R_DrawBrushModel( baseentity, model, origin, angles, bSort, false );
+		R_DrawBrushModel( baseentity, model, origin, angles, DEPTH_MODE_NORMAL, true, true );
+	}
+
+	virtual void DrawBrushModelEx( IClientEntity *baseentity, model_t *model, const Vector& origin, const QAngle& angles, DrawBrushModelMode_t mode )
+	{
+		bool bDrawOpaque = ( mode != DBM_DRAW_TRANSLUCENT_ONLY );
+		bool bDrawTranslucent = ( mode != DBM_DRAW_OPAQUE_ONLY );
+		R_DrawBrushModel( baseentity, model, origin, angles, DEPTH_MODE_NORMAL, bDrawOpaque, bDrawTranslucent );
 	}
 
 	// Draw brush model shadow
@@ -496,9 +576,9 @@ public:
 		model_t *model, 
 		const Vector& origin, 
 		const QAngle& angles, 
-		bool bSort )
+		ERenderDepthMode DepthMode )
 	{
-		R_DrawBrushModel( baseentity, model, origin, angles, bSort, true );
+		R_DrawBrushModel( baseentity, model, origin, angles, DepthMode, true, true );
 	}
 
 	void UpdateBrushModelLightmap( model_t *model, IClientRenderable *pRenderable )

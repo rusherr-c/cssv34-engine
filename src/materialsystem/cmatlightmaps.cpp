@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -19,7 +19,7 @@
 #include "tier0/memdbgon.h"
 #include "bitmap/float_bm.h"
 
-static ConVar mat_lightmap_pfms( "mat_lightmap_pfms", "0", 0, "Outputs .pfm files containing lightmap data for each lightmap page when a level exits." ); // Write PFM files for each lightmap page in the game directory when exiting a level 
+static ConVar mat_lightmap_pfms( "mat_lightmap_pfms", "0", FCVAR_MATERIAL_SYSTEM_THREAD, "Outputs .pfm files containing lightmap data for each lightmap page when a level exits." ); // Write PFM files for each lightmap page in the game directory when exiting a level 
 
 #define USE_32BIT_LIGHTMAPS_ON_360 //uncomment to use 32bit lightmaps, be sure to keep this in sync with the same #define in stdshaders/lightmappedgeneric_ps2_3_x.h
 
@@ -431,15 +431,7 @@ void CMatLightmaps::AllocateLightmapTexture( int lightmap )
 {
 	bool bUseDynamicTextures = HardwareConfig()->PreferDynamicTextures();
 
-	int flags = 0;
-	if ( bUseDynamicTextures )
-	{
-		flags |= TEXTURE_CREATE_DYNAMIC;
-	}
-	else
-	{
-		flags |= TEXTURE_CREATE_MANAGED;
-	}
+	int flags = bUseDynamicTextures ? TEXTURE_CREATE_DYNAMIC : TEXTURE_CREATE_MANAGED;
 
 	m_LightmapPageTextureHandles.EnsureCount( lightmap + 1 );
 
@@ -456,6 +448,7 @@ void CMatLightmaps::AllocateLightmapTexture( int lightmap )
 	case HDR_TYPE_NONE:
 #if !defined( _X360 )
 		imageFormat = IMAGE_FORMAT_RGBA8888;
+		flags |= TEXTURE_CREATE_SRGB;
 #else
 		imageFormat = IMAGE_FORMAT_LINEAR_RGBA8888;
 #endif
@@ -1345,7 +1338,7 @@ static void BumpedLightmapBitsToPixelWriter_HDRI_BGRA_X360( float* RESTRICT pFlo
 	}
 }
 
-#endif _X360
+#endif // _X360
 
 // write bumped lightmap update to HDR integer lightmap
 void CMatLightmaps::BumpedLightmapBitsToPixelWriter_HDRI( float* RESTRICT pFloatImage, float * RESTRICT pFloatImageBump1, float * RESTRICT pFloatImageBump2, 

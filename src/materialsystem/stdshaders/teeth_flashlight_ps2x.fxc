@@ -4,10 +4,12 @@
 //
 //=============================================================================
 
-// STATIC: "CONVERT_TO_SRGB"			"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()]
-// STATIC: "CONVERT_TO_SRGB"			"0..1"	[ps30][= g_pHardwareConfig->NeedsShaderSRGBConversion()]
-// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps20b]
-// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps30]
+// STATIC: "CONVERT_TO_SRGB"			"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()] [PC]
+// STATIC: "CONVERT_TO_SRGB"			"0..1"	[ps30][= g_pHardwareConfig->NeedsShaderSRGBConversion()] [PC]
+// STATIC: "CONVERT_TO_SRGB"			"0..0"	[= 0] [XBOX]
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps20b] [PC]
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"	[ps30]  [PC]
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..0"	[ps20b] [XBOX]
 
 // DYNAMIC: "PIXELFOGTYPE"				"0..1"
 // DYNAMIC: "FLASHLIGHTSHADOWS"			"0..1"	[ps20b]
@@ -19,6 +21,7 @@
 sampler BaseTextureSampler					: register( s0 );
 sampler SpotSampler							: register( s1 );
 sampler FlashlightDepthSampler				: register( s2 );
+sampler RandomRotationSampler				: register( s3 );
 
 const float4 g_FogParams					: register( PSREG_FOG_PARAMS );
 const float3 g_EyePos						: register( PSREG_EYEPOS_SPEC_EXPONENT );
@@ -48,7 +51,7 @@ float4 main( PS_INPUT i ) : COLOR
 	result *= cFlashlightColor.rgb;
 
 #if FLASHLIGHTSHADOWS && ( defined( SHADER_MODEL_PS_2_B ) || defined( SHADER_MODEL_PS_3_0 ) )
-	result *= DoFlashlightShadow( FlashlightDepthSampler, vProjCoords, i.projPos.xy / i.projPos.z, FLASHLIGHTDEPTHFILTERMODE, g_ShadowTweaks, true );
+	result *= DoFlashlightShadow( FlashlightDepthSampler, RandomRotationSampler, vProjCoords, i.projPos.xy / i.projPos.z, FLASHLIGHTDEPTHFILTERMODE, g_ShadowTweaks, true );
 #endif
 	result *= 0.35f;	// Without this, unshadowed teeth always seem to glow
 

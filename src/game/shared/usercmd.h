@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,7 @@
 #include "mathlib/vector.h"
 #include "utlvector.h"
 #include "imovehelper.h"
+#include "checksum_crc.h"
 
 
 class bf_read;
@@ -26,7 +27,6 @@ public:
 	float				minheight;
 	float				maxheight;
 };
-
 
 class CUserCmd
 {
@@ -51,6 +51,9 @@ public:
 		weaponselect = 0;
 		weaponsubtype = 0;
 		random_seed = 0;
+#ifdef GAME_DLL
+		server_random_seed = 0;
+#endif
 		mousedx = 0;
 		mousedy = 0;
 
@@ -76,6 +79,9 @@ public:
 		weaponselect		= src.weaponselect;
 		weaponsubtype		= src.weaponsubtype;
 		random_seed			= src.random_seed;
+#ifdef GAME_DLL
+		server_random_seed = src.server_random_seed;
+#endif
 		mousedx				= src.mousedx;
 		mousedy				= src.mousedy;
 
@@ -91,6 +97,40 @@ public:
 	CUserCmd( const CUserCmd& src )
 	{
 		*this = src;
+	}
+
+	CRC32_t GetChecksum( void ) const
+	{
+		CRC32_t crc;
+
+		CRC32_Init( &crc );
+		CRC32_ProcessBuffer( &crc, &command_number, sizeof( command_number ) );
+		CRC32_ProcessBuffer( &crc, &tick_count, sizeof( tick_count ) );
+		CRC32_ProcessBuffer( &crc, &viewangles, sizeof( viewangles ) );    
+		CRC32_ProcessBuffer( &crc, &forwardmove, sizeof( forwardmove ) );   
+		CRC32_ProcessBuffer( &crc, &sidemove, sizeof( sidemove ) );      
+		CRC32_ProcessBuffer( &crc, &upmove, sizeof( upmove ) );         
+		CRC32_ProcessBuffer( &crc, &buttons, sizeof( buttons ) );		
+		CRC32_ProcessBuffer( &crc, &impulse, sizeof( impulse ) );        
+		CRC32_ProcessBuffer( &crc, &weaponselect, sizeof( weaponselect ) );	
+		CRC32_ProcessBuffer( &crc, &weaponsubtype, sizeof( weaponsubtype ) );
+		CRC32_ProcessBuffer( &crc, &random_seed, sizeof( random_seed ) );
+		CRC32_ProcessBuffer( &crc, &mousedx, sizeof( mousedx ) );
+		CRC32_ProcessBuffer( &crc, &mousedy, sizeof( mousedy ) );
+		CRC32_Final( &crc );
+
+		return crc;
+	}
+
+	// Allow command, but negate gameplay-affecting values
+	void MakeInert( void )
+	{
+		viewangles = vec3_angle;
+		forwardmove = 0.f;
+		sidemove = 0.f;
+		upmove = 0.f;
+		buttons = 0;
+		impulse = 0;
 	}
 
 	// For matching server and client commands for debugging
@@ -117,6 +157,9 @@ public:
 	int		weaponsubtype;
 
 	int		random_seed;	// For shared random functions
+#ifdef GAME_DLL
+	int		server_random_seed; // Only the server populates this seed
+#endif
 
 	short	mousedx;		// mouse accum in x from create move
 	short	mousedy;		// mouse accum in y from create move
@@ -132,6 +175,6 @@ public:
 };
 
 void ReadUsercmd( bf_read *buf, CUserCmd *move, CUserCmd *from );
-void WriteUsercmd( bf_write *buf, CUserCmd *to, CUserCmd *from );
+void WriteUsercmd( bf_write *buf, const CUserCmd *to, const CUserCmd *from );
 
 #endif // USERCMD_H

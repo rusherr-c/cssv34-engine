@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -396,7 +396,7 @@ public:
 			vlkup.ExpandWindow( iEnd - 1 );
 
 			// Allocate a partition
-			size_t numPartitions = ( size_t ) min( iEnd - iBegin, g_nMaxWorkerCount );
+			size_t numPartitions = min( ( size_t )(iEnd - iBegin), ( size_t )g_nMaxWorkerCount );
 			CArrayAutoPtr< CPartitionInfo * > spArrPartitions( new CPartitionInfo* [ numPartitions ] );
 			CPartitionInfo **arrPartitions = spArrPartitions.Get();
 

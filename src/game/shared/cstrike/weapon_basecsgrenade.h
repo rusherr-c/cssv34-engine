@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -37,6 +37,8 @@ public:
 
 	void			PrimaryAttack();
 	void			SecondaryAttack();
+
+// 	virtual float GetSpread() const;
 
 	bool			Reload();
 

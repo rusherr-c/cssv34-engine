@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,6 +31,7 @@ public:
 	C_PlantedC4();
 	virtual ~C_PlantedC4();
 
+	void Explode( void );
 	void Spawn( void );
 	virtual void SetDormant( bool bDormant );
 
@@ -64,6 +65,7 @@ public:
 
 	float	m_flNextRadarFlashTime;	// next time to change flash state
 	bool	m_bRadarFlash;			// is the flash on or off
+	CNewParticleEffect *m_pC4Explosion; // client side explosion particle effect for the bomb
 };
 
 extern CUtlVector< C_PlantedC4* > g_PlantedC4s;

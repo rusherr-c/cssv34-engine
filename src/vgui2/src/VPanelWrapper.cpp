@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -128,11 +128,6 @@ public:
 		return ((VPanel *)vguiPanel)->SetTopmostPopup( state );
 	}
 
-	virtual void SetSiblingPin( VPANEL vguiPanel, VPANEL newSibling, byte iMyCornerToPin = 0, byte iSiblingCornerToPinTo = 0 )
-	{
-
-	}
-
 	virtual void SetParent(VPANEL vguiPanel, VPANEL newParent)
 	{
 		((VPanel *)vguiPanel)->SetParent((VPanel *)newParent);
@@ -150,7 +145,7 @@ public:
 
 	virtual CUtlVector< VPANEL > &GetChildren( VPANEL vguiPanel )
 	{
-		return (CUtlVector< VPANEL >&)((VPanel *)vguiPanel)->GetChildren();
+		return (CUtlVector< VPANEL > &)((VPanel *)vguiPanel)->GetChildren();
 	}
 
 	virtual VPANEL GetParent(VPANEL vguiPanel)
@@ -315,11 +310,14 @@ public:
 
 	virtual Panel *GetPanel(VPANEL vguiPanel, const char *moduleName)
 	{
+		if (!vguiPanel)
+			return NULL;
+
 		if (vguiPanel == g_pSurface->GetEmbeddedPanel())
 			return NULL;
 
 		// assert that the specified vpanel is from the same module as requesting the cast
-		if (stricmp(GetModuleName(vguiPanel), moduleName))
+		if ( !vguiPanel || V_stricmp(GetModuleName(vguiPanel), moduleName) )
 		{
 			// assert(!("GetPanel() used to retrieve a Panel * from a different dll than which which it was created. This is bad, you can't pass Panel * across dll boundaries else you'll break the versioning.  Please only use a VPANEL."));
 			// this is valid for now
@@ -352,6 +350,12 @@ public:
 	{
 		return ((VPanel *)vguiPanel)->IsKeyBoardInputEnabled();
 	}
+
+	virtual void SetSiblingPin(VPANEL vguiPanel, VPANEL newSibling, byte iMyCornerToPin = 0, byte iSiblingCornerToPinTo = 0 )
+	{
+		return ((VPanel *)vguiPanel)->SetSiblingPin( (VPanel *)newSibling, iMyCornerToPin, iSiblingCornerToPinTo );
+	}
+
 };
 
 EXPOSE_SINGLE_INTERFACE(VPanelWrapper, IPanel, VGUI_PANEL_INTERFACE_VERSION);

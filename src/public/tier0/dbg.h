@@ -250,10 +250,10 @@ DBG_INTERFACE struct SDL_Window * GetAssertDialogParent();
 			if (!(_exp)) 													\
 			{ 																\
 				_SpewInfo( SPEW_ASSERT, __TFILE__, __LINE__ );				\
-				SpewRetval_t ret = _SpewMessage("%s", static_cast<const char*>( _msg ));	\
+				SpewRetval_t retAssert = _SpewMessage("%s", static_cast<const char*>( _msg ));	\
 				CallAssertFailedNotifyFunc( __TFILE__, __LINE__, _msg );					\
 				_executeExp; 												\
-				if ( ret == SPEW_DEBUGGER)									\
+				if ( retAssert == SPEW_DEBUGGER)									\
 				{															\
 					if ( !ShouldUseNewAssertDialog() || DoNewAssertDialog( __TFILE__, __LINE__, _msg ) ) \
 					{														\
@@ -559,32 +559,18 @@ public:
 
 
 //-----------------------------------------------------------------------------
-// Macro to assist in asserting constant invariants during compilation
+// This macro predates universal static_assert support in our toolchains
+#define COMPILE_TIME_ASSERT( pred ) static_assert( pred, "Compile time assert constraint is not true: " #pred )
 
-// This implementation of compile time assert has zero cost (so it can safely be
-// included in release builds) and can be used at file scope or function scope.
-// We're using an ancient version of GCC that can't quite handle some
-// of our complicated templates properly.  Use some preprocessor trickery
-// to workaround this
-#ifdef __GNUC__
-	#define COMPILE_TIME_ASSERT( pred ) typedef int UNIQUE_ID[ (pred) ? 1 : -1 ]
-#else
-	#if _MSC_VER >= 1600
-	// If available use static_assert instead of weird language tricks. This
-	// leads to much more readable messages when compile time assert constraints
-	// are violated.
-	#define COMPILE_TIME_ASSERT( pred ) static_assert( pred, "Compile time assert constraint is not true: " #pred )
-	#else
-	// Due to gcc bugs this can in rare cases (some template functions) cause redeclaration
-	// errors when used multiple times in one scope. Fix by adding extra scoping.
-	#define COMPILE_TIME_ASSERT( pred ) typedef char compile_time_assert_type[(pred) ? 1 : -1];
-	#endif
-#endif
 // ASSERT_INVARIANT used to be needed in order to allow COMPILE_TIME_ASSERTs at global
 // scope. However the new COMPILE_TIME_ASSERT macro supports that by default.
 #define ASSERT_INVARIANT( pred )	COMPILE_TIME_ASSERT( pred )
 
-
+// NOTE: On GCC / Clang, assert_cast can sometimes fire even if the type is correct. We should just workaround these.
+// The situation where this would occur is 
+// 1. You create an object of a low level type in a DLL, and it really gets created there.
+// 2. You pass it across a DLL boundary
+// 3. You use assert_cast to verify it in the second DLL boundary (where it also could've been created).
 #ifdef _DEBUG
 template<typename DEST_POINTER_TYPE, typename SOURCE_POINTER_TYPE>
 inline DEST_POINTER_TYPE assert_cast(SOURCE_POINTER_TYPE* pSource)
@@ -822,5 +808,13 @@ private:
 #endif
 
 //-----------------------------------------------------------------------------
+
+
+// This is horrible, but we don't want to integrate CS:GO new logging system atm.
+#define Log_Warning( ignore, ... )	::Msg( __VA_ARGS__ ); ::Log( __VA_ARGS__ );
+#define Log_Msg( ignore, ... )		::Warning( __VA_ARGS__ ); ::Log( __VA_ARGS__ );
+#define Log_Error( ignore, ... )		::Error( __VA_ARGS__ );
+#define DEFINE_LOGGING_CHANNEL_NO_TAGS( ... );
+#define Plat_FatalError( ... ) do { Log_Error( LOG_GENERAL, __VA_ARGS__ ); Plat_ExitProcess( EXIT_FAILURE ); } while( 0 )
 
 #endif /* DBG_H */

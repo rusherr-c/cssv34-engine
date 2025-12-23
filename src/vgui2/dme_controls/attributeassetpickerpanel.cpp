@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 #include "matsys_controls/AssetPicker.h"
 #include "matsys_controls/VtfPicker.h"
 #include "matsys_controls/VMTPicker.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 
 
 using namespace vgui;

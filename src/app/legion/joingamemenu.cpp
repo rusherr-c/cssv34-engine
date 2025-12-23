@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Menu responsible for allowing players to join a game  
 //
@@ -13,7 +13,7 @@
 #include "vgui_controls/button.h"
 #include "networkmessages.h"
 #include "networkmanager.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 
 
 //-----------------------------------------------------------------------------

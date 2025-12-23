@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 #include "vgui_controls/Button.h"
 #include "dme_controls/AttributeTextEntry.h"
 #include "matsys_controls/colorpickerpanel.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "dme_controls/inotifyui.h"
 
 // memdbgon must be the last include file in a .cpp file!!!

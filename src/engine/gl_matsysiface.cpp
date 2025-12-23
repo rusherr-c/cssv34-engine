@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,6 +29,8 @@
 #include "materialsystem/imaterial.h"
 #include "toolframework/itoolframework.h"
 #include "toolframework/itoolsystem.h"
+#include "tier2/p4helpers.h"
+#include "p4lib/ip4.h"
 #include "vgui/ISystem.h"
 #include <vgui_controls/Controls.h>
 
@@ -67,6 +69,7 @@ IMaterial*  g_pMaterialWaterSecondPass;
 IMaterial*	g_pMaterialAmbientCube;
 IMaterial*	g_pMaterialDebugFlat;
 IMaterial*	g_pMaterialDepthWrite[2][2];
+IMaterial*	g_pMaterialSSAODepthWrite[2][2];
 
 #ifdef NEWMESH
 CUtlVector<IVertexBuffer *> g_WorldStaticMeshes;  // fixme - rename to g_WorldStaticVertexBuffers
@@ -148,6 +151,14 @@ CON_COMMAND_F( mat_crosshair_edit, "open the material under the crosshair in the
 		char chResolveName[ 256 ] = {0}, chResolveNameArg[ 256 ] = {0};
 		Q_snprintf( chResolveNameArg, sizeof( chResolveNameArg ) - 1, "materials/%s.vmt", pMaterial->GetName() );
 		char const *szResolvedName = g_pFileSystem->RelativePathToFullPath( chResolveNameArg, "game", chResolveName, sizeof( chResolveName ) - 1 );
+		if ( p4 )
+		{
+			CP4AutoEditAddFile autop4( szResolvedName );
+		}
+		else
+		{
+			Warning( "run with -p4 to get p4 operations upon mat_crosshair_edit\n" );
+		}
 		vgui::system()->ShellExecute( "open", szResolvedName );
 	}
 }
@@ -319,7 +330,7 @@ void MaterialSystem_RegisterLightmapSurfaces( void )
 	surfID = SURFACE_HANDLE_INVALID;
 	for (int i = surfaces.FirstInorder(); i != surfaces.InvalidIndex(); i = surfaces.NextInorder(i) )
 	{
-		SurfaceHandle_t surfID = surfaces[i];
+		surfID = surfaces[i];
 
 		bool hasLightmap = ( MSurf_Flags( surfID ) & SURFDRAW_NOLIGHT) == 0;
 		if ( hasLightmap )
@@ -521,7 +532,11 @@ void MaterialSystem_CreateSortinfo( void )
 		int sortID = MSurf_MaterialSortID( surfID );
 #if _DEBUG
 		IMaterial *pMaterial = MSurf_TexInfo( surfID )->material;
-		Assert ( materialSortInfoArray[pSortIDRemap[sortID]].material == pMaterial );
+
+		if ( !HushAsserts() )
+		{
+			Assert ( materialSortInfoArray[pSortIDRemap[sortID]].material == pMaterial );
+		}
 #endif
 		MSurf_MaterialSortID( surfID ) = pSortIDRemap[sortID];
 	}
@@ -881,7 +896,7 @@ void CMSurfaceSortList::AddSurfaceToTail( msurface2_t *pSurface, int sortGroup, 
 		{
 			// UNDONE: This should really be sorted by sortID would help reduce state changes
 			// NOTE: Doesn't seem to help much in benchmarks to sort this vector
-			int index = m_sortGroupLists[sortGroup].AddToTail(pGroup);
+			index = m_sortGroupLists[sortGroup].AddToTail(pGroup);
 			pGroup->groupListIndex = index;
 			pGroup->listHead = nextBlock;
 		}
@@ -915,7 +930,6 @@ IMaterial *GetMaterialAtCrossHair( void )
 	Vector endPoint;
 	Vector lightmapColor;
 
-#ifdef _WIN32
 	// max_range * sqrt(3)
 	VectorMA( MainViewOrigin(), COORD_EXTENT * 1.74f, MainViewForward(), endPoint );
 	
@@ -928,7 +942,6 @@ IMaterial *GetMaterialAtCrossHair( void )
 	{
 		return NULL;
 	}
-#endif
 }
 
 // hack
@@ -942,7 +955,6 @@ static float lightmapCoords[2];
 
 void SaveSurfAtCrossHair()
 {
-#ifdef _WIN32
 	Vector endPoint;
 	Vector lightmapColor;
 
@@ -951,7 +963,6 @@ void SaveSurfAtCrossHair()
 	
 	s_CrossHairSurfID = R_LightVec( MainViewOrigin(), endPoint, false, lightmapColor, 
 		&textureS, &textureT, &lightmapCoords[0], &lightmapCoords[1] );
-#endif
 }
 
 

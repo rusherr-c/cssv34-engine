@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -219,15 +219,18 @@ public:
 	InitReturnVal_t Init();
 	void Shutdown( void );
 
-	//void EnableScissor( FlashlightState_t *state );
-	//void DisableScissor();
+	void EnableScissor( FlashlightState_t *state );
+	void DisableScissor();
 
 	void DrawModel( const DrawModelInfo_t& info, const StudioRenderContext_t& rc, matrix3x4_t *pBoneToWorld, const FlexWeights_t& flex, int flags = STUDIORENDER_DRAW_ENTIRE_MODEL );
+	void DrawModelArray( const DrawModelInfo_t &drawInfo, const StudioRenderContext_t &rc, int arrayCount, model_array_instance_t *pInstanceData, int instanceStride, int flags = STUDIORENDER_DRAW_ENTIRE_MODEL );
 
 	// Static-prop related draw methods
 	void DrawModelStaticProp( const DrawModelInfo_t& info, const StudioRenderContext_t &rc, const matrix3x4_t &modelToWorld, int flags = STUDIORENDER_DRAW_ENTIRE_MODEL );
 	void DrawStaticPropShadows( const DrawModelInfo_t &drawInfo, const StudioRenderContext_t &rc, const matrix3x4_t &modelToWorld, int flags );
 	void DrawStaticPropDecals( const DrawModelInfo_t &drawInfo, const StudioRenderContext_t &rc, const matrix3x4_t &modelToWorld );
+
+	void ModelStats( const DrawModelInfo_t& info, const StudioRenderContext_t &rc, matrix3x4_t *pBoneToWorld, const FlexWeights_t &flex, int flags );
 
 	// Create, destroy list of decals for a particular model
 	StudioDecalHandle_t CreateDecalList( studiohwdata_t *pHardwareData );
@@ -486,6 +489,8 @@ private:
 	int R_LightGlintPosition( int index, const Vector& org, Vector& delta, Vector& intensity );
 	void R_LightEffectsWorld( const lightpos_t *light, const Vector& normal, const Vector &src, Vector &dest );
 
+	void R_GatherStats( studiomeshgroup_t *pGroup, CMeshBuilder &MeshBuilder, IMesh *pMesh, IMaterial *pMaterial );
+
 public:
 	// NJS: Messy, but needed for an externally optimized routine to set up the lighting.
 	void R_InitLightEffectsWorld3();
@@ -615,6 +620,7 @@ private:
 
 	// Depth override material
 	IMaterial		*m_pDepthWrite[2][2];
+	IMaterial		*m_pSSAODepthWrite[2][2];
 
 	// GLINT data
 	ITexture* m_pGlintTexture;
@@ -656,7 +662,7 @@ inline void CStudioRender::R_StudioTransform( Vector& in1, mstudioboneweight_t *
 	switch( pboneweight->numbones )
 	{
 	case 1:
-		VectorTransform( in1, m_PoseToWorld[pboneweight->bone[0]], out1 );
+		VectorTransform( in1, m_PoseToWorld[(unsigned)pboneweight->bone[0]], out1 );
 		break;
 /*
 	case 2:
@@ -679,7 +685,7 @@ inline void CStudioRender::R_StudioTransform( Vector& in1, mstudioboneweight_t *
 		VectorFill( out1, 0 );
 		for (int i = 0; i < pboneweight->numbones; i++)
 		{
-			VectorTransform( in1, m_PoseToWorld[pboneweight->bone[i]], out2 );
+			VectorTransform( in1, m_PoseToWorld[(unsigned)pboneweight->bone[i]], out2 );
 			VectorMA( out1, pboneweight->weight[i], out2, out1 );
 		}
 		break;
@@ -700,7 +706,7 @@ inline void CStudioRender::R_StudioRotate( Vector& in1, mstudioboneweight_t *pbo
 
 	if (pboneweight->numbones == 1)
 	{
-		VectorRotate( in1, m_PoseToWorld[pboneweight->bone[0]], out1 );
+		VectorRotate( in1, m_PoseToWorld[(unsigned)pboneweight->bone[0]], out1 );
 	}
 	else
 	{
@@ -710,7 +716,7 @@ inline void CStudioRender::R_StudioRotate( Vector& in1, mstudioboneweight_t *pbo
 
 		for (int i = 0; i < pboneweight->numbones; i++)
 		{
-			VectorRotate( in1, m_PoseToWorld[pboneweight->bone[i]], out2 );
+			VectorRotate( in1, m_PoseToWorld[(unsigned)pboneweight->bone[i]], out2 );
 			VectorMA( out1, pboneweight->weight[i], out2, out1 );
 		}
 		VectorNormalize( out1 );
@@ -724,7 +730,7 @@ inline void CStudioRender::R_StudioRotate( Vector4D& realIn1, mstudioboneweight_
 	Vector out1;
 	if (pboneweight->numbones == 1)
 	{
-		VectorRotate( in1, m_PoseToWorld[pboneweight->bone[0]], out1 );
+		VectorRotate( in1, m_PoseToWorld[(unsigned)pboneweight->bone[0]], out1 );
 	}
 	else
 	{
@@ -734,7 +740,7 @@ inline void CStudioRender::R_StudioRotate( Vector4D& realIn1, mstudioboneweight_
 
 		for (int i = 0; i < pboneweight->numbones; i++)
 		{
-			VectorRotate( in1, m_PoseToWorld[pboneweight->bone[i]], out2 );
+			VectorRotate( in1, m_PoseToWorld[(unsigned)pboneweight->bone[i]], out2 );
 			VectorMA( out1, pboneweight->weight[i], out2, out1 );
 		}
 		VectorNormalize( out1 );

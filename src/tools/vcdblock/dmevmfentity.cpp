@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #include "engine/iclientleafsystem.h"
 #include "toolutils/enginetools_int.h"
 #include "vcdblocktool.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 
 // for tracing
 #include "cmodel.h"
@@ -571,7 +571,7 @@ int CDmeVMFEntity::DrawModel( int flags )
 }
 
 
-bool CDmeVMFEntity::CopyFromServer( void *pServerEnt )
+bool CDmeVMFEntity::CopyFromServer( CBaseEntity *pServerEnt )
 {
 	CopyFromServer( pServerEnt, "targetname" );
 	CopyFromServer( pServerEnt, "classname" );
@@ -581,12 +581,12 @@ bool CDmeVMFEntity::CopyFromServer( void *pServerEnt )
 	return true;
 }
 
-bool CDmeVMFEntity::CopyFromServer( void *pServerEnt, const char *szField )
+bool CDmeVMFEntity::CopyFromServer( CBaseEntity *pServerEnt, const char *szField )
 {
 	return CopyFromServer( pServerEnt, szField, szField );
 }
 
-bool CDmeVMFEntity::CopyFromServer( void *pServerEnt, const char *szSrcField, const char *szDstField )
+bool CDmeVMFEntity::CopyFromServer( CBaseEntity *pServerEnt, const char *szSrcField, const char *szDstField )
 {
 	char text[256];
 	if ( servertools->GetKeyValue( pServerEnt, szSrcField, text, sizeof( text ) ) )
@@ -601,7 +601,7 @@ bool CDmeVMFEntity::CopyToServer( void )
 {
 	if (GetEntityId() != 0)
 	{
-		void *pServerEntity = servertools->FindEntityByHammerID( GetEntityId() );
+		CBaseEntity *pServerEntity = servertools->FindEntityByHammerID( GetEntityId() );
 		if (pServerEntity != NULL)
 		{
 			servertools->SetKeyValue( pServerEntity, "origin", m_vecLocalOrigin.Get() );
@@ -618,7 +618,7 @@ bool CDmeVMFEntity::CopyToServer( void )
 	return false;
 }
 
-bool CDmeVMFEntity::IsSameOnServer( void *pServerEntity )
+bool CDmeVMFEntity::IsSameOnServer( CBaseEntity *pServerEntity )
 {
 	char text[256];
 
@@ -640,7 +640,7 @@ bool CDmeVMFEntity::IsSameOnServer( void *pServerEntity )
 
 bool CDmeVMFEntity::CreateOnServer( void )
 {
-	void *pServerEntity = servertools->CreateEntityByName( m_ClassName.Get() );
+	CBaseEntity *pServerEntity = servertools->CreateEntityByName( m_ClassName.Get() );
 
 	if (pServerEntity)
 	{

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,7 @@
 #include "cs_gamerules.h"
 #include "in_buttons.h"
 #include "movevars_shared.h"
+#include "weapon_csbase.h"
 
 #ifdef CLIENT_DLL
 	#include "c_cs_player.h"
@@ -22,9 +23,12 @@
 #define STAMINA_COST_JUMP		25.0
 #define STAMINA_COST_FALL		20.0
 #define STAMINA_RECOVER_RATE	19.0
-#define CS_WALK_SPEED			100.0f
 
 extern bool g_bMovementOptimizations;
+
+ConVar sv_timebetweenducks( "sv_timebetweenducks", "0", FCVAR_REPLICATED, "Minimum time before recognizing consecutive duck key", true, 0.0, true, 2.0 );
+ConVar sv_enableboost( "sv_enableboost", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "Allow boost exploits");
+
 
 class CCSGameMovement : public CGameMovement
 {
@@ -36,6 +40,7 @@ public:
 	virtual void ProcessMovement( CBasePlayer *pPlayer, CMoveData *pMove );
 	virtual bool CanAccelerate();
 	virtual bool CheckJumpButton( void );
+	virtual void PreventBunnyJumping( void );
 	virtual void ReduceTimers( void );
 	virtual void WalkMove( void );
 	virtual void AirMove( void );
@@ -43,12 +48,17 @@ public:
 	virtual void DecayPunchAngle( void );
 	virtual void CheckParameters( void );
 
+	// allow overridden versions to respond to jumping
+	virtual void	OnJump( float fImpulse );
+	virtual void	OnLand( float fVelocity );
+
 	// Ducking
 	virtual void Duck( void );
 	virtual void FinishUnDuck( void );
 	virtual void FinishDuck( void );
 	virtual bool CanUnduck();
 	virtual void HandleDuckingSpeedCrop();
+
 
 	virtual bool OnLadder( trace_t &trace );
 	virtual float LadderDistance( void ) const
@@ -66,22 +76,40 @@ public:
 	virtual float ClimbSpeed( void ) const;
 	virtual float LadderLateralMultiplier( void ) const;
 
+	virtual void  TryTouchGround( const Vector& start, const Vector& end, const Vector& mins, const Vector& maxs, unsigned int fMask, int collisionGroup, trace_t& pm );
+
+
 protected:
 	virtual void PlayerMove();
 
 	void CheckForLadders( bool wasOnGround );
 	virtual unsigned int PlayerSolidMask( bool brushOnly = false );	///< returns the solid mask for the given player, so bots can have a more-restrictive set
 
+	float m_fTimeLastUnducked;
+
 public:
 	CCSPlayer *m_pCSPlayer;
 };
+
+//-----------------------------------------------------------------------------
+// Purpose: used by the TryTouchGround function to exclude non-standables from 
+// consideration
+//-----------------------------------------------------------------------------
+
+bool CheckForStandable( IHandleEntity *pHandleEntity, int contentsMask )
+{
+	CBaseEntity *pEntity = EntityFromEntityHandle( pHandleEntity );
+
+	if ( !pEntity )
+		return false;
+
+	return ( pEntity->IsPlayer() && pEntity->GetGroundEntity() != NULL ) || pEntity->IsStandable();
+}
 
 
 // Expose our interface.
 static CCSGameMovement g_GameMovement;
 IGameMovement *g_pGameMovement = ( IGameMovement * )&g_GameMovement;
-
-const float DuckSpeedMultiplier = 0.34f;
 
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CGameMovement, IGameMovement,INTERFACENAME_GAMEMOVEMENT, g_GameMovement );
 
@@ -92,6 +120,7 @@ EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CGameMovement, IGameMovement,INTERFACENAME_GAM
 
 CCSGameMovement::CCSGameMovement()
 {
+	m_fTimeLastUnducked = 0.0f;
 }
 
 //-----------------------------------------------------------------------------
@@ -149,9 +178,11 @@ void CCSGameMovement::CheckParameters( void )
 		}
 	}
 
+	// it would be nice to put this into the player->GetPlayerMaxSpeed() method, but
+	// this flag is only stored in the move!
 	if ( mv->m_nButtons & IN_SPEED )
 	{
-		mv->m_flClientMaxSpeed = 100;
+		mv->m_flMaxSpeed *= CS_PLAYER_SPEED_WALK_MODIFIER;
 	}
 
 	if ( player->GetMoveType() != MOVETYPE_ISOMETRIC &&
@@ -159,17 +190,11 @@ void CCSGameMovement::CheckParameters( void )
 		 player->GetMoveType() != MOVETYPE_OBSERVER	)
 	{
 		float spd;
-		float maxspeed;
 
 		spd = ( mv->m_flForwardMove * mv->m_flForwardMove ) +
 			  ( mv->m_flSideMove * mv->m_flSideMove ) +
 			  ( mv->m_flUpMove * mv->m_flUpMove );
 
-		maxspeed = mv->m_flClientMaxSpeed;
-		if ( maxspeed != 0.0 )
-		{
-			mv->m_flMaxSpeed = min( maxspeed, mv->m_flMaxSpeed );
-		}
 
 		// Slow down by the speed factor
 		float flSpeedFactor = 1.0f;
@@ -265,7 +290,7 @@ void CCSGameMovement::CheckParameters( void )
 	}
 
 	// If we're standing on a player, then force them off.
-	if ( !player->IsObserver() )
+	if ( !player->IsObserver()  && ( player->GetMoveType() != MOVETYPE_LADDER ) )
 	{
 		int nLevels = 0;
 		CBaseEntity *pCurGround = player->GetGroundEntity();
@@ -340,6 +365,7 @@ void CCSGameMovement::PlayerMove()
 			 m_pCSPlayer->m_flVelocityModifier = 1.0;
 	}
 
+#if !defined(CLIENT_DLL)
 	if ( m_pCSPlayer->IsAlive() )
 	{
 		// Check if our eye height is too close to the ceiling and lower it.
@@ -357,7 +383,7 @@ void CCSGameMovement::PlayerMove()
 		start.z += vHullMax.z;
 		Vector end = start;
 		end.z += eyeClearance - vHullMax.z; 
-		end.z += player->m_Local.m_bDucked ? VEC_DUCK_VIEW.z : VEC_VIEW.z;
+		end.z += player->m_Local.m_bDucked ? VEC_DUCK_VIEW_SCALED( player ).z : VEC_VIEW_SCALED( player ).z;
 
 		vHullMax.z = 0.0f;
 
@@ -379,7 +405,7 @@ void CCSGameMovement::PlayerMove()
 			}
 			else
 			{
-				offset.z = min( est, offset.z );
+				offset.z = MIN( est, offset.z );
 			}
 			player->SetViewOffset( offset );
 		}
@@ -387,13 +413,14 @@ void CCSGameMovement::PlayerMove()
 		{
 			if ( ( player->GetFlags() & FL_DUCKING ) == 0 && !player->m_Local.m_bDucking && !player->m_Local.m_bDucked )
 			{
-				player->SetViewOffset( VEC_VIEW );
+
+				player->SetViewOffset( VEC_VIEW_SCALED( player ) );
 			}
 			else if ( m_pCSPlayer->m_duckUntilOnGround )
 			{
 				// Duck Hull, but we're in the air.  Calculate where the view would be.
-				Vector hullSizeNormal = VEC_HULL_MAX - VEC_HULL_MIN;
-				Vector hullSizeCrouch = VEC_DUCK_HULL_MAX - VEC_DUCK_HULL_MIN;
+				Vector hullSizeNormal = VEC_HULL_MAX_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
+				Vector hullSizeCrouch = VEC_DUCK_HULL_MAX_SCALED( player ) - VEC_DUCK_HULL_MIN_SCALED( player );
 
 				// We've got the duck hull, pulled up to the top of where the player should be
 				Vector lowerClearance = hullSizeNormal - hullSizeCrouch;
@@ -406,6 +433,7 @@ void CCSGameMovement::PlayerMove()
 			}
 		}
 	}
+#endif	
 }
 
 
@@ -477,7 +505,7 @@ float CCSGameMovement::ClimbSpeed( void ) const
 {
 	if ( mv->m_nButtons & IN_DUCK )
 	{
-		return BaseClass::ClimbSpeed() * DuckSpeedMultiplier;
+		return BaseClass::ClimbSpeed() * CS_PLAYER_SPEED_CLIMB_MODIFIER;
 	}
 	else
 	{
@@ -586,6 +614,32 @@ void CCSGameMovement::ReduceTimers( void )
 	BaseClass::ReduceTimers();
 }
 
+ConVar sv_enablebunnyhopping( "sv_enablebunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY );
+
+// Only allow bunny jumping up to 1.1x server / player maxspeed setting
+#define BUNNYJUMP_MAX_SPEED_FACTOR 1.1f
+
+// taken from TF2 but changed BUNNYJUMP_MAX_SPEED_FACTOR from 1.1 to 1.0
+void CCSGameMovement::PreventBunnyJumping()
+{
+	// Speed at which bunny jumping is limited
+	float maxscaledspeed = BUNNYJUMP_MAX_SPEED_FACTOR * player->m_flMaxspeed;
+	if ( maxscaledspeed <= 0.0f )
+		return;
+
+	// Current player speed
+	float spd = mv->m_vecVelocity.Length();
+
+	if ( spd <= maxscaledspeed )
+		return;
+
+	// Apply this cropping fraction to velocity
+	float fraction = ( maxscaledspeed / spd );
+
+	mv->m_vecVelocity *= fraction;
+
+
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -639,6 +693,11 @@ bool CCSGameMovement::CheckJumpButton( void )
 
 	if ( mv->m_nOldButtons & IN_JUMP )
 		return false;		// don't pogo stick
+
+	if ( !sv_enablebunnyhopping.GetBool() )
+	{
+		PreventBunnyJumping();
+	}
 
 	// In the air now.
 	SetGroundEntity( NULL );
@@ -696,6 +755,8 @@ bool CCSGameMovement::CheckJumpButton( void )
 	mv->m_outWishVel.z += mv->m_vecVelocity[2] - startz;
 	mv->m_outStepHeight += 0.1f;
 
+	OnJump(mv->m_outWishVel.z);
+
 #ifndef CLIENT_DLL
 	// allow bots to react
 	IGameEvent * event = gameeventmanager->CreateEvent( "player_jump" );
@@ -724,7 +785,7 @@ void CCSGameMovement::DecayPunchAngle( void )
 	
 	len = VectorNormalize ( vPunchAngle );
 	len -= (10.0 + len * 0.5) * gpGlobals->frametime;
-	len = max( len, 0.0 );
+	len = MAX( len, 0.0 );
 	VectorScale ( vPunchAngle, len, vPunchAngle );
 
 	m_pCSPlayer->m_Local.m_vecPunchAngle.Set( 0, vPunchAngle.x );
@@ -735,14 +796,25 @@ void CCSGameMovement::DecayPunchAngle( void )
 
 void CCSGameMovement::HandleDuckingSpeedCrop()
 {
-	if ( !m_bSpeedCropped )
+	//=============================================================================
+	// HPE_BEGIN:
+	// [Forrest] 
+	//=============================================================================
+	// Movement speed in free look camera mode is unaffected by ducking state.
+	if ( player->GetObserverMode() == OBS_MODE_ROAMING )
+		return;
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
+	if ( !( m_iSpeedCropped & SPEED_CROPPED_DUCK ) )
 	{
 		if ( ( mv->m_nButtons & IN_DUCK ) || ( player->m_Local.m_bDucking ) || ( player->GetFlags() & FL_DUCKING ) )
 		{
-			mv->m_flForwardMove	*= DuckSpeedMultiplier;
-			mv->m_flSideMove	*= DuckSpeedMultiplier;
-			mv->m_flUpMove		*= DuckSpeedMultiplier;
-			m_bSpeedCropped		= true;
+			mv->m_flForwardMove	*= CS_PLAYER_SPEED_DUCK_MODIFIER;
+			mv->m_flSideMove	*= CS_PLAYER_SPEED_DUCK_MODIFIER;
+			mv->m_flUpMove		*= CS_PLAYER_SPEED_DUCK_MODIFIER;
+			m_iSpeedCropped		|= SPEED_CROPPED_DUCK;
 		}
 	}
 }
@@ -756,19 +828,19 @@ bool CCSGameMovement::CanUnduck()
 
 	if ( player->GetGroundEntity() != NULL )
 	{
-		newOrigin += VEC_DUCK_HULL_MIN - VEC_HULL_MIN;
+		newOrigin += VEC_DUCK_HULL_MIN_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
 	}
 	else
 	{
 		// If in air an letting go of croush, make sure we can offset origin to make
 		//  up for uncrouching
- 		Vector hullSizeNormal = VEC_HULL_MAX - VEC_HULL_MIN;
-		Vector hullSizeCrouch = VEC_DUCK_HULL_MAX - VEC_DUCK_HULL_MIN;
+ 		Vector hullSizeNormal = VEC_HULL_MAX_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
+		Vector hullSizeCrouch = VEC_DUCK_HULL_MAX_SCALED( player ) - VEC_DUCK_HULL_MIN_SCALED( player );
 		
 		newOrigin += -0.5f * ( hullSizeNormal - hullSizeCrouch );
 	}
 
-	UTIL_TraceHull( mv->GetAbsOrigin(), newOrigin, VEC_HULL_MIN, VEC_HULL_MAX, PlayerSolidMask(), player, COLLISION_GROUP_PLAYER_MOVEMENT, &trace );
+	UTIL_TraceHull( mv->GetAbsOrigin(), newOrigin, VEC_HULL_MIN_SCALED( player ), VEC_HULL_MAX_SCALED( player ), PlayerSolidMask(), player, COLLISION_GROUP_PLAYER_MOVEMENT, &trace );
 
 	if ( trace.startsolid || ( trace.fraction != 1.0f ) )
 		return false;	
@@ -788,14 +860,14 @@ void CCSGameMovement::FinishUnDuck( void )
 
 	if ( player->GetGroundEntity() != NULL )
 	{
-		newOrigin += VEC_DUCK_HULL_MIN - VEC_HULL_MIN;
+		newOrigin += VEC_DUCK_HULL_MIN_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
 	}
 	else
 	{
 		// If in air an letting go of croush, make sure we can offset origin to make
 		//  up for uncrouching
- 		Vector hullSizeNormal = VEC_HULL_MAX - VEC_HULL_MIN;
-		Vector hullSizeCrouch = VEC_DUCK_HULL_MAX - VEC_DUCK_HULL_MIN;
+ 		Vector hullSizeNormal = VEC_HULL_MAX_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
+		Vector hullSizeCrouch = VEC_DUCK_HULL_MAX_SCALED( player ) - VEC_DUCK_HULL_MIN_SCALED( player );
 
 		Vector viewDelta = -0.5f * ( hullSizeNormal - hullSizeCrouch );
 
@@ -820,8 +892,8 @@ void CCSGameMovement::FinishUnDuck( void )
 void CCSGameMovement::FinishDuck( void )
 {
 	
-	Vector hullSizeNormal = VEC_HULL_MAX - VEC_HULL_MIN;
-	Vector hullSizeCrouch = VEC_DUCK_HULL_MAX - VEC_DUCK_HULL_MIN;
+	Vector hullSizeNormal = VEC_HULL_MAX_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
+	Vector hullSizeCrouch = VEC_DUCK_HULL_MAX_SCALED( player ) - VEC_DUCK_HULL_MIN_SCALED( player );
 
 	Vector viewDelta = 0.5f * ( hullSizeNormal - hullSizeCrouch );
 
@@ -836,7 +908,7 @@ void CCSGameMovement::FinishDuck( void )
 
 		if ( player->GetGroundEntity() != NULL )
 		{
-			org -= VEC_DUCK_HULL_MIN - VEC_HULL_MIN;
+			org -= VEC_DUCK_HULL_MIN_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
 		}
 		else
 		{
@@ -859,6 +931,31 @@ void CCSGameMovement::FinishDuck( void )
 //-----------------------------------------------------------------------------
 void CCSGameMovement::Duck( void )
 {
+
+	// Fix taken from zblock for rapid crouch/stand not showing stand on other clients
+
+	if ( player->GetFlags() & FL_ONGROUND )
+	{
+		// if prevent crouch
+		if ( !( mv->m_nButtons & IN_DUCK ) && ( mv->m_nOldButtons & IN_DUCK ) )
+		{
+			// Player has released crouch and moving to standing
+			m_fTimeLastUnducked = gpGlobals->curtime;
+		}
+		else if ( ( mv->m_nButtons & IN_DUCK ) && !( mv->m_nOldButtons & IN_DUCK ) )
+		{
+			// Crouch from standing
+			if ( ( player->GetFlags() & FL_DUCKING )
+				&& ( m_fTimeLastUnducked > (gpGlobals->curtime - sv_timebetweenducks.GetFloat() ) ) )
+			{
+				// if the server thinks the player is still crouched
+				// AND the time the player started to stand (from being ducked) was less than 300ms ago
+				// prevent the player from ducking again
+				mv->m_nButtons &= ~IN_DUCK;
+			}
+		}
+	}
+
 	int buttonsChanged	= ( mv->m_nOldButtons ^ mv->m_nButtons );	// These buttons have changed this frame
 	int buttonsPressed	=  buttonsChanged & mv->m_nButtons;			// The changed ones still down are "pressed"
 	int buttonsReleased	=  buttonsChanged & mv->m_nOldButtons;		// The changed ones which were previously down are "released"
@@ -910,13 +1007,13 @@ void CCSGameMovement::Duck( void )
 			Vector groundCheck;
 
 			VectorCopy( mv->GetAbsOrigin(), newOrigin );
-			Vector hullSizeNormal = VEC_HULL_MAX - VEC_HULL_MIN;
-			Vector hullSizeCrouch = VEC_DUCK_HULL_MAX - VEC_DUCK_HULL_MIN;
+			Vector hullSizeNormal = VEC_HULL_MAX_SCALED( player ) - VEC_HULL_MIN_SCALED( player );
+			Vector hullSizeCrouch = VEC_DUCK_HULL_MAX_SCALED( player ) - VEC_DUCK_HULL_MIN_SCALED( player );
 			newOrigin -= ( hullSizeNormal - hullSizeCrouch );
 			groundCheck = newOrigin;
 			groundCheck.z -= player->GetStepSize();
 
-			UTIL_TraceHull( newOrigin, groundCheck, VEC_HULL_MIN, VEC_HULL_MAX, PlayerSolidMask(), player, COLLISION_GROUP_PLAYER_MOVEMENT, &trace );
+			UTIL_TraceHull( newOrigin, groundCheck, VEC_HULL_MIN_SCALED( player ), VEC_HULL_MAX_SCALED( player ), PlayerSolidMask(), player, COLLISION_GROUP_PLAYER_MOVEMENT, &trace );
 
 			if ( trace.startsolid || trace.fraction == 1.0f )
 				return; // Can't even stand up, or there's no ground underneath us
@@ -944,13 +1041,16 @@ void CCSGameMovement::Duck( void )
 				player->m_Local.m_bDucking    = true;
 			}
 
-			float duckmilliseconds = max( 0.0f, 1000.0f - (float)player->m_Local.m_flDucktime );
+			float duckmilliseconds = MAX( 0.0f, 1000.0f - (float)player->m_Local.m_flDucktime );
 			float duckseconds = duckmilliseconds / 1000.0f;
 
-			//time = max( 0.0, ( 1.0 - (float)player->m_Local.m_flDucktime / 1000.0 ) );
+			//time = MAX( 0.0, ( 1.0 - (float)player->m_Local.m_flDucktime / 1000.0 ) );
 			
 			if ( player->m_Local.m_bDucking )
 			{
+				if ( !( player->GetFlags() & FL_ANIMDUCKING ) )
+					player->AddFlag( FL_ANIMDUCKING );
+
 				// Finish ducking immediately if duck time is over or not on ground
 				if ( ( duckseconds > TIME_TO_DUCK ) || 
 					( player->GetGroundEntity() == NULL ) ||
@@ -979,7 +1079,7 @@ void CCSGameMovement::Duck( void )
 					player->m_Local.m_bDucking    = true;  // or unducking
 				}
 
-				float duckmilliseconds = max( 0.0f, 1000.0f - (float)player->m_Local.m_flDucktime );
+				float duckmilliseconds = MAX( 0.0f, 1000.0f - (float)player->m_Local.m_flDucktime );
 				float duckseconds = duckmilliseconds / 1000.0f;
 
 				if ( CanUnduck() )
@@ -987,6 +1087,9 @@ void CCSGameMovement::Duck( void )
 					if ( player->m_Local.m_bDucking || 
 						 player->m_Local.m_bDucked ) // or unducking
 					{
+						if ( player->GetFlags() & FL_ANIMDUCKING )
+							player->RemoveFlag( FL_ANIMDUCKING );
+
 						// Finish ducking immediately if duck time is over or not on ground
 						if ( ( duckseconds > TIME_TO_UNDUCK ) ||
 							 ( player->GetGroundEntity() == NULL ) )
@@ -1012,3 +1115,30 @@ void CCSGameMovement::Duck( void )
 	}
 }
 
+
+void CCSGameMovement::OnJump( float fImpulse )
+{
+	m_pCSPlayer->OnJump( fImpulse );
+}	
+
+void CCSGameMovement::OnLand( float fVelocity )
+{
+	m_pCSPlayer->OnLand( fVelocity );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Essentially the same as TracePlayerBBox, but adds a callback to 
+// exclude entities that are not standable (except for other players)
+//-----------------------------------------------------------------------------
+void  CCSGameMovement::TryTouchGround( const Vector& start, const Vector& end, const Vector& mins, const Vector& maxs, unsigned int fMask, int collisionGroup, trace_t& pm )
+{
+	VPROF( "CCSGameMovement::TryTouchGround" );
+
+	Ray_t ray;
+	ray.Init( start, end, mins, maxs );
+
+	ShouldHitFunc_t pStandingTestCallback = sv_enableboost.GetBool() ? NULL : CheckForStandable;
+
+	UTIL_TraceRay( ray, fMask, mv->m_nPlayerHandle.Get(), collisionGroup, &pm,  pStandingTestCallback );
+
+}

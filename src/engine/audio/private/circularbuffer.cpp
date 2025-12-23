@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Circular Buffer
 //
@@ -106,7 +106,7 @@ int CCircularBuffer::Peek(char *pchDest, int nCount)
 	//
 	// Requested amount should not exceed the available amount.
 	//
-	nCount = min(m_nCount, nCount);
+	nCount = MIN(m_nCount, nCount);
 
 	//
 	// Copy as many of the requested bytes as possible.
@@ -150,10 +150,10 @@ int CCircularBuffer::Advance(int nCount)
 	//
 	// Requested amount should not exceed the available amount.
 	//
-	nCount = min(m_nCount, nCount);
+	nCount = MIN(m_nCount, nCount);
 
-	//
-	// Advance the read pointer, checking for buffer wrap.
+	// Advance the read pointer, checking for buffer 
+	//wrap.
 	//
 	m_nRead = (m_nRead + nCount) % m_nSize;
 	m_nCount -= nCount;
@@ -181,28 +181,28 @@ int CCircularBuffer::Advance(int nCount)
 //Output  : Returns the number of bytes placed in the destination buffer.
 //Author  : DSpeyrer
 //------------------------------------------------------------------------------
-int CCircularBuffer::Read(void *pchDestIn, int m_nCount)
+int CCircularBuffer::Read(void *pchDestIn, int nCount)
 {
 	int nPeeked;
-	int m_nRead;
+	int nRead;
 
 	char *pchDest = (char*)pchDestIn;
 
-	nPeeked = Peek(pchDest, m_nCount);
+	nPeeked = Peek(pchDest, nCount);
 
 	if (nPeeked != 0)
 	{
-		m_nRead = Advance(nPeeked);
+		nRead = Advance(nPeeked);
 
-		assert(m_nRead == nPeeked);
+		assert( nRead == nPeeked);
 	}
 	else
 	{
-		m_nRead = 0;
+		nRead = 0;
 	}
 
 	AssertValid();
-	return(m_nRead);
+	return(nRead);
 }
 
 

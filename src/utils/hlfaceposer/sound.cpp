@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,7 +20,7 @@
 #include "expclass.h"
 #include "PhonemeConverter.h"
 #include "utlvector.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "sentence.h"
 #include "faceposer_models.h"
 #include "iclosecaptionmanager.h"
@@ -28,6 +28,9 @@
 #include "wavebrowser.h"
 #include "choreoscene.h"
 #include "choreoview.h"
+#include "KeyValues.h"
+
+extern ISoundEmitterSystemBase *soundemitter;
 
 typedef struct channel_s
 {
@@ -1130,6 +1133,22 @@ void CFacePoserSound::Init( void )
 {
 	m_flElapsedTime = 0.0f;
 	m_pAudio = CAudioOutput::Create();
+
+	// Load SoundOverrides for Faceposer
+
+	KeyValues *manifest = new KeyValues( "scripts/game_sounds_manifest.txt" );
+	if ( filesystem->LoadKeyValues( *manifest, IFileSystem::TYPE_SOUNDEMITTER, "scripts/game_sounds_manifest.txt", "GAME" ) )
+	{
+		for ( KeyValues *sub = manifest->GetFirstSubKey(); sub != NULL; sub = sub->GetNextKey() )
+		{
+			if ( !Q_stricmp( sub->GetName(), "faceposer_file" ) )
+			{
+				soundemitter->AddSoundOverrides( sub->GetString() );
+				continue;
+			}
+		}
+	}
+	manifest->deleteThis();
 }
 
 void CFacePoserSound::Shutdown( void )
@@ -1445,14 +1464,38 @@ void CFacePoserSound::SetupWeights( void )
 						// if the filter starts within this phoneme, make sure the filter size is 
 						// at least least as long as the current phoneme, or until the end of the next phoneme, 
 						// whichever is smaller
-						if ((hdr->flags() & STUDIOHDR_FLAGS_FORCE_PHONEME_CROSSFADE))
+						if (t > phoneme->GetStartTime() && t < phoneme->GetEndTime())
 						{
-							if (t > phoneme->GetStartTime() && t < phoneme->GetEndTime())
+							CPhonemeTag *next = NULL;
+							// try next phoneme, or first phoneme of next word
+							if (k < word->m_Phonemes.Size()-1)
 							{
-								if (k < word->m_Phonemes.Size()-1)
+								next = word->m_Phonemes[ k+1 ];
+							}
+							else if ( w < sentence->m_Words.Size() - 1  && sentence->m_Words[ w+1 ]->m_Phonemes.Size() )
+							{
+								next = sentence->m_Words[ w+1 ]->m_Phonemes[ 0 ];
+							}
+
+							// if I have a neighbor
+							if (next)
+							{
+								// and they're touching
+								if (next->GetStartTime() == phoneme->GetEndTime())
 								{
-									dt = max( dt, min( word->m_Phonemes[ k+1 ]->GetEndTime() - t, phoneme->GetEndTime() - phoneme->GetStartTime() ) );
+									// no gap, so increase the blend length to the end of the next phoneme, as long as it's not longer than the current phoneme
+									dt = max( dt, min( next->GetEndTime() - t, phoneme->GetEndTime() - phoneme->GetStartTime() ) );
 								}
+								else
+								{
+									// dead space, so increase the blend length to the start of the next phoneme, as long as it's not longer than the current phoneme
+									dt = max( dt, min( next->GetStartTime() - t, phoneme->GetEndTime() - phoneme->GetStartTime() ) );
+								}
+							}
+							else
+							{
+								// last phoneme in list, increase the blend length to the length of the current phoneme
+								dt = max( dt, phoneme->GetEndTime() - phoneme->GetStartTime() );
 							}
 						}
 
@@ -1476,7 +1519,6 @@ void CFacePoserSound::SetupWeights( void )
 						}
 					}
 				}
-
 				ProcessCloseCaptionData( model, t, sentence );
 			}
 		}

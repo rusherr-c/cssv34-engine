@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -647,9 +647,9 @@ void CCSBot::UpdatePeripheralVision()
 		const SpotOrder *spotOrder;
 		Vector pos;
 
-		FOR_EACH_LL( m_spotEncounter->spotList, it )
+		FOR_EACH_VEC( m_spotEncounter->spots, it )
 		{
-			spotOrder = &m_spotEncounter->spotList[ it ];
+			spotOrder = &m_spotEncounter->spots[ it ];
 
 			const Vector &spotPos = spotOrder->spot->GetPosition();
 
@@ -864,9 +864,9 @@ void CCSBot::UpdateLookAround( bool updateNow )
 
 			const float checkTime = 10.0f;
 			const SpotOrder *spotOrder;
-			FOR_EACH_LL( m_spotEncounter->spotList, it )
+			FOR_EACH_VEC( m_spotEncounter->spots, it )
 			{
-				spotOrder = &(m_spotEncounter->spotList[ it ]);
+				spotOrder = &(m_spotEncounter->spots[ it ]);
 
 				// if we have seen this spot recently, we don't need to look at it
 				if (gpGlobals->curtime - GetHidingSpotCheckTimestamp( spotOrder->spot ) <= checkTime)
@@ -1818,8 +1818,9 @@ void CCSBot::UpdatePanicLookAround( void )
 	QAngle newAngles;
 	newAngles.x = RandomFloat( -30.0f, 30.0f );
 
-	float yaw = RandomFloat( 135.0f, 180.0f );
-	newAngles.y = eyeAngles.y + (RandomFloat( -1.0f, 1.0f ) < 0.0f) ? (-yaw) : yaw;
+	// Look directly behind at a random offset in a 90 window.
+	float yaw = RandomFloat( 135.0f, 225.0f );
+	newAngles.y = eyeAngles.y + yaw;
 	newAngles.z = 0.0f;
 
 	Vector forward;

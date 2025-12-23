@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -98,7 +98,7 @@ void Key_SetBinding( ButtonCode_t keynum, const char *pBinding )
 Key_Unbind_f
 ===================
 */
-CON_COMMAND( unbind, "Unbind a key." )
+CON_COMMAND_F( unbind, "Unbind a key.", FCVAR_DONTRECORD )
 {
 	ButtonCode_t b;
 
@@ -123,7 +123,38 @@ CON_COMMAND( unbind, "Unbind a key." )
 	Key_SetBinding( b, "" );
 }
 
-CON_COMMAND( unbindall, "Unbind all keys." )
+
+CON_COMMAND_F( unbind_mac, "Unbind a key on the Mac only.", FCVAR_DONTRECORD )
+{
+	if ( IsOSX() )
+	{
+		ButtonCode_t b;
+		
+		if ( args.ArgC() != 2 )
+		{
+			ConMsg( "unbind <key> : remove commands from a key\n" );
+			return;
+		}
+		
+		b = g_pInputSystem->StringToButtonCode( args[1] );
+		if ( b == BUTTON_CODE_INVALID )
+		{
+			ConMsg( "\"%s\" isn't a valid key\n", args[1] );
+			return;
+		}
+		if ( b == KEY_ESCAPE )
+		{
+			ConMsg( "Can't unbind ESCAPE key\n" );
+			return;
+		}
+		
+		Key_SetBinding( b, "" );
+	}
+}
+
+
+
+CON_COMMAND_F( unbindall, "Unbind all keys.", FCVAR_DONTRECORD )
 {
 	int		i;
 	
@@ -155,10 +186,44 @@ CON_COMMAND_F( escape, "Escape key pressed.", FCVAR_CLIENTCMD_CAN_EXECUTE )
 Key_Bind_f
 ===================
 */
-CON_COMMAND( bind, "Bind a key." )
+
+void BindKey( const char *pchBind, bool bShow, const char *pchCmd )
+{		
+	if ( !g_pInputSystem )
+		return;
+
+	ButtonCode_t b = g_pInputSystem->StringToButtonCode( pchBind );
+	if ( b == BUTTON_CODE_INVALID )
+	{
+		ConMsg( "\"%s\" isn't a valid key\n", pchBind );
+		return;
+	}
+	
+	if ( bShow )
+	{
+		if (s_pKeyInfo[b].m_pKeyBinding)
+		{
+			ConMsg( "\"%s\" = \"%s\"\n", pchBind, s_pKeyInfo[b].m_pKeyBinding );
+		}
+		else
+		{
+			ConMsg( "\"%s\" is not bound\n", pchBind );
+		}
+		return;
+	}
+	
+	if ( b == KEY_ESCAPE )
+	{
+		pchCmd = "cancelselect";
+	}
+	
+	Key_SetBinding( b, pchCmd );
+}
+
+
+CON_COMMAND_F( bind, "Bind a key.", FCVAR_DONTRECORD )
 {
 	int i, c;
-	ButtonCode_t b;
 	char cmd[1024];
 	
 	c = args.ArgC();
@@ -168,33 +233,36 @@ CON_COMMAND( bind, "Bind a key." )
 		ConMsg( "bind <key> [command] : attach a command to a key\n" );
 		return;
 	}
-
-	b = g_pInputSystem->StringToButtonCode( args[1] );
-	if ( b == BUTTON_CODE_INVALID )
+	
+	// copy the rest of the command line
+	cmd[0] = 0;		// start out with a null string
+	for ( i=2 ; i< c ; i++ )
 	{
-		ConMsg( "\"%s\" isn't a valid key\n", args[1] );
-		return;
-	}
-
-	if ( c == 2 )
-	{
-		if (s_pKeyInfo[b].m_pKeyBinding)
+		if (i > 2)
 		{
-			ConMsg( "\"%s\" = \"%s\"\n", args[1], s_pKeyInfo[b].m_pKeyBinding );
+			Q_strncat( cmd, " ", sizeof( cmd ), COPY_ALL_CHARACTERS );
 		}
-		else
-		{
-			ConMsg( "\"%s\" is not bound\n", args[1] );
-		}
-		return;
+		Q_strncat( cmd, args[i], sizeof( cmd ), COPY_ALL_CHARACTERS );
 	}
 
-	if ( b == KEY_ESCAPE )
+	BindKey( args[1], c == 2, cmd );
+}
+
+CON_COMMAND_F( bind_mac, "Bind this key but only on Mac, not win32", FCVAR_DONTRECORD )
+{
+	if ( IsOSX() )
 	{
-		Q_strncpy( cmd, "cancelselect", sizeof( cmd ) );
-	}
-	else
-	{	
+		int i, c;
+		char cmd[1024];
+		
+		c = args.ArgC();
+		
+		if ( c != 2 && c != 3 )
+		{
+			ConMsg( "bind <key> [command] : attach a command to a key\n" );
+			return;
+		}
+		
 		// copy the rest of the command line
 		cmd[0] = 0;		// start out with a null string
 		for ( i=2 ; i< c ; i++ )
@@ -205,9 +273,13 @@ CON_COMMAND( bind, "Bind a key." )
 			}
 			Q_strncat( cmd, args[i], sizeof( cmd ), COPY_ALL_CHARACTERS );
 		}
+		
+		BindKey( args[1], c == 2, cmd );
 	}
-	Key_SetBinding( b, cmd );
+	
 }
+	
+
 
 /*
 ============
@@ -298,6 +370,35 @@ const char *Key_NameForBinding( const char *pBinding )
 
 	if ( !Q_stricmp( "zoom", pBind ) )
 		return Key_NameForBinding( "toggle_zoom" );
+
+	return NULL;
+}
+
+/*
+============
+Key_NameForBinding
+
+Returns the keyname to which a binding string is bound.  E.g., if 
+TAB is bound to +use then searching for +use will return "TAB"
+
+Does not perform "helpful" removal of '+' character from bindings.
+============
+*/
+const char *Key_NameForBindingExact( const char *pBinding )
+{
+	int i;
+
+	for (i=0 ; i<BUTTON_CODE_LAST ; i++)
+	{
+		if (s_pKeyInfo[i].m_pKeyBinding)
+		{
+			if (*s_pKeyInfo[i].m_pKeyBinding)
+			{
+				if ( !Q_strcasecmp( s_pKeyInfo[i].m_pKeyBinding, pBinding ) )
+					return g_pInputSystem->ButtonCodeToString( (ButtonCode_t)i );
+			}
+		}
+	}
 
 	return NULL;
 }
@@ -415,6 +516,7 @@ bool Key_CheckDoneTrapping( ButtonCode_t& code )
 	return true;
 }
 
+#ifndef SWDS
 
 //-----------------------------------------------------------------------------
 // Filter out trapped keys
@@ -441,7 +543,6 @@ static bool FilterTrappedKey( ButtonCode_t code, bool bDown )
 	return false;
 }
 
-
 //-----------------------------------------------------------------------------
 // Lets tools have a whack at key events
 //-----------------------------------------------------------------------------
@@ -451,6 +552,7 @@ static bool HandleToolKey( const InputEvent_t &event )
 	return toolsys && toolsys->TrapKey( (ButtonCode_t)event.m_nData, ( event.m_nType != IE_ButtonReleased ) );
 }
 
+#endif // !SWDS
 
 //-----------------------------------------------------------------------------
 // Lets vgui have a whack at key events
@@ -489,6 +591,7 @@ static bool HandleClientKey( const InputEvent_t &event )
 //-----------------------------------------------------------------------------
 // Lets the engine have a whack at key events
 //-----------------------------------------------------------------------------
+#ifndef SWDS
 static bool HandleEngineKey( const InputEvent_t &event )
 {
 	bool bDown = event.m_nType != IE_ButtonReleased;
@@ -497,11 +600,19 @@ static bool HandleEngineKey( const InputEvent_t &event )
 	// Warn about unbound keys 
 	if ( IsPC() && bDown )
 	{
-		if ( IsJoystickCode( code ) && !IsJoystickAxisCode( code ) && !s_pKeyInfo[code].m_pKeyBinding )
+		if ( IsJoystickCode( code ) && !IsJoystickAxisCode( code ) && !IsSteamControllerCode( code ) && !s_pKeyInfo[code].m_pKeyBinding )
 		{
 			ConDMsg( "%s is unbound.\n", g_pInputSystem->ButtonCodeToString( code ) );
 		}
 	}
+
+	// Allow the client to handle mouse wheel events while the game has focus, without having to bind keys.
+#if !defined( SWDS )
+	if ( ( code == MOUSE_WHEEL_UP || code == MOUSE_WHEEL_DOWN ) && g_pClientReplay )
+	{
+		g_ClientDLL->IN_OnMouseWheeled( code == MOUSE_WHEEL_UP ? 1 : -1 );
+	}
+#endif
 
 	// key up events only generate commands if the game key binding is
 	// a button command (leading + sign).  These will occur even in console mode,
@@ -546,12 +657,13 @@ static bool HandleEngineKey( const InputEvent_t &event )
 	Cbuf_AddText( "\n" );
 	return true;
 }
-
+#endif // !SWDS
 
 
 //-----------------------------------------------------------------------------
 // Helper function to make sure key down/key up events go to the right places
 //-----------------------------------------------------------------------------
+#ifndef SWDS
 typedef bool (*FilterKeyFunc_t)( const InputEvent_t &event );
 
 static bool FilterKey( const InputEvent_t &event, KeyUpTarget_t target, FilterKeyFunc_t func )
@@ -590,7 +702,7 @@ static bool FilterKey( const InputEvent_t &event, KeyUpTarget_t target, FilterKe
 
 	return bFiltered;
 }
-
+#endif // !SWDS
 
 
 //-----------------------------------------------------------------------------
@@ -606,6 +718,15 @@ void Key_Event( const InputEvent_t &event )
 	bool bDown = event.m_nType != IE_ButtonReleased;
 	ButtonCode_t code = (ButtonCode_t)event.m_nData;
 
+#ifdef LINUX
+	// We're getting some crashes referencing s_pKeyInfo[ code ]. Let's try to
+	//	hard error here and see if we can get code and type at http://minidump.
+	if ( code < 0 || code >= ARRAYSIZE( s_pKeyInfo ) )
+	{
+		Error( "Key_Event: invalid code! type:%d code:%d\n", event.m_nType, code );
+	}
+#endif
+
 	// Don't handle key ups if the key's already up. 
 	// NOTE: This should already be taken care of by the input system
 	Assert( s_pKeyInfo[code].m_bKeyDown != bDown );
@@ -613,14 +734,6 @@ void Key_Event( const InputEvent_t &event )
 		return;
 
 	s_pKeyInfo[code].m_bKeyDown = bDown;
-
-	bool bCtrlDown = s_pKeyInfo[KEY_LCONTROL].m_bKeyDown || s_pKeyInfo[KEY_RCONTROL].m_bKeyDown; 
-	bool bAltDown = s_pKeyInfo[KEY_LALT].m_bKeyDown || s_pKeyInfo[KEY_RALT].m_bKeyDown;
-	if ( bCtrlDown && bAltDown && s_pKeyInfo[KEY_DELETE].m_bKeyDown )
-	{
-		Error( "ctrl-alt-del pressed" );
-		return;
-	}
 
 	// Deal with trapped keys
 	if ( FilterTrappedKey( code, bDown ) )

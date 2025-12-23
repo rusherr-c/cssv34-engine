@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // CGameClient: represents a player client in a game server
 //
@@ -14,7 +14,7 @@
 #include "const.h"
 #include "bitbuf.h"
 #include "net.h"
-#include "checksum_crc.h"
+#include "checksum_engine.h"
 #include "event_system.h"
 #include "utlvector.h"
 #include "bitvec.h"
@@ -36,6 +36,7 @@ struct	edict_t;
 struct	SoundInfo_t;
 class	KeyValues;
 class	CHLTVServer;
+class	CReplayServer;
 class	CPerClientLogoInfo;
 class	CCommand;
 
@@ -59,14 +60,15 @@ public:
 	void FileReceived( const char *fileName, unsigned int transferID );
 	void FileRequested(const char *fileName, unsigned int transferID );
 	void FileDenied( const char *fileName, unsigned int transferID );
+	void FileSent( const char *fileName, unsigned int transferID );
 	
 	bool ProcessConnectionlessPacket( netpacket_t *packet );
 
 	// IClient interface
-	void	Connect(const char * szName, int nUserID, INetChannel *pNetChannel, bool bFakePlayer);
+	void	Connect( const char * szName, int nUserID, INetChannel *pNetChannel, bool bFakePlayer, int clientChallenge );
 	void	Inactivate( void );
 	void	Reconnect( void );
-	void	Disconnect( const char *reason, ... );
+	void	Disconnect( PRINTF_FORMAT_STRING const char *reason, ... );
 	
 	void	SetRate( int nRate, bool bForce );
 	void	SetUpdateRate( int nUpdateRate, bool bForce );
@@ -86,6 +88,11 @@ public: // IClientMessageHandlers
 	PROCESS_CLC_MESSAGE( VoiceData );
 	PROCESS_CLC_MESSAGE( RespondCvarValue );
 	PROCESS_CLC_MESSAGE( FileCRCCheck );
+	PROCESS_CLC_MESSAGE( FileMD5Check );
+#if defined( REPLAY_ENABLED )
+	PROCESS_CLC_MESSAGE( SaveReplay );
+#endif
+	PROCESS_CLC_MESSAGE( CmdKeyValues );
 	
 public:
 
@@ -141,6 +148,10 @@ public:
 	bool					m_bIsInReplayMode;
 	CCheckTransmitInfo		m_PrevPackInfo;		// Used to speed up CheckTransmit.
 	CBitVec<MAX_EDICTS>		m_PrevTransmitEdict;
+
+#if defined( REPLAY_ENABLED )
+	float					m_flLastSaveReplayTime;
+#endif
 };
 
 #endif // SV_CLIENT_H

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -61,7 +61,7 @@ static const char *facingName[6] = { "rt", "lf", "bk", "ft", "up", "dn" };
 //-----------------------------------------------------------------------------
 // Load, unload vtex 
 //-----------------------------------------------------------------------------
-static IVTex* VTex_Load( CSysModule** pModule )
+IVTex* VTex_Load( CSysModule** pModule )
 {
 	// load the vtex dll
 	IVTex *pIVTex = NULL;
@@ -83,7 +83,7 @@ static IVTex* VTex_Load( CSysModule** pModule )
 	return pIVTex;
 }
 
-static void VTex_Unload( CSysModule *pModule )
+void VTex_Unload( CSysModule *pModule )
 {
 	FileSystem_UnloadModule( pModule );
 }
@@ -354,7 +354,6 @@ static void BuildSingleCubemap( const char *pVTFName, const Vector &vecOrigin,
 }
 
 
-#ifdef _WIN32
 #if !defined( SWDS )
 
 //-----------------------------------------------------------------------------
@@ -427,8 +426,6 @@ static void WriteLightProbe( const char *pBasePath, const LightingState_t& state
 	{
 		CDmxElement* pLight = CreateDmxElement( "DmeElement" );
 		lights.AddToTail( pLight );
-
-		CDmxElementModifyScope modify( pLight );
 
 		const dworldlight_t &wl = *state.locallight[i];
 
@@ -549,10 +546,6 @@ CON_COMMAND( lightprobe,
 }
 
 
-#endif
-#endif
-
-#ifdef _WIN32
 static bool LoadSrcVTFFiles( IVTFTexture *pSrcVTFTextures[6], const char *pSkyboxBaseName )
 {
 	if ( IsX360() )
@@ -654,8 +647,8 @@ void Cubemap_CreateDefaultCubemap( const char *pMapName, IBSPPack *iBSPPack )
 				if ( ( pSrcVTFTextures[iFace]->Width() == 4 ) && ( pSrcVTFTextures[iFace]->Height() == 4 ) ) // If texture is 4x4 square
 				{
 					// Force mip level 2 to get the 1x1 face
-					unsigned char *pSrcBits = pSrcVTFTextures[iFace]->ImageData( iFrame, 0, 2 );
-					int iSrcMipSize = pSrcVTFTextures[iFace]->ComputeMipSize( 2 );
+					pSrcBits = pSrcVTFTextures[iFace]->ImageData( iFrame, 0, 2 );
+					iSrcMipSize = pSrcVTFTextures[iFace]->ComputeMipSize( 2 );
 
 					// Replicate 1x1 mip level across entire face
 					//memset( pDstBits, 0, iSize ); 
@@ -772,25 +765,25 @@ void Cubemap_CreateDefaultCubemap( const char *pMapName, IBSPPack *iBSPPack )
 		DestroyVTFTexture( pSrcVTFTextures[i] );
 	}
 	DestroyVTFTexture( pDstCubemap );
-}	
+}
 
 static void AddSampleToBSPFile( bool bHDR, mcubemapsample_t *pSample, const char *matDir, IBSPPack *iBSPPack )
 {
 	if ( IsX360() )
 		return;
 
-	char textureName[512];
+	char textureName[MAX_PATH] = { 0 };
 	const char *pHDRExtension = "";
 	if( bHDR )
 	{
 		pHDRExtension = ".hdr";
 	}
-	Q_snprintf( textureName, sizeof( textureName ), "%s/c%d_%d_%d%s.vtf", matDir, ( int )pSample->origin[0], 
-		( int )pSample->origin[1], ( int )pSample->origin[2], pHDRExtension );
-	char localPath[1024];
-	if ( !g_pFileSystem->GetLocalPath( textureName, localPath, sizeof(localPath) ) )
+	Q_snprintf( textureName, sizeof( textureName ), "%s/c%d_%d_%d%s.vtf", matDir, ( int )pSample->origin[0],
+	            ( int )pSample->origin[1], ( int )pSample->origin[2], pHDRExtension );
+	char localPath[MAX_PATH] = { 0 };
+	if ( !g_pFileSystem->RelativePathToFullPath_safe( textureName, "DEFAULT_WRITE_PATH", localPath ) || !*localPath )
 	{
-		Warning("vtex failed to compile cubemap!\n"); 
+		Warning("vtex failed to compile cubemap!\n");
 	}
 	else
 	{
@@ -809,56 +802,53 @@ Take a cubemap at each "cubemap" entity in the current map.
 ===============
 */
 // HOLY CRAP THIS NEEDS TO BE CLEANED UP
-void R_BuildCubemapSamples( int numIterations )
+
+//Added these to seperate from R_BuildCubemapSamples to a) clean it up abit and b) fix the issue where if it fails, mouse is disabled.
+static bool saveShadows = true;
+static bool bDrawWater = true;
+static int nSaveLightStyle = -1;
+static int bSaveDrawBeams = true;
+static bool bSaveMatSpecular = true;
+static int nOldOcclusionVal = 1;
+static int nOldBloomDisable = 0;
+static int originaldrawMRMModelsVal = 1; 
+void R_BuildCubemapSamples_PreBuild()
 {
-	if ( IsX360() )
-		return;
-
-	// Make sure that the file is writable before building cubemaps.
-	Assert( g_pFileSystem->FileExists( cl.m_szLevelName, "GAME" ) );
-	if( !g_pFileSystem->IsFileWritable( cl.m_szLevelName, "GAME" ) )
-	{
-		Warning( "%s is not writable!!!  Check it out before running buildcubemaps.\n", cl.m_szLevelName );
-		return;
-	}
-
 	// disable the mouse so that it won't be recentered all the bloody time.
 	ConVarRef cl_mouseenable( "cl_mouseenable" );
 	if( cl_mouseenable.IsValid() )
 	{
 		cl_mouseenable.SetValue( 0 );
 	}
-
+	
 	ConVarRef r_shadows( "r_shadows" );
-	bool saveShadows = true;
+	saveShadows = true;
 	if ( r_shadows.IsValid() )
 	{
 		saveShadows = r_shadows.GetBool();
 		r_shadows.SetValue( 0 );
 	}
-
 	// Clear the water surface.
 	ConVarRef mat_drawwater( "mat_drawwater" );
-	bool bDrawWater = true;
+	bDrawWater = true;
 	if ( mat_drawwater.IsValid() )
 	{
 		bDrawWater = mat_drawwater.GetBool();
 		mat_drawwater.SetValue( 0 );
 	} 
-
-	int nSaveLightStyle = -1;
-	ConVarRef r_lightstyle( "r_lightstyle" );
-	if ( r_lightstyle.IsValid() )
+	nSaveLightStyle = -1;
+	ConVarRef r_lightstyleRef( "r_lightstyle" );
+	if ( r_lightstyleRef.IsValid() )
 	{
-		nSaveLightStyle = r_lightstyle.GetInt();
-		r_lightstyle.SetValue( 0 );
+		nSaveLightStyle = r_lightstyleRef.GetInt();
+		r_lightstyleRef.SetValue( 0 );
 		R_RedownloadAllLightmaps();
 	}
 
-	int bSaveDrawBeams = r_DrawBeams.GetInt();
+	bSaveDrawBeams = r_DrawBeams.GetInt();
 	r_DrawBeams.SetValue( 0 );
 
-	bool bSaveMatSpecular = mat_fastspecular.GetBool();
+	bSaveMatSpecular = mat_fastspecular.GetBool();
 
 //	ConVar *r_drawtranslucentworld = ( ConVar * )cv->FindVar( "r_drawtranslucentworld" );
 //	ConVar *r_drawtranslucentrenderables = ( ConVar * )cv->FindVar( "r_drawtranslucentrenderables" );
@@ -877,7 +867,7 @@ void R_BuildCubemapSamples( int numIterations )
 		// NOTE! : We use to set this to 0 for HDR.
 //		r_drawtranslucentrenderables->SetValue( 0 );
 //	}
-	
+
 	building_cubemaps.SetValue( 1 );
 	
 	ConVarRef r_portalsopenall( "r_portalsopenall" );
@@ -886,7 +876,7 @@ void R_BuildCubemapSamples( int numIterations )
 		r_portalsopenall.SetValue( 1 );
 	}
 
-	int nOldOcclusionVal = 1;
+	nOldOcclusionVal = 1;
 	ConVarRef r_occlusion( "r_occlusion" );
 	if( r_occlusion.IsValid() )
 	{
@@ -895,12 +885,92 @@ void R_BuildCubemapSamples( int numIterations )
 	}
 	
 	ConVarRef mat_disable_bloom( "mat_disable_bloom" );
-	int nOldBloomDisable = 0;
+	nOldBloomDisable = 0;
 	if ( mat_disable_bloom.IsValid() )
 	{
 		nOldBloomDisable = mat_disable_bloom.GetInt();
 		mat_disable_bloom.SetValue( 1 );
 	}
+	ConVarRef drawMRMModelsCVar( "r_drawothermodels" );
+	if( drawMRMModelsCVar.IsValid() )
+		originaldrawMRMModelsVal = drawMRMModelsCVar.GetInt();
+
+
+}
+void R_BuildCubemapSamples_PostBuild()
+{
+	// re-enable the mouse.
+	ConVarRef cl_mouseenable( "cl_mouseenable" );
+	if( cl_mouseenable.IsValid() )
+	{
+		cl_mouseenable.SetValue( 1 );
+	}
+	ConVarRef r_shadows( "r_shadows" );
+	if( r_shadows.IsValid() )
+	{
+		r_shadows.SetValue( saveShadows );
+	}
+	ConVarRef mat_drawwater( "mat_drawwater" );
+	if ( mat_drawwater.IsValid() )
+	{
+		mat_drawwater.SetValue( bDrawWater );
+	}
+	if( bSaveMatSpecular )
+	{
+		mat_fastspecular.SetValue( "1" );
+	}
+	else
+	{
+		mat_fastspecular.SetValue( "0" );
+	}
+
+	ConVarRef r_lightstyleRef( "r_lightstyle" );
+	if( r_lightstyleRef.IsValid() )
+	{
+		r_lightstyleRef.SetValue( nSaveLightStyle );
+		R_RedownloadAllLightmaps();
+	}
+
+	ConVarRef r_portalsopenall( "r_portalsopenall" );
+	if( r_portalsopenall.IsValid() )
+	{
+		r_portalsopenall.SetValue( 0 );
+	}
+	ConVarRef r_occlusion( "r_occlusion" );
+	if( r_occlusion.IsValid() )
+	{
+		r_occlusion.SetValue( nOldOcclusionVal );
+	}
+	ConVarRef mat_disable_bloom( "mat_disable_bloom" );
+	if ( mat_disable_bloom.IsValid() )
+	{
+		mat_disable_bloom.SetValue( nOldBloomDisable);
+	}
+
+	r_DrawBeams.SetValue( bSaveDrawBeams );
+	
+	ConVarRef drawMRMModelsCVar( "r_drawothermodels" );
+	if( drawMRMModelsCVar.IsValid() )
+	{ 
+		drawMRMModelsCVar.SetValue( originaldrawMRMModelsVal );
+	}
+	building_cubemaps.SetValue( 0 );
+
+}
+void R_BuildCubemapSamples( int numIterations )
+{
+	if ( IsX360() )
+		return;
+
+	// Make sure that the file is writable before building cubemaps.
+	Assert( g_pFileSystem->FileExists( cl.m_szLevelFileName, "GAME" ) );
+	if( !g_pFileSystem->IsFileWritable( cl.m_szLevelFileName, "GAME" ) )
+	{
+		Warning( "%s is not writable!!!  Check it out before running buildcubemaps.\n", cl.m_szLevelFileName );
+		return;
+	}
+
+	R_BuildCubemapSamples_PreBuild();
 
 	int bounce;
 	for( bounce = 0; bounce < numIterations; bounce++ )
@@ -914,34 +984,16 @@ void R_BuildCubemapSamples( int numIterations )
 			mat_fastspecular.SetValue( "1" );
 		}
 		UpdateMaterialSystemConfig();
-		
-		char	mapName[ 256 ];
+
 		IClientEntity *world = entitylist->GetClientEntity( 0 );
 
-		if( world && world->GetModel() )
-		{
-			const model_t *pModel = world->GetModel();
-			const char *pModelName = modelloader->GetName( pModel );
-			
-			// This handles the case where you have a map in a directory under maps. 
-			// We need to keep everything after "maps/" so it looks for the BSP file in the right place.
-			if ( Q_stristr( pModelName, "maps/" ) == pModelName ||
-				Q_stristr( pModelName, "maps\\" ) == pModelName )
-			{
-				Q_strncpy( mapName, &pModelName[5], sizeof( mapName ) );
-				Q_StripExtension( mapName, mapName, sizeof( mapName ) );
-			}
-			else
-			{
-				Q_FileBase( pModelName, mapName, sizeof( mapName ) );
-			}
-		}
-		else
+		if( !world || !world->GetModel() )
 		{
 			ConDMsg( "R_BuildCubemapSamples: No map loaded!\n" );
+			R_BuildCubemapSamples_PostBuild(); 
 			return;
 		}
-		
+
 		int oldDrawMRMModelsVal = 1;
 		ConVarRef drawMRMModelsCVar( "r_drawothermodels" );
 		if( drawMRMModelsCVar.IsValid() )
@@ -957,22 +1009,22 @@ void R_BuildCubemapSamples( int numIterations )
 		IVTex *ivt = VTex_Load( &pModule );
 		if ( !ivt )
 			return;
-		
+
 		char matDir[MAX_PATH];
-		Q_snprintf( matDir, sizeof(matDir), "materials/maps/%s", mapName );
+		Q_snprintf( matDir, sizeof(matDir), "materials/maps/%s", cl.m_szLevelBaseName );
 		g_pFileSystem->CreateDirHierarchy( matDir, "DEFAULT_WRITE_PATH" );
 
 		char pTemp[MAX_PATH];
-		Q_snprintf( pTemp, sizeof(pTemp), "materialsrc/maps/%s", mapName );
+		Q_snprintf( pTemp, sizeof(pTemp), "materialsrc/maps/%s", cl.m_szLevelBaseName );
 
 		char pMaterialSrcDir[MAX_PATH];
 		GetModContentSubdirectory( pTemp, pMaterialSrcDir, sizeof(pMaterialSrcDir) );
 
 		g_pFileSystem->CreateDirHierarchy( pMaterialSrcDir, NULL );
-		
+
 		char gameDir[MAX_OSPATH];
 		COM_GetGameDir( gameDir, sizeof( gameDir ) );
-		
+
 		model_t *pWorldModel = ( model_t *)world->GetModel();
 		int i;
 		for( i = 0; i < pWorldModel->brush.pShared->m_nCubemapSamples; i++ )
@@ -985,16 +1037,13 @@ void R_BuildCubemapSamples( int numIterations )
 			{
 				Warning( "Cube map buffer size %d x %d is bigger than screen!\nRun at a higher resolution! or reduce your cubemap resolution (needs 4X)\n", screenBufSize, screenBufSize );
 				// BUGBUG: We'll leak DLLs/handles if we break out here, but this should be infrequent.
+				R_BuildCubemapSamples_PostBuild();
 				return;
 			}
 		}
 
 		bool bSupportsHDR = g_pMaterialSystemHardwareConfig->GetHDRType() != HDR_TYPE_NONE;
-// 		if( g_pMaterialSystemHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
-// 		{
-// 			Warning( "Can't build cube maps with integer HDR.  If you are trying to build LDR cubemaps, run with +hdr_level 0.  If you are trying to build HDR cubemaps, you need a card capable of running float HDR (like 6800), and you need to run with -floathdr +mat_hdr_level 2\n" );
-// 			return;
-// 		}
+
 		for( i = 0; i < pWorldModel->brush.pShared->m_nCubemapSamples; i++ )
 		{
 			Warning( "bounce: %d/%d sample: %d/%d\n", bounce+1, numIterations, i+1, pWorldModel->brush.pShared->m_nCubemapSamples );
@@ -1007,11 +1056,6 @@ void R_BuildCubemapSamples( int numIterations )
 
 			int nTgaSize = ( pCubemapSample->size == 0 ) ? mat_envmaptgasize.GetInt() : 1 << ( pCubemapSample->size-1 );
 			BuildSingleCubemap( pVTFName, pCubemapSample->origin, nTgaSize, bSupportsHDR, gameDir, ivt );
-		}
-
-		if( drawMRMModelsCVar.IsValid() )
-		{ 
-			drawMRMModelsCVar.SetValue( oldDrawMRMModelsVal );
 		}
 
 		ActivateLightSprites( bOldLightSpritesActive );
@@ -1032,95 +1076,57 @@ void R_BuildCubemapSamples( int numIterations )
 		if( !iBSPPack )
 		{
 			ConMsg( "Can't load bsppack.dll\n" );
+			R_BuildCubemapSamples_PostBuild();
 			return;
 		}
 
 		iBSPPack->SetHDRMode( g_pMaterialSystemHardwareConfig->GetHDRType() != HDR_TYPE_NONE );
 
-		char mapPath[1024];
-		Q_snprintf( mapPath, sizeof( mapPath ), "maps/%s.bsp", mapName );
-		iBSPPack->LoadBSPFile( g_pFileSystem, mapPath );
-		
+		iBSPPack->LoadBSPFile( g_pFileSystem, cl.m_szLevelFileName );
+
 		// Cram the textures into the bsp.
-		Q_snprintf( matDir, sizeof(matDir), "materials/maps/%s", mapName );
+		Q_snprintf( matDir, sizeof(matDir), "materials/maps/%s", cl.m_szLevelBaseName );
 		for ( i=0 ; i < pWorldModel->brush.pShared->m_nCubemapSamples ; i++ )
 		{
 			mcubemapsample_t *pSample = &pWorldModel->brush.pShared->m_pCubemapSamples[i];
 			AddSampleToBSPFile( bSupportsHDR, pSample, matDir, iBSPPack );
 		}
-		Cubemap_CreateDefaultCubemap( mapName, iBSPPack );
-		
-		iBSPPack->WriteBSPFile( mapPath );
+		Cubemap_CreateDefaultCubemap( cl.m_szLevelBaseName, iBSPPack );
+
+		// Resolve levelfilename to absolute to ensure we are writing the exact file we loaded and not preferentially to
+		// DEFAULT_WRITE_PATH
+		char szAbsFile[MAX_PATH] = { 0 };
+		g_pFullFileSystem->RelativePathToFullPath( cl.m_szLevelFileName, NULL, szAbsFile, sizeof( szAbsFile ) );
+		if ( !*szAbsFile )
+		{
+			ConMsg( "Failed to resolve absolute path of map: %s\n", cl.m_szLevelFileName );
+			R_BuildCubemapSamples_PostBuild();
+			return;
+		}
+		iBSPPack->WriteBSPFile( szAbsFile );
 		iBSPPack->ClearPackFile();
 		FileSystem_UnloadModule( pModule );
 
 		Cbuf_AddText( "restart setpos\n" );
 	}
 
-	// re-enable the mouse.
-	if( cl_mouseenable.IsValid() )
-	{
-		cl_mouseenable.SetValue( 1 );
-	}
-	if( r_shadows.IsValid() )
-	{
-		r_shadows.SetValue( saveShadows );
-	}
-	if ( mat_drawwater.IsValid() )
-	{
-		mat_drawwater.SetValue( bDrawWater );
-	}
-	if( bSaveMatSpecular )
-	{
-		mat_fastspecular.SetValue( "1" );
-	}
-	else
-	{
-		mat_fastspecular.SetValue( "0" );
-	}
+	R_BuildCubemapSamples_PostBuild();
 
-	if( r_lightstyle.IsValid() )
-	{
-		r_lightstyle.SetValue( nSaveLightStyle );
-		R_RedownloadAllLightmaps();
-	}
-
-	// NOTE! : We use to set this to 0 for HDR.
-//	if( r_drawtranslucentworld )
-//	{
-//		r_drawtranslucentworld->SetValue( bSaveDrawTranslucentWorld );
-//	}
-	// NOTE! : We use to set this to 0 for HDR.
-//	if( r_drawtranslucentrenderables )
-//	{
-//		r_drawtranslucentrenderables->SetValue( bSaveDrawTranslucentRenderables );
-//	}
-	if( r_portalsopenall.IsValid() )
-	{
-		r_portalsopenall.SetValue( 0 );
-	}
-	if( r_occlusion.IsValid() )
-	{
-		r_occlusion.SetValue( nOldOcclusionVal );
-	}
-
-	if ( mat_disable_bloom.IsValid() )
-	{
-		mat_disable_bloom.SetValue( nOldBloomDisable);
-	}
-
-	r_DrawBeams.SetValue( bSaveDrawBeams );
-
-	building_cubemaps.SetValue( 0 );
 	UpdateMaterialSystemConfig();
 
 	// after map reloads, run any state that had to wait for map to reload
 	reload_materials.SetValue( 1 );
 }
 
-#if !defined( SWDS ) && !defined( _X360 )
+#if !defined( _X360 )
 CON_COMMAND( buildcubemaps, "Rebuild cubemaps." )
 {
+	extern void V_RenderVGuiOnly();
+
+	bool bAllow = Host_AllowQueuedMaterialSystem(false);
+
+	// do this to force a frame to render so the material system syncs up to single thread mode
+	V_RenderVGuiOnly();
 	if ( args.ArgC() == 1 )
 	{
 		R_BuildCubemapSamples( 1 );
@@ -1133,6 +1139,7 @@ CON_COMMAND( buildcubemaps, "Rebuild cubemaps." )
 	{
 		ConMsg( "Usage: buildcubemaps [numBounces]\n" );
 	}
+	Host_AllowQueuedMaterialSystem(bAllow);
 }
 #endif // SWDS
 

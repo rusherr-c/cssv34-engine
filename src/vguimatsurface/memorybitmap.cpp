@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,8 +10,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include "MatSystemSurface.h"
-#include "materialsystem/IMaterialVar.h"
-#include "materialsystem/ITexture.h"
+#include "materialsystem/imaterialvar.h"
+#include "materialsystem/itexture.h"
 #include "bitmap/imageformat.h"
 #include "vtf/vtf.h"
 #include "KeyValues.h"
@@ -37,7 +37,7 @@ MemoryBitmap::MemoryBitmap(unsigned char *texture,int wide, int tall)
 	_valid = true;
 	_w = wide;
 	_h = tall;
-	m_iTextureID = 0;
+	m_iTextureID = -1;
 
 	ForceUpload(texture,wide,tall);
 }
@@ -48,8 +48,11 @@ MemoryBitmap::MemoryBitmap(unsigned char *texture,int wide, int tall)
 MemoryBitmap::~MemoryBitmap()
 {
 	// Free the old texture ID.
-	if ( m_iTextureID != 0 )
+	if ( m_iTextureID != -1 )
+	{
 		TextureDictionary()->DestroyTexture( m_iTextureID );
+		m_iTextureID = -1;
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -149,14 +152,14 @@ void MemoryBitmap::ForceUpload(unsigned char *texture,int wide, int tall)
 	if(_w==0 || _h==0)
 		return;
 
-	// If size changed, or first time through, destroy and recreate texture id...
-	if ( sizechanged && m_iTextureID )
+	// Not our first time through and the size changed, destroy and recreate texture id...
+	if ( m_iTextureID != -1 && sizechanged )
 	{
 		TextureDictionary()->DestroyTexture( m_iTextureID );
-		m_iTextureID = 0;
+		m_iTextureID = -1;
 	}
 
-	if ( !m_iTextureID )
+	if ( m_iTextureID == -1 )
 	{
 		m_iTextureID = g_MatSystemSurface.CreateNewTextureID( true );
 	}

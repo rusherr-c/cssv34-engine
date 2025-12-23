@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -55,6 +55,7 @@ public:
 
 	virtual void ItemPostFrame( void );
 
+// 	virtual float GetSpread() const;
 
 	bool Deploy();
 	void Holster( int skiplocal = 0 );

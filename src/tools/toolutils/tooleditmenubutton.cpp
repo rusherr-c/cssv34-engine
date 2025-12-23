@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Standard edit menu for tools
 //
@@ -6,7 +6,7 @@
 
 #include "toolutils/tooleditmenubutton.h"
 #include "toolutils/toolmenubutton.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "toolutils/enginetools_int.h"
 #include "datamodel/idatamodel.h"
 #include "vgui_controls/menu.h"

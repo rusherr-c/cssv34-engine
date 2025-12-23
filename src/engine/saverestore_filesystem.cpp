@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Filesystem abstraction for CSaveRestore - allows for storing temp save files
 //			either in memory or on disk.
@@ -279,7 +279,7 @@ void CSaveRestoreFileSystem::Uncompress( SaveFile_t *pFile )
 	if ( nUncompressedSize != 0 )
 	{
 		unsigned char *pUncompressBuffer = (unsigned char *) malloc( nUncompressedSize );
-		nUncompressedSize = compressor.SafeUncompress( (unsigned char *) pFile->pCompressedBuffer->Base(), pUncompressBuffer, nUncompressedSize );
+		nUncompressedSize = compressor.Uncompress( (unsigned char *) pFile->pCompressedBuffer->Base(), pUncompressBuffer );
 		pFile->pBuffer->AssumeMemory( pUncompressBuffer, nUncompressedSize, nUncompressedSize ); // ?
 	}
 	else
@@ -605,7 +605,7 @@ FSAsyncStatus_t CSaveRestoreFileSystem::AsyncWrite( const char *pFileName, const
 	}
 
 	if ( bFreeMemory )
-		delete pSrc;
+		free( const_cast< void * >( pSrc ) );
 
 	return retval;
 }
@@ -636,7 +636,7 @@ FSAsyncStatus_t CSaveRestoreFileSystem::AsyncAppend(const char *pFileName, const
 	}
 
 	if ( bFreeMemory )
-		delete pSrc;
+		free( const_cast< void * >( pSrc ) );
 
 	return retval;
 }
@@ -998,7 +998,7 @@ void CSaveRestoreFileSystem::AuditFiles( void )
 	}
 
 	Msg("SIM: ------------------------------------------------------------");
-	Msg("SIM: Total files: %d [c: %.02f KB / c: %d KB] : Total Size: %.02f KB\n", nTotalFiles, (float)nTotalCompressed/1024.0f, (float)nTotalUncompressed/1024.0f, (float)(nTotalCompressed+nTotalUncompressed)/1024.0f );
+	Msg("SIM: Total files: %d [c: %.02f KB / c: %.02f KB] : Total Size: %.02f KB\n", nTotalFiles, (float)nTotalCompressed/1024.0f, (float)nTotalUncompressed/1024.0f, (float)(nTotalCompressed+nTotalUncompressed)/1024.0f );
 }
 
 CON_COMMAND( audit_save_in_memory, "Audit the memory usage and files in the save-to-memory system" )
@@ -1042,7 +1042,7 @@ CON_COMMAND( dump_x360_saves, "Dump X360 save games to disk" )
 		{
 			// Strip us down to just our filename
 			Q_FileBase( pFileName, szFileNameBase, sizeof ( szFileNameBase ) );
-			Q_snprintf( szOutName, sizeof( szOutName ), "SAVE/%s.sav", szFileNameBase );
+			Q_snprintf( szOutName, sizeof( szOutName ), "save/%s.sav", szFileNameBase );
 			g_pFileSystem->WriteFile( szOutName, NULL, buf );
 
 			Msg("Copied file: %s to %s\n", szInName, szOutName );

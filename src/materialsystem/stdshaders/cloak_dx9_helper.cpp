@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 
 #include "BaseVSShader.h"
 #include "cloak_dx9_helper.h"
-#include "..\shaderapidx9\locald3dtypes.h"												   
+#include "../shaderapidx9/locald3dtypes.h"												   
 #include "convar.h"
 #include "cpp_shader_constant_register_map.h"
 #include "cloak_vs20.inc"
@@ -44,7 +44,7 @@ void InitCloak_DX9( CBaseVSShader *pShader, IMaterialVar** params, Cloak_DX9_Var
 {
 	if (params[info.m_nBaseTexture]->IsDefined() )
 	{
-		pShader->LoadTexture( info.m_nBaseTexture );
+		pShader->LoadTexture( info.m_nBaseTexture, TEXTUREFLAGS_SRGB );
 	}
 
 	if (params[info.m_nNormalMap]->IsDefined() )
@@ -109,8 +109,11 @@ void DrawCloak_DX9( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynami
 		if ( !g_pHardwareConfig->HasFastVertexTextures() )
 #endif
 		{
+			bool bUseStaticControlFlow = g_pHardwareConfig->SupportsStaticControlFlow();
+
 			DECLARE_STATIC_VERTEX_SHADER( cloak_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( MODEL,  bIsModel );
+			SET_STATIC_VERTEX_SHADER_COMBO( USE_STATIC_CONTROL_FLOW, bUseStaticControlFlow );
 			SET_STATIC_VERTEX_SHADER( cloak_vs20 );
 
 			// Bind ps_2_b shader so we can get Phong terms
@@ -183,10 +186,13 @@ void DrawCloak_DX9( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynami
 		if ( !g_pHardwareConfig->HasFastVertexTextures() )
 #endif
 		{
+			bool bUseStaticControlFlow = g_pHardwareConfig->SupportsStaticControlFlow();
+
 			DECLARE_DYNAMIC_VERTEX_SHADER( cloak_vs20 );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG,    fogIndex );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( SKINNING,      pShaderAPI->GetCurrentNumBones() > 0 );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( COMPRESSED_VERTS, (int)vertexCompression );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( NUM_LIGHTS, bUseStaticControlFlow ? 0 : lightState.m_nNumLights );
 			SET_DYNAMIC_VERTEX_SHADER( cloak_vs20 );
 
 			// Bind ps_2_b shader so we can get Phong, rim and a cloudier refraction
@@ -246,7 +252,7 @@ void DrawCloak_DX9( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynami
 		pShaderAPI->SetPixelShaderFogParams( PSREG_FOG_PARAMS );
 
 		// Pack phong exponent in with the eye position
-		float vEyePos_SpecExponent[4], vFresnelRanges_SpecBoost[4] = {0, 0.5, 1, 1};
+		float vEyePos_SpecExponent[4], vFresnelRanges_SpecBoost[4] = {1, 0.5, 1, 1};
 		float vSpecularTint[4] = {1, 1, 1, 1}, vRimBoost[4] = {1, 1, 1, 1};
 		pShaderAPI->GetWorldSpaceCameraPosition( vEyePos_SpecExponent );
 
@@ -295,7 +301,12 @@ void DrawCloak_DX9( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynami
 		}
 
 		if ( (info.m_nPhongFresnelRanges != -1 ) && params[info.m_nPhongFresnelRanges]->IsDefined() )
+		{
 			params[info.m_nPhongFresnelRanges]->GetVecValue( vFresnelRanges_SpecBoost, 3 );	// Grab optional fresnel range parameters
+			// Change fresnel range encoding from (min, mid, max) to ((mid-min)*2, mid, (max-mid)*2)
+			vFresnelRanges_SpecBoost[0] = (vFresnelRanges_SpecBoost[1] - vFresnelRanges_SpecBoost[0]) * 2;
+			vFresnelRanges_SpecBoost[2] = (vFresnelRanges_SpecBoost[2] - vFresnelRanges_SpecBoost[1]) * 2;
+		}
 
 		if ( ( info.m_nPhongBoost != -1 ) &&params[info.m_nPhongBoost]->IsDefined() )		// Grab optional phong boost param
 			vFresnelRanges_SpecBoost[3] = params[info.m_nPhongBoost]->GetFloatValue();

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 #include "cbase.h"
 #include "c_vguiscreen.h"
 #include "vgui_controls/Label.h"
-#include <vgui/IVGUI.h>
+#include <vgui/IVGui.h>
 #include "c_plantedc4.h"
 #include "ienginevgui.h"
 
@@ -52,6 +52,7 @@ DECLARE_VGUI_SCREEN_FACTORY( CC4Panel, "c4_panel" );
 CC4Panel::CC4Panel( vgui::Panel *parent, const char *panelName )
 	: BaseClass( parent, "CC4Panel", vgui::scheme()->LoadSchemeFromFileEx( enginevgui->GetPanel( PANEL_CLIENTDLL ), "resource/C4Panel.res", "ClientScheme" ) ) 
 {
+	SetSize( 10, 10 ); // Quiet "parent not sized yet" spew
 	m_pTimeLabel = new vgui::Label( this, "TimerLabel", "" );
 	
 	m_flNextDigitRandomizeTime = 0;
@@ -151,7 +152,7 @@ void CC4Panel::OnTick()
 	{
 		//Initial display
 		char buf[8];
-		Q_strncpy( buf, cArmedDisplay, min( sizeof(buf), sizeof(cArmedDisplay) ) );
+		Q_strncpy( buf, cArmedDisplay, MIN( sizeof(buf), sizeof(cArmedDisplay) ) );
 
 		int iDigitPos = 0;
 		while( flProgress < flTransitionTimes[iDigitPos] )

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,6 @@
 #include "tier0/platform.h"
 #ifdef IS_WINDOWS_PC
 #include <windows.h>
-#include <new.h>
 #endif
 #include "cmdlib.h"
 #include <sys/types.h>
@@ -42,6 +41,8 @@
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
 #endif
+
+#include "tier0/memdbgon.h"
 
 // set these before calling CheckParm
 int myargc;
@@ -342,24 +343,25 @@ void InstallExtraSpewHook( SpewHookFn pFn )
 	g_ExtraSpewHooks.AddToTail( pFn );
 }
 
-
+#if 0
 void CmdLib_AllocError( unsigned long size )
 {
 	Error( "Error trying to allocate %d bytes.\n", size );
 }
+
 
 int CmdLib_NewHandler( size_t size )
 {
 	CmdLib_AllocError( size );
 	return 0;
 }
+#endif
 
 void InstallAllocationFunctions()
 {
-	_set_new_mode( 1 ); // so if malloc() fails, we exit.
-	_set_new_handler( CmdLib_NewHandler );
+//	_set_new_mode( 1 ); // so if malloc() fails, we exit.
+//	_set_new_handler( CmdLib_NewHandler );
 }
-
 
 void SetSpewFunctionLogFile( char const *pFilename )
 {
@@ -482,7 +484,7 @@ void ExpandWildcards (int *argc, char ***argv)
 
 // only printf if in verbose mode
 qboolean verbose = false;
-void qprintf (char *format, ...)
+void qprintf (const char *format, ...)
 {
 	if (!verbose)
 		return;
@@ -513,7 +515,7 @@ static void CmdLib_getwd( char *out, int outSize )
 	_getcwd( out, outSize );
 	Q_strncat( out, "\\", outSize, COPY_ALL_CHARACTERS );
 #else
-	getwd(out);
+	getcwd(out, outSize);
 	strcat(out, "/");
 #endif
 	Q_FixSlashes( out );
@@ -566,7 +568,7 @@ void GetHourMinuteSecondsString( int nInputSeconds, char *pOut, int outLen )
 	int nHours = nMinutes / 60;
 	nMinutes -= nHours * 60;
 
-	char *extra[2] = { "", "s" };
+	const char *extra[2] = { "", "s" };
 	
 	if ( nHours > 0 )
 		Q_snprintf( pOut, outLen, "%d hour%s, %d minute%s, %d second%s", nHours, extra[nHours != 1], nMinutes, extra[nMinutes != 1], nSeconds, extra[nSeconds != 1] );
@@ -745,6 +747,34 @@ const char *CmdLib_GetBasePath( int i )
 	Assert( i >= 0 && i < g_NumBasePaths );
 	return g_pBasePaths[i];
 }
+
+
+//-----------------------------------------------------------------------------
+// Like ExpandPath but expands the path for each base path like SafeOpenRead
+//-----------------------------------------------------------------------------
+int CmdLib_ExpandWithBasePaths( CUtlVector< CUtlString > &expandedPathList, const char *pszPath )
+{
+	int nPathLength = 0;
+
+	pszPath = ExpandPath( const_cast< char * >( pszPath ) );	// Kind of redundant but it's how CmdLib_HasBasePath needs things
+
+	if ( CmdLib_HasBasePath( pszPath, nPathLength ) )
+	{
+		pszPath = pszPath + nPathLength;
+		for ( int i = 0; i < CmdLib_GetNumBasePaths(); ++i )
+		{
+			CUtlString &expandedPath = expandedPathList[ expandedPathList.AddToTail( CmdLib_GetBasePath( i ) ) ];
+			expandedPath += pszPath;
+		}
+	}
+	else
+	{
+		expandedPathList.AddToTail( pszPath );
+	}
+
+	return expandedPathList.Count();
+}
+
 
 FileHandle_t SafeOpenRead( const char *filename )
 {

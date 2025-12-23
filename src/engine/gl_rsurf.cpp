@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2007, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -48,7 +48,7 @@
 #include "coordsize.h"
 #include "mempool.h"
 #ifndef SWDS
-#include "overlay.h"
+#include "Overlay.h"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -123,7 +123,7 @@ static ConVar r_drawleaf( "r_drawleaf", "-1", FCVAR_CHEAT, "Draw the specified l
 static ConVar r_drawworld( "r_drawworld", "1", FCVAR_CHEAT, "Render the world." );
 static ConVar r_drawfuncdetail( "r_drawfuncdetail", "1", FCVAR_CHEAT, "Render func_detail" );
 static ConVar fog_enable_water_fog( "fog_enable_water_fog", "1", FCVAR_CHEAT );
-static ConVar r_fastzreject( "r_fastzreject", "0", 0, "Activate/deactivates a fast z-setting algorithm to take advantage of hardware with fast z reject. Use -1 to default to hardware settings" );
+static ConVar r_fastzreject( "r_fastzreject", "0", FCVAR_ALLOWED_IN_COMPETITIVE, "Activate/deactivates a fast z-setting algorithm to take advantage of hardware with fast z reject. Use -1 to default to hardware settings" );
 static ConVar r_fastzrejectdisp( "r_fastzrejectdisp", "0", 0, "Activates/deactivates fast z rejection on displacements (360 only). Only active when r_fastzreject is on." );
 
 
@@ -561,6 +561,8 @@ void Shader_DisplacementSurface( CWorldRenderList *pRenderList, SurfaceHandle_t 
 //-----------------------------------------------------------------------------
 void Shader_DrawSurfaceDynamic( IMatRenderContext *pRenderContext, SurfaceHandle_t surfID, bool bShadowDepth )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s %d", __FUNCTION__, surfID );
+
 	if( !SurfaceHasPrims( surfID ) )
 	{
 		IMesh *pMesh = pRenderContext->GetDynamicMesh( );
@@ -576,7 +578,7 @@ void Shader_DrawSurfaceDynamic( IMatRenderContext *pRenderContext, SurfaceHandle
 
 	if ( pPrim->vertCount )
 	{
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 		int primType = pPrim->type;
 #endif
 		IMesh *pMesh = pRenderContext->GetDynamicMesh( false );
@@ -692,6 +694,8 @@ static inline void Shader_SetChainLightmapState( IMatRenderContext *pRenderConte
 //-----------------------------------------------------------------------------
 void Shader_SetChainTextureState( IMatRenderContext *pRenderContext, SurfaceHandle_t surfID, IClientEntity* pBaseEntity, bool bShadowDepth )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	if ( bShadowDepth )
 	{
 		IMaterial *pDrawMaterial = MSurf_TexInfo( surfID )->material;
@@ -743,12 +747,14 @@ void Shader_SetChainTextureState( IMatRenderContext *pRenderContext, SurfaceHand
 
 void Shader_DrawDynamicChain( const CMSurfaceSortList &sortList, const surfacesortgroup_t &group, bool bShadowDepth )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	CMatRenderContextPtr pRenderContext( materials );
 
-	SurfaceHandle_t surfID = sortList.GetSurfaceAtHead(group);
-	if ( !IS_SURF_VALID(surfID))
+	SurfaceHandle_t hSurfID = sortList.GetSurfaceAtHead(group);
+	if ( !IS_SURF_VALID( hSurfID ))
 		return;
-	Shader_SetChainTextureState( pRenderContext, surfID, 0, bShadowDepth );
+	Shader_SetChainTextureState( pRenderContext, hSurfID, 0, bShadowDepth );
 
 	MSL_FOREACH_SURFACE_IN_GROUP_BEGIN(sortList, group, surfID)
 	{
@@ -759,6 +765,8 @@ void Shader_DrawDynamicChain( const CMSurfaceSortList &sortList, const surfaceso
 
 void Shader_DrawChainsDynamic( const CMSurfaceSortList &sortList, int nSortGroup, bool bShadowDepth )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	MSL_FOREACH_GROUP_BEGIN(sortList, nSortGroup, group )
 	{
 		Shader_DrawDynamicChain( sortList, group, bShadowDepth );
@@ -786,11 +794,13 @@ struct batchlist_t
 
 void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup, bool bShadowDepth )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	//VPROF("DrawChainsStatic");
 	CUtlVectorFixed<vertexformatlist_t, MAX_VERTEX_FORMAT_CHANGES> meshList;
 	int meshMap[MAX_VERTEX_FORMAT_CHANGES];
-	CUtlVector<batchlist_t> batchList( 0, 512 );
-	CUtlVector<const surfacesortgroup_t *> dynamicGroups;
+	CUtlVectorFixedGrowable<batchlist_t, 512> batchList;
+	CUtlVectorFixedGrowable<const surfacesortgroup_t *, 8> dynamicGroups;
 	bool bWarn = true;
 #ifdef NEWMESH
 	CIndexBufferBuilder indexBufferBuilder;
@@ -811,20 +821,20 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 
 	CMatRenderContextPtr pRenderContext( materials );
 
-	PIXEVENT( pRenderContext, "Shader_DrawChainsStatic" );
+	//PIXEVENT( pRenderContext, "Shader_DrawChainsStatic" );
 
 	int nMaxIndices = pRenderContext->GetMaxIndicesToRender();
 	while ( listIndex < count )
 	{
-		const surfacesortgroup_t &group = *groupList[listIndex];
-		SurfaceHandle_t surfID = sortList.GetSurfaceAtHead(group);
-		int sortID = MSurf_MaterialSortID( surfID );
+		const surfacesortgroup_t &groupBase = *groupList[listIndex];
+		SurfaceHandle_t surfIDBase = sortList.GetSurfaceAtHead( groupBase );
+		int sortIDBase = MSurf_MaterialSortID( surfIDBase );
 #ifdef NEWMESH
 		IIndexBuffer *pBuildIndexBuffer = pRenderContext->GetDynamicIndexBuffer( MATERIAL_INDEX_FORMAT_16BIT, false );
 		indexBufferBuilder.Begin( pBuildIndexBuffer, nMaxIndices );
 		IVertexBuffer *pLastVertexBuffer = NULL;
 #else
-		IMesh *pBuildMesh = pRenderContext->GetDynamicMesh( false, g_WorldStaticMeshes[sortID] );
+		IMesh *pBuildMesh = pRenderContext->GetDynamicMesh( false, g_WorldStaticMeshes[sortIDBase] );
 		meshBuilder.Begin( pBuildMesh, MATERIAL_TRIANGLES, 0, nMaxIndices );
 		IMesh *pLastMesh = NULL;
 #endif
@@ -834,7 +844,7 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 		for ( ; listIndex < count; listIndex++ )
 		{
 			const surfacesortgroup_t &group = *groupList[listIndex];
-			surfID = sortList.GetSurfaceAtHead(group);
+			SurfaceHandle_t surfID = sortList.GetSurfaceAtHead(group);
 			Assert( IS_SURF_VALID( surfID ) );
 			if ( MSurf_Flags(surfID) & SURFDRAW_DYNAMIC )
 			{
@@ -860,7 +870,7 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 				break;
 			}
 			
-			sortID = MSurf_MaterialSortID( surfID );
+			int sortID = MSurf_MaterialSortID( surfID );
 
 #ifdef NEWMESH
 			if ( g_WorldStaticMeshes[sortID] != pLastVertexBuffer )
@@ -904,13 +914,14 @@ void Shader_DrawChainsStatic( const CMSurfaceSortList &sortList, int nSortGroup,
 
 			meshList[meshIndex].numbatches++;
 
-			MSL_FOREACH_SURFACE_IN_GROUP_BEGIN(sortList, group, surfID)
+			MSL_FOREACH_SURFACE_IN_GROUP_BEGIN(sortList, group, surfIDList)
 			{
+				tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "BuildIndicesForWorldSurface" );
 #ifdef NEWMESH
-				BuildIndicesForWorldSurface( indexBufferBuilder, surfID, host_state.worldbrush );
+				BuildIndicesForWorldSurface( indexBufferBuilder, surfIDList, host_state.worldbrush );
 #else
 				Assert( meshBuilder.m_nFirstVertex == 0 );
-				BuildIndicesForWorldSurface( meshBuilder, surfID, host_state.worldbrush );
+				BuildIndicesForWorldSurface( meshBuilder, surfIDList, host_state.worldbrush );
 #endif
 			}
 			MSL_FOREACH_SURFACE_IN_GROUP_END()
@@ -1323,21 +1334,20 @@ static void Shader_DrawChainBumpBasis( const CUtlVector<msurface2_t *> &surfaceL
 
 			Vector worldSpaceBumpBasis[3];
 
-			int i;
-			for( i = 0; i < 3; i++ )
+			for( int j = 0; j < 3; j++ )
 			{
-				worldSpaceBumpBasis[i][0] = 
-					g_localBumpBasis[i][0] * tangentS[0] +
-					g_localBumpBasis[i][1] * tangentS[1] + 
-					g_localBumpBasis[i][2] * tangentS[2];
-				worldSpaceBumpBasis[i][1] = 
-					g_localBumpBasis[i][0] * tangentT[0] +
-					g_localBumpBasis[i][1] * tangentT[1] + 
-					g_localBumpBasis[i][2] * tangentT[2];
-				worldSpaceBumpBasis[i][2] = 
-					g_localBumpBasis[i][0] * norm[0] +
-					g_localBumpBasis[i][1] * norm[1] + 
-					g_localBumpBasis[i][2] * norm[2];
+				worldSpaceBumpBasis[j][0] = 
+					g_localBumpBasis[j][0] * tangentS[0] +
+					g_localBumpBasis[j][1] * tangentS[1] + 
+					g_localBumpBasis[j][2] * tangentS[2];
+				worldSpaceBumpBasis[j][1] = 
+					g_localBumpBasis[j][0] * tangentT[0] +
+					g_localBumpBasis[j][1] * tangentT[1] + 
+					g_localBumpBasis[j][2] * tangentT[2];
+				worldSpaceBumpBasis[j][2] = 
+					g_localBumpBasis[j][0] * norm[0] +
+					g_localBumpBasis[j][1] * norm[1] + 
+					g_localBumpBasis[j][2] * norm[2];
 			}
 
 			meshBuilder.Position3fv( pos.Base() );
@@ -1505,6 +1515,8 @@ void AddProjectedTextureDecalsToList( CWorldRenderList *pRenderList, int nSortGr
 //-----------------------------------------------------------------------------
 void Shader_DrawChains( const CWorldRenderList *pRenderList, int nSortGroup, bool bShadowDepth )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	CMatRenderContextPtr pRenderContext(materials);
 	Assert( !g_EngineRenderer->InLightmapUpdate() );
 	VPROF("Shader_DrawChains");
@@ -1564,9 +1576,11 @@ void Shader_DrawChains( const CWorldRenderList *pRenderList, int nSortGroup, boo
 //-----------------------------------------------------------------------------
 // Draws all of the opaque displacement surfaces queued up previously
 //-----------------------------------------------------------------------------
-void Shader_DrawDispChain( int nSortGroup, const CMSurfaceSortList &list, unsigned long flags, bool bShadowDepth )
+void Shader_DrawDispChain( int nSortGroup, const CMSurfaceSortList &list, unsigned long flags, ERenderDepthMode DepthMode )
 {
 	VPROF_BUDGET( "Shader_DrawDispChain", VPROF_BUDGETGROUP_DISPLACEMENT_RENDERING );
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	int count = 0;
 	msurface2_t **pList;
 	MSL_FOREACH_GROUP_BEGIN( list, nSortGroup, group )
@@ -1592,7 +1606,7 @@ void Shader_DrawDispChain( int nSortGroup, const CMSurfaceSortList &list, unsign
 		Assert(i==count);
 
 		// draw displacments, batch decals
-		DispInfo_RenderList( nSortGroup, pList, count, g_EngineRenderer->ViewGetCurrent().m_bOrtho, flags, bShadowDepth );
+		DispInfo_RenderList( nSortGroup, pList, count, g_EngineRenderer->ViewGetCurrent().m_bOrtho, flags, DepthMode );
 		stackfree(pList);
 	}
 }
@@ -1835,16 +1849,23 @@ static const int s_DrawWorldListsToSortGroup[MAX_MAT_SORT_GROUPS] =
 	MAT_SORT_GROUP_WATERSURFACE,
 };
 
-//static ConVar r_flashlightrendermodels(  "r_flashlightrendermodels", "1" );
+static ConVar r_flashlightrendermodels(  "r_flashlightrendermodels", "1" );
 
 //-----------------------------------------------------------------------------
 // Performs the shadow depth texture fill
 //-----------------------------------------------------------------------------
 static void Shader_WorldShadowDepthFill( CWorldRenderList *pRenderList, unsigned long flags )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	// First, count the number of vertices + indices
 	int nVertexCount = 0;
 	int nIndexCount = 0;
+	ERenderDepthMode DepthMode = DEPTH_MODE_SHADOW;
+	if ( flags & DRAWWORLDLISTS_DRAW_SSAO )
+	{
+		DepthMode = DEPTH_MODE_SSA0;
+	}
 
 	int g;
 	CUtlVector<const surfacesortgroup_t *> alphatestedGroups;
@@ -1878,12 +1899,21 @@ static void Shader_WorldShadowDepthFill( CWorldRenderList *pRenderList, unsigned
 		MSL_FOREACH_GROUP_END()
 
 		// Draws opaque displacement surfaces along with shadows, overlays, flashlights, etc.
-		Shader_DrawDispChain( nSortGroup, pRenderList->m_DispSortList, flags, true );
+		Shader_DrawDispChain( nSortGroup, pRenderList->m_DispSortList, flags, DepthMode );
 	}
 	if ( nVertexCount == 0 )
 		return;
  
 	CMatRenderContextPtr pRenderContext( materials );
+
+	if ( DepthMode == DEPTH_MODE_SHADOW )
+	{
+		pRenderContext->Bind( g_pMaterialDepthWrite[0][1] );
+	}
+	else
+	{
+		pRenderContext->Bind( g_pMaterialSSAODepthWrite[0][1] );
+	}
 
 	IMesh *pMesh = pRenderContext->GetDynamicMesh( false );
 
@@ -1895,7 +1925,6 @@ static void Shader_WorldShadowDepthFill( CWorldRenderList *pRenderList, unsigned
 	int nBatchIndexCount  = min( nIndexCount,  nMaxIndices  );
 	int nBatchVertexCount = min( nVertexCount, nMaxVertices );
 
-	pRenderContext->Bind( g_pMaterialDepthWrite[0][1] );
 
 	CMeshBuilder meshBuilder;
 	meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, nBatchVertexCount, nBatchIndexCount );
@@ -1916,6 +1945,14 @@ static void Shader_WorldShadowDepthFill( CWorldRenderList *pRenderList, unsigned
 			if ( ( nCurrIndexCount == 0 ) || ( nCurrVertexCount == 0 ) )
 				continue;
 
+			// this group is too big to draw so push it into the alphatested groups
+			// this will run much slower but at least it won't crash
+			// alphatested groups will draw each surface one at a time.
+			if ( nCurrIndexCount > nMaxIndices || nCurrVertexCount > nMaxVertices )
+			{
+				alphatestedGroups.AddToTail( &group );
+				continue;
+			}
 			IMaterial *pMaterial = MSurf_TexInfo( surfID )->material;
 
 			// Opaque only on this loop
@@ -1964,6 +2001,8 @@ static void Shader_WorldShadowDepthFill( CWorldRenderList *pRenderList, unsigned
 //-----------------------------------------------------------------------------
 static void Shader_WorldZFill( CWorldRenderList *pRenderList, unsigned long flags )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	// First, count the number of vertices + indices
 	int nVertexCount = 0;
 	int nIndexCount = 0;
@@ -2087,7 +2126,7 @@ static void Shader_WorldEnd( CWorldRenderList *pRenderList, unsigned long flags,
 
 	CMatRenderContextPtr pRenderContext( materials );
 
-	if ( flags & DRAWWORLDLISTS_DRAW_SHADOWDEPTH )
+	if ( flags & ( DRAWWORLDLISTS_DRAW_SHADOWDEPTH | DRAWWORLDLISTS_DRAW_SSAO ) )
 	{
 		Shader_WorldShadowDepthFill( pRenderList, flags );
 		return;
@@ -2144,7 +2183,7 @@ static void Shader_WorldEnd( CWorldRenderList *pRenderList, unsigned long flags,
 		}
 
 		// Draws opaque displacement surfaces along with shadows, overlays, flashlights, etc.
-		Shader_DrawDispChain( nSortGroup, pRenderList->m_DispSortList, flags, false );
+		Shader_DrawDispChain( nSortGroup, pRenderList->m_DispSortList, flags, DEPTH_MODE_NORMAL );
 
 		// Draws opaque non-displacement surfaces
 		// This also add shadows to pRenderList->m_ShadowHandles.
@@ -2181,9 +2220,6 @@ static void Shader_WorldEnd( CWorldRenderList *pRenderList, unsigned long flags,
 
 		// Draw the flashlight lighting for the decals.
 		g_pShadowMgr->DrawFlashlightDecals( nSortGroup, bFlashlightMask );
-
-		// Retire decals on opaque world surfaces
-		R_DecalFlushDestroyList();
 
 		// Draw RTT shadows
 		g_pShadowMgr->RenderShadows( );
@@ -2339,7 +2375,7 @@ void Shader_DrawTranslucentSurfaces( IWorldRenderList *pRenderListIn, int sortIn
 		}
 		MSL_FOREACH_SURFACE_IN_GROUP_END()
 
-		DispInfo_RenderList( i, surfaceList.Base(), surfaceList.Count(), g_EngineRenderer->ViewGetCurrent().m_bOrtho, flags, bShadowDepth );
+		DispInfo_RenderList( i, surfaceList.Base(), surfaceList.Count(), g_EngineRenderer->ViewGetCurrent().m_bOrtho, flags, DEPTH_MODE_NORMAL );
 	}
 }
 
@@ -2998,14 +3034,7 @@ void R_BuildWorldLists( IWorldRenderList *pRenderListIn, WorldListInfo_t* pInfo,
 		R_RenderWorldTopView( pRenderList, host_state.worldbrush->nodes );
 	}
 
-	// UNDONE: This is done here because monitor drawing happens before SceneBegin() in the client DLL
-	// investigate moving/fixing this
-	if ( !bShadowDepth )
-	{
-		R_CheckForLightingConfigChanges();
-	}
-
-	// This builds all lightmaps, including those for translucent surfaces
+		// This builds all lightmaps, including those for translucent surfaces
 	// Don't bother in topview?
 	if ( !r_drawtopview && !bShadowDepth )
 	{
@@ -3235,6 +3264,7 @@ void R_DrawWorldLists( IWorldRenderList *pRenderListIn, unsigned long flags, flo
 		return;
 
 	VPROF("R_DrawWorldLists");
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__  );
 	Shader_WorldEnd( pRenderList, flags, waterZAdjust );
 
 #ifdef DEBUG_SURF
@@ -3349,10 +3379,10 @@ void Shader_DrawLightmapPageChains( IWorldRenderList *pRenderListIn, int pageId 
 			{
 				continue;
 			}
-			MSL_FOREACH_SURFACE_IN_GROUP_BEGIN( pRenderList->m_SortList, group, surfID )
+			MSL_FOREACH_SURFACE_IN_GROUP_BEGIN( pRenderList->m_SortList, group, surfIDList )
 			{
-				Assert( !SurfaceHasDispInfo( surfID ) );
-				Shader_DrawLightmapPageSurface( surfID, 0.0f, 1.0f, 0.0f );
+				Assert( !SurfaceHasDispInfo( surfIDList ) );
+				Shader_DrawLightmapPageSurface( surfIDList, 0.0f, 1.0f, 0.0f );
 			}
 			MSL_FOREACH_SURFACE_IN_GROUP_END()
 		}
@@ -3689,64 +3719,64 @@ public:
 	// Builds a transrender_t, then executes it's drawing commands
 	void DrawTranslucentBrushModel( model_t *model, IClientEntity *baseentity )
 	{
-		transrender_t render;
-		render.pLastBatch = NULL;
-		render.pLastNode = NULL;
-		render.nodeCount = 0;
-		render.surfaceCount = 0;
-		render.batchCount = 0;
-		render.decalSurfaceCount = 0;
-		BuildTransLists_r( render, model, model->brush.pShared->nodes + model->brush.firstnode );
+		transrender_t renderT;
+		renderT.pLastBatch = NULL;
+		renderT.pLastNode = NULL;
+		renderT.nodeCount = 0;
+		renderT.surfaceCount = 0;
+		renderT.batchCount = 0;
+		renderT.decalSurfaceCount = 0;
+		BuildTransLists_r( renderT, model, model->brush.pShared->nodes + model->brush.firstnode );
 		void *pProxyData = baseentity ? baseentity->GetClientRenderable() : NULL;
-		DrawTransLists( render, pProxyData );
+		DrawTransLists( renderT, pProxyData );
 	}
 
-	void AddSurfaceToBatch( transrender_t &render, transnode_t *pNode, transbatch_t *pBatch, SurfaceHandle_t surfID )
+	void AddSurfaceToBatch( transrender_t &renderT, transnode_t *pNode, transbatch_t *pBatch, SurfaceHandle_t surfID )
 	{
 		pBatch->surfaceCount++;
-		Assert(render.surfaceCount < MAX_TRANS_SURFACES);
+		Assert( renderT.surfaceCount < MAX_TRANS_SURFACES);
 
 		pBatch->indexCount += (MSurf_VertCount( surfID )-2)*3;
-		render.surfaces[render.surfaceCount] = surfID;
-		render.surfaceCount++;
+		renderT.surfaces[renderT.surfaceCount] = surfID;
+		renderT.surfaceCount++;
 		if ( SurfaceHasDecals( surfID ) )
 		{
-			Assert(render.decalSurfaceCount < MAX_TRANS_DECALS);
+			Assert( renderT.decalSurfaceCount < MAX_TRANS_DECALS);
 			pNode->decalSurfaceCount++;
-			render.decalSurfaces[render.decalSurfaceCount] = surfID;
-			render.decalSurfaceCount++;
+			renderT.decalSurfaces[renderT.decalSurfaceCount] = surfID;
+			renderT.decalSurfaceCount++;
 		}
 	}
 
-	void AddTransNode( transrender_t &render )
+	void AddTransNode( transrender_t &renderT )
 	{
-		render.pLastNode = &render.nodes[render.nodeCount];
-		render.nodeCount++;
-		Assert(render.nodeCount < MAX_TRANS_NODES);
-		render.pLastBatch = NULL;
-		render.pLastNode->firstBatch = render.batchCount;
-		render.pLastNode->firstDecalSurface = render.decalSurfaceCount;
-		render.pLastNode->batchCount = 0;
-		render.pLastNode->decalSurfaceCount = 0;
+		renderT.pLastNode = &renderT.nodes[renderT.nodeCount];
+		renderT.nodeCount++;
+		Assert( renderT.nodeCount < MAX_TRANS_NODES);
+		renderT.pLastBatch = NULL;
+		renderT.pLastNode->firstBatch = renderT.batchCount;
+		renderT.pLastNode->firstDecalSurface = renderT.decalSurfaceCount;
+		renderT.pLastNode->batchCount = 0;
+		renderT.pLastNode->decalSurfaceCount = 0;
 	}
 
-	void AddTransBatch( transrender_t &render, SurfaceHandle_t surfID )
+	void AddTransBatch( transrender_t &renderT, SurfaceHandle_t surfID )
 	{
-		transbatch_t &batch = render.batches[render.pLastNode->firstBatch + render.pLastNode->batchCount];
-		Assert(render.batchCount < MAX_TRANS_BATCHES);
-		render.pLastNode->batchCount++;
-		render.batchCount++;
-		batch.firstSurface = render.surfaceCount;
+		transbatch_t &batch = renderT.batches[renderT.pLastNode->firstBatch + renderT.pLastNode->batchCount];
+		Assert( renderT.batchCount < MAX_TRANS_BATCHES);
+		renderT.pLastNode->batchCount++;
+		renderT.batchCount++;
+		batch.firstSurface = renderT.surfaceCount;
 		batch.surfaceCount = 0;
 		batch.pMaterial = MSurf_TexInfo( surfID )->material;
 		batch.sortID = MSurf_MaterialSortID( surfID );
 		batch.indexCount = 0;
-		render.pLastBatch = &batch;
-		AddSurfaceToBatch( render, render.pLastNode, &batch, surfID );
+		renderT.pLastBatch = &batch;
+		AddSurfaceToBatch( renderT, renderT.pLastNode, &batch, surfID );
 	}
 
 	// build node lists
-	void BuildTransLists_r( transrender_t &render, model_t *model, mnode_t *node )
+	void BuildTransLists_r( transrender_t &renderT, model_t *model, mnode_t *node )
 	{
 		float		dot;
 
@@ -3769,7 +3799,7 @@ public:
 
 		// back side first - translucent surfaces need to render in back to front order
 		// to appear correctly.
-		BuildTransLists_r(render, model, node->children[!side]);
+		BuildTransLists_r( renderT, model, node->children[!side]);
 
 		// emit all surfaces on node
 		CUtlVectorFixed<surfacelist_t, 256> sortList;
@@ -3788,9 +3818,9 @@ public:
 
 				// If this can be appended to the previous batch, do so
 				int sortID = MSurf_MaterialSortID( surfID );
-				if ( render.pLastBatch && render.pLastBatch->sortID == sortID )
+				if ( renderT.pLastBatch && renderT.pLastBatch->sortID == sortID )
 				{
-					AddSurfaceToBatch( render, render.pLastNode, render.pLastBatch, surfID );
+					AddSurfaceToBatch( renderT, renderT.pLastNode, renderT.pLastBatch, surfID );
 				}
 				else
 				{
@@ -3808,7 +3838,7 @@ public:
 			sortList.Sort( SurfaceCmp );
 			
 			// add a new sort group
-			AddTransNode( render );
+			AddTransNode( renderT );
 			int lastSortID = -1;
 			// now add the optimal number of batches to that group
 			for ( int i = 0; i < sortList.Count(); i++ )
@@ -3818,29 +3848,29 @@ public:
 				if ( lastSortID == sortID )
 				{
 					// can be drawn in a single call with the current list of surfaces, append
-					AddSurfaceToBatch( render, render.pLastNode, render.pLastBatch, surfID );
+					AddSurfaceToBatch( renderT, renderT.pLastNode, renderT.pLastBatch, surfID );
 				}
 				else
 				{
 					// requires a break (material/lightmap change).
-					AddTransBatch( render, surfID );
+					AddTransBatch( renderT, surfID );
 					lastSortID = sortID;
 				}
 			}
 
 			// don't batch across decals or decals will sort incorrectly
-			if ( render.pLastNode->decalSurfaceCount )
+			if ( renderT.pLastNode->decalSurfaceCount )
 			{
-				render.pLastNode = NULL;
-				render.pLastBatch = NULL;
+				renderT.pLastNode = NULL;
+				renderT.pLastBatch = NULL;
 			}
 		}
 
 		// front side
-		BuildTransLists_r(render, model, node->children[side]);
+		BuildTransLists_r( renderT, model, node->children[side]);
 	}
 
-	void DrawTransLists( transrender_t &render, void *pProxyData )
+	void DrawTransLists( transrender_t &renderT, void *pProxyData )
 	{
 		CMatRenderContextPtr pRenderContext( materials );
 
@@ -3856,13 +3886,13 @@ public:
 		float pOldColor[4];
 
 
-		for ( int i = 0; i < render.nodeCount; i++ )
+		for ( int i = 0; i < renderT.nodeCount; i++ )
 		{
 			int j;
-			const transnode_t &node = render.nodes[i];
+			const transnode_t &node = renderT.nodes[i];
 			for ( j = 0; j < node.batchCount; j++ )
 			{
-				const transbatch_t &batch = render.batches[node.firstBatch+j];
+				const transbatch_t &batch = renderT.batches[node.firstBatch+j];
 				
 #ifdef NEWMESH
 				CIndexBufferBuilder indexBufferBuilder;
@@ -3889,7 +3919,7 @@ public:
 
 				for ( int k = 0; k < batch.surfaceCount; k++ )
 				{
-					SurfaceHandle_t surfID = render.surfaces[batch.firstSurface + k];
+					SurfaceHandle_t surfID = renderT.surfaces[batch.firstSurface + k];
 					Assert( !(MSurf_Flags( surfID ) & SURFDRAW_NODRAW) );
 #ifdef NEWMESH
 					BuildIndicesForSurface( indexBufferBuilder, surfID );
@@ -3917,7 +3947,7 @@ public:
 			{
 				for ( j = 0; j < node.decalSurfaceCount; j++ )
 				{
-					SurfaceHandle_t surfID = render.decalSurfaces[node.firstDecalSurface + j];
+					SurfaceHandle_t surfID = renderT.decalSurfaces[node.firstDecalSurface + j];
 					Assert( !(MSurf_Flags( surfID ) & SURFDRAW_NODRAW) );
 					if( SurfaceHasDecals( surfID ) )
 					{
@@ -3937,11 +3967,6 @@ public:
 				DecalSurfaceDraw(pRenderContext, BRUSHMODEL_DECAL_SORT_GROUP);
 
 				// FIXME: Decals are not being rendered while illuminated by the flashlight
-
-				// FIXME: Need to draw decals in flashlight rendering mode
-				// Retire decals on opaque world surfaces
-				R_DecalFlushDestroyList();
-
 				DecalSurfacesInit( true );
 
 				// Draw all shadows on the brush
@@ -3952,10 +3977,10 @@ public:
 				CUtlVector<msurface2_t *> brushList;
 				for ( j = 0; j < node.batchCount; j++ )
 				{
-					const transbatch_t &batch = render.batches[node.firstBatch+j];
+					const transbatch_t &batch = renderT.batches[node.firstBatch+j];
 					for ( int k = 0; k < batch.surfaceCount; k++ )
 					{
-						brushList.AddToTail( render.surfaces[batch.firstSurface + k] );
+						brushList.AddToTail( renderT.surfaces[batch.firstSurface + k] );
 					}
 				}
 				DrawDebugInformation( brushList );
@@ -3967,8 +3992,8 @@ public:
 
 	void LevelInit();
 	brushrender_t *FindOrCreateRenderBatch( model_t *pModel );
-	void DrawOpaqueBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, bool bShadowDepth );
-	void DrawTranslucentBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, bool bShadowDepth );
+	void DrawOpaqueBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, ERenderDepthMode DepthMode );
+	void DrawTranslucentBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, bool bShadowDepth, bool bDrawOpaque, bool bDrawTranslucent );
 	void DrawBrushModelShadow( model_t *model, IClientRenderable *pRenderable );
 
 private:
@@ -4039,13 +4064,13 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 
 	index = m_renderList.AddToTail();
 	pModel->brush.renderHandle = index + 1;
-	brushrender_t &render = m_renderList.Element(index);
-	render.pPlanes = NULL;
-	render.pMeshes = NULL;
-	render.planeCount = 0;
-	render.meshCount = 0;
-	render.totalIndexCount = 0;
-	render.totalVertexCount = 0;
+	brushrender_t &renderT = m_renderList.Element(index);
+	renderT.pPlanes = NULL;
+	renderT.pMeshes = NULL;
+	renderT.planeCount = 0;
+	renderT.meshCount = 0;
+	renderT.totalIndexCount = 0;
+	renderT.totalVertexCount = 0;
 
 	CUtlVector<cplane_t *>	planeList;
 	CUtlVector<surfacelist_t> surfaceList;
@@ -4072,11 +4097,11 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 		surfaceList.AddToTail( tmp );
 	}
 	surfaceList.Sort( SurfaceCmp );
-	render.pPlanes = new cplane_t *[planeList.Count()];
-	render.planeCount = planeList.Count();
-	memcpy( render.pPlanes, planeList.Base(), sizeof(cplane_t *)*planeList.Count() );
-	render.pSurfaces = new brushrendersurface_t[surfaceList.Count()];
-	render.surfaceCount = surfaceList.Count();
+	renderT.pPlanes = new cplane_t *[planeList.Count()];
+	renderT.planeCount = planeList.Count();
+	memcpy( renderT.pPlanes, planeList.Base(), sizeof(cplane_t *)*planeList.Count() );
+	renderT.pSurfaces = new brushrendersurface_t[surfaceList.Count()];
+	renderT.surfaceCount = surfaceList.Count();
 
 	int meshCount = 0;
 	int batchCount = 0;
@@ -4093,8 +4118,8 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 
 	for ( i = 0; i < surfaceList.Count(); i++ )
 	{
-		render.pSurfaces[i].surfaceIndex = surfaceList[i].surfaceIndex;
-		render.pSurfaces[i].planeIndex = surfaceList[i].planeIndex;
+		renderT.pSurfaces[i].surfaceIndex = surfaceList[i].surfaceIndex;
+		renderT.pSurfaces[i].planeIndex = surfaceList[i].planeIndex;
 
 		surfID = surfaceList[i].surfID;
 		int sortID = MSurf_MaterialSortID( surfID );
@@ -4131,24 +4156,24 @@ CBrushBatchRender::brushrender_t *CBrushBatchRender::FindOrCreateRenderBatch( mo
 		int vertCount = MSurf_VertCount( surfID );
 		int indexCount = (vertCount - 2) * 3;
 		pBatch->indexCount += indexCount;
-		render.totalIndexCount += indexCount;
-		render.totalVertexCount += vertCount;
+		renderT.totalIndexCount += indexCount;
+		renderT.totalVertexCount += vertCount;
 	}
 
-	render.pMeshes = new brushrendermesh_t[meshCount];
-	memcpy( render.pMeshes, tmpMesh, sizeof(brushrendermesh_t) * meshCount );
-	render.meshCount = meshCount;
-	render.pBatches = new brushrenderbatch_t[batchCount];
-	memcpy( render.pBatches, tmpBatch, sizeof(brushrenderbatch_t) * batchCount );
-	render.batchCount = batchCount;
-	return &render;
+	renderT.pMeshes = new brushrendermesh_t[meshCount];
+	memcpy( renderT.pMeshes, tmpMesh, sizeof(brushrendermesh_t) * meshCount );
+	renderT.meshCount = meshCount;
+	renderT.pBatches = new brushrenderbatch_t[batchCount];
+	memcpy( renderT.pBatches, tmpBatch, sizeof(brushrenderbatch_t) * batchCount );
+	renderT.batchCount = batchCount;
+	return &renderT;
 }
 
 
 //-----------------------------------------------------------------------------
 // Draws an opaque (parts of a) brush model
 //-----------------------------------------------------------------------------
-void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, bool bShadowDepth )
+void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, ERenderDepthMode DepthMode )
 {
 	VPROF( "R_DrawOpaqueBrushModel" );
 	SurfaceHandle_t firstSurfID = SurfaceHandleFromIndex( model->brush.firstmodelsurface, model->brush.pShared );
@@ -4163,7 +4188,7 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 
 	PIXEVENT( pRenderContext, "DrawOpaqueBrushModel" );
 
-	if ( (g_pMaterialSystemConfig->nFullbright == 1) || bShadowDepth )
+	if ( (g_pMaterialSystemConfig->nFullbright == 1) || DepthMode == DEPTH_MODE_SHADOW )
 	{
 		pRenderContext->BindLightmapPage( MATERIAL_SYSTEM_LIGHTMAP_PAGE_WHITE_BUMP );
 		skipLight = true;
@@ -4178,7 +4203,7 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 	for ( i = 0; i < pRender->planeCount; i++ )
 	{
 		float dot = DotProduct( modelorg, pRender->pPlanes[i]->normal) - pRender->pPlanes[i]->dist;
-		backface[i] = ( !bShadowDepth && ( dot < BACKFACE_EPSILON ) ) ? true : false; // don't backface cull when rendering to shadow map
+		backface[i] = ( DepthMode == DEPTH_MODE_NORMAL && ( dot < BACKFACE_EPSILON ) ) ? true : false; // don't backface cull when rendering to shadow map
 	}
 
 	float pOldColor[4];
@@ -4204,12 +4229,21 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 			CMeshBuilder meshBuilder;
 			IMaterial *pMaterial = NULL;
 
-			if ( bShadowDepth )
+			if ( DepthMode != DEPTH_MODE_NORMAL )
 			{
 				// Select proper override material
 				int nAlphaTest = (int) batch.pMaterial->IsAlphaTested();
 				int nNoCull = (int) batch.pMaterial->IsTwoSided();
-				IMaterial *pDepthWriteMaterial = g_pMaterialDepthWrite[nAlphaTest][nNoCull];
+				IMaterial *pDepthWriteMaterial;
+				
+				if ( DepthMode == DEPTH_MODE_SSA0 )
+				{
+					pDepthWriteMaterial = g_pMaterialSSAODepthWrite[nAlphaTest][nNoCull];
+				}
+				else
+				{
+					pDepthWriteMaterial = g_pMaterialDepthWrite[nAlphaTest][nNoCull];
+				}
 
 				if ( nAlphaTest == 1 )
 				{
@@ -4281,7 +4315,7 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 				BuildIndicesForSurface( meshBuilder, surfID );
 #endif
 
-				if( SurfaceHasDecals( surfID ) && !bShadowDepth)
+				if( SurfaceHasDecals( surfID ) && DepthMode == DEPTH_MODE_NORMAL )
 				{
 					DecalSurfaceAdd( surfID, BRUSHMODEL_DECAL_SORT_GROUP );
 				}
@@ -4290,7 +4324,7 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 				// FIXME: A little code support is necessary to get overlays working on brush models
 				//	OverlayMgr()->AddFragmentListToRenderList( MSurf_OverlayFragmentList( surfID ), false );
 
-				if ( !bShadowDepth )
+				if ( DepthMode == DEPTH_MODE_NORMAL )
 				{
 					// Add render-to-texture shadows too....
 					ShadowDecalHandle_t decalHandle = MSurf_ShadowDecals( surfID );
@@ -4310,7 +4344,7 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 			meshBuilder.End( false, true );
 #endif
 
-			if ( !bShadowDepth )
+			if ( DepthMode == DEPTH_MODE_NORMAL )
 			{
 				// Don't leave the material in a bogus state
 				UnModulateMaterial( pMaterial, pOldColor );
@@ -4318,8 +4352,10 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 		}
 	}
 
-	if ( bShadowDepth )
+	if ( DepthMode != DEPTH_MODE_NORMAL )
+	{
 		return;
+	}
 
 	if ( g_ShaderDebug.anydebug )
 	{
@@ -4348,11 +4384,14 @@ void CBrushBatchRender::DrawOpaqueBrushModel( IClientEntity *baseentity, model_t
 //-----------------------------------------------------------------------------
 // Draws an translucent (sorted) brush model
 //-----------------------------------------------------------------------------
-void CBrushBatchRender::DrawTranslucentBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, bool bShadowDepth )
+void CBrushBatchRender::DrawTranslucentBrushModel( IClientEntity *baseentity, model_t *model, const Vector& origin, bool bShadowDepth, bool bDrawOpaque, bool bDrawTranslucent )
 {
-	DrawOpaqueBrushModel( baseentity, model, origin, bShadowDepth );
+	if ( bDrawOpaque )
+	{
+		DrawOpaqueBrushModel( baseentity, model, origin, bShadowDepth ? DEPTH_MODE_SHADOW : DEPTH_MODE_NORMAL );
+	}
 
-	if ( !bShadowDepth )
+	if ( !bShadowDepth && bDrawTranslucent )
 	{
 		DrawTranslucentBrushModel( model, baseentity );
 	}
@@ -4510,9 +4549,6 @@ void Shader_BrushEnd( IMatRenderContext *pRenderContext, VMatrix const* pBrushTo
 	// draw the flashlight lighting for the decals on the brush.
 	g_pShadowMgr->DrawFlashlightDecals( BRUSHMODEL_DECAL_SORT_GROUP, false );
 
-	// Retire decals on opaque brushmodel surfaces
-	R_DecalFlushDestroyList();
-
 	// Draw all shadows on the brush
 	g_pShadowMgr->RenderProjectedTextures( pBrushToWorld );
 }
@@ -4565,7 +4601,7 @@ public:
 // Output : void R_DrawBrushModel
 //-----------------------------------------------------------------------------
 void R_DrawBrushModel( IClientEntity *baseentity, model_t *model, 
-						const Vector& origin, const QAngle& angles, bool bSort, bool bShadowDepth )
+	const Vector& origin, const QAngle& angles, ERenderDepthMode DepthMode, bool bDrawOpaque, bool bDrawTranslucent )
 {
 	VPROF( "R_DrawBrushModel" );
 
@@ -4594,8 +4630,8 @@ void R_DrawBrushModel( IClientEntity *baseentity, model_t *model,
 	
 	if ( model->flags & MODELFLAG_FRAMEBUFFER_TEXTURE )
 	{
-		CMatRenderContextPtr pRenderContext( materials );
-		pRenderContext->CopyRenderTargetToTexture( pRenderContext->GetFrameBufferCopyTexture( 0 ) );
+		CMatRenderContextPtr pRenderContextMat( materials );
+		pRenderContext->CopyRenderTargetToTexture( pRenderContextMat->GetFrameBufferCopyTexture( 0 ) );
 	}
 
 	if ( s_pBrushRenderOverride )
@@ -4604,20 +4640,20 @@ void R_DrawBrushModel( IClientEntity *baseentity, model_t *model,
 	}
 	else
 	{
-		if ( bSort )
+		if ( model->flags & MODELFLAG_TRANSLUCENT )
 		{
-			if ( !bShadowDepth )
+			if ( DepthMode == DEPTH_MODE_NORMAL )
 			{
-				g_BrushBatchRenderer.DrawTranslucentBrushModel( baseentity, model, origin, bShadowDepth );
+				g_BrushBatchRenderer.DrawTranslucentBrushModel( baseentity, model, origin, false, bDrawOpaque, bDrawTranslucent );
 			}
 		}
-		else
+		else if ( bDrawOpaque )
 		{
-			g_BrushBatchRenderer.DrawOpaqueBrushModel( baseentity, model, origin, bShadowDepth );
+			g_BrushBatchRenderer.DrawOpaqueBrushModel( baseentity, model, origin, DepthMode );
 		}
 	}
 
-	Shader_BrushEnd( pRenderContext, brushTransform.GetNonIdentityMatrix(), model, bShadowDepth, baseentity );
+	Shader_BrushEnd( pRenderContext, brushTransform.GetNonIdentityMatrix(), model, DepthMode != DEPTH_MODE_NORMAL, baseentity );
 
 #ifdef USE_CONVARS
 	if ( r_drawbrushmodels.GetInt() == 2 )
@@ -5212,14 +5248,14 @@ static bool EnumerateLeavesAlongExtrudedRay_R( mnode_t *node, Ray_t const& ray,
 	}
 
 	// move up to the node
-	frac = clamp( frac, 0, 1 );
+	frac = clamp( frac, 0.f, 1.f );
 	float midf = start + (end - start)*frac;
 	bool ret = EnumerateLeavesAlongExtrudedRay_R( node->children[side], ray, start, midf, pEnum, context );
 	if (!ret)
 		return ret;
 
 	// go past the node
-	frac2 = clamp( frac2, 0, 1 );
+	frac2 = clamp( frac2, 0.f, 1.f );
 	midf = start + (end - start)*frac2;
 	return EnumerateLeavesAlongExtrudedRay_R( node->children[!side], ray, midf, end, pEnum, context );
 }

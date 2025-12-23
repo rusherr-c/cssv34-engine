@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1140,7 +1140,7 @@ bool CDemoSmootherPanel::GetInterpolatedOriginAndAngles( bool readonly, Vector& 
 		if ( TICKS_TO_TIME( endsample->frametick ) >= time )
 		{
 			// Found a spot
-			float dt = TICKS_TO_TIME( endsample->frametick - startsample->frametick );
+			dt = TICKS_TO_TIME( endsample->frametick - startsample->frametick );
 			// Should never occur!!!
 			if ( dt <= 0.0f )
 			{
@@ -1919,7 +1919,7 @@ void CDemoSmootherPanel::Redo( void )
 	InvalidateLayout();
 }
 
-void CDemoSmootherPanel::PushUndo( char *description )
+void CDemoSmootherPanel::PushUndo( const char *description )
 {
 	Assert( !m_bRedoPending );
 	m_bRedoPending = true;
@@ -1937,7 +1937,7 @@ void CDemoSmootherPanel::PushUndo( char *description )
 	m_nUndoLevel++;
 }
 
-void CDemoSmootherPanel::PushRedo( char *description )
+void CDemoSmootherPanel::PushRedo( const char *description )
 {
 	Assert( m_bRedoPending );
 	m_bRedoPending = false;
@@ -2557,6 +2557,11 @@ void CDemoSmootherPanel::ParseSmoothingInfo( CDemoFile &demoFile, CSmoothingCont
 			case dem_datatables:
 				{
 					demoFile.ReadNetworkDataTables( NULL );
+				}
+				break;
+			case dem_stringtables:
+				{
+					demoFile.ReadStringTables( NULL );
 				}
 				break;
 			case dem_usercmd:

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -175,6 +175,8 @@ private:
 
 	struct FrameLock_t
 	{
+		//$ WARNING: This needs a TSLNodeBase_t as the first item in here.
+		TSLNodeBase_t	base;
 		int				m_iLock;
 		DataCacheItem_t *m_pFirst;
 		int				m_iThread;

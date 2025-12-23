@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,6 +31,8 @@
 #include "xbox/xbox_console.h"
 #endif
 
+#include "tier0/etwprof.h"
+
 #ifndef STEAM
 #define PvRealloc realloc
 #define PvAlloc malloc
@@ -54,11 +56,20 @@ struct SpewGroup_t
 	int		m_Level;
 };
 
+// Skip forward past the directory
+static const char *SkipToFname( const tchar* pFile )
+{
+	if ( pFile == NULL )
+		return "unknown";
+	const tchar* pSlash = _tcsrchr( pFile, '\\' );
+	const tchar* pSlash2 = _tcsrchr( pFile, '/' );
+	if (pSlash < pSlash2) pSlash = pSlash2;
+	return pSlash ? pSlash + 1: pFile;
+}
+
 
 //-----------------------------------------------------------------------------
-// globals
-//-----------------------------------------------------------------------------
-SpewRetval_t DefaultSpewFunc( SpewType_t type, const tchar *pMsg )
+DBG_INTERFACE SpewRetval_t DefaultSpewFunc( SpewType_t type, const tchar *pMsg )
 {
 #ifdef _X360
 	if ( XBX_IsConsoleConnected() )
@@ -75,11 +86,33 @@ SpewRetval_t DefaultSpewFunc( SpewType_t type, const tchar *pMsg )
 #endif
 	}
 	if ( type == SPEW_ASSERT )
-		return SPEW_DEBUGGER;
+	{
+#ifndef WIN32
+		// Non-win32
+		bool bRaiseOnAssert = getenv( "RAISE_ON_ASSERT" ) || !!CommandLine()->FindParm( "-raiseonassert" );
+#elif defined( _DEBUG )
+		// Win32 debug
+		bool bRaiseOnAssert = true;
+#else
+		// Win32 release
+		bool bRaiseOnAssert = !!CommandLine()->FindParm( "-raiseonassert" );
+#endif
+
+		return bRaiseOnAssert ? SPEW_DEBUGGER : SPEW_CONTINUE;
+	}
 	else if ( type == SPEW_ERROR )
 		return SPEW_ABORT;
 	else
 		return SPEW_CONTINUE;
+}
+
+//-----------------------------------------------------------------------------
+DBG_INTERFACE SpewRetval_t DefaultSpewFuncAbortOnAsserts( SpewType_t type, const tchar *pMsg )
+{
+	SpewRetval_t r = DefaultSpewFunc( type, pMsg );
+	if ( type == SPEW_ASSERT )
+		r = SPEW_ABORT;
+	return r;
 }
 
 
@@ -87,6 +120,8 @@ SpewRetval_t DefaultSpewFunc( SpewType_t type, const tchar *pMsg )
 // Globals
 //-----------------------------------------------------------------------------
 static SpewOutputFunc_t   s_SpewOutputFunc = DefaultSpewFunc;
+
+static AssertFailedNotifyFunc_t	s_AssertFailedNotifyFunc = NULL;
 
 static const tchar*	s_pFileName;
 static int			s_Line;
@@ -152,7 +187,9 @@ void _ExitOnFatalAssert( const tchar* pFile, int line )
 	// only write out minidumps if we're not in the debugger
 	if ( !Plat_IsInDebugSession() )
 	{
-		WriteMiniDump();
+		char rgchSuffix[512];
+		_snprintf( rgchSuffix, sizeof(rgchSuffix), "fatalassert_%s_%d", SkipToFname( pFile ), line );
+		WriteMiniDump( rgchSuffix );
 	}
 
 	DevMsg( 1, _T("_ExitOnFatalAssert\n") );
@@ -163,46 +200,28 @@ void _ExitOnFatalAssert( const tchar* pFile, int line )
 //-----------------------------------------------------------------------------
 // Templates to assist in validating pointers:
 //-----------------------------------------------------------------------------
+
+
 DBG_INTERFACE void _AssertValidReadPtr( void* ptr, int count/* = 1*/ )
 {
-#if defined( _WIN32 ) && !defined( _X360 )
-	Assert( !IsBadReadPtr( ptr, count ) );
-#else
 	Assert( !count || ptr );
-#endif
 }
 
 DBG_INTERFACE void _AssertValidWritePtr( void* ptr, int count/* = 1*/ )
 {
-#if defined( _WIN32 ) && !defined( _X360 )
-	Assert( !IsBadWritePtr( ptr, count ) );
-#else
 	Assert( !count || ptr );
-#endif
 }
 
 DBG_INTERFACE void _AssertValidReadWritePtr( void* ptr, int count/* = 1*/ )
 {
-#if defined( _WIN32 ) && !defined( _X360 )
-	Assert(!( IsBadWritePtr(ptr, count) || IsBadReadPtr(ptr,count)));
-#else
 	Assert( !count || ptr );
-#endif
 }
 
+#undef AssertValidStringPtr
 DBG_INTERFACE void AssertValidStringPtr( const tchar* ptr, int maxchar/* = 0xFFFFFF */ )
 {
-#if defined( _WIN32 ) && !defined( _X360 )
-	#ifdef TCHAR_IS_CHAR
-		Assert( !IsBadStringPtr( ptr, maxchar ) );
-	#else
-		Assert( !IsBadStringPtrW( ptr, maxchar ) );
-	#endif
-#else
 	Assert( ptr );
-#endif
 }
-
 
 //-----------------------------------------------------------------------------
 // Should be called only inside a SpewOutputFunc_t, returns groupname, level, color
@@ -238,14 +257,10 @@ const Color* GetSpewOutputColor( void )
 //-----------------------------------------------------------------------------
 // Spew functions
 //-----------------------------------------------------------------------------
-void  _SpewInfo( SpewType_t type, const tchar* pFile, int line )
+DBG_INTERFACE void  _SpewInfo( SpewType_t type, const tchar* pFile, int line )
 {
 	// Only grab the file name. Ignore the path.
-	const tchar* pSlash = _tcsrchr( pFile, '\\' );
-	const tchar* pSlash2 = _tcsrchr( pFile, '/' );
-	if (pSlash < pSlash2) pSlash = pSlash2;
-	
-	s_pFileName = pSlash ? pSlash + 1: pFile;
+	s_pFileName = SkipToFname( pFile );
 	s_Line = line;
 	s_SpewType = type;
 }
@@ -259,7 +274,7 @@ static SpewRetval_t _SpewMessage( SpewType_t spewType, const char *pGroupName, i
 
 	/* Printf the file and line for warning + assert only... */
 	int len = 0;
-	if ((spewType == SPEW_ASSERT) )
+	if ( spewType == SPEW_ASSERT )
 	{
 		len = _sntprintf( pTempBuffer, sizeof( pTempBuffer ) - 1, _T("%s (%d) : "), s_pFileName, s_Line );
 	}
@@ -276,7 +291,7 @@ static SpewRetval_t _SpewMessage( SpewType_t spewType, const char *pGroupName, i
 	assert( len * sizeof(*pMsgFormat) < sizeof(pTempBuffer) ); /* use normal assert here; to avoid recursion. */
 
 	// Add \n for warning and assert
-	if ((spewType == SPEW_ASSERT) )
+	if ( spewType == SPEW_ASSERT )
 	{
 		len += _stprintf( &pTempBuffer[len], _T("\n") ); 
 	}
@@ -296,7 +311,7 @@ static SpewRetval_t _SpewMessage( SpewType_t spewType, const char *pGroupName, i
 
 	g_pSpewInfo = &spewInfo;
 	ret = s_SpewOutputFunc( spewType, pTempBuffer );
-	g_pSpewInfo = NULL;
+	g_pSpewInfo = (int)NULL;
 
 	switch (ret)
 	{
@@ -309,9 +324,11 @@ static SpewRetval_t _SpewMessage( SpewType_t spewType, const char *pGroupName, i
 		break;
 		
 	case SPEW_ABORT:
+	{
 //		MessageBox(NULL,"Error in _SpewMessage","Error",MB_OK);
-		ConMsg( _T("Exiting on SPEW_ABORT\n") );
-		exit(0);
+//		ConMsg( _T("Exiting on SPEW_ABORT\n") );
+		exit(1);
+	}
 	}
 
 	return ret;
@@ -355,6 +372,18 @@ bool FindSpewGroup( const tchar* pGroupName, int* pInd )
 	return false;
 }
 
+//-----------------------------------------------------------------------------
+// True if -hushasserts was passed on command line.
+//-----------------------------------------------------------------------------
+bool HushAsserts()
+{
+#ifdef DBGFLAG_ASSERT
+	static bool s_bHushAsserts = !!CommandLine()->FindParm( "-hushasserts" );
+	return s_bHushAsserts;
+#else
+	return true;
+#endif
+}
 
 //-----------------------------------------------------------------------------
 // Tests to see if a particular spew is active
@@ -426,6 +455,12 @@ void DMsg( const tchar *pGroupName, int level, const tchar *pMsgFormat, ... )
 	va_end(args);
 }
 
+void MsgV( PRINTF_FORMAT_STRING const tchar *pMsg, va_list arglist )
+{
+	_SpewMessage( SPEW_MESSAGE, pMsg, arglist );
+}
+
+
 void Warning( const tchar *pMsgFormat, ... )
 {
 	va_list args;
@@ -444,6 +479,12 @@ void DWarning( const tchar *pGroupName, int level, const tchar *pMsgFormat, ... 
 	_SpewMessage( SPEW_WARNING, pGroupName, level, &s_DefaultOutputColor, pMsgFormat, args );
 	va_end(args);
 }
+
+void WarningV( PRINTF_FORMAT_STRING const tchar *pMsg, va_list arglist )
+{
+	_SpewMessage( SPEW_WARNING, pMsg, arglist );
+}
+
 
 void Log( const tchar *pMsgFormat, ... )
 {
@@ -464,6 +505,12 @@ void DLog( const tchar *pGroupName, int level, const tchar *pMsgFormat, ... )
 	va_end(args);
 }
 
+void LogV( PRINTF_FORMAT_STRING const tchar *pMsg, va_list arglist )
+{
+	_SpewMessage( SPEW_LOG, pMsg, arglist );
+}
+
+
 void Error( const tchar *pMsgFormat, ... )
 {
 	va_list args;
@@ -472,6 +519,10 @@ void Error( const tchar *pMsgFormat, ... )
 	va_end(args);
 }
 
+void ErrorV( PRINTF_FORMAT_STRING const tchar *pMsg, va_list arglist )
+{
+	_SpewMessage( SPEW_ERROR, pMsg, arglist );
+}
 
 //-----------------------------------------------------------------------------
 // A couple of super-common dynamic spew messages, here for convenience 
@@ -821,12 +872,18 @@ void COM_TimestampedLog( char const *fmt, ... )
 {
 	static float s_LastStamp = 0.0;
 	static bool s_bShouldLog = false;
+	static bool s_bShouldLogToETW = false;
 	static bool s_bChecked = false;
 	static bool	s_bFirstWrite = false;
 
 	if ( !s_bChecked )
 	{
 		s_bShouldLog = ( IsX360() || CommandLine()->CheckParm( "-profile" ) ) ? true : false;
+		s_bShouldLogToETW = ( CommandLine()->CheckParm( "-etwprofile" ) ) ? true : false;
+		if ( s_bShouldLogToETW )
+		{
+			s_bShouldLog = true;
+		}
 		s_bChecked = true;
 	}
 	if ( !s_bShouldLog )
@@ -848,26 +905,44 @@ void COM_TimestampedLog( char const *fmt, ... )
 
 	if ( IsPC() )
 	{
-		if ( !s_bFirstWrite )
+		// If ETW profiling is enabled then do it only.
+		if ( s_bShouldLogToETW )
 		{
-			unlink( "timestamped.log" );
-			s_bFirstWrite = true;
+			ETWMark( string );
 		}
+		else
+		{
+			if ( !s_bFirstWrite )
+			{
+				unlink( "timestamped.log" );
+				s_bFirstWrite = true;
+			}
 
-		FILE* fp = fopen( "timestamped.log", "at+" );
-		fprintf( fp, "%8.4f / %8.4f:  %s\n", curStamp, curStamp - s_LastStamp, string );
-		fclose( fp );
+			FILE* fp = fopen( "timestamped.log", "at+" );
+			fprintf( fp, "%8.4f / %8.4f:  %s\n", curStamp, curStamp - s_LastStamp, string );
+			fclose( fp );
+		}
 	}
 
 	s_LastStamp = curStamp;
 }
 
-void CallAssertFailedNotifyFunc( const char *pchFile, int nLine, const char *pchMessage ) 
+//-----------------------------------------------------------------------------
+// Sets an assert failed notify handler
+//-----------------------------------------------------------------------------
+void SetAssertFailedNotifyFunc( AssertFailedNotifyFunc_t func )
 {
-	//FIXME
+	s_AssertFailedNotifyFunc = func;
 }
 
-bool HushAsserts()
+
+//-----------------------------------------------------------------------------
+// Calls the assert failed notify handler if one has been set
+//-----------------------------------------------------------------------------
+void CallAssertFailedNotifyFunc( const char *pchFile, int nLine, const char *pchMessage )
 {
-	return CommandLine()->CheckParm( "-hushasserts" );
+	if ( s_AssertFailedNotifyFunc )
+		s_AssertFailedNotifyFunc( pchFile, nLine, pchMessage );
 }
+
+

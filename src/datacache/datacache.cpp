@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -45,8 +45,8 @@ EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CDataCache, IDataCache, DATACACHE_INTERFACE_V
 //-----------------------------------------------------------------------------
 // Console commands
 //-----------------------------------------------------------------------------
-ConVar developer( "developer", "0" );
-static ConVar mem_force_flush( "mem_force_flush", "0", 0, "Force cache flush of unlocked resources on every alloc" );
+ConVar developer( "developer", "0", FCVAR_INTERNAL_USE );
+static ConVar mem_force_flush( "mem_force_flush", "0", FCVAR_CHEAT, "Force cache flush of unlocked resources on every alloc" );
 static int g_iDontForceFlush;
 
 //-----------------------------------------------------------------------------
@@ -972,7 +972,7 @@ void DataCacheSize_f( IConVar *pConVar, const char *pOldString, float flOldValue
 		g_DataCache.SetSize( var.GetInt() * 1024 * 1024 );
 	}
 }
-ConVar datacachesize( "datacachesize", "32", 0, "Size in MB.", true, 0, true, 128, DataCacheSize_f );
+ConVar datacachesize( "datacachesize", "64", FCVAR_INTERNAL_USE, "Size in MB.", true, 32, true, 512, DataCacheSize_f );
 
 //-----------------------------------------------------------------------------
 // Connect, disconnect
@@ -1039,6 +1039,13 @@ void CDataCache::SetSize( int nMaxBytes )
 {
 	m_LRU.SetTargetSize( nMaxBytes );
 	m_LRU.FlushToTargetSize();
+
+	nMaxBytes /= 1024 * 1024;
+
+	if ( datacachesize.GetInt() != nMaxBytes )
+	{
+		datacachesize.SetValue( nMaxBytes );
+	}
 }
 
 
@@ -1338,7 +1345,7 @@ void CDataCache::OutputItemReport( memhandle_t hItem )
 	name[0] = 0;
 	pSection->GetClient()->GetItemName( pItem->clientId, pItem->pItemData, name, DC_MAX_ITEM_NAME );
 
-	Msg( "\t%16.16s : %12s : 0x%08x, 0x%08x, 0x%08x : %s : %s\n", 
+	Msg( "\t%16.16s : %12s : 0x%08x, 0x%p, 0x%p : %s : %s\n", 
 		Q_pretifymem( pItem->size, 2, true ), 
 		pSection->GetName(), 
 		pItem->clientId, pItem->pItemData, hItem,

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -27,7 +27,7 @@ void CLocalNetworkBackdoor::InitFastCopy()
 	const CStandardSendProxies *pSendProxies = NULL;
 
 	// If the game server is greater than v4, then it is using the new proxy format.
-	if ( g_bServerGameDLLGreaterThanV4 ) // check server version
+	if ( g_iServerGameDLLVersion >= 5 ) // check server version
 	{
 		pSendProxies = serverGameDLL->GetStandardSendProxies();
 	}
@@ -52,8 +52,8 @@ void CLocalNetworkBackdoor::InitFastCopy()
 	for ( int iClass=0; iClass < cl.m_nServerClasses; iClass++ )
 	{
 		ClientClass *pClientClass = cl.GetClientClass(iClass);
-		if ( !pClientClass )
-			Error( "InitFastCopy - missing client class %d", iClass );
+		if ( !pClientClass ) 
+			Error( "InitFastCopy - missing client class %d (Should be equivelent of server class: %s)", iClass, cl.m_pServerClasses[iClass].m_ClassName );
 
 		ServerClass *pServerClass = SV_FindServerClass( pClientClass->GetName() );
 		if ( !pServerClass )
@@ -138,7 +138,7 @@ void CLocalNetworkBackdoor::EndEntityStateUpdate()
 				if ( toDelete & (1 << iBit) )
 				{
 					int iEdict = (i<<5) + iBit;
-					if ( iEdict < MAX_EDICTS )
+					if ( iEdict >= 0 && iEdict < MAX_EDICTS )
 					{
 						if ( m_CachedEntState[iEdict].m_pNetworkable )
 						{

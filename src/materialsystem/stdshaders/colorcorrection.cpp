@@ -1,17 +1,17 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //=============================================================================
 
-#include "basevsshader.h"
+#include "BaseVSShader.h"
 
 #include "screenspaceeffect_vs20.inc"
 #include "colorcorrection_ps20.inc"
 #include "colorcorrection_ps20b.inc"
 
-#include "..\materialsystem_global.h"
+#include "../materialsystem_global.h"
 
 
 BEGIN_VS_SHADER_FLAGS( ColorCorrection, "Help for ColorCorrection", SHADER_NOT_EDITABLE )
@@ -82,6 +82,16 @@ BEGIN_VS_SHADER_FLAGS( ColorCorrection, "Help for ColorCorrection", SHADER_NOT_E
 			int fmt = VERTEX_POSITION;
 			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
+			if ( IsOpenGL() )
+			{
+				// JasonM...do we use this shader?  If so, it needs some sRGB adapter love
+				Assert(0);
+			}
+
+			// Render targets are always sRGB on OSX GL
+			bool bForceSRGBWrite = IsOSX() && g_pHardwareConfig->CanDoSRGBReadFromRTs();
+			pShaderShadow->EnableSRGBWrite( bForceSRGBWrite );
+
 			DECLARE_STATIC_VERTEX_SHADER( screenspaceeffect_vs20 );
 			SET_STATIC_VERTEX_SHADER( screenspaceeffect_vs20 );
 
@@ -95,7 +105,6 @@ BEGIN_VS_SHADER_FLAGS( ColorCorrection, "Help for ColorCorrection", SHADER_NOT_E
 				DECLARE_STATIC_PIXEL_SHADER( colorcorrection_ps20 );
 				SET_STATIC_PIXEL_SHADER( colorcorrection_ps20 );
 			}
-			pShaderShadow->EnableSRGBWrite( false );
 		}
 		DYNAMIC_STATE
 		{

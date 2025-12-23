@@ -1,11 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
 
 #include <windows.h>
-#include <DbgHelp.h>
+#include <dbghelp.h>
 #include "vmpi.h"
 #include "cmdlib.h"
 #include "vmpi_tools_shared.h"
@@ -290,7 +290,7 @@ void VMPI_ExceptionFilter( unsigned long uCode, void *pvExceptionInfo )
 	#define ERR_RECORD( name ) { name, #name }
 	struct
 	{
-		unsigned long code;
+		int code;
 		char *pReason;
 	} errors[] =
 	{
@@ -317,8 +317,8 @@ void VMPI_ExceptionFilter( unsigned long uCode, void *pvExceptionInfo )
 		ERR_RECORD( EXCEPTION_ACCESS_VIOLATION ),
 	};
 
-	size_t nErrors = sizeof( errors ) / sizeof( errors[0] );
-	size_t i=0;
+	int nErrors = sizeof( errors ) / sizeof( errors[0] );
+	int i=0;
 	char *pchReason = NULL;
 	char chUnknownBuffer[32];
 	for ( i; ( i < nErrors ) && !pchReason; i++ )

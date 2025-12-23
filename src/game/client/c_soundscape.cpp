@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Soundscapes.txt resource file processor
 //
@@ -8,7 +8,7 @@
 
 #include "cbase.h"
 #include <KeyValues.h>
-#include "engine/ienginesound.h"
+#include "engine/IEngineSound.h"
 #include "filesystem.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "soundchars.h"
@@ -150,11 +150,11 @@ public:
 		{
 			Msg( "- %d: %s\n", i, m_soundscapes[i]->GetName() );
 		}
-		if ( m_forcedSoundscapeIndex )
+		if ( m_forcedSoundscapeIndex >= 0 )
 		{
 			Msg( "- PLAYING DEBUG SOUNDSCAPE: %d [%s]\n", m_forcedSoundscapeIndex, SoundscapeNameByIndex(m_forcedSoundscapeIndex) );
 		}
-		Msg( "- CURRENT SOUNDSCAPE: %d [%s]\n", m_params.soundscapeIndex, SoundscapeNameByIndex(m_params.soundscapeIndex) );
+		Msg( "- CURRENT SOUNDSCAPE: %d [%s]\n", m_params.soundscapeIndex.Get(), SoundscapeNameByIndex(m_params.soundscapeIndex) );
 		Msg( "----------------------------------\n\n" );
 	}
 

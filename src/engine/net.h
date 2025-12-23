@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,11 +16,12 @@
 #include "common.h"
 #include "bitbuf.h"
 #include "netadr.h"
+#include "proto_version.h"
 
 // Flow control bytes per second limits
 #define MAX_RATE		(1024*1024)				
 #define MIN_RATE		1000
-#define DEFAULT_RATE	10000
+#define DEFAULT_RATE	80000
 
 #define SIGNON_TIME_OUT				300.0f  // signon disconnect timeout
 
@@ -37,7 +38,7 @@
 
 #define TCP_CONNECT_TIMEOUT		4.0f
 #define	PORT_ANY				-1
-#define PORT_TRY_MAX			10
+#define PORT_TRY_MAX			32
 #define TCP_MAX_ACCEPTS			8
 
 #define LOOPBACK_SOCKETS	2
@@ -51,10 +52,11 @@
 // NETWORKING INFO
 
 // This is the packet payload without any header bytes (which are attached for actual sending)
-#define	NET_MAX_PAYLOAD			96000	// largest message we can send in bytes
-#define NET_MAX_PALYLOAD_BITS	17		// 2^NET_MAX_PALYLOAD_BITS > NET_MAX_PAYLOAD
+#define	NET_MAX_PAYLOAD				288000	// largest message we can send in bytes
+#define	NET_MAX_PAYLOAD_V23			96000	// largest message we can send in bytes
+#define NET_MAX_PAYLOAD_BITS_V23	17		// 2^NET_MAX_PAYLOAD_BITS > NET_MAX_PAYLOAD
 // This is just the client_t->netchan.datagram buffer size (shouldn't ever need to be huge)
-#define NET_MAX_DATAGRAM_PAYLOAD 4000	// = maximum unreliable playload size
+#define NET_MAX_DATAGRAM_PAYLOAD	4000	// = maximum unreliable payload size
 
 // UDP has 28 byte headers
 #define UDP_HEADER_SIZE				(20+8)	// IP = 20, UDP = 8
@@ -68,7 +70,9 @@
 
 #define MIN_ROUTABLE_PAYLOAD		16		// minimum playload size
 
-#define NETMSG_TYPE_BITS	5	// must be 2^NETMSG_TYPE_BITS > SVC_LASTMSG
+#define NETMSG_TYPE_BITS	6	// must be 2^NETMSG_TYPE_BITS > SVC_LASTMSG
+
+#define NETMSG_LENGTH_BITS	11	// 256 bytes 
 
 // This is the payload plus any header info (excluding UDP header)
 
@@ -78,6 +82,9 @@
 // This is the largest packet that can come in/out over the wire, before processing the header
 //  bytes will be stripped by the networking channel layer
 #define	NET_MAX_MESSAGE	PAD_NUMBER( ( NET_MAX_PAYLOAD + HEADER_BYTES ), 16 )
+
+// Even connectionless packets require int32 value (-1) + 1 byte content
+#define NET_MIN_MESSAGE 5
 
 #define NET_HEADER_FLAG_SPLITPACKET				-2
 #define NET_HEADER_FLAG_COMPRESSEDPACKET		-3
@@ -91,6 +98,9 @@ enum
 	NS_HLTV,
 	NS_MATCHMAKING,
 	NS_SYSTEMLINK,
+#ifdef LINUX
+	NS_SVLAN,	// LAN udp port for Linux. See NET_OpenSockets for info.
+#endif
 	MAX_SOCKETS
 };
 
@@ -122,7 +132,7 @@ void		NET_ProcessSocket( int sock, IConnectionlessPacketHandler * handler );
 // Set a port to listen mode
 void		NET_ListenSocket( int sock, bool listen );
 // Send connectionsless string over the wire
-void		NET_OutOfBandPrintf(int sock, const netadr_t &adr, const char *format, ...);
+void		NET_OutOfBandPrintf(int sock, const netadr_t &adr, PRINTF_FORMAT_STRING const char *format, ...) FMTFUNCTION( 3, 4 );
 // Send a raw packet, connectionless must be provided (chan can be NULL)
 int			NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const  unsigned char *data, int length, bf_write *pVoicePayload = NULL, bool bUseCompression = false );
 // Called periodically to maybe send any queued packets (up to 4 per frame)
@@ -141,7 +151,8 @@ void		NET_LogBadPacket(netpacket_t * packet);
 
 // bForceNew (used for bots) tells it not to share INetChannels (bots will crash when disconnecting if they
 // share an INetChannel).
-INetChannel	*NET_CreateNetChannel(int socketnumber, netadr_t *adr, const char * name, INetChannelHandler * handler, bool bForceNew=false);
+INetChannel	*NET_CreateNetChannel(int socketnumber, netadr_t *adr, const char * name, INetChannelHandler * handler, bool bForceNew=false,
+								  int nProtocolVersion=PROTOCOL_VERSION );
 void		NET_RemoveNetChannel(INetChannel *netchan, bool bDeleteNetChan);
 void		NET_PrintChannelStatus( INetChannel * chan );
 
@@ -163,10 +174,6 @@ void NET_RemoveAllExtraSockets();
 
 const char *NET_ErrorString (int code); // translate a socket error into a friendly string
 
-// Returns true if compression succeeded, false otherwise
-bool NET_BufferToBufferCompress( char *dest, unsigned int *destLen, char *source, unsigned int sourceLen );
-bool NET_BufferToBufferDecompress( char *dest, unsigned int *destLen, char *source, unsigned int sourceLen );
-
 //============================================================================
 
 // Message data
@@ -178,4 +185,8 @@ typedef struct
 	float	time;
 } flowstats_t;
 
+// Some hackery to avoid using va() in constructor since we cache off the pointer to the string in the ConVar!!!
+#define NET_STRINGIZE( x ) #x
+#define NET_MAKESTRING( macro, val )	macro(val)
+#define NETSTRING( val ) NET_MAKESTRING( NET_STRINGIZE, val )
 #endif // !NET_H

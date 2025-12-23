@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,7 +15,7 @@
 
 #include "utlvector.h"
 #include "shadershadowdx8.h"
-#include "utlsortvector.h"
+#include "UtlSortVector.h"
 #include "checksum_crc.h"
 #include "shaderapi/ishaderapi.h"
 
@@ -27,8 +27,51 @@
 // Forward declarations
 //-----------------------------------------------------------------------------
 struct IDirect3DStateBlock9;
-enum RenderStateFunc_t;
-enum TextureStateFunc_t;
+//-----------------------------------------------------------------------------
+// Enumeration for ApplyStateFunc_ts
+//-----------------------------------------------------------------------------
+// Any function that does not require a texture stage
+// NOTE: If you change this, change the function table s_pRenderFunctionTable[] below!!
+enum RenderStateFunc_t
+{
+	RENDER_STATE_DepthTest = 0,
+	RENDER_STATE_ZWriteEnable,
+	RENDER_STATE_ColorWriteEnable,
+	RENDER_STATE_AlphaTest,
+	RENDER_STATE_FillMode,
+	RENDER_STATE_Lighting,
+	RENDER_STATE_SpecularEnable,
+	RENDER_STATE_SRGBWriteEnable,
+	RENDER_STATE_AlphaBlend,
+	RENDER_STATE_SeparateAlphaBlend,
+	RENDER_STATE_CullEnable,
+	RENDER_STATE_VertexBlendEnable,
+	RENDER_STATE_FogMode,
+	RENDER_STATE_ActivateFixedFunction,
+	RENDER_STATE_TextureEnable,
+	RENDER_STATE_DiffuseMaterialSource,
+	RENDER_STATE_DisableFogGammaCorrection,
+	RENDER_STATE_EnableAlphaToCoverage,
+	
+	RENDER_STATE_COUNT,
+};
+
+
+// Any function that requires a texture stage
+// NOTE: If you change this, change the function table s_pTextureFunctionTable[] below!!
+enum TextureStateFunc_t	
+{
+	TEXTURE_STATE_TexCoordIndex = 0,
+	TEXTURE_STATE_SRGBReadEnable,
+	TEXTURE_STATE_Fetch4Enable,
+#ifdef DX_TO_GL_ABSTRACTION
+	TEXTURE_STATE_ShadowFilterEnable,
+#endif	
+	// Fixed function states
+	TEXTURE_STATE_ColorTextureStage,
+	TEXTURE_STATE_AlphaTextureStage,
+	TEXTURE_STATE_COUNT
+};
 
 
 //-----------------------------------------------------------------------------
@@ -56,6 +99,7 @@ public:
 	{
 		bool					m_SRGBReadEnable;
 		bool					m_Fetch4Enable;
+		bool					m_ShadowFilterEnable;
 	};
 	struct CurrentState_t
 	{
@@ -67,11 +111,13 @@ public:
 		bool				m_AlphaBlendEnable;
 		D3DBLEND			m_SrcBlend;
 		D3DBLEND			m_DestBlend;
+		D3DBLENDOP			m_BlendOp;
 
 		// GR - Separate alpha state
 		bool				m_SeparateAlphaBlendEnable;
 		D3DBLEND			m_SrcBlendAlpha;
 		D3DBLEND			m_DestBlendAlpha;
+		D3DBLENDOP			m_BlendOpAlpha;
 
 		// Depth testing states
 		D3DZBUFFERTYPE		m_ZEnable;
@@ -86,6 +132,12 @@ public:
 		bool				m_ForceDepthFuncEquals;
 		bool				m_bOverrideDepthEnable;
 		D3DZBUFFERTYPE		m_OverrideZWriteEnable;
+
+		bool				m_bOverrideAlphaWriteEnable;
+		bool				m_bOverriddenAlphaWriteValue;
+		bool				m_bOverrideColorWriteEnable;
+		bool				m_bOverriddenColorWriteValue;
+		DWORD				m_ColorWriteEnable;
 
 		bool				m_bLinearColorSpaceFrameBufferEnable;
 
@@ -130,6 +182,8 @@ public:
 	// Snapshotted state overrides
 	void ForceDepthFuncEquals( bool bEnable );
 	void OverrideDepthEnable( bool bEnable, bool bDepthEnable );
+	void OverrideAlphaWriteEnable( bool bOverrideEnable, bool bAlphaWriteEnable );
+	void OverrideColorWriteEnable( bool bOverrideEnable, bool bColorWriteEnable );
 	void EnableLinearColorSpaceFrameBuffer( bool bEnable );
 
 	// Returns a particular snapshot
@@ -167,7 +221,7 @@ public:
 private:
 	enum
 	{
-		INVALID_TRANSITION_OP = 0xFFFF
+		INVALID_TRANSITION_OP = 0xFFFFFF
 	};
 
 	typedef short ShadowStateId_t;
@@ -175,8 +229,8 @@ private:
 	// For the transition table
 	struct TransitionList_t
 	{
-		unsigned short m_FirstOperation;
-		unsigned short m_NumOperations;
+		unsigned int m_FirstOperation : 24;
+		unsigned int m_NumOperations : 8;
 	};
 
 	union TransitionOp_t
@@ -242,8 +296,8 @@ private:
 	StateSnapshot_t FindStateSnapshot( ShadowStateId_t id, const ShadowShaderState_t& currentState ) const;
 
 	// Finds identical transition lists
-	unsigned short FindIdenticalTransitionList( unsigned short firstElem, 
-		unsigned short numOps, unsigned short nFirstTest ) const;
+	unsigned int FindIdenticalTransitionList( unsigned int firstElem, 
+		unsigned short numOps, unsigned int nFirstTest ) const;
 
 	// Adds a transition
 	void AddTransition( RenderStateFunc_t func );

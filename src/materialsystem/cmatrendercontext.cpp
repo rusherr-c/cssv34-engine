@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -18,6 +18,7 @@
 #include "ctype.h"
 
 #include "tier1/fmtstr.h"
+#include "togl/rendermechanism.h"
 
 // NOTE: This must be the last file included!!!
 #include "tier0/memdbgon.h"
@@ -109,6 +110,15 @@ void SetupDirtyDiskReportFunc()
 
 
 //-----------------------------------------------------------------------------
+// Globals
+//-----------------------------------------------------------------------------
+CMemoryStack CMatRenderContextBase::sm_RenderData[2];
+int	CMatRenderContextBase::sm_nRenderLockCount = 0;
+int	CMatRenderContextBase::sm_nRenderStack = 0;
+int	CMatRenderContextBase::sm_nInitializeCount = 0;
+
+
+//-----------------------------------------------------------------------------
 // Constructor
 //-----------------------------------------------------------------------------
 CMatRenderContextBase::CMatRenderContextBase() :
@@ -121,10 +131,11 @@ CMatRenderContextBase::CMatRenderContextBase() :
 	// Put a special element at the top of the RT stack (indicating back buffer is current top of stack)
 	// NULL indicates back buffer, -1 indicates full-size viewport
 #if !defined( _X360 )
-	RenderTargetStackElement_t initialElement = { {NULL, NULL, NULL, NULL}, 0, 0, -1, -1 };
+                RenderTargetStackElement_t initialElement = { {NULL, NULL, NULL, NULL}, NULL, 0, 0, -1, -1 };
 #else
-	RenderTargetStackElement_t initialElement = { {NULL}, 0, 0, -1, -1 };
+                RenderTargetStackElement_t initialElement = { {NULL}, NULL, 0, 0, -1, -1 };
 #endif
+
 
 	m_RenderTargetStack.Push( initialElement );
 
@@ -155,6 +166,129 @@ CMatRenderContextBase::CMatRenderContextBase() :
 	m_LastSetToneMapScale=Vector(1,1,1);
 	m_CurToneMapScale=1.0;
 	m_GoalToneMapScale = 1.0f;
+}
+
+
+//-----------------------------------------------------------------------------
+// Init, shutdown
+//-----------------------------------------------------------------------------
+InitReturnVal_t CMatRenderContextBase::Init( )
+{
+	MEM_ALLOC_CREDIT();
+	if ( !sm_nInitializeCount )
+	{
+		int nSize = 2200 * 1024;
+		int nCommitSize = 32 * 1024;
+
+#ifdef SWDS
+		nSize = nCommitSize = 1024;
+#endif
+
+		const char *gamedir = CommandLine()->ParmValue("-game", CommandLine()->ParmValue( "-defaultgamedir", "hl2" ) );
+		if ( gamedir && !Q_stricmp( "garrysmod", gamedir ) )
+		{
+			nSize = 4400 * 1024;
+		}
+
+		sm_RenderData[0].Init( nSize, nCommitSize, 0, 32 );
+		sm_RenderData[1].Init( nSize, nCommitSize, 0, 32 );
+		sm_nRenderStack = 0;
+		sm_nRenderLockCount = 0;
+	}
+	++sm_nInitializeCount;
+	return INIT_OK;
+}
+
+void CMatRenderContextBase::Shutdown( )
+{
+	Assert( sm_nInitializeCount >= 0 );
+	if ( --sm_nInitializeCount == 0 )
+	{
+		sm_RenderData[0].Term();
+		sm_RenderData[1].Term();
+	}
+}
+
+void CMatRenderContextBase::CompactMemory()
+{
+	if ( sm_nRenderLockCount )
+	{
+		DevWarning( "CMatRenderContext: Trying to compact with render data still locked!\n" );
+		sm_nRenderLockCount = 0;
+	}
+	sm_RenderData[0].FreeAll();
+	sm_RenderData[1].FreeAll();
+}
+
+void CMatRenderContextBase::MarkRenderDataUnused( bool bFrameBegin )
+{
+	if ( sm_nRenderLockCount )
+	{
+		DevWarning( "CMatRenderContext: Trying to clear render data with render data still locked (%d)!\n", sm_nRenderLockCount );
+		sm_nRenderLockCount = 0;
+	}
+
+
+	// JAY: DO NOT MERGE FROM TF2 - L4D HAS CHANGED THE UNDERLYING INTERFACE IN A WAY THAT DOESN'T REQUIRE THIS
+#if 0
+	// Switch stacks
+	if ( bFrameBegin )
+	{
+		sm_nRenderStack = 1 - sm_nRenderStack;
+	}
+
+	// Clear the new stack
+#ifdef _DEBUG
+	memset( sm_RenderData[sm_nRenderStack].GetBase(), 0xFF, RenderDataSizeUsed() );
+#endif
+	sm_RenderData[ sm_nRenderStack ].FreeAll( false );
+#else
+	// Just for TF2, don't free the stack until the end of frame.  TF2 Allocates render data and holds it over the lock
+	// period because we haven't revised the studiorender interface yet to change patterns.
+	// Switch stacks
+	if ( bFrameBegin )
+	{
+		sm_nRenderStack = 1 - sm_nRenderStack;
+		// Clear the new stack
+#ifdef _DEBUG
+		memset( sm_RenderData[sm_nRenderStack].GetBase(), 0xFF, RenderDataSizeUsed() );
+#endif
+		sm_RenderData[ sm_nRenderStack ].FreeAll( false );
+	}
+#endif
+
+
+}
+
+int CMatRenderContextBase::RenderDataSizeUsed() const
+{
+	return sm_RenderData[sm_nRenderStack].GetUsed();
+}
+
+bool CMatRenderContextBase::IsRenderData( const void *pData ) const
+{
+	intp nData = (intp)pData;
+	intp nBaseAddress = (intp)sm_RenderData[sm_nRenderStack].GetBase();
+	intp nLastAddress = nBaseAddress + RenderDataSizeUsed();
+	return ( nData == 0 ) || ( nData >= nBaseAddress && nData < nLastAddress );
+}
+
+
+//-----------------------------------------------------------------------------
+// debug logging - empty in base class
+//-----------------------------------------------------------------------------
+
+void	CMatRenderContextBase::PrintfVA( char *fmt, va_list vargs )
+{
+}
+
+void	CMatRenderContextBase::Printf( const char *fmt, ... )
+{
+}
+
+float	CMatRenderContextBase::Knob( char *knobname, float *setvalue )
+{
+	return 0.0f;
 }
 
 
@@ -199,6 +333,8 @@ void CMatRenderContextBase::InitializeFrom( CMatRenderContextBase *pInitialState
 
 	m_bFlashlightEnable = pInitialState->m_bFlashlightEnable;
 
+	m_FrameTime = pInitialState->m_FrameTime;
+	m_GoalToneMapScale = pInitialState->m_GoalToneMapScale;
 	m_CurToneMapScale = pInitialState->m_CurToneMapScale;
 	m_LastSetToneMapScale = pInitialState->m_LastSetToneMapScale;
 }
@@ -535,6 +671,38 @@ void CMatRenderContextBase::GetWorldSpaceCameraVectors( Vector *pVecForward, Vec
 	}
 }
 
+void *CMatRenderContextBase::LockRenderData( int nSizeInBytes )
+{
+	MEM_ALLOC_CREDIT();
+	void *pDest = sm_RenderData[ sm_nRenderStack ].Alloc( nSizeInBytes, false );
+	if ( !pDest )
+	{
+		ExecuteNTimes( 10, Warning("MaterialSystem: Out of memory in render data!\n") );
+	}
+	AddRefRenderData();
+	return pDest;
+}
+
+void CMatRenderContextBase::UnlockRenderData( void *pData )
+{
+	ReleaseRenderData();
+}
+
+void CMatRenderContextBase::AddRefRenderData()
+{
+	++sm_nRenderLockCount;
+}
+
+void CMatRenderContextBase::ReleaseRenderData()
+{
+	--sm_nRenderLockCount;
+	Assert( sm_nRenderLockCount >= 0 );
+	if ( sm_nRenderLockCount == 0 )
+	{
+		OnRenderDataUnreferenced();
+	}
+}
+
 void CMatRenderContextBase::SyncMatrices()
 {
 }
@@ -689,6 +857,9 @@ void CMatRenderContextBase::PopRenderTargetAndViewport( void )
 		return;
 	}
 
+	// Changelist #266217 added this to main/src/materialsystem.
+	Flush();
+
 	// Remove the top of stack
 	m_RenderTargetStack.Pop( );
 	CommitRenderTargetAndViewport();
@@ -830,9 +1001,53 @@ void CMatRenderContextBase::SetGoalToneMappingScale( float monoscale)
 Vector CMatRenderContextBase::GetToneMappingScaleLinear( void )
 {
 	if ( HardwareConfig()->GetHDRType() == HDR_TYPE_NONE )
-		return Vector(1,1,1);
+		return Vector( 1.0f, 1.0f, 1.0f );
 	else
 		return m_LastSetToneMapScale;
+}
+
+void CMatRenderContextBase::OnAsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char** ppDstName, IAsyncTextureOperationReceiver* pRecipient )
+{
+	Assert( pSrcRt != NULL );
+	Assert( pRecipient != NULL );
+	Assert( ppDstName != NULL && *ppDstName != NULL);
+	
+	// Bump the ref count on the recipient before handing it off. This ensures the receiver won't go away before we have completed our work. 
+	pSrcRt->AddRef();
+	pRecipient->AddRef();
+
+	// Also, need to allocate a copy of the string and use that one s.t. the caller doesn't have to worry about it.
+	char* pDstNameCopy = new char[ V_strlen( *ppDstName ) + 1 ];
+	V_strcpy( pDstNameCopy, *ppDstName );
+	( *ppDstName ) = pDstNameCopy;
+}
+
+// Map and unmap a texture. The pRecipient->OnAsyncMapComplete is called when complete. 
+void CMatRenderContextBase::OnAsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs )
+{
+	Assert( pTexToMap != NULL );
+	Assert( pRecipient != NULL );
+
+	pTexToMap->AddRef();
+	pRecipient->AddRef();
+}
+
+void CMatRenderContextBase::OnAsyncUnmap( ITextureInternal* pTexToUnmap ) 
+{
+	Assert( pTexToUnmap != NULL );
+
+	pTexToUnmap->AddRef();
+}
+
+void CMatRenderContextBase::OnAsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient )
+{
+	Assert( pDst != NULL );
+	Assert( pSrc != NULL );
+	Assert( pRecipient != NULL );
+
+	pDst->AddRef();
+	pSrc->AddRef();
+	pRecipient->AddRef();
 }
 
 #undef g_pShaderAPI 
@@ -840,7 +1055,6 @@ Vector CMatRenderContextBase::GetToneMappingScaleLinear( void )
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-
 CMatRenderContext::CMatRenderContext()
 {
 	g_FrameNum = 0;
@@ -853,6 +1067,10 @@ CMatRenderContext::CMatRenderContext()
 
 InitReturnVal_t CMatRenderContext::Init( CMaterialSystem *pMaterialSystem )
 {
+	InitReturnVal_t nRetVal = BaseClass::Init();
+	if ( nRetVal != INIT_OK )
+		return nRetVal;
+
 	m_pMaterialSystem = pMaterialSystem;
 
 	m_pBoundMorph = NULL;
@@ -877,6 +1095,8 @@ void CMatRenderContext::Shutdown( )
 		g_pMorphMgr->FreeRenderContext( m_pMorphRenderContext );
 		m_pMorphRenderContext = NULL;
 	}
+
+	BaseClass::Shutdown();
 }
 
 void CMatRenderContext::OnReleaseShaderObjects()
@@ -884,6 +1104,19 @@ void CMatRenderContext::OnReleaseShaderObjects()
 	// alt-tab unbinds the morph
 	m_pBoundMorph = NULL;
 }
+
+#ifdef DX_TO_GL_ABSTRACTION
+void CMatRenderContext::DoStartupShaderPreloading( void )
+{
+	g_pShaderDevice->DoStartupShaderPreloading();
+}
+#endif
+
+void CMatRenderContext::TextureManagerUpdate()
+{
+	TextureManager()->Update();
+}
+
 
 inline IMaterialInternal *CMatRenderContext::GetMaterialInternal( MaterialHandle_t h ) const
 {
@@ -952,12 +1185,30 @@ inline ShaderAPITextureHandle_t CMatRenderContext::GetMaxDepthTextureHandle() co
 
 void CMatRenderContext::BeginRender()
 {
-	g_MatSysMutex.Lock();
+#if 1 // Rick's optimization: not sure this is needed anymore
+	if ( GetMaterialSystem()->GetThreadMode() != MATERIAL_SINGLE_THREADED )
+	{
+		VPROF_INCREMENT_GROUP_COUNTER( "render/CMatBeginRender", COUNTER_GROUP_TELEMETRY, 1 );
+
+		TelemetrySetLockName( TELEMETRY_LEVEL1, (char const *)&g_MatSysMutex, "MatSysMutex" );
+
+		tmTryLock( TELEMETRY_LEVEL1, (char const *)&g_MatSysMutex, "BeginRender" );
+		g_MatSysMutex.Lock();
+		tmEndTryLock( TELEMETRY_LEVEL1, (char const *)&g_MatSysMutex, TMLR_SUCCESS );
+		tmSetLockState( TELEMETRY_LEVEL1, (char const *)&g_MatSysMutex, TMLS_LOCKED, "BeginRender" );
+	}
+#endif
 }
 
 void CMatRenderContext::EndRender()
 {
-	g_MatSysMutex.Unlock();
+#if 1 // Rick's optimization: not sure this is needed anymore
+	if ( GetMaterialSystem()->GetThreadMode() != MATERIAL_SINGLE_THREADED )
+	{
+		g_MatSysMutex.Unlock();
+		tmSetLockState( TELEMETRY_LEVEL1, (char const *)&g_MatSysMutex, TMLS_RELEASED, "EndRender" );
+	}
+#endif
 }
 
 void CMatRenderContext::Flush( bool flushHardware )
@@ -1311,6 +1562,15 @@ void CMatRenderContext::SwapBuffers()
 
 
 //-----------------------------------------------------------------------------
+// Clears the render data after we're done with it
+//-----------------------------------------------------------------------------
+void CMatRenderContext::OnRenderDataUnreferenced()
+{
+	MarkRenderDataUnused( false );
+}
+
+
+//-----------------------------------------------------------------------------
 // Custom clip planes
 //-----------------------------------------------------------------------------
 void CMatRenderContext::PushCustomClipPlane( const float *pPlane )
@@ -1427,12 +1687,20 @@ void CMatRenderContext::BindMorph( IMorph *pMorph )
 	if ( m_pBoundMorph != pMorphInternal )
 	{
 		g_pShaderAPI->FlushBufferedPrimitives();
-		g_pShaderAPI->EnableHWMorphing( pMorph != NULL );
+
 		m_pBoundMorph = pMorphInternal;
-		if ( pMorphInternal && pMorphInternal != MATERIAL_MORPH_DECAL )
+
+		bool bEnableHWMorph = false;
+		if ( pMorphInternal == MATERIAL_MORPH_DECAL )
 		{
+			bEnableHWMorph = true;
+		}
+		else if ( pMorphInternal )
+		{
+			bEnableHWMorph = true;
 			pMorphInternal->Bind( m_pMorphRenderContext );
 		}
+		g_pShaderAPI->EnableHWMorphing( bEnableHWMorph );
 	}
 }
 
@@ -1775,51 +2043,43 @@ void CMatRenderContext::GetLightmapDimensions( int *w, int *h )
 	*h = GetMaterialSystem()->GetLightmapHeight( GetLightmapPage() );
 }
 
-
-//-----------------------------------------------------------------------------
-// FIXME: This is a hack required for NVidia/XBox, can they fix in drivers?
-//-----------------------------------------------------------------------------
 void CMatRenderContext::DrawScreenSpaceQuad( IMaterial* pMaterial )
 {
-	// This is required because the texture coordinates for NVidia reading
-	// out of non-power-of-two textures is borked
+	// Despite saying we render a full screen quad, this actually renders a single triangle
+	// that covers the whole screen.
 	int w, h;
 
 	GetRenderTargetDimensions( w, h );
 	if ( ( w == 0 ) || ( h == 0 ) )
 		return;
 
-	// This is the size of the back-buffer we're reading from.
-	int bw, bh;
-	bw = w; bh = h;
+	// DX9 disagrees about (0, 0) in a render target and (0, 0) in the texture. 
+	// Fix that here by doing a half-pixel offset for the pixel. 
+	// Because we are working in clip space which is 2 units across, the adjustment factor is 1.
+	float flOffsetW = 1.0f / w;
+	float flOffsetH = 1.0f / h;
 
-	/* FIXME: Get this to work in hammer/engine integration
-	if ( m_pRenderTargetTexture )
-	{
-	}
-	else
-	{
-		MaterialVideoMode_t mode;
-		GetDisplayMode( mode );
-		if ( ( mode.m_Width == 0 ) || ( mode.m_Height == 0 ) )
-			return;
-		bw = mode.m_Width;
-		bh = mode.m_Height;
-	}
-	*/
-
-	float s0, t0;
-	float s1, t1;
-		 	  
-	float flOffsetS = (bw != 0.0f) ? 1.0f / bw : 0.0f;
-	float flOffsetT = (bh != 0.0f) ? 1.0f / bh : 0.0f;
-	s0 = 0.5f * flOffsetS;
-	t0 = 0.5f * flOffsetT;
-	s1 = (w-0.5f) * flOffsetS;
-	t1 = (h-0.5f) * flOffsetT;
-	
 	Bind( pMaterial );
 	IMesh* pMesh = GetDynamicMesh( true );
+
+	CMeshBuilder meshBuilder;;
+	meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, 1 );
+
+	enum { TL, BL, TR, COORDS_COUNT };
+
+	struct CoordSSQ_t
+	{
+		float x, y;
+		float u, v;
+	};
+
+	CoordSSQ_t coords[] = { 
+		{ -1.0f - 1.0f * flOffsetW,  1.0f + 1.0f * flOffsetH,  0.0f,  0.0f }, // TL
+		{ -1.0f - 1.0f * flOffsetW, -3.0f + 1.0f * flOffsetH,  0.0f,  2.0f }, // BL
+		{  3.0f - 1.0f * flOffsetW,  1.0f + 1.0f * flOffsetH,  2.0f,  0.0f }, // TR
+	};
+
+	static_assert( ARRAYSIZE( coords ) == COORDS_COUNT, "Unexpected number of coords in triangle, should match enum." );
 
 	MatrixMode( MATERIAL_VIEW );
 	PushMatrix();
@@ -1829,37 +2089,17 @@ void CMatRenderContext::DrawScreenSpaceQuad( IMaterial* pMaterial )
 	PushMatrix();
 	LoadIdentity();
 
-	CMeshBuilder meshBuilder;
-	meshBuilder.Begin( pMesh, MATERIAL_QUADS, 1 );
+	for ( int i = 0; i < COORDS_COUNT; ++i )
+	{
+		meshBuilder.Position3f(    coords[ i ].x, coords[ i ].y,          0.0f );
+		meshBuilder.Normal3f(               0.0f,          0.0f,          1.0f );
+		meshBuilder.TangentS3f(             0.0f,          1.0f,          0.0f );
+		meshBuilder.TangentT3f(             1.0f,          0.0f,          0.0f );
+		meshBuilder.TexCoord2f( 0, coords[ i ].u, coords[ i ].v                );
 
-	meshBuilder.Position3f( -1.0f, -1.0f, 0.0f );
-	meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
-	meshBuilder.TangentT3f( 1.0f, 0.0f, 0.0f );
-	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
-	meshBuilder.TexCoord2f( 0, s0, t1 );
-	meshBuilder.AdvanceVertex();
-
-	meshBuilder.Position3f( -1.0f, 1, 0.0f );
-	meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
-	meshBuilder.TangentT3f( 1.0f, 0.0f, 0.0f );
-	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
-	meshBuilder.TexCoord2f( 0, s0, t0 );
-	meshBuilder.AdvanceVertex();
-
-	meshBuilder.Position3f( 1, 1, 0.0f );
-	meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
-	meshBuilder.TangentT3f( 1.0f, 0.0f, 0.0f );
-	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
-	meshBuilder.TexCoord2f( 0, s1, t0 );
-	meshBuilder.AdvanceVertex();
-
-	meshBuilder.Position3f( 1, -1.0f, 0.0f );
-	meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
-	meshBuilder.TangentT3f( 1.0f, 0.0f, 0.0f );
-	meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
-	meshBuilder.TexCoord2f( 0, s1, t1 );
-	meshBuilder.AdvanceVertex();
-
+		meshBuilder.AdvanceVertex();
+	}
+									   
 	meshBuilder.End();
 	pMesh->Draw();
 
@@ -1941,13 +2181,15 @@ int CMatRenderContext::CompareMaterialCombos( IMaterial *pMaterial1, IMaterial *
 
 	IMaterialVar **pParams1 = pMat1->GetShaderParams();
 	IMaterialVar **pParams2 = pMat2->GetShaderParams();
-
-	if( pParams1[BASETEXTURE]->GetType() == MATERIAL_VAR_TYPE_TEXTURE ||
-		pParams2[BASETEXTURE]->GetType() == MATERIAL_VAR_TYPE_TEXTURE )
+	int nParams1 = pMat1->ShaderParamCount();
+	int nParams2 = pMat2->ShaderParamCount();
+	int nBaseTexParamType1 = pParams1 && nParams1 > BASETEXTURE ? pParams1[BASETEXTURE]->GetType() : -1;
+	int nBaseTexParamType2 = pParams2 && nParams2 > BASETEXTURE ? pParams2[BASETEXTURE]->GetType() : -1;
+	if( nBaseTexParamType1 == MATERIAL_VAR_TYPE_TEXTURE || nBaseTexParamType2 == MATERIAL_VAR_TYPE_TEXTURE )
 	{
-		if( pParams1[BASETEXTURE]->GetType() != pParams2[BASETEXTURE]->GetType() )
+		if( nBaseTexParamType1 != nBaseTexParamType2 )
 		{
-			return pParams2[BASETEXTURE]->GetType() - pParams1[BASETEXTURE]->GetType();
+			return nBaseTexParamType2 - nBaseTexParamType1;
 		}
 		int dBaseTexture = Q_stricmp( pParams1[BASETEXTURE]->GetTextureValue()->GetName(), pParams2[BASETEXTURE]->GetTextureValue()->GetName() );
 		if ( dBaseTexture )
@@ -1964,16 +2206,34 @@ int CMatRenderContext::CompareMaterialCombos( IMaterial *pMaterial1, IMaterial *
 
 void CMatRenderContext::Bind( IMaterial *iMaterial, void *proxyData )
 {
-	IMaterialInternal *material = static_cast<IMaterialInternal *>( iMaterial );
-
-	if ( !material )
+	if ( !iMaterial )
 	{
 		if ( !g_pErrorMaterial )
 			return;
 		Warning( "Programming error: CMatRenderContext::Bind: NULL material\n" );
-		material = static_cast<IMaterialInternal *>( g_pErrorMaterial );
+		iMaterial = g_pErrorMaterial;
 	}
+	else
+	{
+		iMaterial = iMaterial->CheckProxyReplacement( proxyData );
+	}
+
+	IMaterialInternal *material = static_cast<IMaterialInternal *>( iMaterial );
 	material = material->GetRealTimeVersion(); //always work with the real time versions of materials internally
+	if ( material->GetReferenceCount() <= 0 )
+	{
+		static ConVarRef matTextureListConVar( "mat_texture_list" );
+		static ConVarRef matShowWaterTextureConVar( "mat_showwatertextures" );
+
+		if ( ( !matTextureListConVar.IsValid() || !matTextureListConVar.GetBool() ) &&
+		     ( !matShowWaterTextureConVar.IsValid() || !matShowWaterTextureConVar.GetBool() ))
+		{
+			Warning( "Material %s has bad reference count %d when being bound\n", material->GetName(), material->GetReferenceCount() );
+			// The usual solution for this for global materials that really don't need refcounting is to do material->AddRef();
+			Assert( 0 );
+			iMaterial = g_pErrorMaterial;
+		}
+	}
 
 	if (g_config.bDrawFlat && !material->NoDebugOverride())
 	{
@@ -2088,6 +2348,28 @@ void CMatRenderContext::CopyRenderTargetToTexture( ITexture *pTexture )
 }
 
 
+void CMatRenderContext::CopyTextureToRenderTargetEx( int nRenderTargetID, ITexture *pTexture, Rect_t *pSrcRect, Rect_t *pDstRect )
+{
+	if ( !pTexture )
+	{
+		Assert( 0 );
+		return;
+	}
+
+	GetMaterialSystem()->Flush( false );
+	ITextureInternal *pTextureInternal = (ITextureInternal *)pTexture;
+
+	if ( IsPC() || !IsX360() )
+	{
+		pTextureInternal->CopyMeToFrameBuffer( nRenderTargetID, pSrcRect, pDstRect );
+	}
+	else
+	{
+		Assert( 0 );
+	}
+}
+
+
 void CMatRenderContext::ClearBuffers( bool bClearColor, bool bClearDepth, bool bClearStencil )
 {
 	int width, height;
@@ -2095,9 +2377,9 @@ void CMatRenderContext::ClearBuffers( bool bClearColor, bool bClearDepth, bool b
 	g_pShaderAPI->ClearBuffers( bClearColor, bClearDepth, bClearStencil, width, height );
 }
 
-void CMatRenderContext::DrawClearBufferQuad( unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool bClearColor, bool bClearDepth )
+void CMatRenderContext::DrawClearBufferQuad( unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool bClearColor, bool bClearAlpha, bool bClearDepth )
 {
-	IMaterialInternal *pClearMaterial = GetBufferClearObeyStencil( bClearColor + ( bClearDepth << 1 ) );
+	IMaterialInternal *pClearMaterial = GetBufferClearObeyStencil( bClearColor + ( bClearAlpha << 1 ) + ( bClearDepth << 2 ) );
 	Bind( pClearMaterial );
 
 	IMesh* pMesh = GetDynamicMesh( true );
@@ -2507,6 +2789,10 @@ void CMatRenderContext::BindStandardTexture( Sampler_t sampler, StandardTextureI
 			g_pShaderAPI->BindTexture( sampler, GetMaxDepthTextureHandle() );
 		return;
 
+	case TEXTURE_DEBUG_LUXELS:
+		TextureManager()->DebugLuxels2D()->Bind( sampler );
+		return;
+
 	default:
 		Assert(0);
 	}
@@ -2590,6 +2876,10 @@ void CMatRenderContext::GetStandardTextureDimensions( int *pWidth, int *pHeight,
 
 	case TEXTURE_MORPH_WEIGHTS:
 		pTexture = g_pMorphMgr->MorphWeights();
+		break;
+
+	case TEXTURE_DEBUG_LUXELS:
+		pTexture = TextureManager()->DebugLuxels2D();
 		break;
 	}
 
@@ -2729,6 +3019,61 @@ bool CMatRenderContext::OnDrawMesh( IMesh *pMesh, CPrimList *pLists, int nLists 
 	return true;
 }
 
+void CMatRenderContext::AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs )
+{
+	if ( g_pMaterialSystem->GetThreadMode() == MATERIAL_SINGLE_THREADED ) 
+	{
+		OnAsyncCreateTextureFromRenderTarget( pSrcRt, &pDstName, pRecipient );
+	}
+
+	TextureManager()->AsyncCreateTextureFromRenderTarget( pSrcRt, pDstName, dstFmt, bGenMips, nAdditionalCreationFlags, pRecipient, pExtraArgs );
+}
+
+void CMatRenderContext::AsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs )
+{
+	if ( g_pMaterialSystem->GetThreadMode() == MATERIAL_SINGLE_THREADED )
+	{
+		OnAsyncMap( pTexToMap, pRecipient, pExtraArgs );
+	}
+
+	void* pMemory = NULL;
+	int nPitch = NULL;
+
+	pTexToMap->Map( &pMemory, &nPitch );
+
+	pRecipient->OnAsyncMapComplete( pTexToMap, pExtraArgs, pMemory, nPitch );
+
+	// Release references held earlier in OnAsyncMap
+	SafeRelease( &pRecipient );
+	SafeRelease( &pTexToMap );
+}
+
+void CMatRenderContext::AsyncUnmap( ITextureInternal* pTexToUnmap )
+{
+	if ( g_pMaterialSystem->GetThreadMode() == MATERIAL_SINGLE_THREADED )
+	{
+		OnAsyncUnmap( pTexToUnmap );
+	}
+
+	pTexToUnmap->Unmap();
+	SafeRelease( &pTexToUnmap ); // Matches AddRef from OnAsyncUnmap
+}
+
+void CMatRenderContext::AsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs )
+{
+	if ( g_pMaterialSystem->GetThreadMode() == MATERIAL_SINGLE_THREADED )
+	{
+		OnAsyncCopyRenderTargetToStagingTexture( pDst, pSrc, pRecipient );
+	}
+
+	pSrc->CopyToStagingTexture( pDst );
+	pRecipient->OnAsyncReadbackBegin( pDst, pSrc, pExtraArgs );
+
+	SafeRelease( &pDst );
+	SafeRelease( &pSrc );
+	SafeRelease( &pRecipient );
+}
+
 
 //-----------------------------------------------------------------------------
 // Methods related to morph accumulation
@@ -2776,3 +3121,37 @@ void CMatRenderContext::SetFullScreenDepthTextureValidityFlag( bool bIsValid )
 {
 	m_bFullFrameDepthIsValid = bIsValid;
 }
+
+//-----------------------------------------------------------------------------
+// Debug logging
+//-----------------------------------------------------------------------------
+
+void	CMatRenderContext::PrintfVA( char *fmt, va_list vargs )
+{
+	#if GLMDEBUG
+		g_pShaderAPI->PrintfVA( fmt, vargs );
+	#endif
+}
+
+void	CMatRenderContext::Printf( const char *fmt, ... )
+{
+	#if GLMDEBUG
+		va_list	vargs;
+
+		va_start(vargs, fmt);
+
+		g_pShaderAPI->PrintfVA( (char *)fmt, vargs );
+
+		va_end( vargs );
+	#endif
+}
+
+float	CMatRenderContext::Knob( char *knobname, float *setvalue )
+{
+	#if GLMDEBUG
+		return g_pShaderAPI->Knob( knobname, setvalue );
+	#else
+		return 0.0f;
+	#endif
+}
+

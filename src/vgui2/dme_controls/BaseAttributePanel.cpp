@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: base class for all element attribute panels
 //    An attribute panel is a one line widget that can be used by a list
@@ -183,15 +183,15 @@ void CBaseAttributePanel::ApplySchemeSettings( IScheme *pScheme )
 //-----------------------------------------------------------------------------
 // Returns the panel element
 //-----------------------------------------------------------------------------
-/*inline CDmElement *CBaseAttributePanel::GetPanelElement()
+CDmElement *CBaseAttributePanel::GetPanelElement()
 {
 	return m_hObject;
 }
 
-inline const CDmElement *CBaseAttributePanel::GetPanelElement() const
+const CDmElement *CBaseAttributePanel::GetPanelElement() const
 {
 	return m_hObject;
-}*/
+}
 
 
 //-----------------------------------------------------------------------------

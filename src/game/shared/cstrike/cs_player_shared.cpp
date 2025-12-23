@@ -1,6 +1,6 @@
- //========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose:
 //
 //=============================================================================//
 
@@ -20,6 +20,7 @@
 	#include "bot/cs_bot.h"
 	#include "KeyValues.h"
 	#include "triggers.h"
+	#include "cs_gamestats.h"
 #endif
 
 #include "cs_playeranimstate.h"
@@ -37,40 +38,6 @@ ConVar sv_showplayerhitboxes( "sv_showplayerhitboxes", "0", FCVAR_REPLICATED, "S
 #define	CS_MASK_SHOOT (MASK_SOLID|CONTENTS_DEBRIS)
 
 void DispatchEffect( const char *pName, const CEffectData &data );
-
-//Pistols
-ConVar mp_weapon_glock_price( "mp_weapon_glock_price", "400", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_usp_price( "mp_weapon_usp_price", "500", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_p228_price( "mp_weapon_p228_price", "600", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_deagle_price( "mp_weapon_deagle_price", "650", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_fiveseven_price( "mp_weapon_fiveseven_price", "750", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_elite_price( "mp_weapon_elite_price", "800", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-
-//Shotguns
-ConVar mp_weapon_m3_price( "mp_weapon_m3_price", "1700", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_xm1014_price( "mp_weapon_xm1014_price", "3000", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-
-//Sub-Machineguns
-ConVar mp_weapon_tmp_price( "mp_weapon_tmp_price", "1250", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_mac10_price( "mp_weapon_mac10_price", "1400", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_mp5navy_price( "mp_weapon_mp5navy_price", "1500", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_ump45_price( "mp_weapon_ump45_price", "1700", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_p90_price( "mp_weapon_p90_price", "2350", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-
-//Rifles
-ConVar mp_weapon_famas_price( "mp_weapon_famas_price", "2250", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_galil_price( "mp_weapon_galil_price", "2000", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_scout_price( "mp_weapon_scout_price", "2750", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_ak47_price( "mp_weapon_ak47_price", "2500", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_m4a1_price( "mp_weapon_m4a1_price", "3100", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_aug_price( "mp_weapon_aug_price", "3500", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_sg552_price( "mp_weapon_sg552_price", "3500", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_sg550_price( "mp_weapon_sg550_price", "4200", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_awp_price( "mp_weapon_awp_price", "4750", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-ConVar mp_weapon_g3sg1_price( "mp_weapon_g3sg1_price", "5000", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
-
-//Machineguns
-ConVar mp_weapon_m249_price( "mp_weapon_m249_price", "5750", FCVAR_REPLICATED | FCVAR_UNLOGGED | FCVAR_PRINTABLEONLY );
 
 
 #ifdef _DEBUG
@@ -109,7 +76,7 @@ ConVar mp_weapon_m249_price( "mp_weapon_m249_price", "5750", FCVAR_REPLICATED | 
 			if (s_bullet_stats[i].count == 0)
 				break;
 
-			Msg("%3i;%3i;%.4f;%.4f\n", i, s_bullet_stats[i].count, 
+			Msg("%3i;%3i;%.4f;%.4f\n", i, s_bullet_stats[i].count,
 				s_bullet_stats[i].timedelta, s_bullet_stats[i].derivation );
 		}
 	}
@@ -135,7 +102,7 @@ ConVar mp_weapon_m249_price( "mp_weapon_m249_price", "5750", FCVAR_REPLICATED | 
 
 		if ( dist < 1 )
 			dist = 1;
-		
+
 		int i = s_bulletCount;
 
 		float offset = VectorLength( s_firstImpact - impact );
@@ -166,10 +133,57 @@ ConVar mp_weapon_m249_price( "mp_weapon_m249_price", "5750", FCVAR_REPLICATED | 
 
 #endif
 
+float CCSPlayer::GetPlayerMaxSpeed()
+{
+	if ( GetMoveType() == MOVETYPE_NONE )
+	{
+		return CS_PLAYER_SPEED_STOPPED;
+	}
 
-void CCSPlayer::GetBulletTypeParameters( 
-	int iBulletType, 
-	float &fPenetrationPower, 
+	if ( IsObserver() )
+	{
+		// Player gets speed bonus in observer mode
+		return CS_PLAYER_SPEED_OBSERVER;
+	}
+
+	bool bValidMoveState = ( State_Get() == STATE_ACTIVE || State_Get() == STATE_OBSERVER_MODE );
+	if ( !bValidMoveState || m_bIsDefusing || CSGameRules()->IsFreezePeriod() )
+	{
+		// Player should not move during the freeze period
+		return CS_PLAYER_SPEED_STOPPED;
+	}
+
+	float speed = BaseClass::GetPlayerMaxSpeed();
+
+	if ( IsVIP() == true )  // VIP is slow due to the armour he's wearing
+	{
+		speed = MIN(speed, CS_PLAYER_SPEED_VIP);
+	}
+	else
+	{
+
+		CWeaponCSBase *pWeapon = dynamic_cast<CWeaponCSBase*>( GetActiveWeapon() );
+
+		if ( pWeapon )
+		{
+			if ( HasShield() && IsShieldDrawn() )
+			{
+				speed = MIN(speed, CS_PLAYER_SPEED_SHIELD);
+			}
+			else
+			{
+				speed = MIN(speed, pWeapon->GetMaxSpeed());
+			}
+		}
+	}
+
+	return speed;
+}
+
+
+void CCSPlayer::GetBulletTypeParameters(
+	int iBulletType,
+	float &fPenetrationPower,
 	float &flPenetrationDistance )
 {
 	//MIKETODO: make ammo types come from a script file.
@@ -183,7 +197,7 @@ void CCSPlayer::GetBulletTypeParameters(
 		fPenetrationPower = 39;
 		flPenetrationDistance = 5000.0;
 	}
-	else if ( IsAmmoType( iBulletType, BULLET_PLAYER_556MM ) || 
+	else if ( IsAmmoType( iBulletType, BULLET_PLAYER_556MM ) ||
 			  IsAmmoType( iBulletType, BULLET_PLAYER_556MM_BOX ) )
 	{
 		fPenetrationPower = 35;
@@ -232,7 +246,7 @@ static void GetMaterialParameters( int iMaterial, float &flPenetrationModifier, 
 {
 	switch ( iMaterial )
 	{
-		case CHAR_TEX_METAL : 
+		case CHAR_TEX_METAL :
 			flPenetrationModifier = 0.5;  // If we hit metal, reduce the thickness of the brush we can't penetrate
 			flDamageModifier = 0.3;
 			break;
@@ -240,7 +254,7 @@ static void GetMaterialParameters( int iMaterial, float &flPenetrationModifier, 
 			flPenetrationModifier = 0.5;
 			flDamageModifier = 0.3;
 			break;
-		case CHAR_TEX_CONCRETE : 
+		case CHAR_TEX_CONCRETE :
 			flPenetrationModifier = 0.4;
 			flDamageModifier = 0.25;
 			break;
@@ -248,7 +262,7 @@ static void GetMaterialParameters( int iMaterial, float &flPenetrationModifier, 
 			flPenetrationModifier = 1.0;
 			flDamageModifier = 0.99;
 			break;
-		case CHAR_TEX_VENT : 
+		case CHAR_TEX_VENT :
 			flPenetrationModifier = 0.5;
 			flDamageModifier = 0.45;
 			break;
@@ -256,7 +270,7 @@ static void GetMaterialParameters( int iMaterial, float &flPenetrationModifier, 
 			flPenetrationModifier = 0.65;
 			flDamageModifier = 0.3;
 			break;
-		case CHAR_TEX_COMPUTER : 
+		case CHAR_TEX_COMPUTER :
 			flPenetrationModifier = 0.4;
 			flDamageModifier = 0.45;
 			break;
@@ -264,7 +278,7 @@ static void GetMaterialParameters( int iMaterial, float &flPenetrationModifier, 
 			flPenetrationModifier = 1.0;
 			flDamageModifier = 0.6;
 			break;
-		default : 
+		default :
 			flPenetrationModifier = 1.0;
 			flDamageModifier = 0.5;
 			break;
@@ -284,7 +298,7 @@ static bool TraceToExit(Vector &start, Vector &dir, Vector &end, float flStepSiz
 	{
 		flDistance += flStepSize;
 
-		end = start + flDistance *dir; 
+		end = start + flDistance *dir;
 
 		if ( (UTIL_PointContents ( end ) & MASK_SOLID) == 0 )
 		{
@@ -296,7 +310,7 @@ static bool TraceToExit(Vector &start, Vector &dir, Vector &end, float flStepSiz
 	return false;
 }
 
-inline void UTIL_TraceLineIgnoreTwoEntities( const Vector& vecAbsStart, const Vector& vecAbsEnd, unsigned int mask, 
+inline void UTIL_TraceLineIgnoreTwoEntities( const Vector& vecAbsStart, const Vector& vecAbsEnd, unsigned int mask,
 					 const IHandleEntity *ignore, const IHandleEntity *ignore2, int collisionGroup, trace_t *ptr )
 {
 	Ray_t ray;
@@ -309,27 +323,25 @@ inline void UTIL_TraceLineIgnoreTwoEntities( const Vector& vecAbsStart, const Ve
 	}
 }
 
-void CCSPlayer::FireBullet( 
+void CCSPlayer::FireBullet(
 	Vector vecSrc,	// shooting postion
 	const QAngle &shootAngles,  //shooting angle
-	float vecSpread, // spread vector
-	float flDistance, // max distance 
+	float flDistance, // max distance
 	int iPenetration, // how many obstacles can be penetrated
 	int iBulletType, // ammo type
 	int iDamage, // base damage
 	float flRangeModifier, // damage range modifier
 	CBaseEntity *pevAttacker, // shooter
 	bool bDoEffects,
-	float x,
-	float y
+	float xSpread, float ySpread
 	)
 {
 	float fCurrentDamage = iDamage;   // damage of the bullet at it's current trajectory
 	float flCurrentDistance = 0.0;  //distance that the bullet has traveled so far
-		
+
 	Vector vecDirShooting, vecRight, vecUp;
 	AngleVectors( shootAngles, &vecDirShooting, &vecRight, &vecUp );
-	
+
 	// MIKETODO: put all the ammo parameters into a script file and allow for CS-specific params.
 	float flPenetrationPower = 0;		// thickness of a wall that this bullet can penetrate
 	float flPenetrationDistance = 0;	// distance at which the bullet is capable of penetrating a wall
@@ -342,24 +354,22 @@ void CCSPlayer::FireBullet(
 	if ( !pevAttacker )
 		pevAttacker = this;  // the default attacker is ourselves
 
-	// add the spray 
-	Vector vecDir = vecDirShooting +
-	      x * vecSpread * vecRight +
-		  y * vecSpread * vecUp;
+	// add the spray
+	Vector vecDir = vecDirShooting + xSpread * vecRight + ySpread * vecUp;
 
 	VectorNormalize( vecDir );
 
 	//Adrian: visualize server/client player positions
 	//This is used to show where the lag compesator thinks the player should be at.
-#if 0 
+#if 0
 	for ( int k = 1; k <= gpGlobals->maxClients; k++ )
 	{
 		CBasePlayer *clientClass = (CBasePlayer *)CBaseEntity::Instance( k );
 
-		if ( clientClass == NULL ) 
+		if ( clientClass == NULL )
 			 continue;
 
-		if ( k == entindex() ) 
+		if ( k == entindex() )
 			 continue;
 
 #ifdef CLIENT_DLL
@@ -371,6 +381,23 @@ void CCSPlayer::FireBullet(
 	}
 
 #endif
+
+
+//=============================================================================
+// HPE_BEGIN:
+//=============================================================================
+
+#ifndef CLIENT_DLL
+	// [pfreese] Track number player entities killed with this bullet
+	int iPenetrationKills = 0;
+
+	// [menglish] Increment the shots fired for this player
+	CCS_GameStats.Event_ShotFired( this, GetActiveWeapon() );
+#endif
+
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 	bool bFirstHit = true;
 
@@ -410,7 +437,7 @@ void CCSPlayer::FireBullet(
 		if ( tr.fraction == 1.0f )
 			break; // we didn't hit anything, stop tracing shoot
 
-#ifdef _DEBUG		
+#ifdef _DEBUG
 		if ( bFirstHit )
 			AddBulletStat( gpGlobals->realtime, VectorLength( vecSrc-tr.endpos), tr.endpos );
 #endif
@@ -436,7 +463,7 @@ void CCSPlayer::FireBullet(
 		/************* MATERIAL DETECTION ***********/
 		surfacedata_t *pSurfaceData = physprops->GetSurfaceData( tr.surface.surfaceProps );
 		int iEnterMaterial = pSurfaceData->game.material;
-	
+
 		GetMaterialParameters( iEnterMaterial, flPenetrationModifier, flDamageModifier );
 
 		bool hitGrate = tr.contents & CONTENTS_GRATE;
@@ -475,7 +502,7 @@ void CCSPlayer::FireBullet(
 			}
 		}
 #endif
-					
+
 		//calculate the damage based on the distance the bullet travelled.
 		flCurrentDistance += tr.fraction * flDistance;
 		fCurrentDamage *= pow (flRangeModifier, (flCurrentDistance / 500));
@@ -495,10 +522,10 @@ void CCSPlayer::FireBullet(
 		{
 			// See if the bullet ended up underwater + started out of the water
 			if ( enginetrace->GetPointContents( tr.endpos ) & (CONTENTS_WATER|CONTENTS_SLIME) )
-			{	
+			{
 				trace_t waterTrace;
 				UTIL_TraceLine( vecSrc, tr.endpos, (MASK_SHOT|CONTENTS_WATER|CONTENTS_SLIME), this, COLLISION_GROUP_NONE, &waterTrace );
-				
+
 				if( waterTrace.allsolid != 1 )
 				{
 					CEffectData	data;
@@ -531,20 +558,40 @@ void CCSPlayer::FireBullet(
 		} // bDoEffects
 
 		// add damage to entity that we hit
-		
+
 #ifndef CLIENT_DLL
 		ClearMultiDamage();
 
+		//=============================================================================
+		// HPE_BEGIN:
+		// [pfreese] Check if enemy players were killed by this bullet, and if so,
+		// add them to the iPenetrationKills count
+		//=============================================================================
+		
+		CBaseEntity *pEntity = tr.m_pEnt;
+
 		CTakeDamageInfo info( pevAttacker, pevAttacker, fCurrentDamage, iDamageType );
 		CalculateBulletDamageForce( &info, iBulletType, vecDir, tr.endpos );
-		tr.m_pEnt->DispatchTraceAttack( info, vecDir, &tr );
+		pEntity->DispatchTraceAttack( info, vecDir, &tr );
+
+		bool bWasAlive = pEntity->IsAlive();
 
 		TraceAttackToTriggers( info, tr.startpos, tr.endpos, vecDir );
 
 		ApplyMultiDamage();
+
+		if (bWasAlive && !pEntity->IsAlive() && pEntity->IsPlayer() && pEntity->GetTeamNumber() != GetTeamNumber())
+		{
+			++iPenetrationKills;
+		}
+		
+		//=============================================================================
+		// HPE_END
+		//=============================================================================
+
 #endif
 
-		// check if bullet can penetarte another entity
+		// check if bullet can penetrate another entity
 		if ( iPenetration == 0 && !hitGrate )
 			break; // no, stop
 
@@ -557,7 +604,7 @@ void CCSPlayer::FireBullet(
 		// try to penetrate object, maximum penetration is 128 inch
 		if ( !TraceToExit( tr.endpos, vecDir, penetrationEnd, 24, 128 ) )
 			break;
-				
+
 		// find exact penetration exit
 		trace_t exitTr;
 		UTIL_TraceLine( penetrationEnd, tr.endpos, CS_MASK_SHOOT|CONTENTS_HITBOX, NULL, &exitTr );
@@ -574,7 +621,7 @@ void CCSPlayer::FireBullet(
 
 		hitGrate = hitGrate && ( exitTr.contents & CONTENTS_GRATE );
 
-		// if enter & exit point is wood or metal we assume this is 
+		// if enter & exit point is wood or metal we assume this is
 		// a hollow crate or barrel and give a penetration bonus
 		if ( iEnterMaterial == iExitMaterial )
 		{
@@ -600,7 +647,7 @@ void CCSPlayer::FireBullet(
 		}
 
 		//setup new start end parameters for successive trace
-		
+
 		flPenetrationPower -= flTraceDistance / flPenetrationModifier;
 		flCurrentDistance += flTraceDistance;
 
@@ -616,6 +663,22 @@ void CCSPlayer::FireBullet(
 		iPenetration--;
 	}
 
+#ifndef CLIENT_DLL
+	//=============================================================================
+	// HPE_BEGIN:
+	// [pfreese] If we killed at least two enemies with a single bullet, award the
+	// TWO_WITH_ONE_SHOT achievement
+	//=============================================================================
+	
+	if (iPenetrationKills >= 2)
+	{
+		AwardAchievement(CSKillTwoWithOneShot);
+	}
+	
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+#endif
 }
 
 
@@ -623,8 +686,8 @@ void CCSPlayer::UpdateStepSound( surfacedata_t *psurface, const Vector &vecOrigi
 {
 	float speedSqr = vecVelocity.AsVector2D().LengthSqr();
 
-	// walking spped is 100 in CS, see CCSGameMovement::CheckParameters()
-	if ( speedSqr < 110.0f * 110.0f )
+	// the fastest walk is 135 ( scout ), see CCSGameMovement::CheckParameters()
+	if ( speedSqr < 150.0 * 150.0 ) 
 		return; // player is not running, no footsteps
 
 	BaseClass::UpdateStepSound( psurface, vecOrigin, vecVelocity  );
@@ -654,7 +717,7 @@ void CCSPlayer::KickBack( float up_base, float lateral_base, float up_modifier, 
 	angle.x -= flKickUp;
 	if ( angle.x < -1 * up_max )
 		angle.x = -1 * up_max;
-	
+
 	if ( m_iDirection == 1 )
 	{
 		angle.y += flKickLateral;
@@ -677,7 +740,7 @@ void CCSPlayer::KickBack( float up_base, float lateral_base, float up_modifier, 
 
 bool CCSPlayer::CanMove() const
 {
-	// When we're in intro camera mode, it's important to return false here 
+	// When we're in intro camera mode, it's important to return false here
 	// so our physics object doesn't fall out of the world.
 	if ( GetMoveType() == MOVETYPE_NONE )
 		return false;
@@ -686,7 +749,7 @@ bool CCSPlayer::CanMove() const
 		return true; // observers can move all the time
 
 	bool bValidMoveState = (State_Get() == STATE_ACTIVE || State_Get() == STATE_OBSERVER_MODE);
-			
+
 	if ( m_bIsDefusing || !bValidMoveState || CSGameRules()->IsFreezePeriod() )
 	{
 		return false;
@@ -700,6 +763,22 @@ bool CCSPlayer::CanMove() const
 
 		return true;
 	}
+}
+
+
+void CCSPlayer::OnJump( float fImpulse )
+{
+	CWeaponCSBase* pActiveWeapon = GetActiveCSWeapon();
+	if ( pActiveWeapon != NULL )
+		pActiveWeapon->OnJump(fImpulse);
+}
+
+
+void CCSPlayer::OnLand( float fVelocity )
+{
+	CWeaponCSBase* pActiveWeapon = GetActiveCSWeapon();
+	if ( pActiveWeapon != NULL )
+		pActiveWeapon->OnLand(fVelocity);
 }
 
 

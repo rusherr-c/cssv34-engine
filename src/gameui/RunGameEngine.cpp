@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "IRunGameEngine.h"
 #include "EngineInterface.h"
 #include "tier1/strtools.h"
-#include "igameuifuncs.h"
+#include "IGameUIFuncs.h"
 #include "tier1/convar.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -99,7 +99,7 @@ public:
 	}
 
 	// gets the in-game name of another user, returns NULL if that user doesn't exists
-	virtual const char *GetPlayerName(int trackerID)
+	virtual const char *GetPlayerName(int trackerID, char *name, int namelen)
 	{
 		// find the player by their friendsID
 		player_info_t pi;
@@ -109,7 +109,8 @@ public:
 			{
 				if (pi.friendsID == (uint)trackerID)
 				{
-					return pi.name;
+					Q_strncpy( name, pi.name, namelen );
+					return name;
 				}
 			}
 		}
@@ -117,7 +118,7 @@ public:
 		return NULL;
 	}
 
-	virtual const char *GetPlayerFriendsName(int trackerID)
+	virtual const char *GetPlayerFriendsName(int trackerID, char *name, int namelen)
 	{
 		// find the player by their friendsID
 		player_info_t pi;
@@ -127,7 +128,8 @@ public:
 			{
 				if (pi.friendsID == (uint)trackerID)
 				{
-					return pi.friendsName;
+					Q_strncpy( name, pi.friendsName, namelen );
+					return name;
 				}
 			}
 		}

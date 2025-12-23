@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,6 +13,20 @@
 #include "movehelper_server.h"
 #include "shake.h"				// For screen fade constants
 #include "engine/IEngineSound.h"
+
+//=============================================================================
+// HPE_BEGIN
+// [dwenger] Necessary for stats tracking
+//=============================================================================
+#ifdef CSTRIKE_DLL
+
+#include "cs_gamestats.h"
+#include "cs_achievement_constants.h"
+
+#endif
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -350,7 +364,28 @@ bool CMoveHelperServer::PlayerFallingDamage( void )
 	{
 		m_pHostPlayer->TakeDamage( CTakeDamageInfo( GetContainingEntity(INDEXENT(0)), GetContainingEntity(INDEXENT(0)), flFallDamage, DMG_FALL ) ); 
 		StartSound( m_pHostPlayer->GetAbsOrigin(), "Player.FallDamage" );
-	}
+
+        //=============================================================================
+        // HPE_BEGIN:
+        // [dwenger] Needed for fun-fact implementation
+        //=============================================================================
+
+#ifdef CSTRIKE_DLL
+
+        // Increment the stat for fall damage
+        CCSPlayer*  pPlayer = ToCSPlayer(m_pHostPlayer);
+
+        if ( pPlayer )
+        {
+            CCS_GameStats.IncrementStat( pPlayer, CSSTAT_FALL_DAMAGE, (int)flFallDamage );
+        }
+
+#endif
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+
+    }
 
 	if ( m_pHostPlayer->m_iHealth <= 0 )
 	{

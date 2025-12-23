@@ -18,13 +18,13 @@ $dstamp=~ s/[\n\r]//g;
 $computername=$ENV{'COMPUTERNAME'};
 
 
-# first, set our prioirty to high and affinity to 1 to try to get more repeatable benchmark results
-my $pid = $$;
+# first, set our priority to high and affinity to 1 to try to get more repeatable benchmark results
+#my $pid = $$;
 
-my $cmd="datafiles\\process.exe -p $pid High";
-print STDERR `$cmd`;
-$cmd="datafiles\\process.exe -a $pid 01";
-print STDERR `$cmd`;
+#my $cmd="datafiles\\process.exe -p $pid High";
+#print STDERR `$cmd`;
+#$cmd="datafiles\\process.exe -a $pid 01";
+#print STDERR `$cmd`;
 
 if ( open(CFGFILE, "filecompare_tests.cfg") )
   {

@@ -1,6 +1,11 @@
-// STATIC: "CONVERT_TO_SRGB"				"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()]
+// STATIC: "CONVERT_TO_SRGB"				"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()] [PC]
+// STATIC: "CONVERT_TO_SRGB"				"0..0"	[= 0] [XBOX]
+// STATIC: "LINEAR_INPUT"					"0..1"  [ps20b]
+// STATIC: "LINEAR_OUTPUT"					"0..1"  [ps20b]
 
 // DYNAMIC: "AA_ENABLE"						"0..1"
+// rem DYNAMIC: "AA_DEBUG_MODE"				"0..3"
+#define AA_DEBUG_MODE						0	
 // DYNAMIC: "AA_QUALITY_MODE"				"0..0"  [ps20]
 // DYNAMIC: "AA_QUALITY_MODE"				"0..1"  [ps20b]
 // DYNAMIC: "AA_QUALITY_MODE"				"0..1"  [ps30]
@@ -11,6 +16,14 @@
 
 #define HDRTYPE HDR_TYPE_NONE
 #include "common_ps_fxc.h"
+
+
+#if !(defined(SHADER_MODEL_PS_2_B) || defined(SHADER_MODEL_PS_3_0))
+// Only allow debug modes and high-quality mode if in ps2b or higher (not enough instruction slots in ps20)
+#undef  AA_DEBUG_MODE
+#define AA_DEBUG_MODE					0
+#endif
+
 
 /* 
  * Engine_Post combines bloom (the final simple addition) with software anti-aliasing
@@ -77,19 +90,29 @@ float4	psTapOffs_Packed				: register( c0 ); // psTapOffs_packed contains 1-pixe
 float4	tweakables						: register( c1 ); // (x - AA strength/unused) (y - reduction of 1-pixel-line blur)
 														  // (z - edge threshold multipler) (w - tap offset multiplier)
 float4	uvTransform						: register( c2 ); // Transform BaseTexture UVs for use with the FBTexture
-								 
+
 float	ColorCorrectionDefaultWeight	: register( c3 );
 float4	ColorCorrectionVolumeWeights	: register( c4 );
 float	BloomFactor						: register( c5 );
 
 float4 GetBloomColor( float2 bloomUV )
 {
-	return tex2D( BaseTextureSampler, bloomUV );
+	#if ( LINEAR_INPUT == 1 )
+	{
+		// In this case, which is only used on OpenGL, we want sRGB data from this tex2D.
+		// Hence, we have to undo the sRGB conversion that we are forced to apply by OpenGL
+		return LinearToGamma( tex2D( BaseTextureSampler, bloomUV ) );
+	}
+	#else
+	{
+		return tex2D( BaseTextureSampler, bloomUV );
+	}
+	#endif
 }
 
 float4 PerformColorCorrection( float4 outColor, float2 fbTexCoord )
 {
-	#if (COL_CORRECT_NUM_LOOKUPS > 0)
+	#if ( COL_CORRECT_NUM_LOOKUPS > 0 )
 	{
 		// NOTE: This code requires the color correction texture to be 32 units to be correct.
 		// This code will cause (0,0,0) to be read from 0.5f/32
@@ -98,13 +121,13 @@ float4 PerformColorCorrection( float4 outColor, float2 fbTexCoord )
 
 		outColor.rgb  = outColor.rgb * ColorCorrectionDefaultWeight;
 		outColor.rgb += tex3D( ColorCorrectionVolumeTexture0, offsetOutColor.rgb ) * ColorCorrectionVolumeWeights.x;
-		#if (COL_CORRECT_NUM_LOOKUPS > 1)
+		#if ( COL_CORRECT_NUM_LOOKUPS > 1 )
 		{
 			outColor.rgb += tex3D( ColorCorrectionVolumeTexture1, offsetOutColor.rgb ) * ColorCorrectionVolumeWeights.y;
-			#if (COL_CORRECT_NUM_LOOKUPS > 2)
+			#if ( COL_CORRECT_NUM_LOOKUPS > 2 )
 			{
 				outColor.rgb += tex3D( ColorCorrectionVolumeTexture2, offsetOutColor.rgb ) * ColorCorrectionVolumeWeights.z;
-				#if (COL_CORRECT_NUM_LOOKUPS > 3)
+				#if ( COL_CORRECT_NUM_LOOKUPS > 3 )
 				{
 					outColor.rgb += tex3D( ColorCorrectionVolumeTexture3, offsetOutColor.rgb ) * ColorCorrectionVolumeWeights.w;
 				}
@@ -199,10 +222,10 @@ float3 PerformAA( float3 baseColor, float2 fbTexCoord, out float3 unlike, out fl
 		deltas  *= DELTA_SCALE;
 	}
 	#endif
-	
+
 	weights = deltas;
 #if AA_QUALITY_MODE == 1
-	#if (FAST_DELTAS == 0)
+	#if ( FAST_DELTAS == 0 )
 	{
 		deltas2 = float4( dot(dE, dE), dot(dF, dF), dot(dG, dG), dot(dH, dH) );
 		deltas2 = DELTA_SCALE*DELTA_SCALE*(deltas2 / 3);
@@ -217,7 +240,7 @@ float3 PerformAA( float3 baseColor, float2 fbTexCoord, out float3 unlike, out fl
 		deltas2  *= DELTA_SCALE;
 	}
 	#endif
-	
+
 	weights2 = deltas2;
 #endif // AA_QUALITY_MODE == 1
 
@@ -290,7 +313,7 @@ float3 PerformAA( float3 baseColor, float2 fbTexCoord, out float3 unlike, out fl
 	// 33% towards the 'unlike' colour, such that these hard, 1-pixel transitions
 	// (0% -> 100%) become soft, 3-pixel transitions (0% -> 33% -> 66% -> 100%).
 	float strengthMultiplier = tweakables.x;
-	#if (AA_QUALITY_MODE == 0)
+	#if ( AA_QUALITY_MODE == 0 )
 	{
 		lerpFactor = saturate( strengthMultiplier*DELTA_SCALE*( (unlikeSum - 1) / 3 ) );
 		// Uncomment the following to blend slightly across vertical/horizontal edges (better for 45-degree edges, worse for 90-degree edges)
@@ -301,11 +324,51 @@ float3 PerformAA( float3 baseColor, float2 fbTexCoord, out float3 unlike, out fl
 		lerpFactor = saturate( strengthMultiplier*DELTA_SCALE*( (unlikeSum - 3) / 3 ) );
 	}
 	#endif
+
 	// Clamp the blend factor so that lone dot pixels aren't blurred into oblivion
 	lerpFactor = min( lerpFactor, MAX_LERP_FACTOR );
 	baseColor = lerp( baseColor, unlike, lerpFactor );
 
 	return baseColor;
+}
+
+float4 GenerateAADebugColor( float4 outColor, float3 unlike, float unlikeSum, float lerpFactor )
+{
+	#if ( AA_DEBUG_MODE == 1 )
+	{
+		// Debug: Visualize the number of 'unlike' samples
+		outColor.rgb = 0;
+		if ( AA_QUALITY_MODE == 0 )
+		{
+			if (unlikeSum >= 0.95f) outColor.rgb = float3(1,0,0);
+			if (unlikeSum >= 1.95f) outColor.rgb = float3(0,1,0);
+			if (unlikeSum >= 2.95f) outColor.rgb = float3(0,0,1);
+		}
+		else
+		{
+			if (unlikeSum >= 2.95f) outColor.rgb = float3(1,0,0);
+			if (unlikeSum >= 3.95f) outColor.rgb = float3(0,1,0);
+			if (unlikeSum >= 4.95f) outColor.rgb = float3(0,0,1);
+		}
+		// Don't sRGB-write
+	}
+	#elif ( AA_DEBUG_MODE == 2 )
+	{
+		// Debug: Visualize the strength of lerpFactor
+		outColor.rgb = 0;
+		outColor.g   = lerpFactor;
+		// Don't sRGB-write
+	}
+	#elif ( AA_DEBUG_MODE == 3 )
+	{
+		// Debug: Visualize the 'unlike' colour that we blend towards
+		outColor.rgb = lerp( 0, unlike, saturate(5*lerpFactor) );
+		// Do sRGB-write (if it's enabled)
+		outColor = FinalOutput( outColor, 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+	}
+	#endif
+
+	return outColor;
 }
 
 float2 PerformUVTransform( float2 bloomUVs )
@@ -314,11 +377,14 @@ float2 PerformUVTransform( float2 bloomUVs )
 	return bloomUVs*uvTransform.wz + uvTransform.xy;
 }
 
-
-
 struct PS_INPUT
 {
 	float2 baseTexCoord : TEXCOORD0;
+	
+#if defined( _X360 ) //avoid a shader patch on 360 due to pixel shader inputs being fewer than vertex shader outputs
+	float2 ZeroTexCoord			: TEXCOORD1;
+	float2 bloomTexCoord		: TEXCOORD2;
+#endif	
 };
 	   
 float4 main( PS_INPUT i ) : COLOR
@@ -326,14 +392,28 @@ float4 main( PS_INPUT i ) : COLOR
 	float2 fbTexCoord = PerformUVTransform( i.baseTexCoord );
 	float3 baseColor  = tex2D( FBTextureSampler, fbTexCoord ).rgb;
 
+	#if ( LINEAR_INPUT == 1 )
+	{
+		// In this case, which is only used on OpenGL, we want sRGB data from this tex2D.
+		// Hence, we have to undo the sRGB conversion that we are forced to apply by OpenGL
+		baseColor = LinearToGamma( baseColor );
+	}
+	#endif
+
 	float4 outColor = float4( baseColor, 1 );
 
-	#if (AA_ENABLE == 1)
+	#if ( AA_ENABLE == 1 )
 	{
 		float  unlikeSum, lerpFactor;
 		float3 unlike;
 
 		outColor.rgb = PerformAA( outColor.rgb, fbTexCoord, unlike, unlikeSum, lerpFactor );
+
+		#if ( AA_DEBUG_MODE > 0 )
+		{
+			return GenerateAADebugColor( outColor, unlike, unlikeSum, lerpFactor );
+		}
+		#endif
 	}
 	#endif
 
@@ -341,6 +421,13 @@ float4 main( PS_INPUT i ) : COLOR
 	outColor.rgb += bloomColor.rgb;
 	outColor = PerformColorCorrection( outColor, fbTexCoord );
 	outColor = FinalOutput( outColor, 0, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_NONE );
+
+	// Go to linear since we're forced to do an sRGB write on OpenGL in ps2b
+	#if ( LINEAR_OUTPUT == 1 )
+	{
+		outColor = GammaToLinear( outColor );
+	}
+	#endif
 
 	return outColor;
 }

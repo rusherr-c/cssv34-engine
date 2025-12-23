@@ -1,4 +1,4 @@
-//========== Copyright © 2007, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -6,6 +6,11 @@
 
 #include "pch_tier0.h"
 #include "tier0/tslist.h"
+#include <list>
+#include <stdlib.h>
+#if defined( _X360 )
+#include "xbox/xbox_win32stubs.h"
+#endif
 
 namespace TSListTests
 {
@@ -23,6 +28,7 @@ CInterlockedInt g_nPops;
 CTSQueue<int, true> g_TestQueue;
 CTSList<int> g_TestList;
 volatile bool g_bStart;
+std::list<ThreadHandle_t> g_ThreadHandles;
 
 int *g_pTestBuckets;
 
@@ -228,6 +234,13 @@ void TestEnd( bool bExpectEmpty = true )
 	{
 		Msg("FAIL: !Validate()\n");
 	}
+	while ( g_ThreadHandles.size() )
+	{
+		ThreadJoin( g_ThreadHandles.front(), 0 );
+
+		ReleaseThreadHandle( g_ThreadHandles.front() );
+		g_ThreadHandles.pop_front();
+	}
 }
 
 
@@ -310,10 +323,11 @@ void STPushMTPop( bool bDistribute )
 {
 	Msg( "%s test: single thread push, multithread pop, %s", g_pListType, bDistribute ? "distributed..." : "no affinity..." );
 	TestStart();
-	CreateSimpleThread( &PushThreadFunc, NULL );
+	g_ThreadHandles.push_back( CreateSimpleThread( &PushThreadFunc, NULL ) );
 	for ( int i = 0; i < NUM_THREADS - 1; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PopThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (i % NUM_PROCESSORS);
@@ -329,10 +343,11 @@ void MTPushSTPop( bool bDistribute )
 {
 	Msg( "%s test: multithread push, single thread pop, %s", g_pListType, bDistribute ? "distributed..." : "no affinity..." );
 	TestStart();
-	CreateSimpleThread( &PopThreadFunc, NULL );
+	g_ThreadHandles.push_back( 	CreateSimpleThread( &PopThreadFunc, NULL ) );
 	for ( int i = 0; i < NUM_THREADS - 1; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PushThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (i % NUM_PROCESSORS);
@@ -352,6 +367,7 @@ void MTPushMTPop( bool bDistribute )
 	for ( int i = 0; i < NUM_THREADS / 2 ; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PopThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (ct++ % NUM_PROCESSORS);
@@ -361,6 +377,7 @@ void MTPushMTPop( bool bDistribute )
 	for ( int i = 0; i < NUM_THREADS / 2 ; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PushThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (ct++ % NUM_PROCESSORS);
@@ -380,6 +397,7 @@ void MTPushPopPopInterleaved( bool bDistribute )
 	for ( int i = 0; i < NUM_THREADS; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PushPopInterleavedTestThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (i % NUM_PROCESSORS);
@@ -397,6 +415,7 @@ void MTPushSeqPop( bool bDistribute )
 	for ( int i = 0; i < NUM_THREADS; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PushThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (i % NUM_PROCESSORS);
@@ -424,6 +443,7 @@ void SeqPushMTPop( bool bDistribute )
 	for ( int i = 0; i < NUM_THREADS; i++ )
 	{
 		ThreadHandle_t hThread = CreateSimpleThread( &PopThreadFunc, NULL );
+		g_ThreadHandles.push_back( hThread );
 		if ( bDistribute )
 		{
 			int32 mask = 1 << (i % NUM_PROCESSORS);
@@ -440,8 +460,8 @@ void RunSharedTests( int nTests )
 {
 	using namespace TSListTests;
 
-	const CPUInformation *pi = GetCPUInformation();
-	NUM_PROCESSORS = pi->m_nLogicalProcessors;
+	const CPUInformation &pi = *GetCPUInformation();
+	NUM_PROCESSORS = pi.m_nLogicalProcessors;
 	MAX_THREADS = NUM_PROCESSORS * 2;
 	g_pTestBuckets = new int[NUM_TEST];
 	while ( nTests-- )
@@ -471,14 +491,13 @@ void RunSharedTests( int nTests )
 	delete[] g_pTestBuckets;
 }
 
-#pragma warning(disable:4101)
-
 bool RunTSListTests( int nListSize, int nTests )
 {
 	using namespace TSListTests;
 	NUM_TEST = nListSize;
 
 	TSLHead_t foo;
+	(void)foo; // Avoid warning about unused variable.
 #ifdef USE_NATIVE_SLIST
 	int maxSize = ( 1 << (sizeof( foo.Depth ) * 8) ) - 1;
 #else

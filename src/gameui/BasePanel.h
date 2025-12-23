@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,9 +14,9 @@
 #include "vgui_controls/Panel.h"
 #include "vgui_controls/PHandle.h"
 #include "vgui_controls/MenuItem.h"
-#include "vgui_controls/messagedialog.h"
+#include "vgui_controls/MessageDialog.h"
 #include "KeyValues.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "tier1/CommandBuffer.h"
 
 #include "ixboxsystem.h"
@@ -35,6 +35,7 @@ enum
 class CMatchmakingBasePanel;
 class CBackgroundMenuButton;
 class CGameMenu;
+class CAsyncCtxOnDeviceAttached;
 
 // X360TBD: Move into a separate module when finished
 class CMessageDialogHandler
@@ -230,7 +231,20 @@ public:
 	void OnOpenLoadCommentaryDialog();
 	void OpenLoadSingleplayerCommentaryDialog();
 	void OnOpenAchievementsDialog();
-	void OnOpenAchievementsDialog_Xbox();
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Specific code for CS Achievements Display
+    //=============================================================================
+
+    // $TODO(HPE): Move this to a game-specific location
+    void OnOpenCSAchievementsDialog();
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+    void OnOpenAchievementsDialog_Xbox();
 	void OnOpenControllerDialog();
 
 	// Xbox 360
@@ -269,6 +283,12 @@ public:
 #if defined( _X360 )
 	CON_COMMAND_MEMBER_F( CBasePanel, "gameui_reload_resources", Reload_Resources, "Reload the Xbox 360 UI res files", 0 );
 #endif
+
+	int  GetMenuAlpha( void );
+
+	void SetMainMenuOverride( vgui::VPANEL panel );
+
+
 
 protected:
 	virtual void PaintBackground();
@@ -336,6 +356,8 @@ private:
 	CGameMenu *m_pGameMenu;
 	bool m_bPlatformMenuInitialized;
 	int m_iGameMenuInset;
+	
+	vgui::VPANEL	m_hMainMenuOverridePanel;
 
 	struct coord {
 		int x;
@@ -425,8 +447,10 @@ private:
 
 	// fading to game
 	MESSAGE_FUNC_CHARPTR( RunEngineCommand, "RunEngineCommand", command );
-	MESSAGE_FUNC_CHARPTR( RunMenuCommand, "RunMenuCommand", command );
 	MESSAGE_FUNC( FinishDialogClose, "FinishDialogClose" );
+
+public:
+	MESSAGE_FUNC_CHARPTR( RunMenuCommand, "RunMenuCommand", command );
 };
 
 //-----------------------------------------------------------------------------

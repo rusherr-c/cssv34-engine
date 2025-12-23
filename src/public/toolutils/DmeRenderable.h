@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =====//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Base decorator class to make a DME renderable 
 //
@@ -86,6 +86,7 @@ public:
 	virtual bool GetAttachment( int number, matrix3x4_t &matrix );
 	virtual float *GetRenderClipPlane() { return NULL; }
 	virtual void RecordToolMessage() {}
+	virtual bool IgnoresZBuffer( void ) const { return false; }
 
 	// Add/remove to engine from drawing
 	void DrawInEngine( bool bDrawInEngine );

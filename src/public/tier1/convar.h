@@ -334,6 +334,12 @@ public:
 								ConVar( const char *pName, const char *pDefaultValue, int flags, 
 									const char *pHelpString, bool bMin, float fMin, bool bMax, float fMax,
 									FnChangeCallback_t callback );
+								ConVar( const char *pName, const char *pDefaultValue, int flags,
+									const char *pHelpString, bool bMin, float fMin, bool bMax, float fMax,
+									bool bCompMin, float fCompMin, bool bCompMax, float fCompMax,
+									FnChangeCallback_t callback );
+
+
 
 	virtual						~ConVar( void );
 
@@ -360,7 +366,7 @@ public:
 	virtual void				SetValue( const char *value );
 	virtual void				SetValue( float value );
 	virtual void				SetValue( int value );
-	
+		
 	// Reset to default value
 	void						Revert( void );
 
@@ -370,19 +376,30 @@ public:
 	const char					*GetDefault( void ) const;
 	void						SetDefault( const char *pszDefault );
 
+	// True if it has a min/max competitive setting
+	bool						GetCompMin( float& minVal ) const;
+	bool						GetCompMax( float& maxVal ) const;
+
+	FORCEINLINE_CVAR bool		IsCompetitiveRestricted() const;
+	bool						SetCompetitiveMode( bool bCompetitive );
+
 private:
 	// Called by CCvar when the value of a var is changing.
 	virtual void				InternalSetValue(const char *value);
 	// For CVARs marked FCVAR_NEVER_AS_STRING
-	virtual void				InternalSetFloatValue( float fNewValue );
+	virtual void				InternalSetFloatValue( float fNewValue, bool bForce = false );
 	virtual void				InternalSetIntValue( int nValue );
 
 	virtual bool				ClampValue( float& value );
 	virtual void				ChangeStringValue( const char *tempVal, float flOldValue );
 
-	virtual void				Create( const char *pName, const char *pDefaultValue, int flags = 0,
+	void						Create( const char *pName, const char *pDefaultValue, int flags = 0,
 									const char *pHelpString = 0, bool bMin = false, float fMin = 0.0,
-									bool bMax = false, float fMax = false, FnChangeCallback_t callback = 0 );
+									bool bMax = false, float fMax = 0.0, 
+									bool bCompMin = false, float fCompMin = 0.0, 
+									bool bCompMax = false, float fCompMax = 0.0,
+									FnChangeCallback_t callback = 0 );
+
 
 	// Used internally by OneTimeInit to initialize.
 	virtual void				Init();
@@ -411,6 +428,15 @@ private:
 	float						m_fMinVal;
 	bool						m_bHasMax;
 	float						m_fMaxVal;
+
+	// Min/Max values for competitive.
+	bool						m_bHasCompMin;
+	float						m_fCompMinVal;
+	bool						m_bHasCompMax;
+	float						m_fCompMaxVal;
+
+	bool						m_bCompetitiveRestrictions;
+
 	
 	// Call this function when ConVar changes
 	FnChangeCallback_t			m_fnChangeCallback;
@@ -448,6 +474,21 @@ FORCEINLINE_CVAR const char *ConVar::GetString( void ) const
 	return ( m_pParent->m_pszString ) ? m_pParent->m_pszString : "";
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Return whether this convar is restricted for competitive play.
+// Output : bool
+//-----------------------------------------------------------------------------
+FORCEINLINE_CVAR bool ConVar::IsCompetitiveRestricted() const
+{
+	const int nFlags = m_pParent->m_nFlags;
+
+	const bool bHasCompSettings = m_pParent->m_bHasCompMin || m_pParent->m_bHasCompMax;
+	const bool bClientCanAdjust = ( nFlags & ( FCVAR_ARCHIVE | FCVAR_ALLOWED_IN_COMPETITIVE ) ) != 0;
+	const bool bInternalUseOnly = ( nFlags & ( FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY | FCVAR_INTERNAL_USE | FCVAR_GAMEDLL | FCVAR_REPLICATED | FCVAR_CHEAT ) ) != 0;
+
+	return bHasCompSettings || !( bClientCanAdjust || bInternalUseOnly );
+}
+
 
 //-----------------------------------------------------------------------------
 // Used to read/write convars that already exist (replaces the FindVar method)
@@ -469,6 +510,9 @@ public:
 	int GetInt( void ) const;
 	bool GetBool() const { return !!GetInt(); }
 	const char *GetString( void ) const;
+	// True if it has a min/max setting
+	bool GetMin( float& minVal ) const;
+	bool GetMax( float& maxVal ) const;
 
 	void SetValue( const char *pValue );
 	void SetValue( float flValue );
@@ -530,6 +574,15 @@ FORCEINLINE_CVAR const char *ConVarRef::GetString( void ) const
 	return m_pConVarState->m_pszString;
 }
 
+FORCEINLINE_CVAR bool ConVarRef::GetMin( float& minVal ) const
+{
+	return m_pConVarState->GetMin( minVal );
+}
+
+FORCEINLINE_CVAR bool ConVarRef::GetMax( float& maxVal ) const
+{
+	return m_pConVarState->GetMax( maxVal );
+}
 
 FORCEINLINE_CVAR void ConVarRef::SetValue( const char *pValue )
 {

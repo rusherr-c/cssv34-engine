@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -280,17 +280,26 @@ void CMapListManager::RefreshList( void )
 			continue;
 		}
 
-		char sz[ MAX_QPATH ];
-		Q_snprintf( sz, sizeof( sz ), "maps/%s", findfn );
-	
-		int idx = m_Items.Find( sz );
+		// Make full fileame (maps/foo.bsp) and map name (foo)
+		char szFileName[ MAX_QPATH ] = { 0 };
+		V_snprintf( szFileName, sizeof( szFileName ), "maps/%s", findfn );
+
+		char szMapName[256] = { 0 };
+		V_strncpy( szMapName, findfn, sizeof( szMapName ) );
+		char *pExt = V_stristr( szMapName, ".bsp" );
+		if ( pExt )
+		{
+			*pExt = '\0';
+		}
+
+		int idx = m_Items.Find( szMapName );
 		if ( idx == m_Items.InvalidIndex() )
 		{
 			CMapListItem item;
-			item.SetFileTimestamp( item.GetFSTimeStamp( sz ) );
+			item.SetFileTimestamp( item.GetFSTimeStamp( szFileName ) );
 			item.SetValid( CMapListItem::PENDING );
 			// Insert into dictionary
-			m_Items.Insert( sz, item );
+			m_Items.Insert( szMapName, item );
 
 			m_bDirty = true;
 		}
@@ -300,7 +309,7 @@ void CMapListManager::RefreshList( void )
 			Assert( item );
 
 			// Make sure data is up to date
-			long timestamp = g_pFileSystem->GetFileTime( sz );
+			long timestamp = g_pFileSystem->GetFileTime( szFileName );
 			if ( !item->IsSameTime( timestamp ) )
 			{
 				item->SetFileTimestamp( timestamp );
@@ -390,18 +399,27 @@ void CMapListManager::BuildList( void )
 			continue;
 		}
 
-		char sz[ MAX_QPATH ];
-		Q_snprintf( sz, sizeof( sz ), "maps/%s", findfn );
-	
+		// Make full fileame (maps/foo.bsp) and map name (foo)
+		char szFileName[ MAX_QPATH ] = { 0 };
+		V_snprintf( szFileName, sizeof( szFileName ), "maps/%s", findfn );
+
+		char szMapName[256] = { 0 };
+		V_strncpy( szMapName, findfn, sizeof( szMapName ) );
+		char *pExt = V_stristr( szMapName, ".bsp" );
+		if ( pExt )
+		{
+			*pExt = '\0';
+		}
+
 		CMapListItem item;
-		item.SetFileTimestamp( item.GetFSTimeStamp( sz ) );
+		item.SetFileTimestamp( item.GetFSTimeStamp( szFileName ) );
 		item.SetValid( CMapListItem::PENDING );
 
 		// Insert into dictionary
-		int idx = m_Items.Find( sz );
+		int idx = m_Items.Find( szMapName );
 		if ( idx == m_Items.InvalidIndex() )
 		{
-			m_Items.Insert( sz, item );
+			m_Items.Insert( szMapName, item );
 		}
 
 		findfn = Sys_FindNext( NULL, 0 );
@@ -473,7 +491,7 @@ static int MapList_CountMaps( const char *pszSubString, bool listobsolete, int& 
 	{
 		substringlength = strlen(pszSubString);
 	}
-	
+
 	//
 	// search through the path, one element at a time
 	//
@@ -486,11 +504,11 @@ static int MapList_CountMaps( const char *pszSubString, bool listobsolete, int& 
 			char const *mapname = g_MapListMgr.GetMapName( i );
 			int valid = g_MapListMgr.IsMapValid( i );
 
-			if ( !substringlength || !Q_strnicmp( &mapname[ 5 ], pszSubString, substringlength ) )
+			if ( !substringlength || V_stristr( mapname, pszSubString ) )
 			{
-				if ( MapList_CheckPrintMap( "(fs)", &mapname[ 5 ], valid, showOutdated ? true : false, false ) )
+				if ( MapList_CheckPrintMap( "(fs)", mapname, valid, showOutdated ? true : false, false ) )
 				{
-					maxitemlength = max( maxitemlength, (int)( strlen( &mapname[ 5 ] ) + 1 ) );
+					maxitemlength = max( maxitemlength, (int)( strlen( mapname ) + 1 ) );
 					count++;
 				}
 			}
@@ -498,7 +516,7 @@ static int MapList_CountMaps( const char *pszSubString, bool listobsolete, int& 
 	}
 
 	return count;
-}	
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -506,8 +524,9 @@ static int MapList_CountMaps( const char *pszSubString, bool listobsolete, int& 
 //  If the substring is empty, or "*", then lists all maps
 // Input  : *pszSubString - 
 //-----------------------------------------------------------------------------
-static int MapList_ListMaps( const char *pszSubString, bool listobsolete, bool verbose, int maxcount, int maxitemlength, char maplist[][ 64 ] )
+int MapList_ListMaps( const char *pszSubString, bool listobsolete, bool verbose, int maxcount, int maxitemlength, char maplist[][ 64 ] )
 {
+	g_MapListMgr.RefreshList();
 	int substringlength = 0;
 	if (pszSubString && pszSubString[0])
 	{
@@ -539,13 +558,13 @@ static int MapList_ListMaps( const char *pszSubString, bool listobsolete, bool v
 			char const *mapname = g_MapListMgr.GetMapName( i );
 			int valid = g_MapListMgr.IsMapValid( i );
 
-			if ( !substringlength || !Q_strnicmp( &mapname[ 5 ], pszSubString, substringlength ) )
+			if ( !substringlength || V_stristr( mapname, pszSubString ) )
 			{
-				if ( MapList_CheckPrintMap( "(fs)", &mapname[ 5 ], valid, showOutdated ? true : false, verbose ) )
+				if ( MapList_CheckPrintMap( "(fs)", mapname, valid, showOutdated ? true : false, verbose ) )
 				{
 					if ( maxitemlength != 0 )
 					{
-						Q_strncpy( maplist[ count ], &mapname[ 5 ], maxitemlength );
+						Q_strncpy( maplist[ count ], mapname, maxitemlength );
 					}
 					count++;
 				}
@@ -565,7 +584,7 @@ static int MapList_ListMaps( const char *pszSubString, bool listobsolete, bool v
 //			**commands - 
 // Output : int
 //-----------------------------------------------------------------------------
-static int _Host_Map_f_CompletionFunc( char const *cmdname, char const *partial, char commands[ COMMAND_COMPLETION_MAXITEMS ][ COMMAND_COMPLETION_ITEM_LENGTH ] )
+int _Host_Map_f_CompletionFunc( char const *cmdname, char const *partial, char commands[ COMMAND_COMPLETION_MAXITEMS ][ COMMAND_COMPLETION_ITEM_LENGTH ] )
 {
 	char *substring = (char *)partial;
 	if ( Q_strstr( partial, cmdname ) )
@@ -586,7 +605,6 @@ static int _Host_Map_f_CompletionFunc( char const *cmdname, char const *partial,
 			char old[ COMMAND_COMPLETION_ITEM_LENGTH ];
 			Q_strncpy( old, commands[ i ], sizeof( old ) );
 			Q_snprintf( commands[ i ], sizeof( commands[ i ] ), "%s%s", cmdname, old );
-			commands[ i ][ strlen( commands[ i ] ) - 4 ] = 0;
 		}
 	}
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,7 +15,9 @@
 
 static CFontManager s_FontManager;
 
+#ifdef WIN32
 extern bool s_bSupportsUnicode;
+#endif
 
 #if !defined( _X360 )
 #define MAX_INITIAL_FONTS	100
@@ -41,6 +43,13 @@ CFontManager::CFontManager()
 	m_FontAmalgams.AddToTail();
 	m_Win32Fonts.EnsureCapacity( MAX_INITIAL_FONTS );
 
+#ifdef LINUX
+	FT_Error error = FT_Init_FreeType( &library ); 
+	if ( error )
+		Error( "Unable to initalize freetype library, is it installed?" );
+	m_pFontDataHelper = NULL;
+#endif
+
 	// setup our text locale
 	setlocale( LC_CTYPE, "" );
 	setlocale( LC_TIME, "" );
@@ -65,6 +74,10 @@ void CFontManager::SetLanguage(const char *language)
 CFontManager::~CFontManager()
 {
 	ClearAllFonts();
+	m_FontAmalgams.RemoveAll();
+#ifdef LINUX
+	FT_Done_FreeType( library );
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -78,6 +91,11 @@ void CFontManager::ClearAllFonts()
 		delete m_Win32Fonts[i];
 	}
 	m_Win32Fonts.RemoveAll();
+
+	for (int i = 0; i < m_FontAmalgams.Count(); i++)
+	{
+		m_FontAmalgams[i].RemoveAll();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -94,6 +112,14 @@ vgui::HFont CFontManager::CreateFont()
 //-----------------------------------------------------------------------------
 bool CFontManager::SetFontGlyphSet(HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags)
 {
+	return SetFontGlyphSet( font, windowsFontName, tall, weight, blur, scanlines, flags, 0, 0);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Sets the valid glyph ranges for a font created by CreateFont()
+//-----------------------------------------------------------------------------
+bool CFontManager::SetFontGlyphSet(HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags, int nRangeMin, int nRangeMax)
+{
 	// ignore all but the first font added
 	// need to rev vgui versions and change the name of this function
 	if ( m_FontAmalgams[font].GetCount() > 0 )
@@ -102,13 +128,38 @@ bool CFontManager::SetFontGlyphSet(HFont font, const char *windowsFontName, int 
 		m_FontAmalgams[font].RemoveAll();
 	}
 
-	CWin32Font *winFont = CreateOrFindWin32Font( windowsFontName, tall, weight, blur, scanlines, flags );
+	bool bForceSingleFontForXbox = false;
+	if ( IsX360() )
+	{
+		// discovered xbox only allows glyphs from these languages from the foreign fallback font
+		// prefer to have the entire range of chars from the font so UI doesn't suffer from glyph disparity
+		if ( !V_stricmp( windowsFontName, "toolbox" ) )
+		{
+			// only the toolbox font is allowed to pass
+		}
+		else
+		{
+			if ( !V_stricmp( m_szLanguage, "polish" ) || 
+				!V_stricmp( m_szLanguage, "russian" ) ||
+				!V_stricmp( m_szLanguage, "japanese" ) ||
+				!V_stricmp( m_szLanguage, "korean" ) ||
+				!V_stricmp( m_szLanguage, "portuguese" ) ||
+				!V_stricmp( m_szLanguage, "schinese" ) ||
+				!V_stricmp( m_szLanguage, "tchinese" ) )
+			{
+				windowsFontName = GetForeignFallbackFontName();
+				bForceSingleFontForXbox = true;
+			}
+		}
+	}
+	font_t *winFont = CreateOrFindWin32Font( windowsFontName, tall, weight, blur, scanlines, flags );
 
-	// cycle until valid english/asian font support has been created
+
+	// cycle until valid english/extended font support has been created
 	do
 	{
 		// add to the amalgam
-		if ( IsFontForeignLanguageCapable( windowsFontName ) )
+		if ( bForceSingleFontForXbox || IsFontForeignLanguageCapable( windowsFontName ) )
 		{
 			if ( winFont )
 			{
@@ -119,8 +170,8 @@ bool CFontManager::SetFontGlyphSet(HFont font, const char *windowsFontName, int 
 		}
 		else
 		{
-			// font cannot provide asian glyphs and just supports the normal range
-			// create the asian version of the font
+			// font cannot provide glyphs and just supports the normal range
+			// redirect to a font that can supply glyps
 			const char *localizedFontName = GetForeignFallbackFontName();
 			if ( winFont && !stricmp( localizedFontName, windowsFontName ) )
 			{
@@ -129,20 +180,47 @@ bool CFontManager::SetFontGlyphSet(HFont font, const char *windowsFontName, int 
 				return true;
 			}
 
-			// create the asian support font
-			CWin32Font *asianFont = CreateOrFindWin32Font( localizedFontName, tall, weight, blur, scanlines, flags );
-			if ( winFont && asianFont )
+			// create the extended support font
+			font_t *pExtendedFont = CreateOrFindWin32Font( localizedFontName, tall, weight, blur, scanlines, flags );
+			if ( winFont && pExtendedFont )
 			{
-				// use the normal font for english characters, and the asian font for the rest
-				m_FontAmalgams[font].AddFont( winFont, 0x0000, 0x00FF );
-				m_FontAmalgams[font].AddFont( asianFont, 0x0100, 0xFFFF );
+				// use the normal font for english characters, and the extended font for the rest
+				int nMin = 0x0000, nMax = 0x00FF;
+
+				// did we specify a range?
+				if ( nRangeMin > 0 || nRangeMax > 0 )
+				{
+					nMin = nRangeMin;
+					nMax = nRangeMax;
+
+					// make sure they're in the correct order
+					if ( nMin > nMax )
+					{
+						int nTemp = nMin;
+						nMin = nMax;
+						nMax = nTemp;
+					}
+				}
+
+				if ( nMin > 0 )
+				{
+					m_FontAmalgams[font].AddFont( pExtendedFont, 0x0000, nMin - 1 );
+				}
+
+				m_FontAmalgams[font].AddFont( winFont, nMin, nMax );
+
+				if ( nMax < 0xFFFF )
+				{
+					m_FontAmalgams[font].AddFont( pExtendedFont, nMax + 1, 0xFFFF );
+				}
+
 				return true;
 			}
-			else if ( asianFont )
+			else if ( pExtendedFont )
 			{
 				// the normal font failed to create
-				// just use the asian font for the full range
-				m_FontAmalgams[font].AddFont( asianFont, 0x0000, 0xFFFF );
+				// just use the extended font for the full range
+				m_FontAmalgams[font].AddFont( pExtendedFont, 0x0000, 0xFFFF );
 				return true;
 			}
 		}
@@ -180,10 +258,10 @@ bool CFontManager::SetBitmapFontGlyphSet(HFont font, const char *windowsFontName
 //-----------------------------------------------------------------------------
 // Purpose: Creates a new win32 font, or reuses one if possible
 //-----------------------------------------------------------------------------
-CWin32Font *CFontManager::CreateOrFindWin32Font(const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags)
+font_t *CFontManager::CreateOrFindWin32Font(const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags)
 {
 	// see if we already have the win32 font
-	CWin32Font *winFont = NULL;
+	font_t *winFont = NULL;
 	int i;
 	for (i = 0; i < m_Win32Fonts.Count(); i++)
 	{
@@ -200,8 +278,45 @@ CWin32Font *CFontManager::CreateOrFindWin32Font(const char *windowsFontName, int
 		MEM_ALLOC_CREDIT();
 
 		i = m_Win32Fonts.AddToTail();
+		m_Win32Fonts[i] = NULL;
 
-		m_Win32Fonts[i] = new CWin32Font();
+#ifdef LINUX
+		int memSize = 0;
+		void *pchFontData = m_pFontDataHelper( windowsFontName, memSize, NULL );
+
+		if( !pchFontData )
+		{
+			// If we didn't find the font data in the font cache, then get the font filename...
+			char *filename = CLinuxFont::GetFontFileName( windowsFontName, flags );
+			if( filename )
+			{
+				// ... and try to add it to the font cache.
+				pchFontData = m_pFontDataHelper( windowsFontName, memSize, filename );
+				free( filename );
+			}
+		}
+
+		if ( pchFontData )
+		{
+			m_Win32Fonts[i] = new font_t();
+			if (m_Win32Fonts[i]->CreateFromMemory( windowsFontName, pchFontData, memSize, tall, weight, blur, scanlines, flags))
+			{
+				// add to the list
+				winFont = m_Win32Fonts[i];
+			}
+		}
+
+		if( !winFont )
+		{
+			// failed to create, remove
+			if (  m_Win32Fonts[i] )
+				delete m_Win32Fonts[i];
+			m_Win32Fonts.Remove(i);
+			return NULL;
+		}
+
+#else
+		m_Win32Fonts[i] = new font_t();
 		if (m_Win32Fonts[i]->Create(windowsFontName, tall, weight, blur, scanlines, flags))
 		{
 			// add to the list
@@ -214,6 +329,8 @@ CWin32Font *CFontManager::CreateOrFindWin32Font(const char *windowsFontName, int
 			m_Win32Fonts.Remove(i);
 			return NULL;
 		}
+#endif
+
 	}
 
 	return winFont;
@@ -229,12 +346,14 @@ CBitmapFont *CFontManager::CreateOrFindBitmapFont(const char *windowsFontName, f
 	int i;
 	for ( i = 0; i < m_Win32Fonts.Count(); i++ )
 	{
-		CWin32Font *font = m_Win32Fonts[i];
+		font_t *font = m_Win32Fonts[i];
 
 		// Only looking for bitmap fonts
 		int testflags = font->GetFlags();
-		if ( ~testflags & vgui::ISurface::FONTFLAG_BITMAP )
+		if ( !( testflags & vgui::ISurface::FONTFLAG_BITMAP ) )
+		{
 			continue;
+		}
 
 		CBitmapFont *bitmapFont = reinterpret_cast< CBitmapFont* >( font );
 		if ( bitmapFont->IsEqualTo( windowsFontName, scalex, scaley, flags ) )
@@ -278,25 +397,21 @@ void CFontManager::SetFontScale(vgui::HFont font, float sx, float sy)
 	m_FontAmalgams[font].SetFontScale( sx, sy );
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: finds a font handle given a name, returns 0 if not found
-//-----------------------------------------------------------------------------
-vgui::HFont CFontManager::GetFontByName(const char *name)
+const char *CFontManager::GetFontName( HFont font )
 {
-	for (int i = 1; i < m_FontAmalgams.Count(); i++)
-	{
-		if (!stricmp(name, m_FontAmalgams[i].Name()))
-		{
-			return i;
-		}
-	}
-	return 0;
+	// ignore the amalgam of disparate char ranges, assume the first font
+	return m_FontAmalgams[font].GetFontName( 0 );
+}
+
+const char *CFontManager::GetFontFamilyName( HFont font )
+{
+	return m_FontAmalgams[font].GetFontFamilyName( 0 );
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: gets the windows font for the particular font in the amalgam
 //-----------------------------------------------------------------------------
-CWin32Font *CFontManager::GetFontForChar(vgui::HFont font, wchar_t wch)
+font_t *CFontManager::GetFontForChar(vgui::HFont font, wchar_t wch)
 {
 	return m_FontAmalgams[font].GetFontForChar(wch);
 }
@@ -306,7 +421,13 @@ CWin32Font *CFontManager::GetFontForChar(vgui::HFont font, wchar_t wch)
 //-----------------------------------------------------------------------------
 void CFontManager::GetCharABCwide(HFont font, int ch, int &a, int &b, int &c)
 {
-	CWin32Font *winFont = m_FontAmalgams[font].GetFontForChar(ch);
+	if ( !m_FontAmalgams.IsValidIndex( font ) )
+	{
+		a = b = c = 0;
+		return;
+	}
+
+	font_t *winFont = m_FontAmalgams[font].GetFontForChar(ch);
 	if (winFont)
 	{
 		winFont->GetCharABCWidths(ch, a, b, c);
@@ -328,11 +449,19 @@ int CFontManager::GetFontTall(HFont font)
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: returns requested height of the font
+//-----------------------------------------------------------------------------
+int CFontManager::GetFontTallRequested(HFont font)
+{
+	return m_FontAmalgams[font].GetFontHeightRequested();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: returns the ascent of a font
 //-----------------------------------------------------------------------------
 int CFontManager::GetFontAscent(HFont font, wchar_t wch)
 {
-	CWin32Font *winFont = m_FontAmalgams[font].GetFontForChar(wch);
+	font_t *winFont = m_FontAmalgams[font].GetFontForChar(wch);
 	if ( winFont )
 	{
 		return winFont->GetAscent();
@@ -387,7 +516,9 @@ void CFontManager::GetTextSize(HFont font, const wchar_t *text, int &wide, int &
 
 	tall = GetFontTall(font);
 	
-	int xx = 0;
+	float xx = 0;
+	char chBefore = 0;
+	char chAfter = 0;
 	for (int i = 0; ; i++)
 	{
 		wchar_t ch = text[i];
@@ -395,7 +526,10 @@ void CFontManager::GetTextSize(HFont font, const wchar_t *text, int &wide, int &
 		{
 			break;
 		}
-		else if (ch == '\n')
+
+		chAfter = text[i+1];
+
+		if (ch == '\n')
 		{
 			tall += GetFontTall(font);
 			xx=0;
@@ -406,12 +540,15 @@ void CFontManager::GetTextSize(HFont font, const wchar_t *text, int &wide, int &
 		}
 		else
 		{
-			xx += GetCharacterWidth(font, ch);
+			float flWide, flabcA, flabcC;
+			GetKernedCharWidth( font, ch, chBefore, chAfter, flWide, flabcA, flabcC );
+			xx += flWide;
 			if (xx > wide)
 			{
-				wide = xx;
+				wide = ceil(xx);
 			}
 		}
+		chBefore = ch;
 	}
 }
 
@@ -422,8 +559,8 @@ struct FallbackFont_t
 	const char *fallbackFont;
 };
 
+#ifdef WIN32
 const char *g_szValidAsianFonts[] = { "Marlett", NULL };
-
 // list of how fonts fallback
 FallbackFont_t g_FallbackFonts[] =
 {
@@ -434,12 +571,48 @@ FallbackFont_t g_FallbackFonts[] =
 	{ "Tahoma", NULL },
 	{ NULL, "Tahoma" },		// every other font falls back to this
 };
+#elif defined(OSX)
+static const char *g_szValidAsianFonts[] = { "Apple Symbols", NULL };
+// list of how fonts fallback
+FallbackFont_t g_FallbackFonts[] =
+{
+	{ "Marlett", "Apple Symbols" },
+	{ "Lucida Console", "Lucida Grande" },
+	{ "Tahoma", "Helvetica" },
+	{ "Helvetica", "Monaco" },
+	{ "Monaco", NULL },
+	{ NULL, "Monaco" }		// every other font falls back to this
+};
+
+#elif defined(LINUX)
+static const char *g_szValidAsianFonts[] = { "Marlett", "WenQuanYi Zen Hei", "unifont", NULL };
+
+// list of how fonts fallback
+FallbackFont_t g_FallbackFonts[] =
+{
+	{ "DejaVu Sans", NULL },
+	{ NULL, "DejaVu Sans" },		// every other font falls back to this
+};
+#elif defined(_PS3)
+// list of how fonts fallback
+FallbackFont_t g_FallbackFonts[] =
+{
+	{ NULL, "Tahoma" },		// every other font falls back to this
+};
+#else
+#error
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose: returns true if the font is in the list of OK asian fonts
 //-----------------------------------------------------------------------------
 bool CFontManager::IsFontForeignLanguageCapable(const char *windowsFontName)
 {
+	if ( IsX360() )
+	{
+		return false;
+	}
+
 	for (int i = 0; g_szValidAsianFonts[i] != NULL; i++)
 	{
 		if (!stricmp(g_szValidAsianFonts[i], windowsFontName))
@@ -466,41 +639,23 @@ const char *CFontManager::GetFallbackFontName(const char *windowsFontName)
 	return g_FallbackFonts[i].fallbackFont;
 }
 
-struct Win98ForeignFallbackFont_t
-{
-	const char *language;
-	const char *fallbackFont;
-};
-
-// list of how fonts fallback
-Win98ForeignFallbackFont_t g_Win98ForeignFallbackFonts[] =
-{
-	{ "russian", "system" },
-	{ "japanese", "win98japanese" },
-	{ "thai", "system" },
-	{ NULL, "Tahoma" },		// every other font falls back to this
-};
-
 //-----------------------------------------------------------------------------
 // Purpose: specialized fonts
 //-----------------------------------------------------------------------------
 const char *CFontManager::GetForeignFallbackFontName()
 {
-	if ( s_bSupportsUnicode )
-	{
-		// tahoma has all the necessary characters for asian/russian languages for winXP/2K+
-		return "Tahoma";
-	}
-
-	int i;
-	for (i = 0; g_Win98ForeignFallbackFonts[i].language != NULL; i++)
-	{
-		if (!stricmp(g_Win98ForeignFallbackFonts[i].language, m_szLanguage))
-			return g_Win98ForeignFallbackFonts[i].fallbackFont;
-	}
-
-	// the ultimate fallback
-	return g_Win98ForeignFallbackFonts[i].fallbackFont;
+#ifdef WIN32
+	// tahoma has all the necessary characters for asian/russian languages for winXP/2K+
+	return "Tahoma";
+#elif defined(OSX)
+	return "Helvetica";
+#elif defined(LINUX)
+	return "WenQuanYi Zen Hei";
+#elif defined(_PS3)
+	return "Tahoma";
+#else
+#error
+#endif
 }
 
 #if defined( _X360 )
@@ -548,6 +703,8 @@ void CFontManager::SetCachedXUIMetrics( const char *pFontName, int tall, int sty
 void CFontManager::ClearTemporaryFontCache()
 {
 #if defined( _X360 )
+	COM_TimestampedLog( "ClearTemporaryFontCache(): Start" );
+
 	m_XUIMetricCache.Purge();
 
 	// many fonts are blindly precached by vgui and never used
@@ -556,9 +713,10 @@ void CFontManager::ClearTemporaryFontCache()
 	{
 		m_Win32Fonts[i]->CloseResource();
 	}
+
+	COM_TimestampedLog( "ClearTemporaryFontCache(): Finish" );
 #endif
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: returns the max height of a font
@@ -568,6 +726,36 @@ bool CFontManager::GetFontUnderlined( HFont font )
 	return m_FontAmalgams[font].GetUnderlined();
 }
 
+void CFontManager::GetKernedCharWidth( vgui::HFont font, wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &flabcA, float &flabcC )
+{
+	wide = 0.0f;
+	flabcA = 0.0f;
+	
+	Assert( font != vgui::INVALID_FONT );
+	if ( font == vgui::INVALID_FONT )
+		return;
+		
+	font_t *pFont = m_FontAmalgams[font].GetFontForChar(ch);
+	if ( !pFont )
+	{
+		// no font for this range, just use the default width
+		flabcA = 0.0f;
+		wide = m_FontAmalgams[font].GetFontMaxWidth();
+		return;
+	}
+	
+	if ( m_FontAmalgams[font].GetFontForChar( chBefore ) != pFont )
+		chBefore = 0;
+	
+	if ( m_FontAmalgams[font].GetFontForChar( chAfter ) != pFont )
+		chAfter = 0;
+	
+#if defined(LINUX)
+	pFont->GetKernedCharWidth( ch, chBefore, chAfter, wide, flabcA, flabcC );
+#else
+	pFont->GetKernedCharWidth( ch, chBefore, chAfter, wide, flabcA );
+#endif
+}
 
 
 #ifdef DBGFLAG_VALIDATE

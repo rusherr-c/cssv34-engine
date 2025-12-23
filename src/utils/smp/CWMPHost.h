@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // CWMPHost.h : Declaration of the CWMPHost
 //
 

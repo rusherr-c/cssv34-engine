@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -25,6 +25,10 @@
 
 class IMatRenderContextInternal;
 
+// because the GPU/driver can buffer frames we need to allow several queries to be in flight.
+// The game wants to reiusse the queries every frame so we buffer them here to avoid
+// having to block waiting for a query to be available for reissue.
+#define COUNT_OCCLUSION_QUERY_STACK 4
 
 //-----------------------------------------------------------------------------
 // Dictionary of all known materials
@@ -64,22 +68,27 @@ private:
 	//-----------------------------------------------------------------------------
 	struct OcclusionQueryObject_t 
 	{
-		ShaderAPIOcclusionQuery_t m_QueryHandle;
+		ShaderAPIOcclusionQuery_t m_QueryHandle[COUNT_OCCLUSION_QUERY_STACK];
 		int m_LastResult;
 		int m_nFrameIssued;
-		bool m_bHasBeenIssued;
+		int m_nCurrentIssue;
+		bool m_bHasBeenIssued[COUNT_OCCLUSION_QUERY_STACK];
 
 		OcclusionQueryObject_t(void)
 		{
-			m_QueryHandle = INVALID_SHADERAPI_OCCLUSION_QUERY_HANDLE;
+			for ( int i = 0; i < COUNT_OCCLUSION_QUERY_STACK; i++ )
+			{
+				m_QueryHandle[i] = INVALID_SHADERAPI_OCCLUSION_QUERY_HANDLE;
+				m_bHasBeenIssued[i] = false;
+			}
 			m_LastResult = -1;
 			m_nFrameIssued = -1;
-			m_bHasBeenIssued = false;
+			m_nCurrentIssue = 0;
 		}
 	};
 
 	// Flushes an outstanding query
-	void FlushQuery( OcclusionQueryObjectHandle_t hOcclusionQuery );
+	void FlushQuery( OcclusionQueryObjectHandle_t hOcclusionQuery, int nIndex );
 
 	// Occlusion query objects
 	CUtlFixedLinkedList<OcclusionQueryObject_t>	m_OcclusionQueryObjects;

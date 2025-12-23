@@ -1,6 +1,6 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// Purpose: 
+// Purpose:
 //
 // $NoKeywords: $
 //
@@ -30,7 +30,7 @@ using namespace vgui;
 #include "hud_numericdisplay.h"
 #include "cs_gamerules.h"
 
-#include "ConVar.h"
+#include "convar.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: Health panel
@@ -52,20 +52,20 @@ public:
 private:
 	// old variables
 	int		m_iHealth;
-	
+
 	int		m_bitsDamage;
 
 	CHudTexture *m_pHealthIcon;
 
 	CPanelAnimationVarAliasType( float, icon_xpos, "icon_xpos", "0", "proportional_float" );
-	CPanelAnimationVarAliasType( float, icon_ypos, "icon_ypos", "2", "proportional_float" );
+	CPanelAnimationVarAliasType( float, icon_ypos, "icon_ypos", "0", "proportional_float" );
 
-	CPanelAnimationVar( Color, m_LowHealthColor, "LowHealthColor", "255 0 0 0" );
+//	CPanelAnimationVar( Color, m_LowHealthColor, "LowHealthColor", "255 0 0 255" );
 
 	float icon_tall;
 	float icon_wide;
 
-};	
+};
 
 DECLARE_HUDELEMENT( CHudHealth );
 
@@ -78,7 +78,7 @@ CHudHealth::CHudHealth( const char *pElementName ) : CHudElement( pElementName )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //-----------------------------------------------------------------------------
 void CHudHealth::Init()
 {
@@ -86,7 +86,7 @@ void CHudHealth::Init()
 	m_bitsDamage	= 0;
 	icon_tall		= 0;
 	icon_wide		= 0;
-
+	SetIndent(true);
 	SetDisplayValue(m_iHealth);
 }
 
@@ -97,7 +97,7 @@ void CHudHealth::ApplySchemeSettings( IScheme *scheme )
 	if( !m_pHealthIcon )
 	{
 		m_pHealthIcon = gHUD.GetIcon( "health_icon" );
-	}	
+	}
 
 	if( m_pHealthIcon )
 	{
@@ -117,14 +117,14 @@ void CHudHealth::Reset()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //-----------------------------------------------------------------------------
 void CHudHealth::VidInit()
 {
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //-----------------------------------------------------------------------------
 void CHudHealth::OnThink()
 {
@@ -133,7 +133,7 @@ void CHudHealth::OnThink()
 	if ( local )
 	{
 		// Never below zero
-		realHealth = max( local->GetHealth(), 0 );
+		realHealth = MAX( local->GetHealth(), 0 );
 	}
 
 	// Only update the fade if we've changed health
@@ -158,7 +158,6 @@ void CHudHealth::OnThink()
 		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence("HealthTookDamage");
 	}
 
-
 	m_iHealth = realHealth;
 
 	SetDisplayValue(m_iHealth);
@@ -168,7 +167,7 @@ void CHudHealth::Paint( void )
 {
 	if( m_pHealthIcon )
 	{
-		m_pHealthIcon->DrawSelf( 0, icon_ypos, icon_wide, icon_tall, GetFgColor() );
+		m_pHealthIcon->DrawSelf( icon_xpos, icon_ypos, icon_wide, icon_tall, GetFgColor() );
 	}
 
 	//draw the health icon

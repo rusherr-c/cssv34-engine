@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,8 +8,7 @@
 #include "mathlib/bumpvects.h"
 #include "cpp_shader_constant_register_map.h"
 
-#include "lightmappedgeneric_vs30.inc"
-
+#include "lightmappedgeneric_vs20.inc"
 #include "lightmappedgeneric_decal_vs20.inc"
 #include "lightmappedgeneric_decal_ps20.inc"
 #include "lightmappedgeneric_decal_ps20b.inc"
@@ -58,8 +57,8 @@ BEGIN_VS_SHADER( DecalBaseTimesLightmapAlphaBlendSelfIllum_DX9, "" )
 
 	SHADER_INIT
 	{
-		LoadTexture( FLASHLIGHTTEXTURE );
-		LoadTexture( BASETEXTURE );
+		LoadTexture( FLASHLIGHTTEXTURE, TEXTUREFLAGS_SRGB );
+		LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		LoadTexture( SELFILLUMTEXTURE );
 	}
 
@@ -73,10 +72,17 @@ BEGIN_VS_SHADER( DecalBaseTimesLightmapAlphaBlendSelfIllum_DX9, "" )
 			pShaderShadow->BlendFunc( SHADER_BLEND_SRC_ALPHA, SHADER_BLEND_ONE_MINUS_SRC_ALPHA );
 			pShaderShadow->EnableSRGBWrite( true );
 
+			// Base Texture
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
+
+			// Lightmaps
 			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE );
 			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER3, g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE );
 
 			int pTexCoords[3] = { 2, 2, 1 };
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION | VERTEX_COLOR, 3, pTexCoords, 0 );
@@ -149,12 +155,16 @@ BEGIN_VS_SHADER( DecalBaseTimesLightmapAlphaBlendSelfIllum_DX9, "" )
 			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_DECAL );
 			pShaderShadow->EnableBlending( true );
 			pShaderShadow->BlendFunc( SHADER_BLEND_SRC_ALPHA, SHADER_BLEND_ONE_MINUS_SRC_ALPHA );
+			
+			// Base texture
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
+
 			pShaderShadow->EnableSRGBWrite( true );
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, 0, 0 );
 
-			DECLARE_STATIC_VERTEX_SHADER( lightmappedgeneric_vs30 );
+			DECLARE_STATIC_VERTEX_SHADER( lightmappedgeneric_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( ENVMAP_MASK, false );
 			SET_STATIC_VERTEX_SHADER_COMBO( TANGENTSPACE, false );
 			SET_STATIC_VERTEX_SHADER_COMBO( BUMPMAP, false );
@@ -167,7 +177,7 @@ BEGIN_VS_SHADER( DecalBaseTimesLightmapAlphaBlendSelfIllum_DX9, "" )
 #ifdef _X360
 			SET_STATIC_VERTEX_SHADER_COMBO( FLASHLIGHT,  0 );
 #endif
-			SET_STATIC_VERTEX_SHADER( lightmappedgeneric_vs30 );
+			SET_STATIC_VERTEX_SHADER( lightmappedgeneric_vs20 );
 
 			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{
@@ -186,15 +196,11 @@ BEGIN_VS_SHADER( DecalBaseTimesLightmapAlphaBlendSelfIllum_DX9, "" )
 		{
 			BindTexture( SHADER_SAMPLER0, SELFILLUMTEXTURE, SELFILLUMTEXTUREFRAME );
 
-			ITexture *pCascadedDepthTexture = /*hasFlashlight ? NULL :*/ ( ITexture* )pShaderAPI->GetIntRenderingParameter( INT_CASCADED_DEPTHTEXTURE );
-			const int iCascadedShadowCombo = ( pCascadedDepthTexture != NULL ) ? 1 : 0;
-
-			DECLARE_DYNAMIC_VERTEX_SHADER( lightmappedgeneric_vs30 );
+			DECLARE_DYNAMIC_VERTEX_SHADER( lightmappedgeneric_vs20 );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( FASTPATH, false );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG, pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( LIGHTING_PREVIEW, false );
-			SET_DYNAMIC_VERTEX_SHADER_COMBO( CASCADED_SHADOW, iCascadedShadowCombo );
-			SET_DYNAMIC_VERTEX_SHADER( lightmappedgeneric_vs30 );
+			SET_DYNAMIC_VERTEX_SHADER( lightmappedgeneric_vs20 );
 
 			pShaderAPI->SetPixelShaderFogParams( PSREG_FOG_PARAMS );					
 

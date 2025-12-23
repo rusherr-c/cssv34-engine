@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // game model input - gets its values from an MDL within the game
 //
@@ -10,6 +10,9 @@
 #pragma once
 #endif
 
+#include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "movieobjects/dmeinput.h"
 
 

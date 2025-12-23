@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The expression operator class - scalar math calculator
 // for a good list of operators and simple functions, see:
@@ -778,7 +778,7 @@ void TestCalculator( const char *expr, float answer )
 	CExpressionCalculator calc( expr );
 	float result = 0.0f;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	bool success =
 #endif
 		calc.Evaluate( result );
@@ -791,7 +791,7 @@ void TestCalculator( const char *expr, float answer, const char *var, float valu
 	calc.SetVariable( var, value );
 	float result = 0.0f;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	bool success =
 #endif
 		calc.Evaluate( result );

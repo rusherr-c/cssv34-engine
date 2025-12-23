@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -351,7 +351,7 @@ void CAI_PlaneSolver::GenerateObstacleNpcs( const AILocalMoveGoal_t &goal, float
 			}
 		}
 
-		CBaseEntity *pPlayer = UTIL_GetNearestPlayer(m_pNpc->GetAbsOrigin());
+		CBaseEntity *pPlayer = UTIL_PlayerByIndex( 1 );
 		if ( pPlayer )
 		{
 			Vector mins, maxs;
@@ -873,7 +873,7 @@ bool CAI_PlaneSolver::Solve( const AILocalMoveGoal_t &goal, float distClear, Vec
 	
 	if ( goal.flags & ( AILMG_TARGET_IS_TRANSITION | AILMG_TARGET_IS_GOAL ) )
 	{
-		probeDist = min( goal.maxDist, probeDist );
+		probeDist = MIN( goal.maxDist, probeDist );
 	}
 
 	if ( GenerateObstacleSuggestions( goal, goal.directTrace, distClear, probeDist, degreesPositiveArc, NUM_PROBES ) != SR_FAIL )

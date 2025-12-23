@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,12 +13,15 @@
 
 
 #ifdef USE_NEW_SHADER
+
 #include "unlitgeneric_vs20.inc"
 #include "unlitgeneric_ps20.inc"
 #include "unlitgeneric_ps20b.inc"
-#else
-#include "unlitgeneric_vs11.inc"
+
 #endif
+
+#include "unlitgeneric_vs11.inc"
+
 
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -67,6 +70,7 @@ BEGIN_VS_SHADER_FLAGS( DebugNormalMap, "Help for DebugNormalMap", SHADER_NOT_EDI
 			if( g_pHardwareConfig->GetDXSupportLevel() >= 90 )
 			{
 				DECLARE_STATIC_VERTEX_SHADER( unlitgeneric_vs20 );
+				SET_STATIC_VERTEX_SHADER_COMBO( VERTEXCOLOR, 0  );
 				SET_STATIC_VERTEX_SHADER( unlitgeneric_vs20 );
 
 				if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
@@ -80,8 +84,8 @@ BEGIN_VS_SHADER_FLAGS( DebugNormalMap, "Help for DebugNormalMap", SHADER_NOT_EDI
 					SET_STATIC_PIXEL_SHADER( unlitgeneric_ps20 );
 				}
 			}
-			//else
-#else
+			else
+#endif
 			{
 				unlitgeneric_vs11_Static_Index vshIndex;
 				vshIndex.SetDETAIL( false );
@@ -94,7 +98,6 @@ BEGIN_VS_SHADER_FLAGS( DebugNormalMap, "Help for DebugNormalMap", SHADER_NOT_EDI
 
 				pShaderShadow->SetPixelShader( "unlitgeneric" );
 			}
-#endif
 		}
 		DYNAMIC_STATE
 		{
@@ -110,8 +113,8 @@ BEGIN_VS_SHADER_FLAGS( DebugNormalMap, "Help for DebugNormalMap", SHADER_NOT_EDI
 #ifdef USE_NEW_SHADER
 			if( g_pHardwareConfig->GetDXSupportLevel() >= 90 )
 			{
-				BOOL bShaderConstants[1] = { false };
-				pShaderAPI->SetBooleanVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_BOOL_CONST_0, bShaderConstants, 1 );
+				float vVertexColor[4] = { 0, 0, 0, 0 };
+				pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_6, vVertexColor, 1 );
 
 				DECLARE_DYNAMIC_VERTEX_SHADER( unlitgeneric_vs20 );
 				SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG, pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
@@ -130,15 +133,14 @@ BEGIN_VS_SHADER_FLAGS( DebugNormalMap, "Help for DebugNormalMap", SHADER_NOT_EDI
 					SET_DYNAMIC_PIXEL_SHADER( unlitgeneric_ps20 );
 				}
 			}
-			//else
-#else
+			else
+#endif
 			{
 				unlitgeneric_vs11_Dynamic_Index vshIndex;
 				vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 				vshIndex.SetSKINNING( pShaderAPI->GetCurrentNumBones() > 0 );
 				pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 			}
-#endif
 		}
 		Draw();
 	}

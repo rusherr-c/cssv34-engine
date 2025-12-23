@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Save game read and write. Any *.hl? files may be stored in memory, so use
 //			g_pSaveRestoreFileSystem when accessing them. The .sav file is always stored
@@ -114,6 +114,26 @@ IThreadPool *g_pSaveThread;
 static bool g_bSaveInProgress = false;
 
 //-----------------------------------------------------------------------------
+static bool HaveExactMap( const char *pszMapName )
+{
+	char szCanonName[64] = { 0 };
+	V_strncpy( szCanonName, pszMapName, sizeof( szCanonName ) );
+	IVEngineServer::eFindMapResult eResult = g_pVEngineServer->FindMap( szCanonName, sizeof( szCanonName ) );
+
+	switch ( eResult )
+	{
+	case IVEngineServer::eFindMap_Found:
+		return true;
+	case IVEngineServer::eFindMap_NonCanonical:
+	case IVEngineServer::eFindMap_NotFound:
+	case IVEngineServer::eFindMap_FuzzyMatch:
+	case IVEngineServer::eFindMap_PossiblyAvailable:
+		return false;
+	}
+
+	AssertMsg( false, "Unhandled engine->FindMap return value\n" );
+	return false;
+}
 
 void FinishAsyncSave()
 {
@@ -146,7 +166,7 @@ void DispatchAsyncSave()
 
 inline void GetServerSaveCommentEx( char *comment, int maxlength, float flMinutes, float flSeconds )
 {
-	if ( g_bServerGameDLLGreaterThanV4 )
+	if ( g_iServerGameDLLVersion >= 5 )
 	{
 		serverGameDLL->GetSaveComment( comment, maxlength, flMinutes, flSeconds );
 	}
@@ -234,7 +254,8 @@ struct SAVE_HEADER
 	int		connectionCount;
 	int		lightStyleCount;
 	int		mapVersion;
-	float	time;
+	float	time__USE_VCR_MODE; // This is renamed to include the __USE_VCR_MODE prefix due to a #define on win32 from the VCR mode changes
+								// The actual save games have the string "time__USE_VCR_MODE" in them
 	char	mapName[32];
 	char	skyName[32];
 };
@@ -312,7 +333,7 @@ private:
 
 	void					AgeSaveList( const char *pName, int count, bool bIsXSave );
 	void					AgeSaveFile( const char *pName, const char *ext, int count, bool bIsXSave );
-	int						SaveReadHeader( FileHandle_t pFile, GAME_HEADER *pHeader, int readGlobalState );
+	int						SaveReadHeader( FileHandle_t pFile, GAME_HEADER *pHeader, int readGlobalState, bool *pbOldSave );
 	CSaveRestoreData		*LoadSaveData( const char *level );
 	void					ParseSaveTables( CSaveRestoreData *pSaveData, SAVE_HEADER *pHeader, int updateGlobals );
 	int						FileSize( FileHandle_t pFile );
@@ -321,7 +342,7 @@ private:
 
 	CSaveRestoreData *		SaveGameStateInit( void );
 	void 					SaveGameStateGlobals( CSaveRestoreData *pSaveData );
-	int						SaveReadNameAndComment( FileHandle_t f, char *name, char *comment );
+	int						SaveReadNameAndComment( FileHandle_t f, OUT_Z_CAP(nameSize) char *name, int nameSize, OUT_Z_CAP(commentSize) char *comment, int commentSize ) OVERRIDE;
 	void					BuildRestoredIndexTranslationTable( char const *mapname, CSaveRestoreData *pSaveData, bool verbose );
 	char const				*GetSaveGameMapName( char const *level );
 
@@ -435,7 +456,7 @@ BEGIN_SIMPLE_DATADESC( SAVE_HEADER )
 	DEFINE_FIELD( connectionCount, FIELD_INTEGER ),
 	DEFINE_FIELD( lightStyleCount, FIELD_INTEGER ),
 	DEFINE_FIELD( mapVersion, FIELD_INTEGER ),
-	DEFINE_FIELD( time, FIELD_TIME ),
+	DEFINE_FIELD( time__USE_VCR_MODE, FIELD_TIME ),
 	DEFINE_ARRAY( mapName, FIELD_CHARACTER, 32 ),
 	DEFINE_ARRAY( skyName, FIELD_CHARACTER, 32 ),
 END_DATADESC()
@@ -494,7 +515,7 @@ char *CSaveRestore::GetSaveDir(void)
 {
 	static char szDirectory[MAX_OSPATH];
 	Q_memset(szDirectory, 0, MAX_OSPATH);
-	Q_strncpy(szDirectory, "SAVE/", sizeof( szDirectory ) );
+	Q_strncpy(szDirectory, "save/", sizeof( szDirectory ) );
 	return szDirectory;
 }
 
@@ -600,8 +621,8 @@ int CSaveRestore::IsValidSave( void )
 	if ( sv.GetClientCount() > 0 && sv.GetClient(0)->IsActive() )
 	{
 		Assert( serverGameClients );
-		CGameClient *cl = sv.Client( 0 );
-		CPlayerState *pl = serverGameClients->GetPlayerState( cl->edict );
+		CGameClient *pGameClient = sv.Client( 0 );
+		CPlayerState *pl = serverGameClients->GetPlayerState( pGameClient->edict );
 		if ( !pl )
 		{
 			ConMsg ("Can't savegame without a player!\n");
@@ -638,7 +659,7 @@ int CSaveRestore::SaveGameSlot( const char *pSaveName, const char *pSaveComment,
 		Sys_Sleep( clamp( save_asyncdelay.GetInt(), 0, 3000 ) );
 	}
 
-	SaveMsg( "Start save...\n", ThreadInMainThread(), ThreadGetCurrentId() );
+	SaveMsg( "Start save... (%d/%d)\n", ThreadInMainThread(), ThreadGetCurrentId() );
 	VPROF_BUDGET( "SaveGameSlot", "Save" );
 	char			hlPath[256], name[256], *pTokenData;
 	int				tag, i, tokenSize;
@@ -766,13 +787,14 @@ int CSaveRestore::SaveGameSlot( const char *pSaveName, const char *pSaveComment,
 	if ( bClearFile && !IsX360() )
 	{		
 		FileHandle_t pSaveFile = g_pSaveRestoreFileSystem->Open( name, "wb" );
-		if (!pSaveFile)
+		if (!pSaveFile && g_pFileSystem->FileExists( name, "GAME" ) )
 		{
 			Msg("Save failed: invalid file name '%s'\n", pSaveName);
 			m_szSaveGameName[ 0 ] = 0;
 			return 0;
 		}
-		g_pSaveRestoreFileSystem->Close( pSaveFile );
+		if ( pSaveFile )
+			g_pSaveRestoreFileSystem->Close( pSaveFile );
 		S_ExtraUpdate();
 	}
 
@@ -847,6 +869,7 @@ void CSaveRestore::UpdateSaveGameScreenshots()
 	if ( IsPC() && g_LostVideoMemory )
 		return;
 
+#ifndef SWDS
 	if ( m_szSaveGameScreenshotFile[0] )
 	{
 		host_framecount++;
@@ -854,13 +877,14 @@ void CSaveRestore::UpdateSaveGameScreenshots()
 		g_ClientDLL->WriteSaveGameScreenshot( m_szSaveGameScreenshotFile );
 		m_szSaveGameScreenshotFile[0] = 0;
 	}
+#endif
 }
 
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-int CSaveRestore::SaveReadHeader( FileHandle_t pFile, GAME_HEADER *pHeader, int readGlobalState )
+int CSaveRestore::SaveReadHeader( FileHandle_t pFile, GAME_HEADER *pHeader, int readGlobalState, bool *pbOldSave )
 {
 	int					i, tag, size, tokenCount, tokenSize;
 	char				*pszTokenList;
@@ -957,7 +981,10 @@ int CSaveRestore::SaveReadHeader( FileHandle_t pFile, GAME_HEADER *pHeader, int 
 		g_szMapLoadOverride[0] = 0;
 	}
 
-	if ( readGlobalState )
+	if ( pHeader->mapCount != 0 && pbOldSave)
+		*pbOldSave = true;
+
+	if ( readGlobalState && pHeader->mapCount == 0 ) // Alfred: Only load save games from the OB era engine where mapCount is forced to zero
 	{
 		serverGameDLL->RestoreGlobalState( pSaveData );
 	}
@@ -1035,6 +1062,8 @@ bool CSaveRestore::SaveFileExists( const char *pName )
 // Input  : *pName - 
 // Output : int
 //-----------------------------------------------------------------------------
+bool CL_HL2Demo_MapCheck( const char *name ); // in host_cmd.cpp
+bool CL_PortalDemo_MapCheck( const char *name ); // in host_cmd.cpp
 bool CSaveRestore::LoadGame( const char *pName )
 {
 	FileHandle_t	pFile;
@@ -1075,6 +1104,7 @@ bool CSaveRestore::LoadGame( const char *pName )
 	
 	int iElapsedMinutes = 0;
 	int iElapsedSeconds = 0;
+	bool bOldSave = false;
 
 	pFile = g_pSaveRestoreFileSystem->Open( name, "rb", MOD_DIR );
 	if ( pFile )
@@ -1083,7 +1113,7 @@ bool CSaveRestore::LoadGame( const char *pName )
 		char szComment[ MAX_PATH ];
 		char szElapsedTime[ MAX_PATH ];
 
-		if ( SaveReadNameAndComment( pFile, szDummyName, szComment ) )
+		if ( SaveReadNameAndComment( pFile, szDummyName, sizeof(szDummyName), szComment, sizeof(szComment) ) )
 		{
 			// Elapsed time is the last 6 characters in comment. (mmm:ss)
 			int i;
@@ -1112,12 +1142,12 @@ bool CSaveRestore::LoadGame( const char *pName )
 		// Reset the file pointer to the start of the file
 		g_pSaveRestoreFileSystem->Seek( pFile, 0, FILESYSTEM_SEEK_HEAD );
 
-		if ( SaveReadHeader( pFile, &gameHeader, 1 ) )
+		if ( SaveReadHeader( pFile, &gameHeader, 1, &bOldSave ) )
 		{
 			validload = DirectoryExtract( pFile, gameHeader.mapCount );
 		}
 
-		if ( !g_pVEngineServer->IsMapValid( gameHeader.mapName ) )
+		if ( !HaveExactMap( gameHeader.mapName ) )
 		{
 			Msg( "Map '%s' missing or invalid\n", gameHeader.mapName );
 			validload = false;
@@ -1148,9 +1178,21 @@ bool CSaveRestore::LoadGame( const char *pName )
 	deathmatch.SetValue( 0 );
 	coop.SetValue( 0 );
 
+	if ( !CL_HL2Demo_MapCheck( gameHeader.mapName ) )
+	{
+		Warning( "Save file %s is not valid\n", name );
+		return false;	
+	}
+	
+	if ( !CL_PortalDemo_MapCheck( gameHeader.mapName ) )
+	{
+		Warning( "Save file %s is not valid\n", name );
+		return false;	
+	}
+
 	bool bIsTransitionSave = ( gameHeader.originMapName[0] != 0 );
 
-	bool retval = Host_NewGame( gameHeader.mapName, true, false, ( bIsTransitionSave ) ? gameHeader.originMapName : NULL, ( bIsTransitionSave ) ? gameHeader.landmark : NULL );
+	bool retval = Host_NewGame( gameHeader.mapName, true, false, ( bIsTransitionSave ) ? gameHeader.originMapName : NULL, ( bIsTransitionSave ) ? gameHeader.landmark : NULL, bOldSave );
 
 	SetMostRecentElapsedMinutes( iElapsedMinutes );
 	SetMostRecentElapsedSeconds( iElapsedSeconds );
@@ -1271,7 +1313,7 @@ void CSaveRestore::SaveGameStateGlobals( CSaveRestoreData *pSaveData )
 	header.version 			= build_number( );
 	header.skillLevel 		= skill.GetInt();	// This is created from an int even though it's a float
 	header.connectionCount 	= pSaveData->levelInfo.connectionCount;
-	header.time 			= sv.GetTime();
+	header.time__USE_VCR_MODE	= sv.GetTime();
 	ConVarRef skyname( "sv_skyname" );
 	if ( skyname.IsValid() )
 	{
@@ -1296,7 +1338,7 @@ void CSaveRestore::SaveGameStateGlobals( CSaveRestoreData *pSaveData )
 
 	pSaveData->levelInfo.time = 0; // prohibits rebase of header.time (why not just save time as a field_float and ditch this hack?)
 	serverGameDLL->SaveWriteFields( pSaveData, "Save Header", &header, NULL, SAVE_HEADER::m_DataMap.dataDesc, SAVE_HEADER::m_DataMap.dataNumFields );
-	pSaveData->levelInfo.time = header.time;
+	pSaveData->levelInfo.time = header.time__USE_VCR_MODE;
 
 	// Write adjacency list
 	for ( i = 0; i < pSaveData->levelInfo.connectionCount; i++ )
@@ -1786,7 +1828,7 @@ void CSaveRestore::RestoreClientState( char const *fileName, bool adjacent )
 
 	if ( sections.symbolsize > 0 )
 	{
-		void *pSaveMemory = SaveAllocMemory( sections.symbolcount, sizeof(char *), true );
+		pSaveMemory = SaveAllocMemory( sections.symbolcount, sizeof(char *), true );
 		if ( !pSaveMemory )
 		{
 			SaveFreeMemory( pSaveData );
@@ -2031,12 +2073,15 @@ bool CSaveRestore::SaveClientState( const char *name )
 //-----------------------------------------------------------------------------
 // Purpose: Parses and confirms save information. Pulled from PC UI
 //-----------------------------------------------------------------------------
-int CSaveRestore::SaveReadNameAndComment( FileHandle_t f, char *name, char *comment )
+int CSaveRestore::SaveReadNameAndComment( FileHandle_t f, OUT_Z_CAP(nameSize) char *name, int nameSize, OUT_Z_CAP(commentSize) char *comment, int commentSize )
 {
 	int i, tag, size, tokenSize, tokenCount;
 	char *pSaveData = NULL;
 	char *pFieldName = NULL;
 	char **pTokenList = NULL;
+
+	name[0] = '\0';
+	comment[0] = '\0';
 
 	// Make sure we can at least read in the first five fields
 	unsigned int tagsize = sizeof(int) * 5;
@@ -2047,8 +2092,6 @@ int CSaveRestore::SaveReadNameAndComment( FileHandle_t f, char *name, char *comm
 	if ( ( nRead != sizeof(int) ) || tag != MAKEID('J','S','A','V') )
 		return 0;
 
-	name[0] = '\0';
-	comment[0] = '\0';
 	if ( g_pSaveRestoreFileSystem->Read( &tag, sizeof(int), f ) != sizeof(int) )
 		return 0;
 
@@ -2137,11 +2180,13 @@ int CSaveRestore::SaveReadNameAndComment( FileHandle_t f, char *name, char *comm
 
 		if ( !Q_stricmp( pFieldName, "comment" ) )
 		{
-			strncpy(comment, pData, nFieldSize);
+			int copySize = MAX( commentSize, nFieldSize );
+			Q_strncpy( comment, pData, copySize );
 		}
 		else if ( !Q_stricmp( pFieldName, "mapName" ) )
 		{
-			Q_strncpy( name, pData, nFieldSize );
+			int copySize = MAX( commentSize, nFieldSize );
+			Q_strncpy( name, pData, copySize );
 		};
 
 		// Move to Start of next field.
@@ -2287,7 +2332,7 @@ void CSaveRestore::ParseSaveTables( CSaveRestoreData *pSaveData, SAVE_HEADER *pH
 
 	pSaveData->levelInfo.mapVersion = pHeader->mapVersion;
 	pSaveData->levelInfo.connectionCount = pHeader->connectionCount;
-	pSaveData->levelInfo.time = pHeader->time;
+	pSaveData->levelInfo.time = pHeader->time__USE_VCR_MODE;
 	pSaveData->levelInfo.fUseLandmark = true;
 	VectorCopy( vec3_origin, pSaveData->levelInfo.vecLandmarkOffset );
 
@@ -2441,7 +2486,7 @@ int CSaveRestore::LoadGameState( char const *level, bool createPlayers )
 
 	Finish( pSaveData );
 
-	sv.m_nTickCount = (int)( header.time / host_state.interval_per_tick );
+	sv.m_nTickCount = (int)( header.time__USE_VCR_MODE / host_state.interval_per_tick );
 	// SUCCESS!
 	return 1;
 }

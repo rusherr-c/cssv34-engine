@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -82,10 +82,11 @@ public:
 	virtual float			GetAlphaModulation();
 	virtual void			GetColorModulation( float *r, float *g, float *b );
 	virtual void			CallBindProxy( void *proxyData );
+	virtual IMaterial		*CheckProxyReplacement( void *proxyData );
 	virtual void			PrecacheMappingDimensions( );
 	virtual void			FindRepresentativeTexture( void );
 	virtual bool			WasReloadedFromWhitelist() { return m_pRealTimeVersion->WasReloadedFromWhitelist(); }
-
+	virtual bool			IsPrecached( ) const { return m_pRealTimeVersion->IsPrecached(); }
 
 
 #define QUEUEFRIENDLY_USED_INTERNALLY_ASSERT AssertMsg( 0, "CMaterial_QueueFriendly used internally within materialsystem. Update the calling code to use a realtime CMaterial." )
@@ -101,14 +102,13 @@ public:
 	virtual void	Uncache( bool bPreserveVars = false  ) { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; m_pRealTimeVersion->Uncache( bPreserveVars ); }
 	virtual void	Precache() { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; m_pRealTimeVersion->Precache(); }
 	// If provided, pKeyValues and pPatchKeyValues should come from LoadVMTFile()
-	virtual bool	PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL ) { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->PrecacheVars( pKeyValues, pPatchKeyValues, pIncludes ); }
+	virtual bool	PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL, int nFindContext = MATERIAL_FINDCONTEXT_NONE ) { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->PrecacheVars( pKeyValues, pPatchKeyValues, pIncludes, nFindContext ); }
 	virtual void	ReloadTextures() { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; m_pRealTimeVersion->ReloadTextures(); }
 	virtual void	SetMinLightmapPageID( int pageID ) { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; m_pRealTimeVersion->SetMinLightmapPageID( pageID ); }
 	virtual void	SetMaxLightmapPageID( int pageID ) { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; m_pRealTimeVersion->SetMaxLightmapPageID( pageID ); }
 	virtual int		GetMinLightmapPageID( ) const { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->GetMinLightmapPageID(); }
 	virtual int		GetMaxLightmapPageID( ) const { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->GetMaxLightmapPageID(); }
 	virtual IShader *GetShader() const { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->GetShader(); }
-	virtual bool	IsPrecached( ) const { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->IsPrecached(); }
 	virtual bool	IsPrecachedVars() const { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->IsPrecachedVars(); }
 	virtual void	DrawMesh( VertexCompressionType_t vertexCompression ) { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; m_pRealTimeVersion->DrawMesh( vertexCompression ); }
 	virtual VertexFormat_t GetVertexUsage() const { QUEUEFRIENDLY_USED_INTERNALLY_ASSERT; return m_pRealTimeVersion->GetVertexUsage(); }
@@ -138,7 +138,11 @@ public:
 	virtual IMaterialInternal *GetRealTimeVersion( void );
 	virtual IMaterialInternal *GetQueueFriendlyVersion( void );
 
-	void SetRealTimeVersion( IMaterialInternal *pRealTimeVersion ) { m_pRealTimeVersion = pRealTimeVersion; }
+	void SetRealTimeVersion( IMaterialInternal *pRealTimeVersion )
+	{
+		m_pRealTimeVersion = pRealTimeVersion;
+		m_nReferenceCount = m_pRealTimeVersion->GetReferenceCount();
+	}
 	void UpdateToRealTime( void ); //update cached off variables using the real time version as a base.
 
 
@@ -149,6 +153,7 @@ private:
 	//some calls need to know what state the material would be in right now if the queue had completed.
 	float m_fAlphaModulationOnQueueCompletion;
 	Vector m_vColorModulationOnQueueCompletion;
+	int m_nReferenceCount; // Only ever accessed from the main thread.
 };
 
 

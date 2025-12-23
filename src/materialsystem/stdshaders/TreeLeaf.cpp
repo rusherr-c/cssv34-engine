@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -54,8 +54,11 @@ BEGIN_VS_SHADER_FLAGS( TreeLeaf, "Help for TreeLeaf", SHADER_NOT_EDITABLE )
 			int numTexCoords = 1;
 			pShaderShadow->VertexShaderVertexFormat( flags, numTexCoords, 0, 0 );
 
+			bool bUseStaticControlFlow = g_pHardwareConfig->SupportsStaticControlFlow();
+
 			DECLARE_STATIC_VERTEX_SHADER( treeleaf_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( HALFLAMBERT, true );
+			SET_STATIC_VERTEX_SHADER_COMBO( USE_STATIC_CONTROL_FLOW, bUseStaticControlFlow );
 			SET_STATIC_VERTEX_SHADER( treeleaf_vs20 );
 
 			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
@@ -86,9 +89,12 @@ BEGIN_VS_SHADER_FLAGS( TreeLeaf, "Help for TreeLeaf", SHADER_NOT_EDITABLE )
 			LightState_t lightState;
 			pShaderAPI->GetDX9LightState( &lightState );
 
+			bool bUseStaticControlFlow = g_pHardwareConfig->SupportsStaticControlFlow();
+
 			DECLARE_DYNAMIC_VERTEX_SHADER( treeleaf_vs20 );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( DYNAMIC_LIGHT, lightState.HasDynamicLight() );
-			SET_DYNAMIC_VERTEX_SHADER_COMBO( STATIC_LIGHT,  lightState.m_bStaticLight  ? 1 : 0 );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( STATIC_LIGHT, lightState.m_bStaticLightVertex ? 1 : 0 );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( NUM_LIGHTS, bUseStaticControlFlow ? 0 : lightState.m_nNumLights );
 			SET_DYNAMIC_VERTEX_SHADER( treeleaf_vs20 );
 		}
 		Draw( );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -37,6 +37,11 @@ public:
 
 	virtual void	redraw();
 
+	void			EnableStickySnapshotMode( void );
+	void			DisableStickySnapshotMode( void );
+	void			PushSnapshotMode( int nSnapShotSize );
+	void			PopSnapshotMode( void );
+
 	void			TakeSnapshotRect( const char *pFilename, int x, int y, int w, int h );
 	bool			IsSuppressingResize( void );
 	void			SuppressResize( bool suppress );
@@ -53,6 +58,13 @@ public:
 private:
 	bool			m_bSuppressResize;
 	bool			m_bSuppressSwap;
+
+	// stack and sticky window mode
+	int					m_stickyDepth;
+	bool				m_bIsSticky;
+	int					m_snapshotDepth;
+	WINDOWPLACEMENT		m_wp;
+	HCURSOR				m_hPrevCursor;
 };
 
 extern MatSysWindow		*g_pMatSysWindow;
@@ -61,6 +73,9 @@ extern IMaterialSystem *g_pMaterialSystem;
 extern IMaterial *g_materialBackground;
 extern IMaterial *g_materialWireframe;
 extern IMaterial *g_materialWireframe;
+extern IMaterial *g_materialWireframeVertexColor;
+extern IMaterial *g_materialWireframeVertexColorNoCull;
+extern IMaterial *g_materialDebugCopyBaseTexture;
 extern IMaterial *g_materialFlatshaded;
 extern IMaterial *g_materialSmoothshaded;
 extern IMaterial *g_materialBones;
@@ -109,7 +124,7 @@ public:
 	bool			FindParameter(const char *s);
 	const char*		FindParameterArg(const char *s);
 
-	void			SetTitleText(const char *fmt, ...);
+	void			SetTitleText(PRINTF_FORMAT_STRING const char *fmt, ...);
 
 
 private:
@@ -166,10 +181,10 @@ public:
 // ---------------------------------------------------------------------------------------- //
 
 // Show an error dialog and quit.
-bool Sys_Error(const char *pMsg, ...);
+bool Sys_Error(PRINTF_FORMAT_STRING const char *pMsg, ...);
 
 // Print to the trace window.
-void con_Printf(const char *pMsg, ...);
+void con_Printf(PRINTF_FORMAT_STRING const char *pMsg, ...);
 
 // Returns true if the key is down.
 bool IsKeyDown(char key);

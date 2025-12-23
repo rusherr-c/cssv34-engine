@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,7 +29,7 @@ void DrawDashedLine(int x0, int y0, int x1, int y1, int dashLen, int gapLen);
 class BuyPresetImage : public vgui::IImage
 {
 public:
-	BuyPresetImage(vgui::IImage* realImage)
+	BuyPresetImage( vgui::IImage *realImage )
 	{
 		m_image = realImage;
 		if ( m_image )
@@ -100,37 +100,31 @@ public:
 		if ( !m_image )
 			return;
 
-		m_image->SetColor( col ); 
+		m_image->SetColor( col );
 	}
-
-	// ---------- STUBS ------------- //
 
 	virtual bool Evict()
 	{
-		if (m_image)
-			return m_image->Evict();
-		
+		return false;
 	}
 
 	virtual int GetNumFrames()
 	{
-		return m_image ? m_image->GetNumFrames() : 1;
+		return 0;
 	}
 
-	virtual void SetFrame(int nFrame)
+	virtual void SetFrame( int nFrame )
 	{
-		if (m_image)
-			m_image->SetFrame(nFrame);
 	}
 
-	virtual unsigned long GetID() {
-		return m_image ? m_image->GetID() : 1;
-	}
-
-	virtual void SetRotation(int iRotation)
+	virtual vgui::HTexture GetID()
 	{
-		if (m_image)
-			m_image->SetRotation(iRotation);
+		return 0;
+	}
+
+	virtual void SetRotation( int iRotation )
+	{
+		return;
 	}
 
 private:

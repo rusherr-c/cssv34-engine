@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -17,6 +17,9 @@
 #include "shaderapi/ishaderutil.h"
 #include "materialsystem/deformations.h"
 
+#include "tier1/utlintrusivelist.h"
+#include "utlvector.h"
+#include "utldict.h"
 #include "cmaterialdict.h"
 #include "cmatlightmaps.h"
 #include "cmatrendercontext.h"
@@ -34,6 +37,8 @@
 //-----------------------------------------------------------------------------
 
 class CJob;
+class CTextureCompositor;
+class IThreadPool;
 struct DeferredUpdateLightmapInfo_t;
 
 // typedefs to allow use of delegation macros
@@ -95,10 +100,17 @@ private:
 	// Initializes the color correction terms
 	void									InitColorCorrection();
 
+	// force the thread mode to single threaded, synchronizes with render thread if running
+	void									ForceSingleThreaded();
+
+	void									ThreadRelease( );
+	void									ThreadAcquire( bool bForce = false );
 
 public:
 	virtual void							SetThreadMode( MaterialThreadMode_t nextThreadMode, int nServiceThread );
-	virtual MaterialThreadMode_t			GetThreadMode();
+	virtual MaterialThreadMode_t			GetThreadMode( ); // current thread mode
+	virtual bool							IsRenderThreadSafe( );
+	virtual bool							AllowThreading( bool bAllow, int nServiceThread );
 	virtual void							ExecuteQueued();
 
 	//---------------------------------------------------------
@@ -158,6 +170,7 @@ public:
 	// -----------------------------------------------------------
 	int										GetDisplayAdapterCount() const;
 	int										GetCurrentAdapter() const;
+	char									*GetDisplayDeviceName() const OVERRIDE;
 	void									GetDisplayAdapterInfo( int adapter, MaterialAdapterInfo_t& info ) const;
 	int										GetModeCount( int adapter ) const;
 	void									GetModeInfo( int adapter, int mode, MaterialVideoMode_t& info ) const;
@@ -183,9 +196,6 @@ public:
 
 	// Reports support for fetch4 texture access (useful for shadow map PCF in shader)
 	bool									SupportsFetch4( void );
-
-	float									GetShadowDepthBias( void );
-	float									GetShadowSlopeScaleDepthBias( void );
 
 	// Vendor-dependent shadow depth texture format
 	ImageFormat								GetShadowDepthTextureFormat( void );
@@ -317,6 +327,7 @@ public:
 	//---------------------------------------------------------
 	void									CreateDebugMaterials();
 	void									CleanUpDebugMaterials();
+	void									CleanUpErrorMaterial();
 
 	void									DebugPrintUsedMaterials( const char *pSearchSubString, bool bVerbose );
 	void									DebugPrintUsedTextures();
@@ -324,6 +335,12 @@ public:
 	void									ToggleSuppressMaterial( const char* pMaterialName );
 	void									ToggleDebugMaterial( const char* pMaterialName );
 
+
+	//---------------------------------------------------------
+	// Compositor Support
+	//---------------------------------------------------------
+	void									CreateCompositorMaterials();
+	void									CleanUpCompositorMaterials();
 
 	//---------------------------------------------------------
 	// Misc features
@@ -359,6 +376,10 @@ public:
 	//---------------------------------------------------------
 	// Material and texture management
 	//---------------------------------------------------------
+	// Stop attempting to stream in textures in response to usage.  Useful for phases such as loading or other explicit
+	// operations that shouldn't take usage of textures as a signal to stream them in at full rez.
+	void									SuspendTextureStreaming( );
+	void									ResumeTextureStreaming( );
 	void									UncacheAllMaterials();
 	void									UncacheUnusedMaterials( bool bRecomputeStateSnapshots );
 	void									CacheUsedMaterials();
@@ -368,8 +389,13 @@ public:
 	// Create new materials	(currently only used by the editor!)
 	IMaterial *								CreateMaterial( const char *pMaterialName, KeyValues *pVMTKeyValues );
 	IMaterial *								FindMaterial( const char *materialName, const char *pTextureGroupName, bool complain = true, const char *pComplainPrefix = NULL );
+	virtual IMaterial *						FindMaterialEx( char const* pMaterialName, const char *pTextureGroupName, int nContext, bool complain = true, const char *pComplainPrefix = NULL );
+	bool									IsMaterialLoaded( const char *materialName );
 	virtual IMaterial *						FindProceduralMaterial( const char *pMaterialName, const char *pTextureGroupName, KeyValues *pVMTKeyValues );
 	const char *							GetForcedTextureLoadPathID() { return m_pForcedTextureLoadPathID; }
+	
+	void									SetAsyncTextureLoadCache( void* h );
+	void									SetVMTFileLoadCache( void* h );
 
 	//---------------------------------
 
@@ -385,7 +411,8 @@ public:
 
 	//---------------------------------
 
-	ITexture *								FindTexture( const char* pTextureName, const char *pTextureGroupName, bool complain = true );
+	ITexture *								FindTexture( char const* pTextureName, const char *pTextureGroupName, bool complain = true, int nAdditionalCreationFlags = 0 );
+
 	bool									IsTextureLoaded( const char* pTextureName ) const;
 
 	void									AddTextureAlias( const char *pAlias, const char *pRealName );
@@ -442,6 +469,25 @@ public:
 																				unsigned int textureFlags = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT,
 																				unsigned int renderTargetFlags = 0 );
 
+	virtual ITexture*			CreateTextureFromBits(int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits);
+
+	virtual void				OverrideRenderTargetAllocation( bool rtAlloc );
+
+	virtual ITextureCompositor*	NewTextureCompositor( int w, int h, const char* pCompositeName, int nTeamNum, uint64 randomSeed, KeyValues* stageDesc, uint32 texCompositeCreateFlags ) OVERRIDE;
+	void						ScheduleTextureComposite( CTextureCompositor* _texCompositor );
+
+
+	virtual void				SetRenderTargetFrameBufferSizeOverrides( int nWidth, int nHeight ) OVERRIDE;
+	virtual void				GetRenderTargetFrameBufferDimensions( int & nWidth, int & nHeight ) OVERRIDE;
+
+	virtual void				AsyncFindTexture( const char* pFilename, const char *pTextureGroupName, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs, bool bComplain = true, int nAdditionalCreationFlags = 0 ) OVERRIDE;
+	virtual ITexture*			CreateNamedTextureFromBitsEx( const char* pName, const char *pTextureGroupName, int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits, int nFlags ) OVERRIDE;
+
+	virtual bool				AddTextureCompositorTemplate( const char* pName, KeyValues* pTmplDesc, int nTexCompositeTemplateFlags = 0 ) OVERRIDE;
+	virtual bool				VerifyTextureCompositorTemplates() OVERRIDE;
+
+
+
 
 	// -----------------------------------------------------------
 	
@@ -453,6 +499,9 @@ public:
 	DELEGATE_TO_OBJECT_0V(					SyncMatrices, GetRenderContextInternal() );
 	DELEGATE_TO_OBJECT_1V(					SyncMatrix, MaterialMatrixMode_t, GetRenderContextInternal() );
 	DELEGATE_TO_OBJECT_0( bool,				OnFlushBufferedPrimitives, GetRenderContextInternal() );
+	void									OnThreadEvent( uint32 threadEvent );
+	ShaderAPITextureHandle_t				GetShaderAPITextureBindHandle( ITexture *pTexture, int nFrame, int nTextureChannel ); // JasonM ????
+
 
 
 	// -----------------------------------------------------------
@@ -501,7 +550,7 @@ public:
 	DELEGATE_TO_OBJECT_3V(					GetStandardTextureDimensions, int *, int *, StandardTextureId_t, &m_HardwareRenderContext );
 	DELEGATE_TO_OBJECT_0( MorphFormat_t,	GetBoundMorphFormat, &m_HardwareRenderContext );
 	DELEGATE_TO_OBJECT_1( ITexture *,		GetRenderTargetEx, int, &m_HardwareRenderContext );
-	DELEGATE_TO_OBJECT_6V(					DrawClearBufferQuad, unsigned char, unsigned char, unsigned char, unsigned char, bool, bool, &m_HardwareRenderContext );
+	DELEGATE_TO_OBJECT_7V(					DrawClearBufferQuad, unsigned char, unsigned char, unsigned char, unsigned char, bool, bool, bool, &m_HardwareRenderContext );
 	DELEGATE_TO_OBJECT_0C( int,				MaxHWMorphBatchCount, g_pMorphMgr );
 	DELEGATE_TO_OBJECT_1V(					GetCurrentColorCorrection, ShaderColorCorrectionInfo_t*, g_pColorCorrectionSystem );
 
@@ -526,7 +575,18 @@ public:
 	uint									GetRenderThreadId() const { return m_nRenderThreadID; }
 	void									UnbindMaterial( IMaterial *pMaterial );
 
+	IMaterialProxy							*DetermineProxyReplacements( IMaterial *pMaterial, KeyValues *pFallbackKeyValues );
+	void									LoadReplacementMaterials();
+	void									ScanDirForReplacements( const char *pszPathName );
+	void									InitReplacementsFromFile( const char *pszPathName );
+
+	void									PreloadReplacements( );
+	CUtlDict< KeyValues *, int >			m_Replacements;
+
 	virtual void							CompactMemory();
+
+private:
+	void									OnRenderingAsyncComplete();
 
 	// -----------------------------------------------------------
 private:
@@ -546,6 +606,15 @@ private:
 
 	void ThreadExecuteQueuedContext( CMatQueuedRenderContext *pContext );
 
+	IThreadPool * CreateMatQueueThreadPool();
+	void DestroyMatQueueThreadPool();
+
+#ifdef DX_TO_GL_ABSTRACTION
+	void									DoStartupShaderPreloading( void );
+#endif
+
+	// -----------------------------------------------------------
+
 	CMaterialDict							m_MaterialDict;
 	CMatLightmaps							m_Lightmaps;
 	CThreadLocal<IMatRenderContextInternal *> m_pRenderContext;
@@ -556,6 +625,7 @@ private:
 
 	MaterialThreadMode_t					m_ThreadMode;
 	MaterialThreadMode_t					m_IdealThreadMode;
+	bool									m_bThreadingNotAvailable;		// this is true if the VirtualAlloc()'s in the threading fail to allocate
 	int										m_nServiceThread;
 
 	//---------------------------------
@@ -598,16 +668,23 @@ private:
 	// Have we allocated the standard lightmaps?
 	bool									m_StandardTexturesAllocated;
 
+
+	bool									m_bReplacementFilesValid;
+
 	//---------------------------------
 	// Shared materials used for debugging....
 	//---------------------------------
 
-	enum BufferClearType_t
+	enum BufferClearType_t //bClearColor + ( bClearAlpha << 1 ) + ( bClearDepth << 2 )
 	{
 		BUFFER_CLEAR_NONE,
 		BUFFER_CLEAR_COLOR,
+		BUFFER_CLEAR_ALPHA,
+		BUFFER_CLEAR_COLOR_AND_ALPHA,
 		BUFFER_CLEAR_DEPTH,
 		BUFFER_CLEAR_COLOR_AND_DEPTH,
+		BUFFER_CLEAR_ALPHA_AND_DEPTH,
+		BUFFER_CLEAR_COLOR_AND_ALPHA_AND_DEPTH,
 
 		BUFFER_CLEAR_TYPE_COUNT
 	};
@@ -615,19 +692,36 @@ private:
     IMaterialInternal *						m_pBufferClearObeyStencil[BUFFER_CLEAR_TYPE_COUNT];
 	IMaterialInternal *						m_pDrawFlatMaterial;
 	IMaterialInternal *						m_pRenderTargetBlitMaterial;
+	CUtlVector< IMaterialInternal* >		m_pCompositorMaterials;
 
 	//---------------------------------
 
 	const char *							m_pForcedTextureLoadPathID;
+	FileCacheHandle_t						m_hAsyncLoadFileCache;
 	uint									m_nRenderThreadID;
 	bool									m_bAllocatingRenderTargets;
 	bool									m_bInStubMode;
 	bool									m_bGeneratedConfig;
 	bool									m_bInFrame;
+	bool									m_bForcedSingleThreaded;
+	bool									m_bAllowQueuedRendering;
+	volatile bool							m_bThreadHasOwnership;
+	uint									m_ThreadOwnershipID;
 
 	//---------------------------------
 
 	CJob *									m_pActiveAsyncJob;
+	CUtlVector<uint32>						m_threadEvents;
+
+	IThreadPool *							m_pMatQueueThreadPool;
+
+	//---------------------------------
+
+	int										m_nRenderTargetFrameBufferWidthOverride;
+	int										m_nRenderTargetFrameBufferHeightOverride;
+
+	CUtlVector< CTextureCompositor* >		m_scheduledComposites;
+	CUtlVector< CTextureCompositor* >		m_pendingComposites;
 };
 
 //-----------------------------------------------------------------------------

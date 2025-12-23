@@ -38,6 +38,9 @@
 	#undef _XBOX
 #endif
 
+#define __STDC_LIMIT_MACROS
+#include <stdint.h>
+
 #include "wchartypes.h"
 #include "basetypes.h"
 #include "tier0/valve_off.h"
@@ -89,31 +92,42 @@
 #define IsDebug() false
 #endif
 
-// Eventually remove all uses these
-#define IsConsole() false
-#define IsX360()	false
+// Deprecating, infavor of IsX360() which will revert to IsXbox()
+// after confidence of xbox 1 code flush
 #define IsXbox()	false
-#define IsPS3()		false
-#define IsPC()		true
-// #define PLATFORM_X360 0
 
-// why is this such a mess
 #ifdef _WIN32
 	#define IsLinux() false
 	#define IsOSX() false
 	#define IsPosix() false
-	#define IsWindows() true
-	#define IS_WINDOWS_PC
-	#define PLATFORM_WINDOWS 1 // these two are old checks for if its xbox or windows i think
-	#define PLATFORM_WINDOWS_PC 1
-	#ifdef _WIN64
-		#define IsPlatformWindowsPC64() true
-		#define IsPlatformWindowsPC32() false
-		#define PLATFORM_WINDOWS_PC64 1
+	#define PLATFORM_WINDOWS 1 // Windows PC or Xbox 360
+	#ifndef _X360
+		#define IsWindows() true
+		#define IsPC() true
+		#define IsConsole() false
+		#define IsX360() false
+		#define IsPS3() false
+		#define IS_WINDOWS_PC
+		#define PLATFORM_WINDOWS_PC 1 // Windows PC
+		#ifdef _WIN64
+			#define IsPlatformWindowsPC64() true
+			#define IsPlatformWindowsPC32() false
+			#define PLATFORM_WINDOWS_PC64 1
+		#else
+			#define IsPlatformWindowsPC64() false
+			#define IsPlatformWindowsPC32() true
+			#define PLATFORM_WINDOWS_PC32 1
+		#endif
 	#else
-		#define IsPlatformWindowsPC64() false
-		#define IsPlatformWindowsPC32() true
-		#define PLATFORM_WINDOWS_PC32 1
+		#define PLATFORM_X360 1
+		#ifndef _CONSOLE
+			#define _CONSOLE
+		#endif
+		#define IsWindows() false
+		#define IsPC() false
+		#define IsConsole() true
+		#define IsX360() true
+		#define IsPS3() false
 	#endif
 	// Adding IsPlatformOpenGL() to help fix a bunch of code that was using IsPosix() to infer if the DX->GL translation layer was being used.
 	#if defined( DX_TO_GL_ABSTRACTION )
@@ -122,7 +136,11 @@
 		#define IsPlatformOpenGL() false
 	#endif
 #elif defined(POSIX)
+	#define IsPC() true
 	#define IsWindows() false
+	#define IsConsole() false
+	#define IsX360() false
+	#define IsPS3() false
 	#if defined( LINUX )
 		#define IsLinux() true
 	#else
@@ -159,6 +177,13 @@ typedef signed char int8;
 	#else
 		typedef __int32 intp;
 		typedef unsigned __int32 uintp;
+	#endif
+
+	#if defined( _X360 )
+		#ifdef __m128
+			#undef __m128
+		#endif
+		#define __m128				__vector4
 	#endif
 
 	// Use this to specify that a function is an override of a virtual function.
@@ -203,12 +228,16 @@ typedef signed char int8;
 //-----------------------------------------------------------------------------
 // Set up platform type defines.
 //-----------------------------------------------------------------------------
-// Remove:
-#define IsGameConsole()	false
-// _GAMECONSOLE
-// _PS3
-// PLATFORM_X360
-#define IsPC()			true	// remove this since it will always be pc
+#if defined( PLATFORM_X360 ) || defined( _PS3 )
+	#if !defined( _GAMECONSOLE )
+		#define _GAMECONSOLE
+	#endif
+	#define IsPC()			false
+	#define IsGameConsole()	true
+#else
+	#define IsPC()			true
+	#define IsGameConsole()	false
+#endif
 
 #ifdef PLATFORM_64BITS
 	#define IsPlatform64Bits()	true
@@ -233,8 +262,18 @@ typedef unsigned int		uint;
 // Ensure that everybody has the right compiler version installed. The version
 // number can be obtained by looking at the compiler output when you type 'cl'
 // and removing the last two digits and the periods: 16.00.40219.01 becomes 160040219
-#if _MSC_FULL_VER < 191025017
-	#error You must install VS 2017 or newer
+#if _MSC_FULL_VER > 180000000
+	#if _MSC_FULL_VER < 180030723
+		#error You must install VS 2013 Update 3
+	#endif
+#elif _MSC_FULL_VER > 160000000
+	#if _MSC_FULL_VER < 160040219
+		#error You must install VS 2010 SP1
+	#endif
+#else
+	#if _MSC_FULL_VER < 140050727
+		#error You must install VS 2005 SP1
+	#endif
 #endif
 #endif
 
@@ -288,8 +327,6 @@ typedef unsigned int		uint;
 // As a result, we pick the least common denominator here.  This should be used anywhere
 // you might typically want to use RAND_MAX
 #define VALVE_RAND_MAX 0x7fff
-
-
 
 /*
 FIXME: Enable this when we no longer fear change =)
@@ -352,6 +389,7 @@ typedef void * HINSTANCE;
 
 #endif // defined(_WIN32) && !defined(WINDED)
 
+#define MAX_FILEPATH 512 
 
 // Defines MAX_PATH
 #ifndef MAX_PATH
@@ -366,14 +404,13 @@ typedef void * HINSTANCE;
 
 #define MAX_UNICODE_PATH_IN_UTF8 MAX_UNICODE_PATH*4
 
-#ifdef GNUC
-#undef offsetof
-//#define offsetof( type, var ) __builtin_offsetof( type, var ) 
-#define offsetof(s,m)	(size_t)&(((s *)0)->m)
-#else
-#undef offsetof
-#define offsetof(s,m)	(size_t)&(((s *)0)->m)
-#endif
+#if !defined( offsetof )
+	#ifdef __GNUC__
+		#define offsetof( type, var ) __builtin_offsetof( type, var )
+	#else
+		#define offsetof(s,m)	(size_t)&(((s *)0)->m)
+	#endif
+#endif // !defined( offsetof )
 
 
 #define ALIGN_VALUE( val, alignment ) ( ( val + alignment - 1 ) & ~( alignment - 1 ) ) //  need macro for constant expression
@@ -1095,8 +1132,23 @@ PLATFORM_INTERFACE bool				Plat_IsInBenchmarkMode();
 
 
 PLATFORM_INTERFACE double			Plat_FloatTime();		// Returns time in seconds since the module was loaded.
-PLATFORM_INTERFACE unsigned int		Plat_MSTime();			// Time in milliseconds.
+PLATFORM_INTERFACE uint32			Plat_MSTime();			// Time in milliseconds.
+PLATFORM_INTERFACE uint64			Plat_USTime();			// Time in microseconds.
 PLATFORM_INTERFACE char *			Plat_ctime( const time_t *timep, char *buf, size_t bufsize );
+PLATFORM_INTERFACE void				Plat_GetModuleFilename( char *pOut, int nMaxBytes );
+
+PLATFORM_INTERFACE void				Plat_ExitProcess( int nCode );
+
+//called to exit the process due to a fatal error. This allows for the application to handle providing a hook as well which can be called
+//before exiting
+PLATFORM_INTERFACE void				Plat_ExitProcessWithError( int nCode, bool bGenerateMinidump = false );
+
+//sets the callback that will be triggered by Plat_ExitProcessWithError. NULL is valid. The return value true indicates that
+//the exit has been handled and no further processing should be performed. False will cause a minidump to be generated, and the process
+//to be terminated
+typedef bool (*ExitProcessWithErrorCBFn)( int nCode );
+PLATFORM_INTERFACE void				Plat_SetExitProcessWithErrorCB( ExitProcessWithErrorCBFn pfnCB );
+
 PLATFORM_INTERFACE struct tm *		Plat_gmtime( const time_t *timep, struct tm *result );
 PLATFORM_INTERFACE time_t			Plat_timegm( struct tm *timeptr );
 PLATFORM_INTERFACE struct tm *		Plat_localtime( const time_t *timep, struct tm *result );
@@ -1186,6 +1238,28 @@ struct CPUInformation
 // Have to return a pointer, not a reference, because references are not compatible with the
 // extern "C" implied by PLATFORM_INTERFACE.
 PLATFORM_INTERFACE const CPUInformation* GetCPUInformation();
+
+#define MEMORY_INFORMATION_VERSION 0
+
+struct MemoryInformation
+{
+	int m_nStructVersion;
+
+	uint m_nPhysicalRamMbTotal;
+	uint m_nPhysicalRamMbAvailable;
+	
+	uint m_nVirtualRamMbTotal;
+	uint m_nVirtualRamMbAvailable;
+
+	inline MemoryInformation()
+	{
+		memset( this, 0, sizeof( *this ) );
+		m_nStructVersion = MEMORY_INFORMATION_VERSION;
+	}
+};
+
+// Returns true if the passed in MemoryInformation structure was filled out, otherwise false.
+PLATFORM_INTERFACE bool GetMemoryInformation( MemoryInformation *pOutMemoryInfo );
 
 PLATFORM_INTERFACE float GetCPUUsage();
 
@@ -1340,37 +1414,37 @@ inline const char *GetPlatformExt( void )
 template <class T>
 inline T* Construct( T* pMemory )
 {
-	return ::new( pMemory ) T;
+	return reinterpret_cast<T*>(::new( pMemory ) T);
 }
 
 template <class T, typename ARG1>
 inline T* Construct( T* pMemory, ARG1 a1 )
 {
-	return ::new( pMemory ) T( a1 );
+	return reinterpret_cast<T*>(::new( pMemory ) T( a1 ));
 }
 
 template <class T, typename ARG1, typename ARG2>
 inline T* Construct( T* pMemory, ARG1 a1, ARG2 a2 )
 {
-	return ::new( pMemory ) T( a1, a2 );
+	return reinterpret_cast<T*>(::new( pMemory ) T( a1, a2 ));
 }
 
 template <class T, typename ARG1, typename ARG2, typename ARG3>
 inline T* Construct( T* pMemory, ARG1 a1, ARG2 a2, ARG3 a3 )
 {
-	return ::new( pMemory ) T( a1, a2, a3 );
+	return reinterpret_cast<T*>(::new( pMemory ) T( a1, a2, a3 ));
 }
 
 template <class T, typename ARG1, typename ARG2, typename ARG3, typename ARG4>
 inline T* Construct( T* pMemory, ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4 )
 {
-	return ::new( pMemory ) T( a1, a2, a3, a4 );
+	return reinterpret_cast<T*>(::new( pMemory ) T( a1, a2, a3, a4 ));
 }
 
 template <class T, typename ARG1, typename ARG2, typename ARG3, typename ARG4, typename ARG5>
 inline T* Construct( T* pMemory, ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4, ARG5 a5 )
 {
-	return ::new( pMemory ) T( a1, a2, a3, a4, a5 );
+	return reinterpret_cast<T*>(::new( pMemory ) T( a1, a2, a3, a4, a5 ));
 }
 
 template <class T, class P>
@@ -1394,7 +1468,7 @@ inline void ConstructThreeArg( T* pMemory, P1 const& arg1, P2 const& arg2, P3 co
 template <class T>
 inline T* CopyConstruct( T* pMemory, T const& src )
 {
-	return ::new( pMemory ) T(src);
+	return reinterpret_cast<T*>(::new( pMemory ) T(src));
 }
 
 template <class T>
@@ -1404,6 +1478,21 @@ inline void Destruct( T* pMemory )
 
 #ifdef _DEBUG
 	memset( reinterpret_cast<void*>( pMemory ), 0xDD, sizeof(T) );
+#endif
+}
+
+// The above will error when binding to a type of: foo(*)[] -- there is no provision in c++ for knowing how many objects
+// to destruct without preserving the count and calling the necessary destructors.
+template <class T, size_t N>
+inline void Destruct( T (*pMemory)[N] )
+{
+	for ( size_t i = 0; i < N; i++ )
+	{
+		(pMemory[i])->~T();
+	}
+
+#ifdef _DEBUG
+	memset( reinterpret_cast<void*>( pMemory ), 0xDD, sizeof(*pMemory) );
 #endif
 }
 
@@ -1589,5 +1678,14 @@ PLATFORM_INTERFACE void Plat_SetWatchdogHandlerFunction( Plat_WatchDogHandlerFun
 //-----------------------------------------------------------------------------
 
 #include "tier0/valve_on.h"
+
+#if defined(TIER0_DLL_EXPORT)
+extern "C" int V_tier0_stricmp(const char *s1, const char *s2 );
+#undef stricmp
+#undef strcmpi
+#define stricmp(s1,s2) V_tier0_stricmp( s1, s2 )
+#define strcmpi(s1,s2) V_tier0_stricmp( s1, s2 )
+#endif
+
 
 #endif /* PLATFORM_H */

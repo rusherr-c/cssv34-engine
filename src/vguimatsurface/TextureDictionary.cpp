@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Contains all texture state for the material system surface to use
 //
@@ -6,16 +6,16 @@
 
 #include "bitmap/imageformat.h"
 #include "TextureDictionary.h"
-#include "UtlLinkedList.h"
+#include "utllinkedlist.h"
 #include "checksum_crc.h"
-#include "materialsystem/IMaterial.h"
-#include "VguiMatSurface.h"
-#include "materialsystem/IMaterialSystem.h"
+#include "materialsystem/imaterial.h"
+#include "vguimatsurface.h"
+#include "materialsystem/imaterialsystem.h"
 #include "tier0/dbg.h"
 #include "KeyValues.h"
-#include "PixelWriter.h"
-#include "materialsystem/IMaterialVar.h"
-#include "materialsystem/ITexture.h"
+#include "pixelwriter.h"
+#include "materialsystem/imaterialvar.h"
+#include "materialsystem/itexture.h"
 #include "vtf/vtf.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -56,6 +56,8 @@ public:
 	void SetMaterial( const char *pFileName );
 	void SetMaterial( IMaterial *pMaterial );
 
+	void SetTexture( ITexture *pTexture ) { SafeAssign( &m_pOverrideTexture, pTexture ); }
+
 	// This is used when we want different rendering state sharing the same procedural texture (fonts)
 	void ReferenceOtherProcedural( CMatSystemTexture *pTexture, IMaterial *pMaterial );
 
@@ -68,8 +70,10 @@ public:
 
  	bool IsReference() const { return m_Flags & TEXTURE_IS_REFERENCE; }
 
-	void SetTextureRGBA( const char* rgba, int wide, int tall, ImageFormat format );
+	void SetTextureRGBA( const char* rgba, int wide, int tall, ImageFormat format, bool bFixupTextCoordsForDimensions );
 	void SetSubTextureRGBA( int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall );
+	void SetSubTextureRGBAEx( int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat );
+	void UpdateSubTextureRGBA( int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat );
 
 	float	m_s0, m_t0, m_s1, m_t1;
 
@@ -90,8 +94,12 @@ private:
 	CRC32_t				m_crcFile;
 	IMaterial			*m_pMaterial;
 	ITexture			*m_pTexture;
+	ITexture			*m_pOverrideTexture;
+
 	int					m_iWide;
 	int					m_iTall;
+	int					m_iInputWide;
+	int					m_iInputTall;
 	int					m_ID;
 	int					m_Flags;
 	CFontTextureRegen	*m_pRegen;
@@ -108,6 +116,7 @@ public:
 
 	// Create, destroy textures
 	int	CreateTexture( bool procedural = false );
+	int CreateTextureByTexture( ITexture *pTexture, bool procedural = true ) OVERRIDE;
 	void DestroyTexture( int id );
 	void DestroyAllTextures();
 
@@ -125,8 +134,10 @@ public:
 	void GetTextureTexCoords( int id, float &s0, float &t0, float &s1, float &t1 );
 
 	void SetTextureRGBA( int id, const char* rgba, int wide, int tall );
-	void SetTextureRGBAEx( int id, const char* rgba, int wide, int tall, ImageFormat format );
+	void SetTextureRGBAEx( int id, const char* rgba, int wide, int tall, ImageFormat format, bool bFixupTextCoordsForDimensions );
 	void SetSubTextureRGBA( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall );
+	void SetSubTextureRGBAEx( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat );
+	void UpdateSubTextureRGBA( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat );
 
 	int	FindTextureIdForTextureFile( char const *pFileName );
 
@@ -170,7 +181,7 @@ public:
 		DeleteTextureBits();
 	}
 
-	void UpdateBackingBits( Rect_t &subRect, const unsigned char *pBits )
+	void UpdateBackingBits( Rect_t &subRect, const unsigned char *pBits, Rect_t &uploadRect, ImageFormat format )
 	{
 		int size = ImageLoader::GetMemRequired( m_nWidth, m_nHeight, 1, m_nFormat, false );
 		if ( IsPC() )
@@ -187,23 +198,19 @@ public:
 
 		// Copy subrect into backing bits storage
 		// source data is expected to be in same format as backing bits
-		int x, y;
+		int y;
 		if ( ImageLoader::SizeInBytes( m_nFormat ) == 4 )
 		{
+			bool bIsInputFullRect = ( subRect.width != uploadRect.width || subRect.height != uploadRect.height );
 			Assert( (subRect.x >= 0) && (subRect.y >= 0) );
 			Assert( (subRect.x + subRect.width <= m_nWidth) && (subRect.y + subRect.height <= m_nHeight) );
-
-			// expecting RGBA
 			for ( y=0; y < subRect.height; ++y )
 			{
 				int idx = ( (subRect.y + y) * m_nWidth + subRect.x ) << 2;
 				unsigned int *pDst = (unsigned int*)(&m_pTextureBits[ idx ]);
-				const unsigned int *pSrc = (const unsigned int *)(&pBits[ (y * subRect.width) << 2 ]);
-
-				for ( x=0; x < subRect.width; ++x )
-				{
-					*pDst++ = *pSrc++;
-				}
+				int offset = bIsInputFullRect ? (subRect.y+y)*uploadRect.width + subRect.x : y*uploadRect.width;
+				const unsigned int *pSrc = (const unsigned int *)(&pBits[ offset << 2 ]);
+				ImageLoader::ConvertImageFormat( (const unsigned char *)pSrc, format,(unsigned char *)pDst, m_nFormat, subRect.width, 1 );
 			}
 		}
 		else
@@ -228,26 +235,41 @@ public:
 		int nFormatBytes = ImageLoader::SizeInBytes( m_nFormat );
 		if ( nFormatBytes == 4 )
 		{
-			CPixelWriter pixelWriter;
-			pixelWriter.SetPixelMemory( 
-				pVTFTexture->Format(), 
-				pVTFTexture->ImageData( 0, 0, 0 ), 
-				pVTFTexture->RowSizeInBytes( 0 ) );
-
-			// Now upload the part we've been asked for
-			int xmax = pSubRect->x + pSubRect->width;
-			int ymax = pSubRect->y + pSubRect->height;
-			int x, y;
-
-			for( y = pSubRect->y; y < ymax; ++y )
+			if ( m_nFormat == pVTFTexture->Format() )
 			{
- 				pixelWriter.Seek( pSubRect->x, y );
-				unsigned char *rgba = &m_pTextureBits[ (y * m_nWidth + pSubRect->x) * nFormatBytes ];
-
-				for ( x=pSubRect->x; x < xmax; ++x )
+				int ymax = pSubRect->y + pSubRect->height;
+				for( int y = pSubRect->y; y < ymax; ++y )
 				{
-					pixelWriter.WritePixel( rgba[0], rgba[1], rgba[2], rgba[3] );
-					rgba += nFormatBytes;
+					// copy each row across for the update
+					char *pchData = (char *)pVTFTexture->ImageData( 0, 0, 0, 0, y ) + pSubRect->x *nFormatBytes;
+					int size = ImageLoader::GetMemRequired( pSubRect->width, 1, 1, m_nFormat, false );
+					V_memcpy( pchData, m_pTextureBits + (y * m_nWidth + pSubRect->x) * nFormatBytes, size );
+				}
+			}
+			else
+			{
+				// formats don't match so do a pixel by pixel swizel
+				CPixelWriter pixelWriter;
+				pixelWriter.SetPixelMemory( 
+					pVTFTexture->Format(), 
+					pVTFTexture->ImageData( 0, 0, 0 ), 
+					pVTFTexture->RowSizeInBytes( 0 ) );
+
+				// Now upload the part we've been asked for
+				int xmax = pSubRect->x + pSubRect->width;
+				int ymax = pSubRect->y + pSubRect->height;
+				int x, y;
+
+				for( y = pSubRect->y; y < ymax; ++y )
+				{
+ 					pixelWriter.Seek( pSubRect->x, y );
+					unsigned char *rgba = &m_pTextureBits[ (y * m_nWidth + pSubRect->x) * nFormatBytes ];
+
+					for ( x=pSubRect->x; x < xmax; ++x )
+					{
+						pixelWriter.WritePixel( rgba[0], rgba[1], rgba[2], rgba[3] );
+						rgba += nFormatBytes;
+					}
 				}
 			}
 		}
@@ -294,6 +316,7 @@ CMatSystemTexture::CMatSystemTexture( void )
 {
 	m_pMaterial = NULL;
 	m_pTexture = NULL;
+	m_pOverrideTexture = NULL;
 	m_crcFile = (CRC32_t)0;
 	m_iWide = m_iTall = 0;
 	m_s0 = m_t0 = 0;
@@ -308,6 +331,13 @@ CMatSystemTexture::CMatSystemTexture( void )
 //-----------------------------------------------------------------------------
 CMatSystemTexture::~CMatSystemTexture( void )
 {
+	if ( m_pOverrideTexture )
+	{
+		m_pOverrideTexture->Release();
+		m_pOverrideTexture->DeleteIfUnreferenced();
+		m_pOverrideTexture = NULL;
+	}
+
 	CleanUpMaterial();
 }
 
@@ -332,6 +362,7 @@ void CMatSystemTexture::CleanUpMaterial()
 {
 	if ( m_pMaterial )
 	{
+		// causes the underlying texture (if unreferenced) to be deleted as well
 		m_pMaterial->DecrementReferenceCount();
 		m_pMaterial->DeleteIfUnreferenced();
 		m_pMaterial = NULL;
@@ -371,7 +402,7 @@ void CMatSystemTexture::ReleaseRegen( void )
 	}
 }
 
-void CMatSystemTexture::SetTextureRGBA( const char *rgba, int wide, int tall, ImageFormat format )
+void CMatSystemTexture::SetTextureRGBA( const char *rgba, int wide, int tall, ImageFormat format, bool bFixupTextCoords )
 {
 	Assert( IsProcedural() );
 	if ( !IsProcedural() )
@@ -433,6 +464,13 @@ void CMatSystemTexture::SetTextureRGBA( const char *rgba, int wide, int tall, Im
 		pTexture->DecrementReferenceCount();
 
 		SetMaterial( pMaterial );
+		m_iInputTall = tall;
+		m_iInputWide = wide;
+		if ( bFixupTextCoords && ( wide != width || tall != height ) )
+		{
+			m_s1 = (double)wide / width;
+			m_t1 = (double)tall / height;
+		}
 
 		// undo the extra +1 refCount
 		pMaterial->DecrementReferenceCount();
@@ -442,7 +480,7 @@ void CMatSystemTexture::SetTextureRGBA( const char *rgba, int wide, int tall, Im
 	Assert( tall <= m_iTall );
 
 	// Just replace the whole thing
-	SetSubTextureRGBA( 0, 0, (const unsigned char *)rgba, wide, tall );
+	SetSubTextureRGBAEx( 0, 0, (const unsigned char *)rgba, wide, tall, format );
 }
 
 //-----------------------------------------------------------------------------
@@ -454,10 +492,64 @@ ITexture *CMatSystemTexture::GetTextureValue( void )
 	if ( !m_pMaterial )
 		return NULL;
 
+	if ( m_pOverrideTexture )
+		return m_pOverrideTexture;
+
 	return m_pTexture;
 }
 
 void CMatSystemTexture::SetSubTextureRGBA( int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall )
+{
+	SetSubTextureRGBAEx( drawX, drawY, rgba, subTextureWide, subTextureTall, IMAGE_FORMAT_RGBA8888 );
+}
+
+void CMatSystemTexture::SetSubTextureRGBAEx( int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat format )
+{
+		ITexture *pTexture = GetTextureValue();
+	if ( !pTexture )
+		return;
+
+	Assert( IsProcedural() );
+	if ( !IsProcedural() )
+		return;
+
+	Assert( drawX < m_iWide );
+	Assert( drawY < m_iTall );
+	Assert( drawX + subTextureWide <= m_iWide );
+	Assert( drawY + subTextureTall <= m_iTall );
+
+	Assert( m_pRegen );
+
+	Assert( rgba );
+
+	Rect_t subRect;
+	subRect.x = drawX;
+	subRect.y = drawY;
+	subRect.width = subTextureWide;
+	subRect.height = subTextureTall;
+
+	Rect_t textureSize;
+	textureSize.x = 0;
+	textureSize.y = 0;
+	textureSize.width = subTextureWide;
+	textureSize.height = subTextureTall;
+
+	
+	m_pRegen->UpdateBackingBits( subRect, rgba, textureSize, format );
+	pTexture->Download( &subRect );
+
+	if ( IsX360() )
+	{	
+		// xboxissue - no need to persist "backing bits", saves memory
+		// the texture (commonly font page) "backing bits" are allocated during UpdateBackingBits() which get blitted
+		// into by procedural regeneration in preparation for download() which then subrect blits
+		// out of and into target texture (d3d upload)
+		// the "backing bits" are then no longer required
+		m_pRegen->DeleteTextureBits();
+	}
+}
+
+void CMatSystemTexture::UpdateSubTextureRGBA( int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat )
 {
 	ITexture *pTexture = GetTextureValue();
 	if ( !pTexture )
@@ -481,8 +573,14 @@ void CMatSystemTexture::SetSubTextureRGBA( int drawX, int drawY, unsigned const 
 	subRect.y = drawY;
 	subRect.width = subTextureWide;
 	subRect.height = subTextureTall;
-	
-	m_pRegen->UpdateBackingBits( subRect, rgba );
+
+	Rect_t textureSize;
+	textureSize.x = 0;
+	textureSize.y = 0;
+	textureSize.width = m_iInputWide;
+	textureSize.height = m_iInputTall;
+
+	m_pRegen->UpdateBackingBits( subRect, rgba, textureSize, imageFormat );
 	pTexture->Download( &subRect );
 
 	if ( IsX360() )
@@ -495,6 +593,8 @@ void CMatSystemTexture::SetSubTextureRGBA( int drawX, int drawY, unsigned const 
 		m_pRegen->DeleteTextureBits();
 	}
 }
+
+
 
 void CMatSystemTexture::SetCRC( CRC32_t val )
 {
@@ -549,7 +649,7 @@ void CMatSystemTexture::SetMaterial( IMaterial *pMaterial )
 	{
 		bool bFound;
 		IMaterialVar *tv = m_pMaterial->FindVar( "$baseTexture", &bFound );
-		if ( bFound )
+		if ( bFound && tv->IsTexture() )
 		{
 			m_pTexture = tv->GetTextureValue();
 			if ( m_pTexture )
@@ -622,6 +722,10 @@ void CMatSystemTexture::SetMaterial( const char *pFileName )
 
 	if ( IsErrorMaterial( pMaterial ) )
 	{
+		if (IsOSX())
+		{
+			printf( "\n ##### Missing Vgui material %s\n", pFileName );
+		}
 		Msg( "--- Missing Vgui material %s\n", pFileName );
 	}
 
@@ -655,12 +759,29 @@ int	CTextureDictionary::CreateTexture( bool procedural /*=false*/ )
 	return idx;
 }
 
+int CTextureDictionary::CreateTextureByTexture( ITexture *pTexture, bool procedural /*= true*/ )
+{
+	int idx = m_Textures.AddToTail();
+	CMatSystemTexture &texture = m_Textures[idx];
+	texture.SetProcedural( procedural );
+	texture.SetId( idx );
+	texture.SetTexture( pTexture );
+
+	return idx;
+}
+
 void CTextureDictionary::DestroyTexture( int id )
 {
+	if ( m_Textures.Count() <= 1 )
+	{
+		// TextureDictionary already destroyed all the textures before this (something destructed late in shutdown)
+		return;
+	}
+
 	if (id != INVALID_TEXTURE_ID)
 	{
 		Assert( id != m_Textures.InvalidIndex() );
-		m_Textures.Remove((unsigned short)id);
+		m_Textures.Remove( (unsigned short)id );
 	}
 }
 
@@ -675,11 +796,10 @@ void CTextureDictionary::DestroyAllTextures()
 
 void CTextureDictionary::SetTextureRGBA( int id, const char* rgba, int wide, int tall )
 {
-
-	SetTextureRGBAEx( id, rgba, wide, tall, IMAGE_FORMAT_RGBA8888 );
+	SetTextureRGBAEx( id, rgba, wide, tall, IMAGE_FORMAT_RGBA8888, false );
 }
 
-void CTextureDictionary::SetTextureRGBAEx( int id, const char* rgba, int wide, int tall, ImageFormat format )
+void CTextureDictionary::SetTextureRGBAEx( int id, const char* rgba, int wide, int tall, ImageFormat format, bool bFixupTextCoordsForDimensions )
 {
 	if (!IsValidId(id))
 	{
@@ -687,10 +807,16 @@ void CTextureDictionary::SetTextureRGBAEx( int id, const char* rgba, int wide, i
 		return;
 	}
 	CMatSystemTexture &texture = m_Textures[id];
-	texture.SetTextureRGBA( rgba, wide, tall, format );
+	texture.SetTextureRGBA( rgba, wide, tall, format, bFixupTextCoordsForDimensions );
 }
 
 void CTextureDictionary::SetSubTextureRGBA( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall )
+{
+	SetSubTextureRGBAEx( id, drawX, drawY, rgba, subTextureWide, subTextureTall, IMAGE_FORMAT_RGBA8888 );
+}
+
+
+void CTextureDictionary::SetSubTextureRGBAEx( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat format )
 {
 	if (!IsValidId(id))
 	{
@@ -699,8 +825,22 @@ void CTextureDictionary::SetSubTextureRGBA( int id, int drawX, int drawY, unsign
 	}
 
 	CMatSystemTexture &texture = m_Textures[id];
-	texture.SetSubTextureRGBA( drawX, drawY, rgba, subTextureWide, subTextureTall );
+	texture.SetSubTextureRGBAEx( drawX, drawY, rgba, subTextureWide, subTextureTall, format );
 }
+
+
+void CTextureDictionary::UpdateSubTextureRGBA( int id, int drawX, int drawY, unsigned const char *rgba, int subTextureWide, int subTextureTall, ImageFormat imageFormat )
+{
+	if (!IsValidId(id))
+	{
+		Msg( "UpdateSubTextureRGBA: Invalid texture id %i\n", id );
+		return;
+	}
+
+	CMatSystemTexture &texture = m_Textures[id];
+	texture.UpdateSubTextureRGBA( drawX, drawY, rgba, subTextureWide, subTextureTall, imageFormat  );
+}
+
 
 //-----------------------------------------------------------------------------
 // Returns true if the id is valid

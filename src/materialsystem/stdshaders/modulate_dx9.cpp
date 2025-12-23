@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -161,6 +161,7 @@ BEGIN_VS_SHADER( Modulate_DX9,
 				if( params[BASETEXTURE]->IsTexture() )
 				{
 					pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			
 					numTexCoords = 1;
 				}
 
@@ -183,6 +184,7 @@ BEGIN_VS_SHADER( Modulate_DX9,
 				pShaderShadow->VertexShaderVertexFormat( flags, numTexCoords, NULL, userDataSize );
 
 				DECLARE_STATIC_VERTEX_SHADER( unlitgeneric_vs20 );
+				SET_STATIC_VERTEX_SHADER_COMBO( VERTEXCOLOR, bVertexColorOrAlpha ? 1 : 0  );
 				SET_STATIC_VERTEX_SHADER( unlitgeneric_vs20 );
 
 				if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
@@ -238,8 +240,8 @@ BEGIN_VS_SHADER( Modulate_DX9,
 				vEyePos_SpecExponent[3] = 0.0f;
 				pShaderAPI->SetPixelShaderConstant( PSREG_EYEPOS_SPEC_EXPONENT, vEyePos_SpecExponent, 1 );
 
-				BOOL bShaderConstants[1] = { false };
-				pShaderAPI->SetBooleanVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_BOOL_CONST_0, bShaderConstants, 1 );
+				float vVertexColor[4] = { bVertexColorOrAlpha ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
+				pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_6, vVertexColor, 1 );
 
 				DECLARE_DYNAMIC_VERTEX_SHADER( unlitgeneric_vs20 );
 				SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG, pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Draws CSPort's death notices
 //
@@ -9,8 +9,8 @@
 #include "hud_macros.h"
 #include "c_playerresource.h"
 #include "iclientmode.h"
-#include <vgui_controls/controls.h>
-#include <vgui_controls/panel.h>
+#include <vgui_controls/Controls.h>
+#include <vgui_controls/Panel.h>
 #include <vgui/ISurface.h>
 #include <vgui/ILocalize.h>
 #include <KeyValues.h>
@@ -26,12 +26,16 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+const int DOMINATION_DRAW_HEIGHT = 20;
+const int DOMINATION_DRAW_WIDTH = 20;
+
 static ConVar hud_deathnotice_time( "hud_deathnotice_time", "6", 0 );
 
 // Player entries in a death notice
 struct DeathNoticePlayer
 {
 	char		szName[MAX_PLAYER_NAME_LENGTH];
+	char		szClan[MAX_CLAN_TAG_LENGTH];
 	int			iEntIndex;
 	Color		color;
 };
@@ -45,6 +49,7 @@ struct DeathNoticeItem
 	int			iSuicide;
 	float		flDisplayTime;
 	bool		bHeadshot;
+	int			iDominationImageId;
 };
 
 //-----------------------------------------------------------------------------
@@ -66,6 +71,9 @@ public:
 	
 	void FireGameEvent( IGameEvent *event );
 
+protected:
+	int SetupHudImageId( const char* fname );
+
 private:
 
 	CPanelAnimationVarAliasType( float, m_flLineHeight, "LineHeight", "15", "proportional_float" );
@@ -82,6 +90,12 @@ private:
 	// Texture for skull symbol
 	CHudTexture		*m_iconD_skull;  
 	CHudTexture		*m_iconD_headshot;  
+
+	int				m_iNemesisImageId;
+	int				m_iDominatedImageId;
+	int				m_iRevengeImageId;
+
+	Color			m_teamColors[TEAM_MAXCOUNT];
 
 	CUtlVector<DeathNoticeItem> m_DeathNotices;
 };
@@ -103,6 +117,21 @@ CHudDeathNotice::CHudDeathNotice( const char *pElementName ) :
 	m_iconD_skull = NULL;
 
 	SetHiddenBits( HIDEHUD_MISCSTATUS );
+
+	m_iNemesisImageId = SetupHudImageId("hud/freeze_nemesis");
+	m_iDominatedImageId = SetupHudImageId("hud/freeze_dominated");
+	m_iRevengeImageId = SetupHudImageId("hud/freeze_revenge");
+}
+
+
+/**
+ * Helper function to get an image id and set 
+ */
+int CHudDeathNotice::SetupHudImageId( const char* fname )
+{
+	int imageId = surface()->CreateNewTextureID();
+	surface()->DrawSetTextureFile( imageId, fname, true, false );
+	return imageId;
 }
 
 //-----------------------------------------------------------------------------
@@ -112,6 +141,11 @@ void CHudDeathNotice::ApplySchemeSettings( IScheme *scheme )
 {
 	BaseClass::ApplySchemeSettings( scheme );
 	SetPaintBackgroundEnabled( false );
+
+	// make team color lookups easier
+	memset(m_teamColors, 0, sizeof(m_teamColors));
+	m_teamColors[TEAM_CT] = m_clrCTText;
+	m_teamColors[TEAM_TERRORIST] = m_clrTerroristText;
 }
 
 //-----------------------------------------------------------------------------
@@ -168,6 +202,9 @@ void CHudDeathNotice::Paint()
 	surface()->DrawSetTextFont( m_hTextFont );
 	surface()->DrawSetTextColor( m_clrCTText );
 
+	int dominationDrawWidth = scheme()->GetProportionalScaledValueEx( GetScheme(), DOMINATION_DRAW_WIDTH );
+	int dominationDrawHeight = scheme()->GetProportionalScaledValueEx( GetScheme(), DOMINATION_DRAW_HEIGHT );
+
 	int iconHeadshotWide;
 	int iconHeadshotTall;
 
@@ -192,12 +229,17 @@ void CHudDeathNotice::Paint()
 
 		wchar_t victim[ 256 ];
 		wchar_t killer[ 256 ];
+		wchar_t victimclan[ 256 ];
+		wchar_t killerclan[ 256 ];
 
 		g_pVGuiLocalize->ConvertANSIToUnicode( m_DeathNotices[i].Victim.szName, victim, sizeof( victim ) );
 		g_pVGuiLocalize->ConvertANSIToUnicode( m_DeathNotices[i].Killer.szName, killer, sizeof( killer ) );
+		g_pVGuiLocalize->ConvertANSIToUnicode( m_DeathNotices[i].Victim.szClan, victimclan, sizeof( victimclan ) );
+		g_pVGuiLocalize->ConvertANSIToUnicode( m_DeathNotices[i].Killer.szClan, killerclan, sizeof( killerclan ) );
 
 		// Get the local position for this notice
-		int len = UTIL_ComputeStringWidth( m_hTextFont, victim );
+		int victimNameLen = UTIL_ComputeStringWidth( m_hTextFont, victim );
+		int victimClanLen = UTIL_ComputeStringWidth( m_hTextFont, victimclan );
 		int y = yStart + (m_flLineHeight * i);
 
 		int iconWide;
@@ -215,42 +257,59 @@ void CHudDeathNotice::Paint()
 			iconTall = (int)( scale * (float)icon->Height() );
 		}
 
-		int x;
+		int x = 0;
 		if ( m_bRightJustify )
 		{
-			x =	GetWide() - len - iconWide;
+			x =	GetWide();
+			x -= victimNameLen;
+			x -= victimClanLen;
+			x -= iconWide;
 
-			if( m_DeathNotices[i].bHeadshot )
-			{
+			if ( m_DeathNotices[i].bHeadshot )
 				x -= iconHeadshotWide;
+
+			if ( !m_DeathNotices[i].iSuicide )
+			{
+				x -= UTIL_ComputeStringWidth( m_hTextFont, killer );
+				x -= UTIL_ComputeStringWidth( m_hTextFont, killerclan );
+			}
+
+			if (m_DeathNotices[i].iDominationImageId >= 0)
+			{				
+				x -= dominationDrawWidth;
 			}
 		}
-		else
-		{
-			x = 0;
+
+		if (m_DeathNotices[i].iDominationImageId >= 0)
+		{			
+			surface()->DrawSetTexture(m_DeathNotices[i].iDominationImageId);
+			surface()->DrawSetColor(m_DeathNotices[i].Killer.color);
+			surface()->DrawTexturedRect( x, y, x + dominationDrawWidth, y + dominationDrawHeight );
+			x += dominationDrawWidth;
 		}
 		
 		// Only draw killers name if it wasn't a suicide
 		if ( !m_DeathNotices[i].iSuicide )
 		{
-			if ( m_bRightJustify )
-			{
-				x -= UTIL_ComputeStringWidth( m_hTextFont, killer );
-			}
-
+			// Draw killer's clan
 			surface()->DrawSetTextColor( m_DeathNotices[i].Killer.color );
+			surface()->DrawSetTextPos( x, y );
+			surface()->DrawSetTextFont( m_hTextFont );
+			surface()->DrawUnicodeString( killerclan );
+			surface()->DrawGetTextPos( x, y );
 
 			// Draw killer's name
+			surface()->DrawSetTextColor( m_DeathNotices[i].Killer.color );
 			surface()->DrawSetTextPos( x, y );
 			surface()->DrawSetTextFont( m_hTextFont );
 			surface()->DrawUnicodeString( killer );
 			surface()->DrawGetTextPos( x, y );
 		}
 
-		Color iconColor( 255, 80, 0, 255 );
 
 		// Draw death weapon
 		//If we're using a font char, this will ignore iconTall and iconWide
+		Color iconColor( 255, 80, 0, 255 );
 		icon->DrawSelf( x, y, iconWide, iconTall, iconColor );
 		x += iconWide;		
 
@@ -260,9 +319,15 @@ void CHudDeathNotice::Paint()
 			x += iconHeadshotWide;
 		}
 
+		// Draw victims clan
 		surface()->DrawSetTextColor( m_DeathNotices[i].Victim.color );
+		surface()->DrawSetTextPos( x, y );
+		surface()->DrawSetTextFont( m_hTextFont );	//reset the font, draw icon can change it
+		surface()->DrawUnicodeString( victimclan );
+		surface()->DrawGetTextPos( x, y );
 
 		// Draw victims name
+		surface()->DrawSetTextColor( m_DeathNotices[i].Victim.color );
 		surface()->DrawSetTextPos( x, y );
 		surface()->DrawSetTextFont( m_hTextFont );	//reset the font, draw icon can change it
 		surface()->DrawUnicodeString( victim );
@@ -296,13 +361,17 @@ void CHudDeathNotice::FireGameEvent( IGameEvent *event )
 	if (!g_PR)
 		return;
 
+	C_CS_PlayerResource *cs_PR = dynamic_cast<C_CS_PlayerResource *>( g_PR );
+	if ( !cs_PR )
+		return;
+
 	if ( hud_deathnotice_time.GetFloat() == 0 )
 		return;
 
 	// the event should be "player_death"
 	
-	int killer = engine->GetPlayerForUserID( event->GetInt("attacker") );
-	int victim = engine->GetPlayerForUserID( event->GetInt("userid") );
+	int iKiller = engine->GetPlayerForUserID( event->GetInt("attacker") );
+	int iVictim = engine->GetPlayerForUserID( event->GetInt("userid") );
 	const char *killedwith = event->GetString( "weapon" );
 	bool headshot = event->GetInt( "headshot" ) > 0;
 
@@ -325,25 +394,49 @@ void CHudDeathNotice::FireGameEvent( IGameEvent *event )
 	}
 
 	// Get the names of the players
-	const char *killer_name = g_PR->GetPlayerName( killer );
-	const char *victim_name = g_PR->GetPlayerName( victim );
+	const char *killer_name = iKiller > 0 ? g_PR->GetPlayerName( iKiller ) : NULL;
+	const char *victim_name = iVictim > 0 ? g_PR->GetPlayerName( iVictim ) : NULL;
 
 	if ( !killer_name )
 		killer_name = "";
 	if ( !victim_name )
 		victim_name = "";
 
+	// Get the clan tags of the players
+	const char *killer_clan = iKiller > 0 ? cs_PR->GetClanTag( iKiller ) : NULL;
+	const char *victim_clan = iVictim > 0 ? cs_PR->GetClanTag( iVictim ) : NULL;
+
+	if ( !killer_clan )
+		killer_clan = "";
+	if ( !victim_clan )
+		victim_clan = "";
+
 	// Make a new death notice
 	DeathNoticeItem deathMsg;
-	deathMsg.Killer.iEntIndex = killer;
-	deathMsg.Victim.iEntIndex = victim;
-	deathMsg.Killer.color = ( g_PR->GetTeam( killer ) == TEAM_CT ) ? m_clrCTText : m_clrTerroristText;
-	deathMsg.Victim.color = ( g_PR->GetTeam( victim ) == TEAM_CT ) ? m_clrCTText : m_clrTerroristText;
+	deathMsg.Killer.iEntIndex = iKiller;
+	deathMsg.Victim.iEntIndex = iVictim;
+	deathMsg.Killer.color = iKiller > 0 ? m_teamColors[g_PR->GetTeam(iKiller)] : COLOR_WHITE;
+	deathMsg.Victim.color = iVictim > 0 ? m_teamColors[g_PR->GetTeam(iVictim)] : COLOR_WHITE;
+	Q_snprintf( deathMsg.Killer.szClan, sizeof( deathMsg.Killer.szClan ), "%s ", killer_clan );
+	Q_snprintf( deathMsg.Victim.szClan, sizeof( deathMsg.Victim.szClan ), "%s ", victim_clan );
 	Q_strncpy( deathMsg.Killer.szName, killer_name, MAX_PLAYER_NAME_LENGTH );
 	Q_strncpy( deathMsg.Victim.szName, victim_name, MAX_PLAYER_NAME_LENGTH );
 	deathMsg.flDisplayTime = gpGlobals->curtime + hud_deathnotice_time.GetFloat();
-	deathMsg.iSuicide = ( !killer || killer == victim );
+	deathMsg.iSuicide = ( !iKiller || iKiller == iVictim );
 	deathMsg.bHeadshot = headshot;
+	deathMsg.iDominationImageId = -1;
+
+	CCSPlayer* pKiller = ToCSPlayer(ClientEntityList().GetBaseEntity(iKiller));
+
+	// the local player is dead, see if this is a new nemesis or a revenge
+	if ( event->GetInt( "dominated" ) > 0 || (pKiller != NULL && pKiller->IsPlayerDominated(iVictim)) )
+	{
+		deathMsg.iDominationImageId = m_iDominatedImageId;
+	}
+	else if ( event->GetInt( "revenge" ) > 0 )
+	{
+		deathMsg.iDominationImageId = m_iRevengeImageId;
+	}
 
 	// Try and find the death identifier in the icon list
 	deathMsg.iconDeath = gHUD.GetIcon( fullkilledwith );

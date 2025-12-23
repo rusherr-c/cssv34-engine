@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2007, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: particle system code
 //
@@ -30,6 +30,85 @@
 #include "tier0/memdbgon.h"
 
 
+
+
+// rename table from the great rename 
+static const char *s_RemapOperatorNameTable[]={
+	"alpha_fade", "Alpha Fade and Decay",
+	"alpha_fade_in_random", "Alpha Fade In Random",
+	"alpha_fade_out_random", "Alpha Fade Out Random",
+	"basic_movement", "Movement Basic",
+	"color_fade", "Color Fade",
+	"controlpoint_light", "Color Light From Control Point",
+	"Dampen Movement Relative to Control Point", "Movement Dampen Relative to Control Point",
+	"Distance Between Control Points Scale", "Remap Distance Between Two Control Points to Scalar",
+	"Distance to Control Points Scale", "Remap Distance to Control Point to Scalar",
+	"lifespan_decay", "Lifespan Decay",
+	"lock to bone",	"Movement Lock to Bone",
+	"postion_lock_to_controlpoint", "Movement Lock to Control Point",
+	"maintain position along path", "Movement Maintain Position Along Path",
+	"Match Particle Velocities", "Movement Match Particle Velocities",
+	"Max Velocity", "Movement Max Velocity",
+	"noise", "Noise Scalar",
+	"vector noise", "Noise Vector",
+	"oscillate_scalar", "Oscillate Scalar",
+	"oscillate_vector", "Oscillate Vector",
+	"Orient Rotation to 2D Direction", "Rotation Orient to 2D Direction",
+	"radius_scale", "Radius Scale",
+	"Random Cull", "Cull Random",
+	"remap_scalar", "Remap Scalar",
+	"rotation_movement", "Rotation Basic",
+	"rotation_spin", "Rotation Spin Roll",
+	"rotation_spin yaw", "Rotation Spin Yaw",
+	"alpha_random", "Alpha Random",
+	"color_random", "Color Random",
+	"create from parent particles", "Position From Parent Particles",
+	"Create In Hierarchy", "Position In CP Hierarchy",
+	"random position along path", "Position Along Path Random",
+	"random position on model", "Position on Model Random",
+	"sequential position along path", "Position Along Path Sequential",
+	"position_offset_random", "Position Modify Offset Random",
+	"position_warp_random", "Position Modify Warp Random",
+	"position_within_box", "Position Within Box Random",
+	"position_within_sphere", "Position Within Sphere Random",
+	"Inherit Velocity", "Velocity Inherit from Control Point",
+	"Initial Repulsion Velocity", "Velocity Repulse from World",
+	"Initial Velocity Noise", "Velocity Noise",
+	"Initial Scalar Noise", "Remap Noise to Scalar",
+	"Lifespan from distance to world", "Lifetime from Time to Impact",
+	"Pre-Age Noise", "Lifetime Pre-Age Noise",
+	"lifetime_random", "Lifetime Random",
+	"radius_random", "Radius Random",
+	"random yaw", "Rotation Yaw Random",
+	"Randomly Flip Yaw", "Rotation Yaw Flip Random",
+	"rotation_random", "Rotation Random",
+	"rotation_speed_random", "Rotation Speed Random",
+	"sequence_random", "Sequence Random",
+	"second_sequence_random", "Sequence Two Random",
+	"trail_length_random", "Trail Length Random",
+	"velocity_random", "Velocity Random",
+};
+
+static char const *RemapOperatorName( char const *pOpName )
+{
+	for( int i = 0 ; i < ARRAYSIZE( s_RemapOperatorNameTable ) ; i += 2 )
+	{
+		if ( Q_stricmp( pOpName, s_RemapOperatorNameTable[i] ) == 0 )
+		{
+			return s_RemapOperatorNameTable[i + 1 ];
+		}
+	}
+	return pOpName;
+}
+
+
+// This is the soft limit - if we exceed this, we spit out a report of all the particles in the frame
+#define MAX_PARTICLE_VERTS	50000
+// These are some limits that control g_pParticleSystemMgr->ParticleThrottleScaling() and g_pParticleSystemMgr->ParticleThrottleRandomEnable()
+//ConVar cl_particle_scale_lower ( "cl_particle_scale_lower", "20000", FCVAR_CLIENTDLL | FCVAR_CHEAT );
+//ConVar cl_particle_scale_upper ( "cl_particle_scale_upper", "40000", FCVAR_CLIENTDLL | FCVAR_CHEAT );
+#define CL_PARTICLE_SCALE_LOWER 20000
+#define CL_PARTICLE_SCALE_UPPER 40000
 
 
 //-----------------------------------------------------------------------------
@@ -216,6 +295,7 @@ public:
 	}
 	virtual ParticleOperatorId_t GetId() const { return OPERATOR_GENERIC; }
 	virtual bool IsObsolete() const { return false; }
+	virtual size_t GetClassSize() const { return 0; }
 };
 
 static CChildOperatorDefinition s_ChildOperatorDefinition;
@@ -255,6 +335,7 @@ BEGIN_DMXELEMENT_UNPACK( CParticleSystemDefinition )
 	DMXELEMENT_UNPACK_FIELD( "control point to disable rendering if it is the camera", "-1", int, m_nSkipRenderControlPoint )
 	DMXELEMENT_UNPACK_FIELD( "maximum draw distance", "100000.0", float, m_flMaxDrawDistance )
 	DMXELEMENT_UNPACK_FIELD( "time to sleep when not drawn", "8", float, m_flNoDrawTimeToGoToSleep )
+	DMXELEMENT_UNPACK_FIELD( "Sort particles", "1", bool, m_bShouldSort )
 	DMXELEMENT_UNPACK_FIELD( "batch particle systems", "0", bool, m_bShouldBatch )
 	DMXELEMENT_UNPACK_FIELD( "view model effect", "0", bool, m_bViewModelEffect )
 END_DMXELEMENT_UNPACK( CParticleSystemDefinition, s_pParticleSystemDefinitionUnpack )
@@ -356,11 +437,10 @@ void CParticleSystemDefinition::Uncache()
 //-----------------------------------------------------------------------------
 // Has this been precached?
 //-----------------------------------------------------------------------------
-bool CParticleSystemDefinition::IsPrecached()
+bool CParticleSystemDefinition::IsPrecached() const
 {
 	return m_bIsPrecached;
 }
-
 
 //-----------------------------------------------------------------------------
 // Helper methods to help with unserialization
@@ -375,21 +455,17 @@ void CParticleSystemDefinition::ParseOperators(
 		return;
 
 	const CUtlVector<IParticleOperatorDefinition *> &flist = g_pParticleSystemMgr->GetAvailableParticleOperatorList( nFunctionType );
-	
-	const CUtlVector< CDmxElement* >& ops = pAttribute->GetArray<CDmxElement*>( );
 
-	for( int j = 0; j < flist.Count(); ++j )
-	{
-#if 0
-		FILE * f = fopen("log_particles.txt", "a");
-		fprintf(f, "Particle: %s\n", flist[j]->GetName());
-		fclose(f);
-#endif
-	}
+	const CUtlVector< CDmxElement* >& ops = pAttribute->GetArray<CDmxElement*>( );
 	int nCount = ops.Count();
 	for ( int i = 0; i < nCount; ++i )
 	{
-		const char *pOpName = ops[i]->GetValueString( "functionName" );
+		const char *pOrigName = ops[i]->GetValueString( "functionName" );
+		char const *pOpName = RemapOperatorName( pOrigName );
+		if ( pOpName != pOrigName )
+		{
+			pElement->SetValue( "functionName", pOpName );
+		}
 		bool bFound = false;
 		int nFunctionCount = flist.Count();
 		for( int j = 0; j < nFunctionCount; ++j )
@@ -404,7 +480,7 @@ void CParticleSystemDefinition::ParseOperators(
 			const DmxElementUnpackStructure_t *pUnpack = flist[j]->GetUnpackStructure();
 			if ( pUnpack )
 			{
-				ops[i]->UnpackIntoStructure( pNewRef, pUnpack );
+				ops[i]->UnpackIntoStructure( pNewRef, flist[j]->GetClassSize(), pUnpack );
 			}
 			pNewRef->InitParams( this, pElement );
 			m_nAttributeReadMask |= pNewRef->GetReadAttributes();
@@ -459,7 +535,7 @@ void CParticleSystemDefinition::ParseChildren( CDmxElement *pElement )
 			continue;
 
 		int j = m_Children.AddToTail();
-		children[i]->UnpackIntoStructure( &m_Children[j], s_ChildrenInfoUnpack );
+		children[i]->UnpackIntoStructure( &m_Children[j], sizeof( m_Children[j] ), s_ChildrenInfoUnpack );
 		m_Children[j].m_bUseNameBasedLookup = !pChild->GetValue<bool>( "preventNameBasedLookup" );
 		if ( m_Children[j].m_bUseNameBasedLookup )
 		{
@@ -480,7 +556,7 @@ void CParticleSystemDefinition::Read( CDmxElement *pElement )
 {
 	m_Name = pElement->GetName();
 	CopyUniqueId( pElement->GetId(), &m_Id );
-	pElement->UnpackIntoStructure( this, s_pParticleSystemDefinitionUnpack );
+	pElement->UnpackIntoStructure( this, sizeof( *this ), s_pParticleSystemDefinitionUnpack );
 
 #ifndef SWDS												// avoid material/ texture load
 // NOTE: This makes a X appear for uncached particles.
@@ -512,7 +588,7 @@ void CParticleSystemDefinition::Read( CDmxElement *pElement )
 	SetupContextData();
 }
 
-IMaterial *CParticleSystemDefinition::GetMaterial()
+IMaterial *CParticleSystemDefinition::GetMaterial() const
 {
 	// NOTE: This has to be this way to ensure we don't load every freaking material @ startup
 	Assert( IsPrecached() );
@@ -699,6 +775,13 @@ void CParticleOperatorInstance::InitNewParticles( CParticleCollection *pParticle
 	if ( !nParticleCount )
 		return;
 
+	if ( nParticleCount < 16 )								// don't bother with vectorizing
+															// unless enough particles to bother
+	{
+		InitNewParticlesScalar( pParticles, nFirstParticle, nParticleCount, nAttributeWriteMask, pContext );
+		return;
+	}
+	
 	int nHead = nFirstParticle & 3;
 	if ( nHead )
 	{
@@ -807,6 +890,7 @@ CParticleCollection::CParticleCollection( )
 	m_bIsRunningOperators = false;
 	m_bIsTranslucent = false;
 	m_bIsTwoPass = false;
+	m_bIsBatchable = false;
 	m_bUsesPowerOfTwoFrameBufferTexture = false;
 	m_bUsesFullFrameBufferTexture = false;
 	m_pRenderOp = NULL;
@@ -853,13 +937,16 @@ CParticleCollection::CParticleCollection( )
 	m_nMaxAllowedParticles = 0;
 	m_bDormant = false;
 	m_bEmissionStopped = false;
+	m_bRequiresOrderInvariance = false;
+	m_nSimulatedFrames = 0;
 
 	m_nNumParticlesToKill = 0;
 	m_pParticleKillList = NULL;
 	m_nHighestCP = 0;
 	memset( m_pCollisionCacheData, 0, sizeof( m_pCollisionCacheData ) );
 	m_pParent = NULL;
-
+	m_LocalLighting = Color(255, 255, 255, 255);
+	m_LocalLightingCP = -1;
 	
 }
 
@@ -941,6 +1028,7 @@ void CParticleCollection::Init( CParticleSystemDefinition *pDef, float flDelay, 
 	SetAttributeToConstant( PARTICLE_ATTRIBUTE_TRAIL_LENGTH, 0.1f );
 	SetAttributeToConstant( PARTICLE_ATTRIBUTE_PARTICLE_ID, 0 );
 	SetAttributeToConstant( PARTICLE_ATTRIBUTE_YAW, 0 );
+	SetAttributeToConstant( PARTICLE_ATTRIBUTE_ALPHA2, 1.0f );
 
 	// Offset the child in time
 	m_flCurTime = -flDelay;
@@ -1007,11 +1095,16 @@ void CParticleCollection::Init( CParticleSystemDefinition *pDef, float flDelay, 
 		}
 	}
 
+	if ( !IsValid() )
+		return;
+
 	m_bIsTranslucent = ComputeIsTranslucent();
 	m_bIsTwoPass = ComputeIsTwoPass();
+	m_bIsBatchable = ComputeIsBatchable();
 	LabelTextureUsage();
 	m_bAnyUsesPowerOfTwoFrameBufferTexture = ComputeUsesPowerOfTwoFrameBufferTexture();
 	m_bAnyUsesFullFrameBufferTexture = ComputeUsesFullFrameBufferTexture();
+	m_bRequiresOrderInvariance = ComputeRequiresOrderInvariance();
 }
 
 
@@ -1107,6 +1200,40 @@ void CParticleCollection::UnlinkFromDefList( )
 #endif
 }
 
+//-----------------------------------------------------------------------------
+// Determine if this particle has moved since the last time it was simulated, 
+// which will let us know if the bbox needs to be updated.
+//-----------------------------------------------------------------------------
+bool CParticleCollection::HasMoved() const
+{
+	// It's weird that this is possible, but it apparently is (see the many other functions that 
+	// check).
+	if ( !m_pDef )
+		return false;
+
+	Vector prevCP;
+	for ( int i = 0; i <= m_nHighestCP; ++i )
+	{
+		if ( !m_pDef->ReadsControlPoint( i ) )
+			continue;
+
+		GetControlPointAtPrevTime( i, &prevCP );
+		if ( prevCP != GetControlPointAtCurrentTime( i ) )
+		{
+			return true;
+		}
+	}
+
+	for ( CParticleCollection *child = m_Children.m_pHead; child; child = child->m_pNext )
+	{
+		if ( child->HasMoved() )
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
 
 //-----------------------------------------------------------------------------
 // Particle memory initialization
@@ -1122,7 +1249,11 @@ void CParticleCollection::InitStorage( CParticleSystemDefinition *pDef )
 						 
 	// Align allocation for constant attributes to 16 byte boundaries
 	m_pConstantMemory =	new unsigned char[nConstantMemorySize];
-	m_pConstantAttributes = (float*)( (size_t)m_pConstantMemory + 15 & ~0xF );
+	m_pConstantAttributes = (float*)( (size_t)( m_pConstantMemory + 15 ) & ~0xF );
+
+	// We have to zero-init the memory so that any attributes that are not initialized
+	// get predictable and sensible values.
+	memset( m_pConstantMemory, 0, nConstantMemorySize );
 
 	m_nPerParticleInitializedAttributeMask = pDef->m_nPerParticleInitializedAttributeMask;
 	m_nPerParticleUpdatedAttributeMask = pDef->m_nPerParticleUpdatedAttributeMask;
@@ -1167,8 +1298,8 @@ void CParticleCollection::InitStorage( CParticleSystemDefinition *pDef )
 	}
 
 	// Align allocation to 16-byte boundaries
-	float *pMem = (float*)( (size_t)m_pParticleMemory + 15 & ~0xF );
-	float *pInitialMem = (float*)( (size_t)m_pParticleInitialMemory + 15 & ~0xF );
+	float *pMem = (float*)( (size_t)( m_pParticleMemory + 15 ) & ~0xF );
+	float *pInitialMem = (float*)( (size_t)( m_pParticleInitialMemory + 15 ) & ~0xF );
 
 	// Point each attribute to memory associated with that attribute
 	for( int bit = 0; bit < MAX_PARTICLE_ATTRIBUTES; bit++ )
@@ -1381,6 +1512,51 @@ bool CParticleCollection::ComputeIsTranslucent()
 	return false;
 }
 
+//-----------------------------------------------------------------------------
+// Is the particle system batchable
+//-----------------------------------------------------------------------------
+bool CParticleCollection::IsBatchable() const
+{
+	return m_bIsBatchable;
+}
+
+bool CParticleCollection::ComputeIsBatchable()
+{
+	int nRendererCount = GetRendererCount();
+	for( int i = 0; i < nRendererCount; i++ )
+	{
+		if ( !GetRenderer( i )->IsBatchable() )
+			return false;
+	}
+
+	for( CParticleCollection *p = m_Children.m_pHead; p; p = p->m_pNext )
+	{
+		if ( !p->IsBatchable() )
+			return false;
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------
+// Does this system require order invariance of the particles?
+//-----------------------------------------------------------------------------
+bool CParticleCollection::ComputeRequiresOrderInvariance()
+{
+	const int nRendererCount = GetRendererCount();
+	for( int i = 0; i < nRendererCount; i++ )
+	{
+		if ( GetRenderer( i )->RequiresOrderInvariance() )
+			return true;
+	}
+
+	for (CParticleCollection *p = m_Children.m_pHead; p; p = p->m_pNext)
+	{
+		if ( p->m_bRequiresOrderInvariance )
+			return true;
+	}
+
+	return false;
+}
 
 //-----------------------------------------------------------------------------
 // Renderer iteration
@@ -1498,7 +1674,7 @@ void CParticleCollection::Render( IMatRenderContext *pRenderContext, bool bTrans
 	if ( !IsValid() )
 		return;
 
-	m_flNextSleepTime = max ( m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + m_pDef->m_flNoDrawTimeToGoToSleep ));
+	m_flNextSleepTime = Max ( m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + m_pDef->m_flNoDrawTimeToGoToSleep ));
 
 	if ( m_nActiveParticles != 0 )
 	{
@@ -1508,8 +1684,21 @@ void CParticleCollection::Render( IMatRenderContext *pRenderContext, bool bTrans
 			for( int i = 0; i < nCount; i++ )
 			{
 				if ( CheckIfOperatorShouldRun( m_pDef->m_Renderers[i] ) )
+				{
+// 					pRenderContext->MatrixMode( MATERIAL_VIEW );
+// 					pRenderContext->PushMatrix();
+// 					pRenderContext->LoadIdentity();
+// 					pRenderContext->MatrixMode( MATERIAL_PROJECTION );
+// 					pRenderContext->PushMatrix();
+// 					pRenderContext->LoadIdentity();
+// 					pRenderContext->Ortho( -100, -100, 100, 100, -100, 100 );
 					m_pDef->m_Renderers[i]->Render(
 						pRenderContext, this, m_pOperatorContextData + m_pDef->m_nRenderersCtxOffsets[i] );
+// 					pRenderContext->MatrixMode( MATERIAL_VIEW );
+// 					pRenderContext->PopMatrix();
+// 					pRenderContext->MatrixMode( MATERIAL_PROJECTION );
+// 					pRenderContext->PopMatrix();
+				}
 			}
 		}
 	}
@@ -1564,16 +1753,7 @@ void CParticleCollection::UpdatePrevControlPoints( float dt )
 
 void CParticleCollection::InitializeNewParticles( int nFirstParticle, int nParticleCount, uint32 nInittedMask )
 {
-	if ( m_bIsScrubbable && nParticleCount > 1 )
-	{
-		// In order to get the same random number ordering,
-		// scrubbable particles must fully initialize 1 particle at a time
-		for ( int j = 0; j < nParticleCount; ++j )
-		{
-			InitializeNewParticles( nFirstParticle + j, 1, nInittedMask );
-		}
-		return;
-	}
+	VPROF_BUDGET( "CParticleCollection::InitializeNewParticles", VPROF_BUDGETGROUP_PARTICLE_SIMULATION );
 
 #ifdef _DEBUG
 	m_bIsRunningInitializers = true;
@@ -1585,28 +1765,51 @@ void CParticleCollection::InitializeNewParticles( int nFirstParticle, int nParti
 	int nInitializerCount = m_pDef->m_Initializers.Count();
 	for ( int i = 0; i < nInitializerCount; i++ )
 	{
-		int nInitializerAttrMask = m_pDef->m_Initializers[i]->GetWrittenAttributes();
-		if ( ( nInitializerAttrMask & nAttrsLeftToInit ) && !m_pDef->m_Initializers[i]->InitMultipleOverride() )
+		CParticleOperatorInstance *pOp = m_pDef->m_Initializers[i];
+		int nInitializerAttrMask = pOp->GetWrittenAttributes();
+		if ( ( ( nInitializerAttrMask & nAttrsLeftToInit ) == 0 ) || pOp->InitMultipleOverride() )
+			continue;
+
+		void *pContext = m_pOperatorContextData + m_pDef->m_nInitializersCtxOffsets[i];
+		START_OP;
+		if ( m_bIsScrubbable && !pOp->IsScrubSafe() )
 		{
-			CParticleOperatorInstance *pOp = m_pDef->m_Initializers[i];
-			START_OP;
-			pOp->InitNewParticles( this, nFirstParticle, nParticleCount, nAttrsLeftToInit, m_pOperatorContextData + m_pDef->m_nInitializersCtxOffsets[i] );
-			END_OP;
-			nAttrsLeftToInit &= ~nInitializerAttrMask;
+			for ( int j = 0; j < nParticleCount; ++j )
+			{
+				pOp->InitNewParticles( this, nFirstParticle + j, 1, nAttrsLeftToInit, pContext );
+			}
 		}
+		else
+		{
+			pOp->InitNewParticles( this, nFirstParticle, nParticleCount, nAttrsLeftToInit, pContext );
+		}
+		END_OP;
+		nAttrsLeftToInit &= ~nInitializerAttrMask;
 	}
+
 	// always run second tier initializers (modifiers) after first tier - this ensures they don't get stomped.
 	for ( int i = 0; i < nInitializerCount; i++ )
 	{
 		int nInitializerAttrMask = m_pDef->m_Initializers[i]->GetWrittenAttributes();
-		if ( m_pDef->m_Initializers[i]->InitMultipleOverride() )
+		CParticleOperatorInstance *pOp = m_pDef->m_Initializers[i];
+		if ( !pOp->InitMultipleOverride() )
+			continue;
+
+		void *pContext = m_pOperatorContextData + m_pDef->m_nInitializersCtxOffsets[i];
+		START_OP;
+		if ( m_bIsScrubbable && !pOp->IsScrubSafe() )
 		{
-			CParticleOperatorInstance *pOp = m_pDef->m_Initializers[i];
-			START_OP;
-			pOp->InitNewParticles( this, nFirstParticle, nParticleCount, nAttrsLeftToInit, m_pOperatorContextData + m_pDef->m_nInitializersCtxOffsets[i] );
-			END_OP;
-			nAttrsLeftToInit &= ~nInitializerAttrMask;
+			for ( int j = 0; j < nParticleCount; ++j )
+			{
+				pOp->InitNewParticles( this, nFirstParticle + j, 1, nAttrsLeftToInit, pContext );
+			}
 		}
+		else
+		{
+			pOp->InitNewParticles( this, nFirstParticle, nParticleCount, nAttrsLeftToInit, pContext );
+		}
+		END_OP;
+		nAttrsLeftToInit &= ~nInitializerAttrMask;
 	}
 
 #ifdef _DEBUG
@@ -1655,9 +1858,16 @@ static void CHECKSYSTEM( CParticleCollection *pParticles )
 	for ( int i = 0; i < pParticles->m_nActiveParticles; ++i )
 	{
 		const float *xyz = pParticles->GetFloatAttributePtr( PARTICLE_ATTRIBUTE_XYZ, i );
-		const float *rad = pParticles->GetFloatAttributePtr( PARTICLE_ATTRIBUTE_RADIUS, i );
 		const float *xyz_prev = pParticles->GetFloatAttributePtr( PARTICLE_ATTRIBUTE_PREV_XYZ, i );
+/*		
+		const float *rad = pParticles->GetFloatAttributePtr( PARTICLE_ATTRIBUTE_RADIUS, i );
 		Assert( IsFinite( rad[0] ) );
+
+		RJ: Disabling this assert.  While the proper way is to fix the math which leads to the bad number, the fix would result in more particles being drawn and in a post shipping world, users were not happy.
+		See Changelists #1368648, #1368635, and #1368434 for proper math calculation fixes.
+
+		In a post shipping world, as these particles would not render with infinites, code was added C_OP_RenderSprites::RenderSpriteCard() to check for the infinite and not add the vert to meshbuilder.
+*/
 		Assert( IsFinite( xyz[0] ) );
 		Assert( IsFinite( xyz[4] ) );
 		Assert( IsFinite( xyz[8] ) );
@@ -1672,6 +1882,7 @@ void CParticleCollection::SimulateFirstFrame( )
 {
 	m_flDt = 0.0f;
 	m_nDrawnFrames = 0;
+	m_nSimulatedFrames = 1;
 
 	// For the first frame, copy over the initial control points
 	if ( ( m_nParticleFlags & PCFLAGS_PREV_CONTROL_POINTS_INITIALIZED ) == 0 )
@@ -1707,7 +1918,7 @@ void CParticleCollection::SimulateFirstFrame( )
 
 
 
-void CParticleCollection::Simulate( float dt )
+void CParticleCollection::Simulate( float dt, bool updateBboxOnly )
 {
 	VPROF_BUDGET( "CParticleCollection::Simulate", VPROF_BUDGETGROUP_PARTICLE_SIMULATION );
 	if ( dt < 0.0f )
@@ -1745,101 +1956,56 @@ void CParticleCollection::Simulate( float dt )
 #endif
 
 	bool bAttachedKillList = false;
-	
-	if ( ! HasAttachedKillList() )
+
+	if (!HasAttachedKillList())
 	{
-		g_pParticleSystemMgr->AttachKillList( this );
+		g_pParticleSystemMgr->AttachKillList(this);
 		bAttachedKillList = true;
 	}
-	
-	float flRemainingDt = dt;
-	float flMaxDT = 0.1;									// default
-	if ( m_pDef->m_flMaximumTimeStep > 0.0 )
-		flMaxDT = m_pDef->m_flMaximumTimeStep;
 
-	// Limit timestep if needed (prevents short lived particles from being created and destroyed before being rendered.
-	//if ( m_pDef->m_flMaximumSimTime != 0.0 && !m_bHasDrawnOnce )
-	if ( m_pDef->m_flMaximumSimTime != 0.0 && ( m_nDrawnFrames <= m_pDef->m_nMinimumFrames ) )
+	if (!updateBboxOnly)
 	{
-		if ( ( flRemainingDt + m_flCurTime ) > m_pDef->m_flMaximumSimTime )
-		{
-			//if delta+current > checkpoint then delta = checkpoint - current
-			flRemainingDt = m_pDef->m_flMaximumSimTime - m_flCurTime;
-			flRemainingDt = max( m_pDef->m_flMinimumSimTime, flRemainingDt );
-		}
-		m_nDrawnFrames += 1;
-	}
+		++m_nSimulatedFrames;
 
-	flRemainingDt = min( flRemainingDt, 10 * flMaxDT );	// no more than 10 passes ever
+		float flRemainingDt = dt;
+		float flMaxDT = 0.1;									// default
+		if ( m_pDef->m_flMaximumTimeStep > 0.0 )
+			flMaxDT = m_pDef->m_flMaximumTimeStep;
 
-	while( flRemainingDt > 0.0 )
-	{
-		float flDT_ThisStep = min( flRemainingDt, flMaxDT );
-		flRemainingDt -= flDT_ThisStep;
-		m_flDt = flDT_ThisStep;
-		m_flCurTime += flDT_ThisStep;
-		m_fl4CurTime = ReplicateX4( m_flCurTime );
-		
-#ifdef _DEBUG
-		m_bIsRunningOperators = true;
-#endif
-		
-		m_nOperatorRandomSampleOffset = 0;
-		int nCount = m_pDef->m_Operators.Count();
-		for( int i = 0; i < nCount; i++ )
+		// Limit timestep if needed (prevents short lived particles from being created and destroyed before being rendered.
+		//if ( m_pDef->m_flMaximumSimTime != 0.0 && !m_bHasDrawnOnce )
+		if ( m_pDef->m_flMaximumSimTime != 0.0 && ( m_nDrawnFrames <= m_pDef->m_nMinimumFrames ) )
 		{
-			float flStrength;
-			CParticleOperatorInstance *pOp = m_pDef->m_Operators[i];
-			if ( pOp->ShouldRunBeforeEmitters() &&
-				 CheckIfOperatorShouldRun( pOp, &flStrength ) )
+			if ( ( flRemainingDt + m_flCurTime ) > m_pDef->m_flMaximumSimTime )
 			{
-				START_OP;
-				pOp->Operate( this, flStrength, m_pOperatorContextData + m_pDef->m_nOperatorsCtxOffsets[i] );
-				END_OP;
-				CHECKSYSTEM( this );
-				if ( m_nNumParticlesToKill )
-				{
-					ApplyKillList();
-				}
-				m_nOperatorRandomSampleOffset += 17;
+				//if delta+current > checkpoint then delta = checkpoint - current
+				flRemainingDt = m_pDef->m_flMaximumSimTime - m_flCurTime;
+				flRemainingDt = max( m_pDef->m_flMinimumSimTime, flRemainingDt );
 			}
+			m_nDrawnFrames += 1;
 		}
-#ifdef _DEBUG
-		m_bIsRunningOperators = false;
-#endif
 
+		flRemainingDt = min( flRemainingDt, 10 * flMaxDT );	// no more than 10 passes ever
 
-		int nEmitterCount = m_pDef->m_Emitters.Count();
-		for( int i=0; i < nEmitterCount; i++ )
+		while( flRemainingDt > 0.0 )
 		{
-			int nOldParticleCount = m_nActiveParticles;
-			float flEmitStrength;
-			if ( CheckIfOperatorShouldRun( m_pDef->m_Emitters[i], &flEmitStrength ) )
-			{
-				uint32 nInittedMask = m_pDef->m_Emitters[i]->Emit( 
-					this, flEmitStrength, 
-					m_pOperatorContextData + m_pDef->m_nEmittersCtxOffsets[i] );
-				if ( nOldParticleCount != m_nActiveParticles )
-				{
-					// init newly emitted particles
-					InitializeNewParticles( nOldParticleCount, m_nActiveParticles - nOldParticleCount, nInittedMask );
-					CHECKSYSTEM( this );
-				}
-			}
-		}
+			float flDT_ThisStep = min( flRemainingDt, flMaxDT );
+			flRemainingDt -= flDT_ThisStep;
+			m_flDt = flDT_ThisStep;
+			m_flCurTime += flDT_ThisStep;
+			m_fl4CurTime = ReplicateX4( m_flCurTime );
 		
 #ifdef _DEBUG
-		m_bIsRunningOperators = true;
+			m_bIsRunningOperators = true;
 #endif
 		
-		m_nOperatorRandomSampleOffset = 0;
-		nCount = m_pDef->m_Operators.Count();
-		if ( m_nActiveParticles )
+			m_nOperatorRandomSampleOffset = 0;
+			int nCount = m_pDef->m_Operators.Count();
 			for( int i = 0; i < nCount; i++ )
 			{
 				float flStrength;
 				CParticleOperatorInstance *pOp = m_pDef->m_Operators[i];
-				if ( (!  pOp->ShouldRunBeforeEmitters() ) &&
+				if ( pOp->ShouldRunBeforeEmitters() &&
 					 CheckIfOperatorShouldRun( pOp, &flStrength ) )
 				{
 					START_OP;
@@ -1849,41 +2015,103 @@ void CParticleCollection::Simulate( float dt )
 					if ( m_nNumParticlesToKill )
 					{
 						ApplyKillList();
-						if ( ! m_nActiveParticles )
-							break;								// don't run any more operators
 					}
 					m_nOperatorRandomSampleOffset += 17;
 				}
 			}
 #ifdef _DEBUG
-		m_bIsRunningOperators = false;
+			m_bIsRunningOperators = false;
+#endif
+
+
+			int nEmitterCount = m_pDef->m_Emitters.Count();
+			for( int i=0; i < nEmitterCount; i++ )
+			{
+				int nOldParticleCount = m_nActiveParticles;
+				float flEmitStrength;
+				if ( CheckIfOperatorShouldRun( m_pDef->m_Emitters[i], &flEmitStrength ) )
+				{
+					uint32 nInittedMask = m_pDef->m_Emitters[i]->Emit( 
+						this, flEmitStrength, 
+						m_pOperatorContextData + m_pDef->m_nEmittersCtxOffsets[i] );
+					if ( nOldParticleCount != m_nActiveParticles )
+					{
+						// init newly emitted particles
+						InitializeNewParticles( nOldParticleCount, m_nActiveParticles - nOldParticleCount, nInittedMask );
+						CHECKSYSTEM( this );
+					}
+				}
+			}
+		
+			m_nOperatorRandomSampleOffset = 0;
+			nCount = m_pDef->m_Operators.Count();
+			if ( m_nActiveParticles )
+			{
+#ifdef FP_EXCEPTIONS_ENABLED
+				const int processedParticles = m_nPaddedActiveParticles * 4;
+				for ( int unusedParticle = m_nActiveParticles; unusedParticle < processedParticles; ++unusedParticle )
+				{
+					// Set the unused-but-processed particle lifetimes to a value that
+					// won't cause division by zero or other madness. This allows us
+					// to enable floating-point exceptions during particle processing,
+					// which helps us to find bugs.
+					float *dtime = GetFloatAttributePtrForWrite( PARTICLE_ATTRIBUTE_LIFE_DURATION, unusedParticle );
+					*dtime = 1.0f;
+				}
+#endif
+#ifdef _DEBUG
+				m_bIsRunningOperators = true;
+#endif
+				for( int i = 0; i < nCount; i++ )
+				{
+					float flStrength;
+					CParticleOperatorInstance *pOp = m_pDef->m_Operators[i];
+					if ( (!  pOp->ShouldRunBeforeEmitters() ) &&
+						 CheckIfOperatorShouldRun( pOp, &flStrength ) )
+					{
+						START_OP;
+						pOp->Operate( this, flStrength, m_pOperatorContextData + m_pDef->m_nOperatorsCtxOffsets[i] );
+						END_OP;
+						CHECKSYSTEM( this );
+						if ( m_nNumParticlesToKill )
+						{
+							ApplyKillList();
+							if ( ! m_nActiveParticles )
+								break;								// don't run any more operators
+						}
+						m_nOperatorRandomSampleOffset += 17;
+					}
+				}
+#ifdef _DEBUG
+				m_bIsRunningOperators = false;
+#endif
+			}
+		}
+
+#if MEASURE_PARTICLE_PERF
+		m_pDef->m_nMaximumActiveParticles = max( m_pDef->m_nMaximumActiveParticles, m_nActiveParticles );
+		float flETime = Plat_FloatTime() - flStartSimTime;
+		m_pDef->m_flUncomittedTotalSimTime += flETime;
+		m_pDef->m_flMaxMeasuredSimTime = max( m_pDef->m_flMaxMeasuredSimTime, flETime );
 #endif
 	}
 
-#if MEASURE_PARTICLE_PERF
-	m_pDef->m_nMaximumActiveParticles = max( m_pDef->m_nMaximumActiveParticles, m_nActiveParticles );
-	float flETime = Plat_FloatTime() - flStartSimTime;
-	m_pDef->m_flUncomittedTotalSimTime += flETime;
-	m_pDef->m_flMaxMeasuredSimTime = max( m_pDef->m_flMaxMeasuredSimTime, flETime );
-#endif
-
 	// let children simulate
-	for( CParticleCollection *i = m_Children.m_pHead; i; i = i->m_pNext )
+	for (CParticleCollection *i = m_Children.m_pHead; i; i = i->m_pNext)
 	{
-		LoanKillListTo( i );								// re-use the allocated kill list for the children
-		i->Simulate( dt );
+		LoanKillListTo(i);								// re-use the allocated kill list for the children
+		i->Simulate(dt, updateBboxOnly);
 		i->m_pParticleKillList = NULL;
 	}
 
-	if ( bAttachedKillList )
-		g_pParticleSystemMgr->DetachKillList( this );
-	UpdatePrevControlPoints( dt );
+	if (bAttachedKillList)
+		g_pParticleSystemMgr->DetachKillList(this);
+
+	UpdatePrevControlPoints(dt);
 
 	// Bloat the bounding box by bounds around the control point
 	BloatBoundsUsingControlPoint();
 
-	// FIXME: Is there a way of doing this iteratively?
-//	RecomputeBounds();
 }
 
 
@@ -1961,16 +2189,16 @@ void CParticleCollection::CopyInitialAttributeValues( int nStartParticle, int nN
 }
 
 
-//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------e
 // Computes a random vector inside a sphere
 //-----------------------------------------------------------------------------
 float CParticleCollection::RandomVectorInUnitSphere( int nRandomSampleId, Vector *pVector )
 {
 	// Guarantee uniform random distribution within a sphere
 	// Graphics gems III contains this algorithm ("Nonuniform random point sets via warping")
-	float u = RandomFloat( nRandomSampleId, 0.0f, 1.0f );
-	float v = RandomFloat( nRandomSampleId+1, 0.0f, 1.0f );
-	float w = RandomFloat( nRandomSampleId+2, 0.0f, 1.0f );
+	float u = RandomFloat( nRandomSampleId, 0.0001f, 1.0f );
+	float v = RandomFloat( nRandomSampleId+1, 0.0001f, 1.0f );
+	float w = RandomFloat( nRandomSampleId+2, 0.0001f, 1.0f );
 
 	float flPhi = acos( 1 - 2 * u );
 	float flTheta = 2 * M_PI * v;
@@ -1993,28 +2221,49 @@ float CParticleCollection::RandomVectorInUnitSphere( int nRandomSampleId, Vector
 // Used to retrieve the position of a control point
 // somewhere between m_flCurTime and m_flCurTime - m_fPreviousDT
 //-----------------------------------------------------------------------------
-void CParticleCollection::GetControlPointAtTime( int nControlPoint, float flTime, Vector *pControlPoint )
+void CParticleCollection::GetControlPointAtTime( int nControlPoint, float flTime, Vector *pControlPoint ) const
 {
 	Assert( m_pDef->ReadsControlPoint( nControlPoint ) );
 	if ( nControlPoint > GetHighestControlPoint() )
 	{
 		DevWarning(2, "Warning : Particle system (%s) using unassigned ControlPoint %d!\n", GetName(), nControlPoint );
 	}
-	float flPrevTime = m_flCurTime - m_flDt;
-	Assert( flTime + 0.5f >= flPrevTime && flTime <= m_flCurTime );
-	// Precision errors can cause this problem
-	if ( flTime < flPrevTime )
-	{
-		flTime = flPrevTime;
-	}
-
 	if ( m_flDt == 0.0f )
 	{
 		VectorCopy( m_ControlPoints[nControlPoint].m_Position, *pControlPoint );
 		return;
 	}
 
-	float t = ( flTime - flPrevTime ) / m_flDt;
+	// The original calculation for 't' was this:
+	//     float flPrevTime = m_flCurTime - m_flDt;
+	//     float t = ( flTime - flPrevTime ) / m_flDt;
+	// Which is mathematically equivalent to this:
+	//     float t = ( flTime - ( m_flCurTime - m_flDt ) ) / m_flDt;
+	// However if m_flCurTime and flTime are large then significant precision
+	// is lost during subtraction -- catastrophic cancellation
+	// is the technical term. This starts out being an error of one part in
+	// ten million, but after running for just a few minutes it increases to
+	// one part in ten thousand -- and continues to get worse.
+	// This calculation even fails in the simple case where flTime == m_flCurTime,
+	// giving an answer that is not 1.0 and may be out of range.
+
+	// If the calculation is arranged as shown below then, because flTime and
+	// m_flCurTime are close to each other, the subtraction loses *no* precision.
+	// The subtraction will not necessarily be 'correct', since eventually flTime
+	// and m_flCurTime will not have enough precision, but it will give results
+	// that are as accurate as possible given the inputs.
+	// flHowLongAgo stores how far before the current time flTime is.
+	const float flHowLongAgo = m_flCurTime - flTime;
+	float t = ( m_flDt - flHowLongAgo ) / m_flDt;
+	// The original code had a comment saying:
+	//     Precision errors can cause this problem
+	// in regards to issues that can cause t to go negative. Actually this function
+	// is just sometimes called (from InitNewParticlesScalar) with values that cause
+	// 't' to go massively negative. So I clamp it.
+	if ( t < 0.0f )
+		t = 0.0f;
+	Assert( t <= 1.0f );
+
 	VectorLerp( m_ControlPoints[nControlPoint].m_PrevPosition, m_ControlPoints[nControlPoint].m_Position, t, *pControlPoint );
 	Assert( IsFinite(pControlPoint->x) && IsFinite(pControlPoint->y) && IsFinite(pControlPoint->z) );
 }
@@ -2023,10 +2272,27 @@ void CParticleCollection::GetControlPointAtTime( int nControlPoint, float flTime
 // Used to retrieve the previous position of a control point
 // 
 //-----------------------------------------------------------------------------
-void CParticleCollection::GetControlPointAtPrevTime( int nControlPoint, Vector *pControlPoint )
+void CParticleCollection::GetControlPointAtPrevTime( int nControlPoint, Vector *pControlPoint ) const
 {
 	Assert( m_pDef->ReadsControlPoint( nControlPoint ) );
 	*pControlPoint = m_ControlPoints[nControlPoint].m_PrevPosition;
+}
+
+void CParticleCollection::GetControlPointTransformAtCurrentTime( int nControlPoint, matrix3x4_t *pMat )
+{
+	Assert( m_pDef->ReadsControlPoint( nControlPoint ) );
+	const Vector &vecControlPoint = GetControlPointAtCurrentTime( nControlPoint );
+
+	// FIXME: Use quaternion lerp to get control point transform at time
+	Vector left;
+	VectorMultiply( m_ControlPoints[nControlPoint].m_RightVector, -1.0f, left );
+	pMat->Init( m_ControlPoints[nControlPoint].m_ForwardVector, left, m_ControlPoints[nControlPoint].m_UpVector, vecControlPoint );
+}
+
+void CParticleCollection::GetControlPointTransformAtCurrentTime( int nControlPoint, VMatrix *pMat )
+{
+	GetControlPointTransformAtCurrentTime( nControlPoint, const_cast<matrix3x4_t *> ( &pMat->As3x4() ) );
+	pMat->m[3][0] = pMat->m[3][1] = pMat->m[3][2] = 0.0f; pMat->m[3][3] = 1.0f;
 }
 
 void CParticleCollection::GetControlPointOrientationAtTime( int nControlPoint, float flTime, Vector *pForward, Vector *pRight, Vector *pUp )
@@ -2049,6 +2315,12 @@ void CParticleCollection::GetControlPointTransformAtTime( int nControlPoint, flo
 	Vector left;
 	VectorMultiply( m_ControlPoints[nControlPoint].m_RightVector, -1.0f, left );
 	pMat->Init( m_ControlPoints[nControlPoint].m_ForwardVector, left, m_ControlPoints[nControlPoint].m_UpVector, vecControlPoint );
+}
+
+void CParticleCollection::GetControlPointTransformAtTime( int nControlPoint, float flTime, VMatrix *pMat )
+{
+	GetControlPointTransformAtTime( nControlPoint, flTime, const_cast< matrix3x4_t * > ( &pMat->As3x4() ) );
+	pMat->m[3][0] = pMat->m[3][1] = pMat->m[3][2] = 0.0f; pMat->m[3][3] = 1.0f;
 }
 
 void CParticleCollection::GetControlPointTransformAtTime( int nControlPoint, float flTime, CParticleSIMDTransformation *pXForm )
@@ -2087,6 +2359,21 @@ void CParticleCollection::BloatBoundsUsingControlPoint()
 	// more specifically, some particle systems were using "start" as an input, so it got set as control point 1,
 	// so other particle systems had an extra point in their bounding box, that generally remained at the world origin
 	RecomputeBounds();
+
+	// Don't do the bounding box fixup until after the second simulation (first real simulation)
+	// so that we know they're in their correct position.
+	if ( m_nSimulatedFrames > 2 )
+	{
+		// Include control points in the bbox. 
+		for (int i = 0; i <= m_nHighestCP; ++i) {
+			if ( !m_pDef->ReadsControlPoint( i ) )
+				continue;
+
+			const Vector& cp = GetControlPointAtCurrentTime(i);
+			VectorMin( m_MinBounds, cp, m_MinBounds );
+			VectorMax( m_MaxBounds, cp, m_MaxBounds );
+		}
+	}
 
 	// Deal with children
 	// NOTE: Bounds have been recomputed for children prior to this call in Simulate
@@ -2234,7 +2521,7 @@ void CParticleCollection::StopEmission( bool bInfiniteOnly, bool bRemoveAllParti
 	{
 		// Set next sleep time - an additional fudge factor is added over the normal time
 		// so that existing particles have a chance to go away.
-		m_flNextSleepTime = max ( m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + 10 ));
+		m_flNextSleepTime = Max ( m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + 10 ));
 	}
 		 
 	m_bEmissionStopped = true;
@@ -2448,7 +2735,7 @@ void CParticleCollection::ApplyKillList( void )
 #endif
 
 	// first, kill particles past bounds
-	while( nLeftInKillList && pCurKillListSlot[ nLeftInKillList-1 ] >= nParticlesActiveNow )
+	while ( nLeftInKillList && pCurKillListSlot[nLeftInKillList - 1] >= nParticlesActiveNow )
 	{
 		nLeftInKillList--;
 	}
@@ -2456,31 +2743,61 @@ void CParticleCollection::ApplyKillList( void )
 	Assert( nLeftInKillList <= m_nActiveParticles );
 
 	// now, execute kill list
-	while( nLeftInKillList )
+	// Previously, this code would swap the last item that wasn't dead into this slot. 
+	// However, some lists require order invariance, so we need to collapse over holes instead of
+	// doing the (cheaper) swap from the end to the hole. 
+	if ( !m_bRequiresOrderInvariance )
 	{
-		int nKillIndex = *(pCurKillListSlot++);
-		nLeftInKillList--;
-
-		// now, we will move a particle from the end to where we are
-		// first, we have to find the last particle (which is not in the kill list)
-		while ( nLeftInKillList &&
-			( pCurKillListSlot[ nLeftInKillList-1 ] == nParticlesActiveNow-1 ))
+		while( nLeftInKillList )
 		{
+			int nKillIndex = *(pCurKillListSlot++);
 			nLeftInKillList--;
+
+			// now, we will move a particle from the end to where we are
+			// first, we have to find the last particle (which is not in the kill list)
+			while ( nLeftInKillList &&
+				( pCurKillListSlot[ nLeftInKillList-1 ] == nParticlesActiveNow-1 ))
+			{
+				nLeftInKillList--;
+				nParticlesActiveNow--;
+			}
+
+			// we might be killing the last particle
+			if ( nKillIndex == nParticlesActiveNow-1 )
+			{
+				// killing last one
+				nParticlesActiveNow--;
+				break;											// we are done
+			}
+
+			// move the last particle to this one and chop off the end of the list
+			MoveParticle( nParticlesActiveNow-1, nKillIndex );
 			nParticlesActiveNow--;
 		}
+	} 
+	else 
+	{
+		// The calling code may tell us to kill particles that are already out of bounds.
+		// That causes this code to kill more particles than we're supposed to (possibly even causing a crash).
+		// So remember how many particles we had left to kill so we can properly decrement the count below.
+		int decrementValue = nLeftInKillList;
+		int writeLoc = *(pCurKillListSlot++);
+		--nLeftInKillList;
 
-		// we might be killing the last particle
-		if ( nKillIndex == nParticlesActiveNow-1 )
+		for ( int readLoc = 1 + writeLoc; readLoc < nParticlesActiveNow; ++readLoc )
 		{
-			// killing last one
-			nParticlesActiveNow--;
-			break;											// we are done
+			if ( nLeftInKillList > 0 && readLoc == *pCurKillListSlot ) 
+			{
+				pCurKillListSlot++;
+				--nLeftInKillList;
+				continue;
+			}
+
+			MoveParticle( readLoc, writeLoc );
+			++writeLoc;
 		}
 
-		// move the last particle to this one and chop off the end of the list
-		MoveParticle( nParticlesActiveNow-1, nKillIndex );
-		nParticlesActiveNow--;
+		nParticlesActiveNow -= decrementValue;
 	}
 
 	// set count in system and wipe kill list
@@ -2559,6 +2876,23 @@ public:
 		ptr->fraction = 1.0;								// no hit
 	}
 
+	virtual void GetRandomPointsOnControllingObjectHitBox( 
+		CParticleCollection *pParticles,
+		int nControlPointNumber, 
+		int nNumPtsOut,
+		float flBBoxScale,
+		int nNumTrysToGetAPointInsideTheModel,
+		Vector *pPntsOut,
+		Vector vecDirectionBias,
+		Vector *pHitBoxRelativeCoordOut, int *pHitBoxIndexOut ) 
+	{
+		for ( int i = 0; i < nNumPtsOut; ++i )
+		{
+			pPntsOut[i].Init();
+		}
+	}
+
+	virtual float GetPixelVisibility( int *pQueryHandle, const Vector &vecOrigin, float flScale ) { return 0.0f; }
 };
 
 static CDefaultParticleSystemQuery s_DefaultParticleSystemQuery;
@@ -2583,6 +2917,14 @@ CParticleSystemMgr::CParticleSystemMgr()
 	m_pParticleSystemDictionary = NULL;
 	m_nNumFramesMeasured = 0;
 	m_flLastSimulationTime = 0.0f;
+	m_nParticleVertexCount = m_nParticleIndexCount = 0;
+	m_bFrameWarningNeeded = false;
+
+	for ( int i = 0; i < c_nNumFramesTracked; i++ )
+	{
+		m_nParticleVertexCountHistory[i] = 0;
+	}
+	m_fParticleCountScaling = 1.0f;
 }
 
 CParticleSystemMgr::~CParticleSystemMgr()
@@ -2700,10 +3042,10 @@ static const char *s_pParticleFieldNames[MAX_PARTICLE_ATTRIBUTES] =
 
 	"Yaw", // YAW, 12 );
 	"Sequence Number 1", // SEQUENCE_NUMBER1, 13 );
-	NULL,
-	NULL,
+	NULL, // HITBOX_INDEX is for internal use only
+	NULL, // HITBOX_XYZ_RELATIVE is for internal use only
 
-	NULL,
+	"Alpha Alternate", // ALPHA2, 16
 	NULL,
 	NULL,
 	NULL,
@@ -2791,7 +3133,7 @@ bool CParticleSystemMgr::ReadParticleDefinitions( CUtlBuffer &buf, const char *p
 	DECLARE_DMX_CONTEXT_DECOMMIT( bDecommitTempMemory );
 
 	CDmxElement *pRoot;
-	if ( !UnserializeDMX( buf, &pRoot, pFileName ) )
+	if ( !UnserializeDMX( buf, &pRoot, pFileName ) || !pRoot )
 	{
 		Warning( "Unable to read particle definition %s! UtlBuffer is the wrong type!\n", pFileName );
 		return false;
@@ -2824,11 +3166,6 @@ bool CParticleSystemMgr::ReadParticleDefinitions( CUtlBuffer &buf, const char *p
 	for ( int i = 0; i < nCount; ++i )
 	{
 		CParticleSystemDefinition *pDef = m_pParticleSystemDictionary->AddParticleSystem( definitions[i] );
-#if 0
-		FILE * f = fopen("Defs.txt", "a");
-		fprintf(f, "pDef: %s\n", pDef->GetName());
-		fclose(f);
-#endif
 		if ( pDef && bPrecache )
 		{
 			pDef->m_bAlwaysPrecache = true;
@@ -2859,6 +3196,29 @@ void CParticleSystemMgr::DecommitTempMemory()
 void CParticleSystemMgr::SetLastSimulationTime( float flTime )
 {
 	m_flLastSimulationTime = flTime;
+
+	int nParticleVertexCountHistoryMax = 0;
+	for ( int i = 0; i < c_nNumFramesTracked-1; i++ )
+	{
+		m_nParticleVertexCountHistory[i] = m_nParticleVertexCountHistory[i+1];
+		nParticleVertexCountHistoryMax = Max ( nParticleVertexCountHistoryMax, m_nParticleVertexCountHistory[i] );
+	}
+	m_nParticleVertexCountHistory[c_nNumFramesTracked-1] = m_nParticleVertexCount;
+	nParticleVertexCountHistoryMax = Max ( nParticleVertexCountHistoryMax, m_nParticleVertexCount );
+
+	// We need to take an average over a decent number of frames because this throttling has a direct feedback effect. Worried about oscillation problems!
+	int nLower = CL_PARTICLE_SCALE_LOWER;//cl_particle_scale_lower.GetInt();
+	m_fParticleCountScaling = 1.0f;
+	int nHowManyOver = nParticleVertexCountHistoryMax - nLower;
+	if ( nHowManyOver > 0 )
+	{
+		int nUpper = CL_PARTICLE_SCALE_UPPER;//cl_particle_scale_upper.GetInt();
+		int nRange = nUpper - nLower;
+		m_fParticleCountScaling = 1.0f - ( (float)nHowManyOver / (float)nRange );
+		m_fParticleCountScaling = Clamp ( m_fParticleCountScaling, 0.0f, 1.0f );
+	}
+
+	m_nParticleVertexCount = m_nParticleIndexCount = 0;
 }
 
 float CParticleSystemMgr::GetLastSimulationTime() const
@@ -2866,6 +3226,36 @@ float CParticleSystemMgr::GetLastSimulationTime() const
 	return m_flLastSimulationTime;
 }
 
+bool CParticleSystemMgr::Debug_FrameWarningNeededTestAndReset()
+{
+	bool bTemp = m_bFrameWarningNeeded;
+	m_bFrameWarningNeeded = false;
+	return bTemp;
+}
+
+int CParticleSystemMgr::Debug_GetTotalParticleCount() const
+{
+	return m_nParticleVertexCountHistory[c_nNumFramesTracked-1];
+}
+
+float CParticleSystemMgr::ParticleThrottleScaling() const
+{
+	return m_fParticleCountScaling;
+}
+
+bool CParticleSystemMgr::ParticleThrottleRandomEnable() const
+{
+	if ( m_fParticleCountScaling == 1.0f )
+	{
+		// No throttling.
+		return true;
+	}
+	else if ( m_fParticleCountScaling > RandomFloat ( 0.0f, 1.0f ) )
+	{
+		return true;
+	}
+	return false;
+}
 
 //-----------------------------------------------------------------------------
 // Unserialization-related methods
@@ -2919,7 +3309,7 @@ bool CParticleSystemMgr::ReadParticleConfigFile( const char *pFileName, bool bPr
 			fileBuffer.SetBigEndian( false );
 			return ReadParticleConfigFile( fileBuffer, bPrecache, bDecommitTempMemory, szTargetName );
 		}
-		else if ( g_pFullFileSystem->GetDVDMode() == DVDMODE_STRICT )
+		else if ( g_pFullFileSystem->GetDVDMode() != DVDMODE_OFF )
 		{
 			// 360 version should have been there, 360 zips can only have binary particles
 			Warning( "Particles: Missing '%s'\n", szTargetName );
@@ -2960,7 +3350,7 @@ bool CParticleSystemMgr::ReadParticleConfigFile( const char *pFileName, bool bPr
 	CUtlBuffer buf( 0, 0, 0 );
 	if ( IsX360() )
 	{
-		// fell through, load as pc paricle resource file
+		// fell through, load as pc particle resource file
 		buf.ActivateByteSwapping( true );
 	}
 
@@ -2979,25 +3369,35 @@ bool CParticleSystemMgr::ReadParticleConfigFile( const char *pFileName, bool bPr
 //-----------------------------------------------------------------------------
 bool CParticleSystemMgr::WriteParticleConfigFile( const char *pParticleSystemName, CUtlBuffer &buf, bool bPreventNameBasedLookup )
 {
+	DECLARE_DMX_CONTEXT();
 	// Create DMX elements representing the particle system definition
 	CDmxElement *pParticleSystem = CreateParticleDmxElement( pParticleSystemName );
-	pParticleSystem->SetValue( "preventNameBasedLookup", bPreventNameBasedLookup );
-
-	// Now write the DMX elements out
-	DECLARE_DMX_CONTEXT();
-	bool bOk = SerializeDMX( buf, pParticleSystem );
-	CleanupDMX( pParticleSystem );
-	return bOk;
+	return WriteParticleConfigFile( pParticleSystem, buf, bPreventNameBasedLookup );
 }
 
 bool CParticleSystemMgr::WriteParticleConfigFile( const DmObjectId_t& id, CUtlBuffer &buf, bool bPreventNameBasedLookup )
 {
+	DECLARE_DMX_CONTEXT();
 	// Create DMX elements representing the particle system definition
 	CDmxElement *pParticleSystem = CreateParticleDmxElement( id );
+	return WriteParticleConfigFile( pParticleSystem, buf, bPreventNameBasedLookup );
+}
+
+bool CParticleSystemMgr::WriteParticleConfigFile( CDmxElement *pParticleSystem, CUtlBuffer &buf, bool bPreventNameBasedLookup )
+{
 	pParticleSystem->SetValue( "preventNameBasedLookup", bPreventNameBasedLookup );
 
+	CDmxAttribute* pAttribute = pParticleSystem->GetAttribute( "children" );
+	const CUtlVector< CDmxElement* >& children = pAttribute->GetArray<CDmxElement*>( );
+	int nCount = children.Count();
+	for ( int i = 0; i < nCount; ++i )
+	{
+		CDmxElement *pChildRef = children[ i ];
+		CDmxElement *pChild = pChildRef->GetValue<CDmxElement*>( "child" );
+		pChild->SetValue( "preventNameBasedLookup", bPreventNameBasedLookup );
+	}
+
 	// Now write the DMX elements out
-	DECLARE_DMX_CONTEXT();
 	bool bOk = SerializeDMX( buf, pParticleSystem );
 	CleanupDMX( pParticleSystem );
 	return bOk;
@@ -3196,7 +3596,7 @@ void CParticleSystemMgr::AddToRenderCache( CParticleCollection *pParticles )
 	if ( !pParticles->IsValid() || pParticles->m_pDef->GetMaterial()->IsTranslucent() )
 		return;
 
-	pParticles->m_flNextSleepTime = max ( pParticles->m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + pParticles->m_pDef->m_flNoDrawTimeToGoToSleep ));
+	pParticles->m_flNextSleepTime = Max ( pParticles->m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + pParticles->m_pDef->m_flNoDrawTimeToGoToSleep ));
 	// Find the current rope list.
 	int iRenderCache = 0;
 	int nRenderCacheCount = m_RenderCache.Count();
@@ -3253,21 +3653,20 @@ void CParticleSystemMgr::BuildBatchList( int iRenderCache, IMatRenderContext *pR
 			int nFirstParticle = 0;
 			while ( nFirstParticle < pParticles->m_nActiveParticles )
 			{
-				int i;
-
+				int iPart;
 				BatchStep_t step;
 				step.m_pParticles = pParticles;
 				step.m_pRenderer = pParticles->GetRenderer( j );
 				step.m_pContext = pParticles->GetRendererContext( j ); 
 				step.m_nFirstParticle = nFirstParticle;
 				step.m_nParticleCount = step.m_pRenderer->GetParticlesToRender( pParticles, 
-					step.m_pContext, nFirstParticle, nRemainingVertices, nRemainingIndices, &step.m_nVertCount, &i );
+					step.m_pContext, nFirstParticle, nRemainingVertices, nRemainingIndices, &step.m_nVertCount, &iPart );
 				nFirstParticle += step.m_nParticleCount;
 
 				if ( step.m_nParticleCount > 0 )
 				{
 					pBatch->m_nVertCount += step.m_nVertCount;
-					pBatch->m_nIndexCount += i;
+					pBatch->m_nIndexCount += iPart;
 					pBatch->m_BatchStep.AddToTail( step );
 					Assert( pBatch->m_nVertCount <= nMaxVertices && pBatch->m_nIndexCount <= nMaxIndices );
 				}
@@ -3278,8 +3677,7 @@ void CParticleSystemMgr::BuildBatchList( int iRenderCache, IMatRenderContext *pR
 
 					// Not enough room
 					Assert( pBatch->m_nVertCount > 0 && pBatch->m_nIndexCount > 0 ); 
-					int j = batches.AddToTail();
-					pBatch = &batches[j];
+					pBatch = &batches[batches.AddToTail()];
 					pBatch->m_nVertCount = 0;
 					pBatch->m_nIndexCount = 0;
 					nRemainingVertices = nMaxVertices;
@@ -3387,6 +3785,9 @@ void CParticleSystemMgr::DrawRenderCache( bool bShadowDepth )
 		{
 			const Batch_t& batch = batches[i];
 			Assert( batch.m_nVertCount > 0 && batch.m_nIndexCount > 0 );
+
+			g_pParticleSystemMgr->TallyParticlesRendered( batch.m_nVertCount * 3, batch.m_nIndexCount * 3 );
+
 			meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, batch.m_nVertCount, batch.m_nIndexCount );
 
 			int nVertexOffset = 0;
@@ -3411,6 +3812,20 @@ void CParticleSystemMgr::DrawRenderCache( bool bShadowDepth )
 	pRenderContext->MatrixMode( MATERIAL_MODEL );
 	pRenderContext->PopMatrix();
 }
+
+
+void CParticleSystemMgr::TallyParticlesRendered( int nVertexCount, int nIndexCount )
+{
+	m_nParticleIndexCount += nIndexCount;
+	m_nParticleVertexCount += nVertexCount;
+
+	if ( m_nParticleVertexCount > MAX_PARTICLE_VERTS )
+	{
+		m_bFrameWarningNeeded = true;
+	}
+}
+
+
 
 
 

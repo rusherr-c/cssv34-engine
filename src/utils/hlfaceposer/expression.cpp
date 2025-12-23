@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -285,7 +285,7 @@ const char *CExpression::GetBitmapFilename( int modelindex )
 
 	while ( *in )
 	{
-		if ( isalnum( *in ) ||
+		if ( V_isalnum( *in ) ||
 			*in == '_' || 
 			*in == '\\' || 
 			*in == '/' ||
@@ -324,7 +324,7 @@ void CExpression::CreateNewBitmap( int modelindex )
 		return;
 
 	char filename[ 256 ];
-	strcpy( filename, GetBitmapFilename( modelindex ) );
+	V_strcpy_safe( filename, GetBitmapFilename( modelindex ) );
 	if ( !Q_strstr( filename, ".bmp" ) )
 		return;
 

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -296,8 +296,6 @@ void CBaseAnimSetControlGroupPanel::ChangeAnimationSet( CDmeAnimationSet *newAni
 		return;
 	}
 
-	int i;
-
 	// Compare groups 
 	bool bRebuildGroups = false;
 	const CDmaElementArray< CDmElement > &groups = m_AnimSet->GetSelectionGroups();
@@ -308,7 +306,7 @@ void CBaseAnimSetControlGroupPanel::ChangeAnimationSet( CDmeAnimationSet *newAni
 	}
 	else
 	{
-		for ( i = 0; i < c; ++i )
+		for ( int i = 0; i < c; ++i )
 		{
 			CDmElement *group = groups[ i ];
 			if ( group == m_GroupList[ i ].Get() )
@@ -345,8 +343,7 @@ void CBaseAnimSetControlGroupPanel::ChangeAnimationSet( CDmeAnimationSet *newAni
 
 		CAppUndoScopeGuard *guard = NULL;
 
-		int i;
-		for ( i = 0; i < c; ++i )
+		for ( int i = 0; i < c; ++i )
 		{
 			CDmElement *group = groups[ i ];
 			
@@ -394,7 +391,7 @@ void CBaseAnimSetControlGroupPanel::ChangeAnimationSet( CDmeAnimationSet *newAni
 
 	if ( changed  )
 	{
-		for ( i = 0; i < m_hSelectableIndices.Count(); ++i )
+		for ( int i = 0; i < m_hSelectableIndices.Count(); ++i )
 		{
 
 			m_hGroups->AddSelectedItem( m_hSelectableIndices[ i ], 
@@ -444,7 +441,7 @@ void CBaseAnimSetControlGroupPanel::ExpandOpenItems( OpenItemTree_t &tree, int n
 			if ( info.m_nFlags & EP_SELECTED )
 			{
 				// Look for preserved item
-				int nChildIndex = FindTreeItem( nItemIndex, info.m_Item );
+				nChildIndex = FindTreeItem( nItemIndex, info.m_Item );
 				if ( nChildIndex != -1 )
 				{
 					m_hGroups->AddSelectedItem( nChildIndex, false, false );

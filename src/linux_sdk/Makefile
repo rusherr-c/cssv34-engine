@@ -10,19 +10,19 @@
 # the name of the mod binary (_i486.so is appended to the end)
 NAME=server
 # the location of the vcproj that builds the mod
-MOD_PROJ=../game/server/server_hl2.vcproj
+MOD_PROJ=../dlls/hl_sdk.vcproj
 # the name of the mod configuration (typically <proj name>_<build type><build target>)
-MOD_CONFIG=Release
+MOD_CONFIG=hl_ReleaseSDKWin32
 
 # the directory the base binaries (tier0_i486.so, etc) are located
-GAME_DIR=../../game
-#GAME_DIR=~/valve/hl2bin/
+#GAME_DIR=../../
+GAME_DIR=~/valve/hl2bin/
 
 # compiler options (gcc 3.4.1 or above is required)
-CC=/usr/bin/gcc-3.4
-CPLUS=/usr/bin/g++-3.4
-CLINK=/usr/bin/gcc-3.4
-CPP_LIB="/usr/lib/gcc/i486-linux-gnu/3.4.6/libstdc++.a /usr/lib/gcc/i486-linux-gnu/3.4.6/libgcc_eh.a"
+CC=/usr/local/bin/gcc
+CPLUS=/usr/local/bin/g++
+CLINK=/usr/local/bin/gcc
+CPP_LIB="/usr/local/lib/libstdc++.a /usr/local/lib/libgcc_eh.a"
 
 # put any compiler flags you want passed here
 USER_CFLAGS=
@@ -32,8 +32,8 @@ LDFLAGS="-lm -ldl $(GAME_DIR)/bin/tier0_i486.so $(GAME_DIR)/bin/vstdlib_i486.so"
 
 # XERCES 2.6.0 or above ( http://xml.apache.org/xerces-c/ ) is used by the vcproj to makefile converter
 # it must be installed before being able to run this makefile
-XERCES_INC_DIR=~/xerces-c_2_8_0-x86-linux-gcc_3_4/include
-XERCES_LIB_DIR=~/xerces-c_2_8_0-x86-linux-gcc_3_4/lib
+XERCES_INC_DIR=/home/alfred/tmp/xerces-c-src_2_6_0/include
+XERCES_LIB_DIR=/home/alfred/tmp/xerces-c-src_2_6_0/lib
 # if you have xerces installed already you should be able to use the two lines below
 #XERCES_INC_DIR=/usr/include
 #XERCES_LIB_DIR=/usr/lib

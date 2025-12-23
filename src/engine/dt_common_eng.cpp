@@ -1,10 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
 //=============================================================================//
+#include "tier0/icommandline.h"
 #include "dt_stack.h"
 #include "client.h"
 #include "host.h"
@@ -15,6 +16,10 @@
 #include "demo.h"
 #include "sv_packedentities.h"
 
+#ifndef DEDICATED
+#include "renamed_recvtable_compat.h"
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -22,6 +27,35 @@ extern CUtlLinkedList< CClientSendTable*, unsigned short > g_ClientSendTables;
 extern CUtlLinkedList< CRecvDecoder *, unsigned short > g_RecvDecoders;
 
 RecvTable* FindRecvTable( const char *pName );
+
+RecvTable *DataTable_FindRenamedTable( const char *pOldTableName )
+{
+#ifdef DEDICATED
+	return NULL;
+#else
+	extern IBaseClientDLL *g_ClientDLL;
+	if ( !g_ClientDLL )
+		return NULL;
+
+	// Get the renamed receive table list from the client DLL and see if we can find
+	// a new name (assuming it was renamed at all).
+	const CRenamedRecvTableInfo *pCur = g_ClientDLL->GetRenamedRecvTableInfos();
+
+	// This should be a very short list, so we'll do string compares until 2020 when
+	// someone finds this code and the list has grown to 10,000.
+	while ( pCur && pCur->m_pOldName && pCur->m_pNewName )
+	{
+		if ( !V_stricmp( pCur->m_pOldName, pOldTableName ) )
+		{
+			return FindRecvTable( pCur->m_pNewName );
+		}
+
+		pCur = pCur->m_pNext;
+	}
+
+	return NULL;
+#endif
+}
 
 bool DataTable_SetupReceiveTableFromSendTable( SendTable *sendTable, bool bNeedsDecoder )
 {
@@ -42,8 +76,13 @@ bool DataTable_SetupReceiveTableFromSendTable( SendTable *sendTable, bool bNeeds
 		RecvTable *pRecvTable = FindRecvTable( pTable->m_pNetTableName );
 		if ( !pRecvTable )
 		{
-			DataTable_Warning( "No matching RecvTable for SendTable '%s'.\n", pTable->m_pNetTableName );
-			return false;
+			// Attempt to find a renamed version of the table.
+			pRecvTable = DataTable_FindRenamedTable( pTable->m_pNetTableName );
+			if ( !pRecvTable )
+			{
+				DataTable_Warning( "No matching RecvTable for SendTable '%s'.\n", pTable->m_pNetTableName );
+				return false;
+			}
 		}
 
 		pRecvTable->m_pDecoder = pDecoder;
@@ -72,9 +111,14 @@ bool DataTable_SetupReceiveTableFromSendTable( SendTable *sendTable, bool bNeeds
 		pProp->m_pVarName = COM_StringCopy( pSendTableProp->GetName() );
 		pProp->SetFlags( pSendTableProp->GetFlags() );
 
+		if ( CommandLine()->FindParm("-dti" ) && pSendTableProp->GetParentArrayPropName() )
+		{
+			pProp->m_pParentArrayPropName = COM_StringCopy( pSendTableProp->GetParentArrayPropName() );
+		}
+
 		if ( pProp->m_Type == DPT_DataTable )
 		{
-			char *pDTName = pSendTableProp->m_pExcludeDTName; // HACK
+			const char *pDTName = pSendTableProp->m_pExcludeDTName; // HACK
 
 			if ( pSendTableProp->GetDataTable() )
 				pDTName = pSendTableProp->GetDataTable()->m_pNetTableName;

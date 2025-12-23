@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -16,7 +16,7 @@
 #include "dme_controls/elementpropertiestree.h"
 #include "tier0/icommandline.h"
 #include "materialsystem/imaterialsystem.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "commeditdoc.h"
 #include "commentarynodebrowserpanel.h"
 #include "commentarypropertiespanel.h"
@@ -299,7 +299,10 @@ void CCommEditTool::DrawCommentaryNodeEntitiesInEngine( bool bDrawInEngine )
 	{
 		CDmeCommentaryNodeEntity *pEntity = entities[i];
 		Assert( pEntity );
-		pEntity->DrawInEngine( bDrawInEngine );
+		if ( pEntity )
+		{
+			pEntity->DrawInEngine( bDrawInEngine );
+		}
 	}
 }
 
@@ -623,7 +626,7 @@ void CCommEditTool::OnToggleConsole()
 void CCommEditTool::BringConsoleToFront()
 {
 	CConsolePage *p = GetConsole();
-	Panel *pPage = p->GetParent();
+	Panel *pPage = p ? p->GetParent() : NULL;
 	if ( pPage == NULL )
 	{
 		OnToggleConsole();
@@ -837,9 +840,9 @@ void CCommEditTool::OnCommand( const char *cmd )
 		int idx = Q_atoi( pSuffix );
 		OpenFileFromHistory( idx );
 	}
-	else if ( const char *pSuffix = StringAfterPrefix( cmd, "OnTool" ) )
+	else if ( const char *pSuffixTool = StringAfterPrefix( cmd, "OnTool" ) )
 	{
-		int idx = Q_atoi( pSuffix );
+		int idx = Q_atoi( pSuffixTool );
 		enginetools->SwitchToTool( idx );
 	}
 	else if ( !V_stricmp( cmd, "OnUndo" ) )
@@ -870,7 +873,7 @@ void CCommEditTool::OnNew()
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetTXTFileName();
 	}
 
@@ -888,7 +891,7 @@ void CCommEditTool::OnOpen( )
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetTXTFileName();
 	}
 
@@ -911,7 +914,7 @@ void CCommEditTool::Save()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( m_pDoc->GetTXTFileName(), "txt", NULL );
+		SaveFile( m_pDoc->GetTXTFileName(), "txt", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -919,7 +922,7 @@ void CCommEditTool::OnSaveAs()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( NULL, "txt", NULL );
+		SaveFile( NULL, "txt", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -942,7 +945,7 @@ void CCommEditTool::SaveAndTest()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetTXTFileName(), "txt", NULL, 
+		SaveFile( m_pDoc->GetTXTFileName(), "txt", FOSM_SHOW_PERFORCE_DIALOGS, 
 			new KeyValues( "RestartLevel" ) );
 	}
 	else
@@ -969,7 +972,7 @@ void CCommEditTool::OnClose()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetTXTFileName(), "txt", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetTXTFileName(), "txt", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnClose" ) );
 		return;
 	}
@@ -1065,7 +1068,7 @@ void CCommEditTool::OpenSpecificFile( const char *pFileName )
 
 		if ( m_pDoc->IsDirty() )
 		{
-			nFlags = FOSM_SHOW_SAVE_QUERY;
+			nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 			pSaveFileName = m_pDoc->GetTXTFileName();
 		}
 		else
@@ -1157,7 +1160,7 @@ bool CCommEditTool::CanQuit()
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
 		// Show Save changes Yes/No/Cancel and re-quit if hit yes/no
-		SaveFile( m_pDoc->GetTXTFileName(), "txt", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetTXTFileName(), "txt", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnQuit" ) );
 		return false;
 	}

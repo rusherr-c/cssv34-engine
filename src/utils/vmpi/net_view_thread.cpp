@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -128,7 +128,7 @@ void CNetViewThread::UpdateServicesFromNetView()
 				PeekNamedPipe(hChildStdoutRd, NULL, NULL, NULL, &dwCount, NULL);
 				if (dwCount)
 				{
-					dwCount = min (dwCount, BUFFER_SIZE - 1);
+					dwCount = min (dwCount, (DWORD)BUFFER_SIZE - 1);
 					ReadFile(hChildStdoutRd, buffer, dwCount, &dwRead, NULL);
 				}
 				if(dwRead)
@@ -173,7 +173,7 @@ void CNetViewThread::ParseComputerNames( const char *pNetViewOutput )
 			char *pOutPos = curComputerName;
 
 			pCur += 2;
-			while ( *pCur && !isspace( *pCur ) && (pOutPos-curComputerName < 510) )
+			while ( *pCur && !V_isspace( *pCur ) && (pOutPos-curComputerName < 510) )
 			{
 				*pOutPos++ = *pCur++;
 			}

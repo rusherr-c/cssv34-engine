@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -197,7 +197,7 @@ void CDemoActionManager::StartPlaying( char const *demfilename )
 	// Clear anything currently pending
 	StopPlaying();
 
-	bool changedfile = Q_strcasecmp( demfilename, m_szCurrentFile );
+	bool changedfile = Q_strcasecmp( demfilename, m_szCurrentFile ) != 0;
 
 	Q_strncpy( m_szCurrentFile, demfilename, sizeof( m_szCurrentFile ) );
 

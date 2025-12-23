@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "cbase.h"
 #include "faceposer_vgui.h"
 #include <vgui/IVGui.h>

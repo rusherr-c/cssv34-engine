@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,15 +10,15 @@
 #include "client_pch.h"
 
 #include "ivideomode.h"
-#include "VguiMatSurface/IMatSystemSurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include <vgui_controls/Panel.h>
 #include <vgui_controls/Controls.h>
 #include <vgui/ISurface.h>
 #include <vgui/IScheme.h>
-#include "materialsystem/IMaterialSystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "materialsystem/imesh.h"
 #include "materialsystem/imaterial.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "client.h"
 #include "gl_matsysiface.h"
 
@@ -145,7 +145,7 @@ static ConCommand vprof_child		("vprof_child",		  IN_VProfChild);
 CVProfGraphPanel::CVProfGraphPanel( vgui::VPANEL parent ) : BaseClass( NULL, "CVProfGraphPanel" )
 {
 	SetParent( parent ); 
-	SetSize( videomode->GetModeWidth(), videomode->GetModeHeight() );
+	SetSize( videomode->GetModeStereoWidth(), videomode->GetModeStereoHeight() );
 	SetPos( 0, 0 );
 	SetVisible( false );
 	SetCursor( null );
@@ -234,8 +234,8 @@ void CVProfGraphPanel::Paint()
 	// Get screen rectangle
 	vrect.x		 = 0;
 	vrect.y		 = 0;
-	vrect.width	 = videomode->GetModeWidth();
-	vrect.height = videomode->GetModeHeight();
+	vrect.width	 = videomode->GetModeStereoWidth();
+	vrect.height = videomode->GetModeStereoHeight();
 
 	// Determine graph width
 	w = vprof_graphwidth.GetInt();
@@ -260,7 +260,7 @@ void CVProfGraphPanel::Paint()
 	if ( ( g_ClientGlobalVariables.absoluteframetime) > 0.f )
 	{
 		Q_snprintf( sz, sizeof( sz ), "%s - %0.1f%%%%", m_CurrentNode->GetName(), ( m_CurrentNode->GetPrevTime() /  RootTime ) * 100.f);
-		g_pMatSystemSurface->DrawColoredText( m_hFont, x, y, GRAPH_RED, GRAPH_GREEN, GRAPH_BLUE, 255, sz );
+		g_pMatSystemSurface->DrawColoredText( m_hFont, x, y, GRAPH_RED, GRAPH_GREEN, GRAPH_BLUE, 255, "%s", sz );
 	}
 
 	byte color[3][3] = 
@@ -281,7 +281,7 @@ void CVProfGraphPanel::Paint()
 	{
 		Q_snprintf( sz, sizeof( sz ), "%07.3f ms (%s)", m_Samples[m_CurrentSample][i], pTitles[i] );
 		y -= 10;
-		g_pMatSystemSurface->DrawColoredText( m_hFont, x, y, color[i][0], color[i][1], color[i][2], 180, sz );
+		g_pMatSystemSurface->DrawColoredText( m_hFont, x, y, color[i][0], color[i][1], color[i][2], 180, "%s", sz );
 	}
 }
 

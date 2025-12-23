@@ -1,4 +1,4 @@
-//====== Copyright c 1996-2007, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -222,7 +222,6 @@ public:
 class IExpression
 {
 public:
-	virtual ~IExpression() = default;
 	virtual int  Evaluate( IEvaluationContext *pCtx ) const = 0;
 	virtual void Print( IEvaluationContext *pCtx ) const = 0;
 };
@@ -386,7 +385,7 @@ IExpression * CComplexExpression::ParseTopLevel( char *&szExpression )
 	for ( ; ; )
 	{
 		// Skip whitespace
-		while ( *szExpression && isspace( *szExpression ) )
+		while ( *szExpression && V_isspace( *szExpression ) )
 		{
 			++ szExpression;
 		}
@@ -496,7 +495,7 @@ IExpression * CComplexExpression::ParseTopLevel( char *&szExpression )
 IExpression * CComplexExpression::ParseInternal( char *&szExpression )
 {
 	// Skip whitespace
-	while ( *szExpression && isspace( *szExpression ) )
+	while ( *szExpression && V_isspace( *szExpression ) )
 	{
 		++ szExpression;
 	}
@@ -508,7 +507,7 @@ IExpression * CComplexExpression::ParseInternal( char *&szExpression )
 	{
 		NULL;
 	}
-	else if ( isdigit( *szExpression ) )
+	else if ( V_isdigit( *szExpression ) )
 	{
 		long lValue = strtol( szExpression, &szExpression, 10 );
 		return Allocated( new CExprConstant( lValue ) );
@@ -538,7 +537,7 @@ IExpression * CComplexExpression::ParseInternal( char *&szExpression )
 		size_t lenVariable = 0;
 		for ( char *szEndVar = szExpression + 1; *szEndVar; ++ szEndVar, ++ lenVariable )
 		{
-			if ( !isalnum( *szEndVar ) )
+			if ( !V_isalnum( *szEndVar ) )
 			{
 				switch ( *szEndVar )
 				{
@@ -916,7 +915,7 @@ have_combo_iteration:
 			sprintf( pchBuffer, "%s ", m_pEntry->m_sPrefix.data() );
 			pchBuffer += strlen( pchBuffer );
 
-			sprintf( pchBuffer, "/DSHADERCOMBO=%lld ", m_iComboNumber );
+			sprintf( pchBuffer, "/DSHADERCOMBO=%llu ", m_iComboNumber );
 			pchBuffer += strlen( pchBuffer );
 
 			for ( pSetValues = pnValues, pSetDef = pDefVars;
@@ -974,7 +973,7 @@ have_combo_iteration:
 		{
 			// Trim trailing whitespace as well
 			size_t len = ( size_t ) strlen( szLine );
-			while ( len -- > 0 && isspace( szLine[ len ] ) )
+			while ( len -- > 0 && V_isspace( szLine[ len ] ) )
 			{
 				szLine[ len ] = 0;
 			}
@@ -1028,7 +1027,7 @@ have_combo_iteration:
 				continue;
 			}
 
-			while ( *szLine && isspace(*szLine) )
+			while ( *szLine && V_isspace(*szLine) )
 			{
 				++ szLine;
 			}
@@ -1041,7 +1040,7 @@ have_combo_iteration:
 			char *pchStartRange = pchEq + 1;
 			*pchEq = 0;
 			while ( -- pchEq >= szLine &&
-				isspace( *pchEq ) )
+				V_isspace( *pchEq ) )
 			{
 				*pchEq = 0;
 			}
@@ -1158,7 +1157,7 @@ have_combo_iteration:
 
 			// We also establish mapping by either splitting the
 			// combos into 500 intervals or stepping by every 1000 combos.
-			int iPartStep = ( int ) max( 1000, ( chi.m_numCombos / 500 ) );
+			int iPartStep = ( int ) max( 1000, (int)( chi.m_numCombos / 500 ) );
 			for ( uint64 iRecord = nCurrentCommand + iPartStep;
 				  iRecord < nCurrentCommand + chi.m_numCombos;
 				  iRecord += iPartStep )

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,14 +31,13 @@ public:
 
 	virtual void PrimaryAttack();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_M249; }
 
 
 private:
-
 	CWeaponM249( const CWeaponM249 & );
-
-	void M249Fire( float flSpread );
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponM249, DT_WeaponM249 )
@@ -58,6 +57,24 @@ CWeaponM249::CWeaponM249()
 {
 }
 
+float CWeaponM249::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.045f + 0.5f * m_flAccuracy;
+		else if (pPlayer->GetAbsVelocity().Length2D() > 140)
+			return 0.045f + 0.095f * m_flAccuracy;
+		else
+			return 0.03f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
 
 void CWeaponM249::PrimaryAttack( void )
 {
@@ -65,20 +82,10 @@ void CWeaponM249::PrimaryAttack( void )
 	if ( !pPlayer )
 		return;
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		M249Fire( 0.045f + 0.5f * m_flAccuracy );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 140)
-		M249Fire( 0.045f + 0.095f * m_flAccuracy );
-	else
-		M249Fire( 0.03f * m_flAccuracy );
-}
-
-void CWeaponM249::M249Fire( float flSpread )
-{
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 	
-	CCSPlayer *pPlayer = GetPlayerOwner();
+	pPlayer = GetPlayerOwner();
 
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
 	if ( !pPlayer )

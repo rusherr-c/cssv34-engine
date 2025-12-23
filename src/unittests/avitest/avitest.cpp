@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -12,16 +12,17 @@
 //=============================================================================
 #include <windows.h>
 #include "appframework/vguimatsysapp.h"
-#include "FileSystem.h"
-#include "materialsystem/IMaterialSystem.h"
-#include "materialsystem/IMesh.h"
+#include "filesystem.h"
+#include "materialsystem/imaterialsystem.h"
+#include "materialsystem/imesh.h"
 #include "vgui/ISurface.h"
 #include "vgui/IVGui.h"
 #include "vgui_controls/controls.h"
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "vgui/ILocalize.h"
 #include "vgui/IScheme.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
+#include "avi/ibik.h"
 #include "tier3/tier3.h"
 
 
@@ -62,6 +63,7 @@ bool CAVITestApp::Create()
 	AppSystemInfo_t appSystems[] = 
 	{
 		{ "valve_avi.dll",				AVI_INTERFACE_VERSION },
+		{ "valve_avi.dll",				BIK_INTERFACE_VERSION },
 		{ "", "" }	// Required to terminate the list
 	};
 

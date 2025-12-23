@@ -1,11 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
 
 #include "cbase.h"
-#include <vgui/isurface.h>
+#include <vgui/ISurface.h>
 #include "clientmode_csnormal.h"
 #include "cs_gamerules.h"
 #include "hud_numericdisplay.h"
@@ -16,8 +16,8 @@
 #include "c_cs_playerresource.h"
 #include <coordsize.h>
 #include "hud_macros.h"
-#include "vgui/ivgui.h"
-#include "vgui/ilocalize.h"
+#include "vgui/IVGui.h"
+#include "vgui/ILocalize.h"
 #include "mapoverview.h"
 #include "cstrikespectatorgui.h"
 #include "hud_radar.h"
@@ -61,6 +61,7 @@ CHudRadar::CHudRadar( const char *pName ) :	vgui::Panel( NULL, "HudRadar" ), CHu
 	s_Radar = this;
 
 	SetHiddenBits( HIDEHUD_PLAYERDEAD );
+
 }
 
 
@@ -151,12 +152,27 @@ void CHudRadar::MsgFunc_UpdateRadar(bf_read &msg )
 		if ( !pPlayer )
 			continue;
 
-		bool bOppositeTeams = (pLocalPlayer->GetTeamNumber() != TEAM_UNASSIGNED && pCSPR->GetTeam( pPlayer->entindex() ) != pLocalPlayer->GetTeamNumber());
+		bool bOppositeTeams = (pLocalPlayer->GetTeamNumber() != TEAM_UNASSIGNED && pCSPR->GetTeam( pPlayer->entindex() ) != pLocalPlayer->GetTeamNumber());		
 
-		// don't update dead players or if they are in PVS
-		if ( pPlayer->IsObserver() || (!pPlayer->IsDormant() && bOppositeTeams == false ) )
+		//=============================================================================
+		// HPE_BEGIN:
+		// [tj] This used to do slightly different logic that caused other players
+		//		to twitch while you were observing.
+		//=============================================================================
+		// Don't update players if they are in PVS.
+		if (!pPlayer->IsDormant())
+		{
 			continue;
+		}
 
+		//Don't update players if you are sill alive and they are an enemy.
+		if (bOppositeTeams && !pLocalPlayer->IsObserver())
+		{
+			continue;
+		}
+		//=============================================================================
+		// HPE_END
+		//=============================================================================
 		// update origin and angle for players out of my PVS
 		origin = pPlayer->GetAbsOrigin();
 		angles = pPlayer->GetAbsAngles();
@@ -175,7 +191,15 @@ void CHudRadar::MsgFunc_UpdateRadar(bf_read &msg )
 bool CHudRadar::ShouldDraw()
 {
 	C_CSPlayer *pPlayer = C_CSPlayer::GetLocalCSPlayer();
-	return pPlayer && pPlayer->IsAlive() && !m_bHideRadar;
+	
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Added base class call
+	//=============================================================================
+	return pPlayer && pPlayer->IsAlive() && !m_bHideRadar && CHudElement::ShouldDraw();
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 void CHudRadar::SetVisible(bool state)

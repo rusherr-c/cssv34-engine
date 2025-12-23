@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,6 +26,7 @@
 #include "engine/ishadowmgr.h"
 #include "getintersectingsurfaces_struct.h"
 #include "surfacehandle.h"
+#include "ivrenderview.h"
 
 struct model_t;
 struct Ray_t;
@@ -128,10 +129,9 @@ int				DispInfo_ComputeIndex( HDISPINFOARRAY hArray, IDispInfo* pInfo );
 // Clear the tags for all displacements in the array.
 void			DispInfo_ClearAllTags( HDISPINFOARRAY hArray );
 
-
 // Call this to render a list of displacements.
 // If bOrtho is true, then no backface removal is done on dispinfos.
-void			DispInfo_RenderList( int nSortGroup, SurfaceHandle_t *pList, int listCount, bool bOrtho, unsigned long flags, bool bShadowDepth );
+void			DispInfo_RenderList( int nSortGroup, SurfaceHandle_t *pList, int listCount, bool bOrtho, unsigned long flags, ERenderDepthMode DepthMode );
 
 
 // This should be called from Map_LoadDisplacements (while the map file is open).

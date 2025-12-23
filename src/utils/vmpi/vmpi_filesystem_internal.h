@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -35,7 +35,7 @@
 
 #define TCP_CHUNK_PAYLOAD_SIZE			(16*1024)
 #define MULTICAST_CHUNK_PAYLOAD_SIZE	(1024*1)
-#define MAX_CHUNK_PAYLOAD_SIZE			max( TCP_CHUNK_PAYLOAD_SIZE, MULTICAST_CHUNK_PAYLOAD_SIZE )
+#define MAX_CHUNK_PAYLOAD_SIZE			MAX( TCP_CHUNK_PAYLOAD_SIZE, MULTICAST_CHUNK_PAYLOAD_SIZE )
 
 
 class CMulticastFileInfo

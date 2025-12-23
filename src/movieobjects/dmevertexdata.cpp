@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -562,8 +562,8 @@ void CDmeVertexDataBase::RemoveAllVertexData( FieldIndex_t nFieldIndex )
 	array.RemoveAll();
 	if ( IsVertexDeltaData() )
 	{
-		CDmrArray<int> array( m_FieldInfo[nFieldIndex].m_pIndexData );
-		array.RemoveAll();
+		CDmrArray<int> arrayDelta( m_FieldInfo[nFieldIndex].m_pIndexData );
+		arrayDelta.RemoveAll();
 	}
 }
 

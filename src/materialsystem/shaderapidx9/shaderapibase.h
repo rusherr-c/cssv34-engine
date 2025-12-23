@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,7 @@
 #endif
 
 
+#include "togl/rendermechanism.h"
 #include "shaderapi/ishaderapi.h"
 #include "shaderapi_global.h"
 #include "locald3dtypes.h"
@@ -70,12 +71,14 @@ class CPixEvent
 public:
 	CPixEvent( unsigned long color, const char *szName )
 	{
-		g_pShaderAPI->BeginPIXEvent( color, szName );
+		if ( g_pShaderAPI )
+			g_pShaderAPI->BeginPIXEvent( color, szName );
 	}
 
 	~CPixEvent()
 	{
-		g_pShaderAPI->EndPIXEvent();
+		if ( g_pShaderAPI )
+			g_pShaderAPI->EndPIXEvent();
 	}
 };
 

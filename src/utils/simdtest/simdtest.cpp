@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -288,7 +288,7 @@ SSEClassTest( const fltx4 & val, fltx4 & out )
 #endif // !_X360
 
 
-void main(int argc,char **argv)
+int main(int argc,char **argv)
 {
 #ifndef _X360
 
@@ -316,4 +316,6 @@ void main(int argc,char **argv)
 
 	// Run the perf. test
 	SIMDTest();
+	
+	return 0;
 }

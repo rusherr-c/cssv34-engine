@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -351,7 +351,7 @@ bool CDmxSerializer::UnserializeAttributes( CUtlBuffer &buf, CDmxElement *pEleme
 		}
 		else
 		{
-			buf.GetStringManualCharCount( nameBuf, sizeof( nameBuf ) );
+			buf.GetString( nameBuf );
 			pName = nameBuf;
 		}
 		DmAttributeType_t nAttributeType = (DmAttributeType_t)buf.GetChar();
@@ -431,18 +431,30 @@ bool CDmxSerializer::Unserialize( CUtlBuffer &buf, int nEncodingVersion, CDmxEle
 	if ( bReadStringTable )
 	{
 		nStrings = buf.GetShort();
-		offsetTable = ( int* )stackalloc( nStrings * sizeof( int ) );
+		if ( nStrings > 0 )
+		{
+			offsetTable = ( int* )stackalloc( nStrings * sizeof( int ) );
 
-		// this causes entire string table to be mapped in memory at once
-		int nStringMemoryUsage = GetStringOffsetTable( buf, offsetTable, nStrings );
-		stringTable = ( char* )stackalloc( nStringMemoryUsage * sizeof( char ) );
-		buf.Get( stringTable, nStringMemoryUsage );
+			// this causes entire string table to be mapped in memory at once
+			int nStringMemoryUsage = GetStringOffsetTable( buf, offsetTable, nStrings );
+			stringTable = ( char* )stackalloc( nStringMemoryUsage * sizeof( char ) );
+			buf.Get( stringTable, nStringMemoryUsage );
+		}
 	}
 
 	// Read in the element count.
 	int nElementCount = buf.GetInt();
 	if ( !nElementCount )
+	{
+		// Empty (but valid) file
 		return true;
+	}
+
+	if ( nElementCount < 0 || ( bReadStringTable && !stringTable ) )
+	{
+		// Invalid file. Non-empty files with a string table need at least one to associate with elements.
+		return false;
+	}
 
 	char pTypeBuf[256];
 	char pName[2048];
@@ -453,7 +465,7 @@ bool CDmxSerializer::Unserialize( CUtlBuffer &buf, int nEncodingVersion, CDmxEle
 	for ( int i = 0; i < nElementCount; ++i )
 	{
 		const char *pType = NULL;
-		if ( bReadStringTable )
+		if ( stringTable )
 		{
 			int si = buf.GetShort();
 			if ( si >= nStrings )
@@ -462,10 +474,10 @@ bool CDmxSerializer::Unserialize( CUtlBuffer &buf, int nEncodingVersion, CDmxEle
 		}
 		else
 		{
-			buf.GetStringManualCharCount( pTypeBuf, sizeof( pTypeBuf ) );
+			buf.GetString( pTypeBuf );
 			pType = pTypeBuf;
 		}
-		buf.GetStringManualCharCount( pName, 2048 );
+		buf.GetString( pName );
 		buf.Get( &id, sizeof(DmObjectId_t) );
 
 		CDmxElement *pElement = new CDmxElement( pType );
@@ -527,7 +539,9 @@ bool SerializeDMX( const char *pFileName, const char *pPathID, bool bTextMode, C
 		}
 	}
 
-	CUtlStreamBuffer buf( pFullPath, pPathID, bTextMode ? CUtlBuffer::TEXT_BUFFER : 0 );
+	CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER |  CUtlBuffer::READ_ONLY );
+	g_pFullFileSystem->ReadFile( pFullPath, pPathID, buf );
+
 	if ( !buf.IsValid() )
 	{
 		Warning( "SerializeDMX: Unable to open file \"%s\"\n", pFullPath );
@@ -548,16 +562,22 @@ bool ReadDMXHeader( CUtlBuffer &buf, char *pEncodingName, int nEncodingNameLen, 
 	bool bBufHasCRLF = buf.ContainsCRLF();
 	buf.SetBufferType( true, !bBufIsText || bBufHasCRLF );
 
-	char header[ DMX_MAX_HEADER_LENGTH ];
+	char header[ DMX_MAX_HEADER_LENGTH ] = { 0 };
 	bool bOk = buf.ParseToken( DMX_VERSION_STARTING_TOKEN, DMX_VERSION_ENDING_TOKEN, header, sizeof( header ) );
 	if ( bOk )
 	{
 #ifdef _WIN32
 		int nAssigned = sscanf_s( header, "encoding %s %d format %s %d\n", pEncodingName, nEncodingNameLen, &nEncodingVersion, pFormatName, nFormatNameLen, &nFormatVersion );
 #else
-		int nAssigned = sscanf( header, "encoding %s %d format %s %d\n", pEncodingName, &nEncodingVersion, pFormatName, &nFormatVersion );
+		// sscanf considered harmful. We don't have POSIX 2008 support on OS X and "C11 Annex K" is optional... (optional specs considered useful)
+		char pTmpEncodingName[ sizeof( header ) ] = { 0 };
+		char pTmpFormatName  [ sizeof( header ) ] = { 0 };
+		int nAssigned = sscanf( header, "encoding %s %d format %s %d\n", pTmpEncodingName, &nEncodingVersion, pTmpFormatName, &nFormatVersion );
+		bOk = ( V_strlen( pTmpEncodingName ) < nEncodingNameLen ) && ( V_strlen( pTmpFormatName ) < nFormatNameLen );
+		V_strncpy( pEncodingName, pTmpEncodingName, nEncodingNameLen );
+		V_strncpy( pFormatName, pTmpFormatName, nFormatNameLen );
 #endif
-		bOk = nAssigned == 4;
+		bOk = bOk && ( nAssigned == 4 );
 		if ( bOk )
 		{
 			bOk = !V_stricmp( pEncodingName, bBufIsText ? "keyvalues2" : "binary" );
@@ -651,7 +671,10 @@ bool UnserializeDMX( const char *pFileName, const char *pPathID, bool bTextMode,
 	{
 		nFlags |= CUtlBuffer::TEXT_BUFFER;
 	}
-	CUtlStreamBuffer buf( pFullPath, pPathID, nFlags );
+
+	CUtlBuffer buf( 0, 0, nFlags );
+	g_pFullFileSystem->ReadFile( pFullPath, pPathID, buf );
+
 	if ( !buf.IsValid() )
 	{
 		Warning( "UnserializeDMX: Unable to open file \"%s\"\n", pFullPath );

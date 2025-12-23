@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Portable code to mix sounds for snd_dma.cpp.
 //
@@ -11,10 +11,24 @@
 #include "icliententitylist.h"
 #include "icliententity.h"
 #include "../../sys_dll.h"
-#include "video/iavi.h"
+#include "video/ivideoservices.h"
+#include "engine/IEngineSound.h"
+
+#if defined( REPLAY_ENABLED )
+#include "demo.h"
+#include "replay_internal.h"
+#endif
+#ifdef GNUC
+// we don't suport the ASM in this file right now under GCC, fallback to C libs
+#undef id386
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+#if defined( REPLAY_ENABLED )
+extern IReplayMovieManager *g_pReplayMovieManager;
+#endif
 
 #if defined(_WIN32) && id386
 // warning C4731: frame pointer register 'ebp' modified by inline assembly code
@@ -65,21 +79,15 @@ portable_samplepair_t *g_paintbuffer;
 // NOTE: this paintbuffer is also used as a copy buffer by interpolating pitch
 // shift routines.  Decreasing TEMP_COPY_BUFFER_SIZE (or PAINTBUFFER_MEM_SIZE)
 // will decrease the maximum pitch level (current 4.0)!
-portable_samplepair_t *g_temppaintbuffer;
+portable_samplepair_t *g_temppaintbuffer = NULL;
 
-paintbuffer_t *g_paintBuffers;
+CUtlVector< paintbuffer_t > g_paintBuffers;
 
-#define IPAINTBUFFER			0
-#define IROOMBUFFER				1
-#define IFACINGBUFFER			2
-#define IFACINGAWAYBUFFER		3
-#define IDRYBUFFER				4
-#define ISPEAKERBUFFER			5
 
 // pointer to current paintbuffer (front and reare), used by all mixing, upsampling and dsp routines
-portable_samplepair_t *g_curpaintbuffer;
-portable_samplepair_t *g_currearpaintbuffer;	
-portable_samplepair_t *g_curcenterpaintbuffer;
+portable_samplepair_t *g_curpaintbuffer = NULL;
+portable_samplepair_t *g_currearpaintbuffer = NULL;	
+portable_samplepair_t *g_curcenterpaintbuffer = NULL;
 
 bool g_bdirectionalfx;
 bool g_bDspOff;
@@ -102,19 +110,21 @@ int	g_snd_profile_type = 0;		// type 1 dsp, type 2 mixer, type 3 load sound, typ
 portable_samplepair_t cubicfilter1[3] = {{0,0},{0,0},{0,0}};
 portable_samplepair_t cubicfilter2[3] = {{0,0},{0,0},{0,0}};
 
-portable_samplepair_t linearfilter1[1] = {0,0};
-portable_samplepair_t linearfilter2[1] = {0,0};
-portable_samplepair_t linearfilter3[1] = {0,0};
-portable_samplepair_t linearfilter4[1] = {0,0};
-portable_samplepair_t linearfilter5[1] = {0,0};
-portable_samplepair_t linearfilter6[1] = {0,0};
-portable_samplepair_t linearfilter7[1] = {0,0};
-portable_samplepair_t linearfilter8[1] = {0,0};
+portable_samplepair_t linearfilter1[1] = {{0,0}};
+portable_samplepair_t linearfilter2[1] = {{0,0}};
+portable_samplepair_t linearfilter3[1] = {{0,0}};
+portable_samplepair_t linearfilter4[1] = {{0,0}};
+portable_samplepair_t linearfilter5[1] = {{0,0}};
+portable_samplepair_t linearfilter6[1] = {{0,0}};
+portable_samplepair_t linearfilter7[1] = {{0,0}};
+portable_samplepair_t linearfilter8[1] = {{0,0}};
 
 int		snd_scaletable[SND_SCALE_LEVELS][256];	// 32k*4 = 128K
 
 int 	*snd_p, snd_linear_count, snd_vol;
 short	*snd_out;
+
+extern int DSP_Alloc( int ipset, float xfade, int cchan );
 
 bool DSP_CheckDspAutoEnabled( void );
 int Get_idsp_room ( void );
@@ -124,12 +134,21 @@ bool DSP_CheckDspAutoEnabled( void );
 
 void MIX_ScalePaintBuffer( int bufferIndex, int count, float fgain );
 
+bool IsReplayRendering()
+{
+#if defined( REPLAY_ENABLED )
+	return g_pReplayMovieManager && g_pReplayMovieManager->IsRendering();
+#else
+	return false;
+#endif
+}
+
 //-----------------------------------------------------------------------------
 // Free allocated memory buffers
 //-----------------------------------------------------------------------------
 void MIX_FreeAllPaintbuffers(void)
 {		
-	if ( g_paintBuffers )
+	if ( g_paintBuffers.Count() )
 	{
 		if ( g_temppaintbuffer )
 		{
@@ -137,7 +156,7 @@ void MIX_FreeAllPaintbuffers(void)
 			g_temppaintbuffer = NULL;
 		}
 
-		for ( int i = 0; i < CPAINTBUFFERS; i++ )
+		for ( int i = 0; i < g_paintBuffers.Count(); i++ )
 		{
 			if ( g_paintBuffers[i].pbuf )
 			{
@@ -153,77 +172,80 @@ void MIX_FreeAllPaintbuffers(void)
 			}
 		}
 
-		free( g_paintBuffers );
-		g_paintBuffers = NULL;
+		g_paintBuffers.RemoveAll();
+	}
+}
+
+void MIX_InitializePaintbuffer( paintbuffer_t *pPaintBuffer, bool bSurround, bool bSurroundCenter )
+{
+	V_memset( pPaintBuffer, 0, sizeof( *pPaintBuffer ) );
+
+	pPaintBuffer->pbuf = (portable_samplepair_t *)_aligned_malloc( PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t), 16 );
+	V_memset( pPaintBuffer->pbuf, 0, PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t) );
+
+	if ( bSurround )
+	{
+		pPaintBuffer->pbufrear = (portable_samplepair_t *)_aligned_malloc( PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t), 16 );
+		V_memset( pPaintBuffer->pbufrear, 0, PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t) );
+	}
+	if ( bSurroundCenter )
+	{
+		pPaintBuffer->pbufcenter = (portable_samplepair_t *)_aligned_malloc( PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t), 16 );
+		V_memset( pPaintBuffer->pbufcenter, 0, PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t) );
 	}
 }
 
 //-----------------------------------------------------------------------------
 // Allocate memory buffers
-// Initialize paintbuffers array, set current paint buffer to main output buffer IPAINTBUFFER
+// Initialize paintbuffers array, set current paint buffer to main output buffer SOUND_BUFFER_PAINT
 //-----------------------------------------------------------------------------
 bool MIX_InitAllPaintbuffers(void)
 {
 	bool	bSurround;
 	bool	bSurroundCenter;
-	int		i;
 
 	bSurroundCenter = g_AudioDevice->IsSurroundCenter();
 	bSurround = g_AudioDevice->IsSurround() || bSurroundCenter;
 
-	g_paintBuffers = (paintbuffer_t *)malloc( CPAINTBUFFERS*sizeof( paintbuffer_t ) );
-	V_memset( g_paintBuffers, 0, CPAINTBUFFERS*sizeof( paintbuffer_t ) );
-
 	g_temppaintbuffer = (portable_samplepair_t*)_aligned_malloc( TEMP_COPY_BUFFER_SIZE*sizeof(portable_samplepair_t), 16 );
 	V_memset( g_temppaintbuffer, 0, TEMP_COPY_BUFFER_SIZE*sizeof(portable_samplepair_t) );
 
-	for ( i=0; i<CPAINTBUFFERS; i++ )
+	while ( g_paintBuffers.Count() < SOUND_BUFFER_BASETOTAL )
 	{
-		g_paintBuffers[i].pbuf = (portable_samplepair_t *)_aligned_malloc( PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t), 16 );
-		V_memset( g_paintBuffers[i].pbuf, 0, PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t) );
-
-		if ( bSurround )
-		{
-			g_paintBuffers[i].pbufrear = (portable_samplepair_t *)_aligned_malloc( PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t), 16 );
-			V_memset( g_paintBuffers[i].pbufrear, 0, PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t) );
-		}
-		if ( bSurroundCenter )
-		{
-			g_paintBuffers[i].pbufcenter = (portable_samplepair_t *)_aligned_malloc( PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t), 16 );
-			V_memset( g_paintBuffers[i].pbufcenter, 0, PAINTBUFFER_MEM_SIZE*sizeof(portable_samplepair_t) );
-		}
+		int nIndex = g_paintBuffers.AddToTail();
+		MIX_InitializePaintbuffer( &(g_paintBuffers[ nIndex ]), bSurround, bSurroundCenter );
 	}
 
-	g_paintbuffer = g_paintBuffers[IPAINTBUFFER].pbuf;
+	g_paintbuffer = g_paintBuffers[SOUND_BUFFER_PAINT].pbuf;
 
 	// buffer flags
-	g_paintBuffers[IROOMBUFFER].flags = SOUND_BUSS_ROOM;
-	g_paintBuffers[IFACINGBUFFER].flags = SOUND_BUSS_FACING;
-	g_paintBuffers[IFACINGAWAYBUFFER].flags = SOUND_BUSS_FACINGAWAY;
-	g_paintBuffers[ISPEAKERBUFFER].flags = SOUND_BUSS_SPEAKER;
-	g_paintBuffers[IDRYBUFFER].flags = SOUND_BUSS_DRY;
+	g_paintBuffers[SOUND_BUFFER_ROOM].flags = SOUND_BUSS_ROOM;
+	g_paintBuffers[SOUND_BUFFER_FACING].flags = SOUND_BUSS_FACING;
+	g_paintBuffers[SOUND_BUFFER_FACINGAWAY].flags = SOUND_BUSS_FACINGAWAY;
+	g_paintBuffers[SOUND_BUFFER_SPEAKER].flags = SOUND_BUSS_SPEAKER;
+	g_paintBuffers[SOUND_BUFFER_DRY].flags = SOUND_BUSS_DRY;
 
 	// buffer surround sound flag
-	g_paintBuffers[IPAINTBUFFER].fsurround = bSurround;
-	g_paintBuffers[IFACINGBUFFER].fsurround = bSurround;
-	g_paintBuffers[IFACINGAWAYBUFFER].fsurround	= bSurround;
-	g_paintBuffers[IDRYBUFFER].fsurround = bSurround;
+	g_paintBuffers[SOUND_BUFFER_PAINT].fsurround = bSurround;
+	g_paintBuffers[SOUND_BUFFER_FACING].fsurround = bSurround;
+	g_paintBuffers[SOUND_BUFFER_FACINGAWAY].fsurround	= bSurround;
+	g_paintBuffers[SOUND_BUFFER_DRY].fsurround = bSurround;
 
 	// buffer 5 channel surround sound flag
-	g_paintBuffers[IPAINTBUFFER].fsurround_center = bSurroundCenter;
-	g_paintBuffers[IFACINGBUFFER].fsurround_center = bSurroundCenter;
-	g_paintBuffers[IFACINGAWAYBUFFER].fsurround_center = bSurroundCenter;
-	g_paintBuffers[IDRYBUFFER].fsurround_center = bSurroundCenter;
+	g_paintBuffers[SOUND_BUFFER_PAINT].fsurround_center = bSurroundCenter;
+	g_paintBuffers[SOUND_BUFFER_FACING].fsurround_center = bSurroundCenter;
+	g_paintBuffers[SOUND_BUFFER_FACINGAWAY].fsurround_center = bSurroundCenter;
+	g_paintBuffers[SOUND_BUFFER_DRY].fsurround_center = bSurroundCenter;
 	
 	// room buffer mixes down to mono or stereo, never to 4 or 5 ch
-	g_paintBuffers[IROOMBUFFER].fsurround = false;
-	g_paintBuffers[IROOMBUFFER].fsurround_center = false;
+	g_paintBuffers[SOUND_BUFFER_ROOM].fsurround = false;
+	g_paintBuffers[SOUND_BUFFER_ROOM].fsurround_center = false;
 
 	// speaker buffer mixes to mono
-	g_paintBuffers[ISPEAKERBUFFER].fsurround = false;
-	g_paintBuffers[ISPEAKERBUFFER].fsurround_center	= false;
+	g_paintBuffers[SOUND_BUFFER_SPEAKER].fsurround = false;
+	g_paintBuffers[SOUND_BUFFER_SPEAKER].fsurround_center	= false;	
 
-	MIX_SetCurrentPaintbuffer( IPAINTBUFFER );
+	MIX_SetCurrentPaintbuffer( SOUND_BUFFER_PAINT );
 
 	return true;
 }
@@ -233,7 +255,7 @@ bool MIX_InitAllPaintbuffers(void)
 
 double MIX_GetMaxRate( double rate, int sampleCount )
 {
-	if (rate >= 1.0)
+	if (rate <= 2.0)
 		return rate;
 
 	// copybuf_bytes = rate_max * samples_max * samplesize_max
@@ -279,7 +301,7 @@ void S_TransferStereo16( void *pOutput, const portable_samplepair_t *pfront, int
 	int samplePairCount = g_AudioDevice->DeviceSampleCount() >> 1;
 	int sampleMask = samplePairCount  - 1;
 
-	bool bShouldPlaySound = !cl_movieinfo.IsRecording();
+	bool bShouldPlaySound = !cl_movieinfo.IsRecording() && !IsReplayRendering();
 
 	while ( lpaintedtime < endtime )
 	{														
@@ -331,7 +353,7 @@ void S_TransferPaintBuffer(void *pOutput, const portable_samplepair_t *pfront, i
 	int 		out_mask;
 	int 		step;
 	int			val;
-	int			snd_vol;
+	int			nSoundVol;
 	const int 	*p;
  
 	if ( IsX360() )
@@ -355,14 +377,14 @@ void S_TransferPaintBuffer(void *pOutput, const portable_samplepair_t *pfront, i
 	out_idx = (lpaintedtime * g_AudioDevice->DeviceChannels()) & out_mask;
 	
 	step = 3 - g_AudioDevice->DeviceChannels();	// mono output buffer - step 2, stereo - step 1
-	snd_vol = S_GetMasterVolume()*256;
+	nSoundVol = S_GetMasterVolume()*256;
 
 	if (g_AudioDevice->DeviceSampleBits() == 16)
 	{
 		short *out = (short *) pOutput;
 		while (count--)
 		{
-			val = (*p * snd_vol) >> 8;
+			val = (*p * nSoundVol) >> 8;
 			p+= step;
 			val = CLIP(val);
 			
@@ -375,7 +397,7 @@ void S_TransferPaintBuffer(void *pOutput, const portable_samplepair_t *pfront, i
 		unsigned char *out = (unsigned char *) pOutput;
 		while (count--)
 		{
-			val = (*p * snd_vol) >> 8;
+			val = (*p * nSoundVol) >> 8;
 			p+= step;
 			val = CLIP(val);
 			
@@ -438,6 +460,8 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 	int		i;
 	int		sampleCount;
 
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s c:%d %d/%d", __FUNCTION__, list.Count(), rate, outputRate );
+
 	// mix each channel into paintbuffer
 	// validate parameters
 	Assert( outputRate <= SOUND_DMA_SPEED );
@@ -448,12 +472,24 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 	if ( sampleCount <= 0 )
 		return;
 
+	// Apply a global pitch shift if we're playing back a time-scaled replay
+	float flGlobalPitchScale = 1.0f;
+
+#if defined( REPLAY_ENABLED )
+	extern IDemoPlayer *g_pReplayDemoPlayer;
+	if ( demoplayer->IsPlayingBack() && demoplayer == g_pReplayDemoPlayer )
+	{
+		// adjust time scale if playing back demo
+		flGlobalPitchScale = demoplayer->GetPlaybackTimeScale();
+	}
+#endif
+
 	for ( i = list.Count(); --i >= 0; )
 	{
 		channel_t *ch = list.GetChannel( i );
 		Assert( ch->sfx );
 		// must never have a 'dry' and 'speaker' set - causes double mixing & double data reading
-		Assert ( !( ch->flags.bdry && ch->flags.bSpeaker ) );	
+		Assert ( !( ( ch->flags.bdry && ch->flags.bSpeaker ) || ( ch->flags.bdry && ch->special_dsp != 0 ) ) );	
 
 		// if mixing with SOUND_MIX_DRY flag, ignore (don't even load) all channels not flagged as 'dry'
 		if ( flags == SOUND_MIX_DRY )
@@ -465,7 +501,7 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 		// if mixing with SOUND_MIX_WET flag, ignore (don't even load) all channels flagged as 'dry' or 'speaker'
 		if ( flags == SOUND_MIX_WET )
 		{
-			if ( ch->flags.bdry || ch->flags.bSpeaker )
+			if ( ch->flags.bdry || ch->flags.bSpeaker || ch->special_dsp != 0 )
 				continue;
 		}
 
@@ -473,6 +509,13 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 		if ( flags == SOUND_MIX_SPEAKER )
 		{
 			if ( !ch->flags.bSpeaker )
+				continue;
+		}
+
+		// if mixing with SOUND_MIX_SPEAKER flag, ignore (don't even load) all channels not flagged as 'speaker'
+		if ( flags == SOUND_MIX_SPECIAL_DSP )
+		{
+			if ( ch->special_dsp == 0 )
 				continue;
 		}
 
@@ -504,7 +547,7 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 
 		if ( bIsMouth )
 		{
-			if ( entitylist->GetClientEntity(ch->soundsource) || 
+			if ( ( ch->soundsource == SOUND_FROM_UI_PANEL ) || entitylist->GetClientEntity(ch->soundsource) || 
 				( ch->flags.bSpeaker && entitylist->GetClientEntity( ch->speakerentity ) ) )
 			{
 				// UNDONE: recode this as a member function of CAudioMixer
@@ -517,6 +560,9 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 		// mix 'speaker' sounds only to speaker paintbuffer.
 		// mix all other sounds between room, facing & facingaway paintbuffers
 		// NOTE: must be called once per channel only - consecutive calls retrieve additional data.
+		float flPitch = ch->pitch;
+		ch->pitch *= flGlobalPitchScale;
+
 		if (list.IsQuashed(i))
 		{
 			// If the sound has been silenced as a performance heuristic, quash it.
@@ -525,10 +571,19 @@ void MIX_MixChannelsToPaintbuffer( CChannelList &list, int endtime, int flags, i
 		}
 		else
 		{
+			tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "MixDataToDevice" );
 			ch->pMixer->MixDataToDevice( g_AudioDevice, ch, sampleCount, outputRate, 0 );
 		}
 
+		// restore to original pitch settings
+		ch->pitch = flPitch;
+
 		if ( !ch->pMixer->ShouldContinueMixing() )
+		{
+			S_FreeChannel( ch );
+			list.RemoveChannelFromList(i);
+		}
+		if ( (ch->nFreeChannelAtSampleTime > 0 && (int)ch->nFreeChannelAtSampleTime <= endtime) )
 		{
 			S_FreeChannel( ch );
 			list.RemoveChannelFromList(i);
@@ -816,11 +871,11 @@ void S_MixBufferUpsample2x( int count, portable_samplepair_t *pbuffer, portable_
 // Also sets the rear paintbuffer if paintbuffer has fsurround true.
 // (otherwise, rearpaintbuffer is NULL)
 
-inline void MIX_SetCurrentPaintbuffer(int ipaintbuffer)
+void MIX_SetCurrentPaintbuffer(int ipaintbuffer)
 {
 	// set front and rear paintbuffer
 
-	Assert(ipaintbuffer < CPAINTBUFFERS);
+	Assert(ipaintbuffer < g_paintBuffers.Count());
 	
 	g_curpaintbuffer = g_paintBuffers[ipaintbuffer].pbuf;
 
@@ -844,11 +899,11 @@ inline void MIX_SetCurrentPaintbuffer(int ipaintbuffer)
 
 // return index to current paintbuffer
 
-inline int MIX_GetCurrentPaintbufferIndex( void )
+int MIX_GetCurrentPaintbufferIndex( void )
 {
 	int i;
 
-	for (i = 0; i < CPAINTBUFFERS; i++)
+	for ( i = 0; i < g_paintBuffers.Count(); i++ )
 	{
 		if (g_curpaintbuffer == g_paintBuffers[i].pbuf)
 			return i;
@@ -860,11 +915,11 @@ inline int MIX_GetCurrentPaintbufferIndex( void )
 
 // return pointer to current paintbuffer struct
 
-inline paintbuffer_t *MIX_GetCurrentPaintbufferPtr( void )
+paintbuffer_t *MIX_GetCurrentPaintbufferPtr( void )
 {
 	int ipaint = MIX_GetCurrentPaintbufferIndex();
 	
-	Assert(ipaint < CPAINTBUFFERS);
+	Assert( ipaint < g_paintBuffers.Count() );
 
 	return &g_paintBuffers[ipaint];
 }
@@ -877,11 +932,11 @@ inline portable_samplepair_t *MIX_GetPFrontFromIPaint(int ipaintbuffer)
 	return g_paintBuffers[ipaintbuffer].pbuf;
 }
 
-inline paintbuffer_t *MIX_GetPPaintFromIPaint( int ipaint )
+paintbuffer_t *MIX_GetPPaintFromIPaint( int ipaintbuffer )
 {	
-	Assert(ipaint < CPAINTBUFFERS);
+	Assert( ipaintbuffer < g_paintBuffers.Count() );
 
-	return &g_paintBuffers[ipaint];
+	return &g_paintBuffers[ipaintbuffer];
 }
 
 
@@ -913,9 +968,9 @@ inline int MIX_GetIPaintFromPFront( portable_samplepair_t *pbuf )
 {
 	int i;
 
-	for (i = 0; i < CPAINTBUFFERS; i++)
+	for ( i = 0; i < g_paintBuffers.Count(); i++ )
 	{
-		if (pbuf == g_paintBuffers[i].pbuf)
+		if ( pbuf == g_paintBuffers[i].pbuf )
 			return i;
 	}
 
@@ -966,7 +1021,7 @@ inline void MIX_ConvertBufferToSurround( int ipaintbuffer )
 
 inline void MIX_ActivatePaintbuffer(int ipaintbuffer)
 {
-	Assert(ipaintbuffer < CPAINTBUFFERS);
+	Assert( ipaintbuffer < g_paintBuffers.Count() );
 	g_paintBuffers[ipaintbuffer].factive = true;
 }
 
@@ -974,7 +1029,7 @@ inline void MIX_ActivatePaintbuffer(int ipaintbuffer)
 
 inline void MIX_DeactivatePaintbuffer(int ipaintbuffer)
 {
-	Assert(ipaintbuffer < CPAINTBUFFERS);
+	Assert( ipaintbuffer < g_paintBuffers.Count() );
 	g_paintBuffers[ipaintbuffer].factive = false;
 }
 
@@ -983,7 +1038,7 @@ inline void MIX_DeactivatePaintbuffer(int ipaintbuffer)
 inline void MIX_DeactivateAllPaintbuffers(void)
 {
 	int i;
-	for (i = 0; i < CPAINTBUFFERS; i++)
+	for ( i = 0; i < g_paintBuffers.Count(); i++ )
 		g_paintBuffers[i].factive = false;
 }
 
@@ -993,13 +1048,13 @@ inline void MIX_ResetPaintbufferFilterCounters( void )
 
 {
 	int i;
-	for (i = 0; i < CPAINTBUFFERS; i++)
+	for ( i = 0; i < g_paintBuffers.Count(); i++ )
 		g_paintBuffers[i].ifilter = 0;
 }
 
 inline void MIX_ResetPaintbufferFilterCounter( int ipaintbuffer )
 {
-	Assert (ipaintbuffer < CPAINTBUFFERS);
+	Assert ( ipaintbuffer < g_paintBuffers.Count() );
 	g_paintBuffers[ipaintbuffer].ifilter = 0;
 }
 
@@ -1007,7 +1062,7 @@ inline void MIX_ResetPaintbufferFilterCounter( int ipaintbuffer )
 
 inline void MIX_SetPaintbufferFlags(int ipaintbuffer, int flags)
 {
-	Assert(ipaintbuffer < CPAINTBUFFERS);
+	Assert( ipaintbuffer < g_paintBuffers.Count() );
 	g_paintBuffers[ipaintbuffer].flags = flags;
 }
 
@@ -1017,16 +1072,17 @@ inline void MIX_SetPaintbufferFlags(int ipaintbuffer, int flags)
 void MIX_ClearAllPaintBuffers( int SampleCount, bool clearFilters )
 {
 	// g_paintBuffers can be NULL with -nosound
-	if( !g_paintBuffers )
+	if ( g_paintBuffers.Count() <= 0 )
 	{
 		return;
 	}
+
 	int i;
 	int count = min(SampleCount, PAINTBUFFER_SIZE);
 
 	// zero out all paintbuffer data (ignore sampleCount)
 
-	for (i = 0; i < CPAINTBUFFERS; i++)
+	for ( i = 0; i < g_paintBuffers.Count(); i++ )
 	{
 		if (g_paintBuffers[i].pbuf != NULL)
 			Q_memset(g_paintBuffers[i].pbuf, 0, (count+1) * sizeof(portable_samplepair_t));
@@ -1128,9 +1184,9 @@ void MIX_MixPaintbuffers(int ibuf1, int ibuf2, int ibuf3, int count, float fgain
 	gain_out = 256 * fgain_out;
 	
 	Assert (count <= PAINTBUFFER_SIZE);
-	Assert (ibuf1 < CPAINTBUFFERS);
-	Assert (ibuf2 < CPAINTBUFFERS);
-	Assert (ibuf3 < CPAINTBUFFERS);
+	Assert (ibuf1 < g_paintBuffers.Count());
+	Assert (ibuf2 < g_paintBuffers.Count());
+	Assert (ibuf3 < g_paintBuffers.Count());
 
 	pbuf1 = g_paintBuffers[ibuf1].pbuf;
 	pbuf2 = g_paintBuffers[ibuf2].pbuf;
@@ -1760,9 +1816,9 @@ void MIX_MixUpsampleBuffer( CChannelList &list, int ipaintbuffer, int end, int c
 }
 
 // upsample and mix sounds into final 44khz versions of the following paintbuffers:
-// IROOMBUFFER, IFACINGBUFFER, IFACINGAWAY, IDRYBUFFER, ISPEAKERBUFFER
+// SOUND_BUFFER_ROOM, SOUND_BUFFER_FACING, IFACINGAWAY, SOUND_BUFFER_DRY, SOUND_BUFFER_SPEAKER, SOUND_BUFFER_SPECIALs
 // dsp fx are then applied to these buffers by the caller.
-// caller also remixes all into final IPAINTBUFFER output.
+// caller also remixes all into final SOUND_BUFFER_PAINT output.
 
 void MIX_UpsampleAllPaintbuffers( CChannelList &list, int end, int count )
 {
@@ -1770,15 +1826,30 @@ void MIX_UpsampleAllPaintbuffers( CChannelList &list, int end, int count )
 
 	// 'dry' and 'speaker' channel sounds mix 100% into their corresponding buffers
 
-	// mix and upsample all 'dry' sounds (channels) to 44khz IDRYBUFFER paintbuffer
+	// mix and upsample all 'dry' sounds (channels) to 44khz SOUND_BUFFER_DRY paintbuffer
 
 	if ( list.m_hasDryChannels )
-		MIX_MixUpsampleBuffer( list, IDRYBUFFER, end, count, SOUND_MIX_DRY );
+		MIX_MixUpsampleBuffer( list, SOUND_BUFFER_DRY, end, count, SOUND_MIX_DRY );
 
-	// mix and upsample all 'speaker' sounds (channels) to 44khz ISPEAKERBUFFER paintbuffer
+	// mix and upsample all 'speaker' sounds (channels) to 44khz SOUND_BUFFER_SPEAKER paintbuffer
 	
 	if ( list.m_hasSpeakerChannels )
-		MIX_MixUpsampleBuffer( list, ISPEAKERBUFFER, end, count, SOUND_MIX_SPEAKER );
+		MIX_MixUpsampleBuffer( list, SOUND_BUFFER_SPEAKER, end, count, SOUND_MIX_SPEAKER );
+
+	// mix and upsample all 'special dsp' sounds (channels) to 44khz SOUND_BUFFER_SPECIALs paintbuffer
+
+	for ( int iDSP = 0; iDSP < list.m_nSpecialDSPs.Count(); ++iDSP )
+	{
+		for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+		{
+			paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+			if ( pSpecialBuffer->nSpecialDSP == list.m_nSpecialDSPs[ iDSP ] && pSpecialBuffer->idsp_specialdsp != -1 )
+			{
+				MIX_MixUpsampleBuffer( list, i, end, count, SOUND_MIX_SPECIAL_DSP );
+				break;
+			}
+		}
+	}
 
 	// 'room', 'facing' 'facingaway' sounds are mixed into up to 3 buffers:
 
@@ -1798,16 +1869,16 @@ void MIX_UpsampleAllPaintbuffers( CChannelList &list, int end, int count )
 	if ( !g_bDspOff )		
 	{
 		// only mix to roombuffer if dsp fx are on KDB: perf
-		MIX_ActivatePaintbuffer(IROOMBUFFER);					// operates on MIX_MixChannelsToPaintbuffer
+		MIX_ActivatePaintbuffer(SOUND_BUFFER_ROOM);					// operates on MIX_MixChannelsToPaintbuffer
 	}
 
-	MIX_ActivatePaintbuffer(IFACINGBUFFER);					
+	MIX_ActivatePaintbuffer(SOUND_BUFFER_FACING);					
 
 	if ( g_bdirectionalfx )
 	{
 		// mix to facing away buffer only if directional presets are set
 
-		MIX_ActivatePaintbuffer(IFACINGAWAYBUFFER);		
+		MIX_ActivatePaintbuffer(SOUND_BUFFER_FACINGAWAY);		
 	}
 	
 	// mix 11khz sounds: 
@@ -1819,16 +1890,16 @@ void MIX_UpsampleAllPaintbuffers( CChannelList &list, int end, int count )
 	if ( !g_bDspOff )
 	{
 		// only upsample roombuffer if dsp fx are on KDB: perf
-		MIX_SetCurrentPaintbuffer(IROOMBUFFER);			// operates on MixUpSample
+		MIX_SetCurrentPaintbuffer(SOUND_BUFFER_ROOM);			// operates on MixUpSample
 		g_AudioDevice->MixUpsample( count / (SOUND_DMA_SPEED / SOUND_11k), FILTERTYPE_LINEAR ); 
 	}
 
-	MIX_SetCurrentPaintbuffer(IFACINGBUFFER);			
+	MIX_SetCurrentPaintbuffer(SOUND_BUFFER_FACING);			
 	g_AudioDevice->MixUpsample( count / (SOUND_DMA_SPEED / SOUND_11k), FILTERTYPE_LINEAR ); 
 
 	if ( g_bdirectionalfx )
 	{
-		MIX_SetCurrentPaintbuffer(IFACINGAWAYBUFFER);	
+		MIX_SetCurrentPaintbuffer(SOUND_BUFFER_FACINGAWAY);	
 		g_AudioDevice->MixUpsample( count / (SOUND_DMA_SPEED / SOUND_11k), FILTERTYPE_LINEAR ); 
 	}
 
@@ -1842,16 +1913,16 @@ void MIX_UpsampleAllPaintbuffers( CChannelList &list, int end, int count )
 	{
 		// only upsample roombuffer if dsp fx are on KDB: perf
 
-		MIX_SetCurrentPaintbuffer(IROOMBUFFER);
+		MIX_SetCurrentPaintbuffer(SOUND_BUFFER_ROOM);
 		g_AudioDevice->MixUpsample( count / (SOUND_DMA_SPEED / SOUND_22k), FILTERTYPE_LINEAR );
 	}
 
-	MIX_SetCurrentPaintbuffer(IFACINGBUFFER);
+	MIX_SetCurrentPaintbuffer(SOUND_BUFFER_FACING);
 	g_AudioDevice->MixUpsample( count / (SOUND_DMA_SPEED / SOUND_22k), FILTERTYPE_LINEAR );
 
 	if ( g_bdirectionalfx )
 	{
-		MIX_SetCurrentPaintbuffer(IFACINGAWAYBUFFER);
+		MIX_SetCurrentPaintbuffer(SOUND_BUFFER_FACINGAWAY);
 		g_AudioDevice->MixUpsample( count / (SOUND_DMA_SPEED / SOUND_22k), FILTERTYPE_LINEAR );
 	}
 #endif
@@ -1861,10 +1932,10 @@ void MIX_UpsampleAllPaintbuffers( CChannelList &list, int end, int count )
 
 	MIX_DeactivateAllPaintbuffers();
 
-	MIX_SetCurrentPaintbuffer(IPAINTBUFFER);
+	MIX_SetCurrentPaintbuffer(SOUND_BUFFER_PAINT);
 }
 
-ConVar snd_cull_duplicates("snd_cull_duplicates","0",FCVAR_NONE,"If nonzero, aggressively cull duplicate sounds during mixing. The number specifies the number of duplicates allowed to be played.");
+ConVar snd_cull_duplicates("snd_cull_duplicates","0",FCVAR_ALLOWED_IN_COMPETITIVE,"If nonzero, aggressively cull duplicate sounds during mixing. The number specifies the number of duplicates allowed to be played.");
 
 
 // Helper class for determining whether a given channel number should be culled from
@@ -1977,7 +2048,7 @@ void CChannelCullList::Initialize( CChannelList &list )
 	}
 }
 
-
+ConVar snd_mute_losefocus("snd_mute_losefocus", "1", FCVAR_ARCHIVE);
 
 // build a list of channels that will actually do mixing in this update
 // remove all active channels that won't mix for some reason
@@ -1985,13 +2056,19 @@ void MIX_BuildChannelList( CChannelList &list )
 {
 	VPROF("MIX_BuildChannelList");
 	g_ActiveChannels.GetActiveChannels( list );
+	list.m_nSpecialDSPs.RemoveAll();
 	list.m_hasDryChannels = false;
 	list.m_hasSpeakerChannels = false;
 	list.m_has11kChannels = false;
 	list.m_has22kChannels = false;
 	list.m_has44kChannels = false;
-	bool delayStart = false;
+	bool delayStartServer = false;
+	bool delayStartClient = false;
 	bool bPaused = g_pSoundServices->IsGamePaused();
+#ifdef POSIX
+	bool bActive = g_pSoundServices->IsGameActive();
+	bool bStopOnFocusLoss = !bActive && snd_mute_losefocus.GetBool();
+#endif
 
 	CChannelCullList cullList;
 	if (snd_cull_duplicates.GetInt() > 0)
@@ -2038,6 +2115,21 @@ void MIX_BuildChannelList( CChannelList &list )
 			{
 				bRemove = true;
 			}
+#ifdef POSIX
+			// If we aren't the active app and the option for background audio isn't on, mute the audio
+			// Windows has it's own system for background muting
+			if ( !bRemove && bStopOnFocusLoss )
+			{
+				bRemove = true;
+
+				// Free up the sound channels otherwise they start filling up
+				if ( pSource && ( !pSource->IsLooped() && !pSource->IsStreaming() ) )
+				{
+					S_FreeChannel( ch );
+				}
+
+			}
+#endif
 			// On lowend, aggressively cull duplicate sounds.
 			if ( !bRemove && snd_cull_duplicates.GetInt() > 0 )
 			{
@@ -2071,6 +2163,13 @@ void MIX_BuildChannelList( CChannelList &list )
 		{
 			list.m_hasSpeakerChannels = true;
 		}
+		if ( ch->special_dsp != 0 )
+		{
+			if ( list.m_nSpecialDSPs.Find( ch->special_dsp ) == -1 )
+			{
+				list.m_nSpecialDSPs.AddToTail( ch->special_dsp );
+			}
+		}
 		if ( ch->flags.bdry )
 		{
 			list.m_hasDryChannels = true;
@@ -2089,7 +2188,16 @@ void MIX_BuildChannelList( CChannelList &list )
 			list.m_has44kChannels = true;
 		}
 		if ( ch->flags.delayed_start && !SND_IsMouth(ch) )
-			delayStart = true;
+		{
+			if ( ch->flags.fromserver )
+			{
+				delayStartServer = true;
+			}
+			else
+			{
+				delayStartClient = true;
+			}
+		}
 
 		// get playback pitch
 		ch->pitch = ch->pMixer->ModifyPitch( ch->basePitch * 0.01f );
@@ -2101,9 +2209,18 @@ void MIX_BuildChannelList( CChannelList &list )
 	// we go ahead and reset the clock
 	// That way the clock is only used for short periods of time
 	// and we need no solution for drift
-	if (!delayStart || bPaused || (host_frametime_unbounded > host_frametime) )
+	if ( bPaused || (host_frametime_unbounded > host_frametime) )
 	{
-		S_SyncClockAdjust();
+		delayStartClient = false;
+		delayStartServer = false;
+	}
+	if (!delayStartServer)
+	{
+		S_SyncClockAdjust(CLOCK_SYNC_SERVER);
+	}
+	if (!delayStartClient)
+	{
+		S_SyncClockAdjust(CLOCK_SYNC_CLIENT);
 	}
 }
 
@@ -2111,23 +2228,25 @@ void MIX_BuildChannelList( CChannelList &list )
 // All channels are mixed in a paintbuffer and then sent to 
 // hardware.
 
-// A mix pass is performed, resulting in mixed sounds in IROOMBUFFER, IFACINGBUFFER, IFACINGAWAYBUFFER, IDRYBUFFER, ISPEAKERBUFFER:
+// A mix pass is performed, resulting in mixed sounds in SOUND_BUFFER_ROOM, SOUND_BUFFER_FACING, SOUND_BUFFER_FACINGAWAY, SOUND_BUFFER_DRY, SOUND_BUFFER_SPEAKER, SOUND_BUFFER_SPECIALs
                                   
-	// directional sounds are panned and mixed between IFACINGBUFFER and IFACINGAWAYBUFFER
-	// omnidirectional sounds are panned 100% into IFACINGBUFFER
+	// directional sounds are panned and mixed between SOUND_BUFFER_FACING and SOUND_BUFFER_FACINGAWAY
+	// omnidirectional sounds are panned 100% into SOUND_BUFFER_FACING
 	// sound sources far from player (ie: near back of room ) are mixed in proportion to this distance
-	// into IROOMBUFFER
-	// sounds with ch->bSpeaker set are mixed in mono into ISPEAKERBUFFER
+	// into SOUND_BUFFER_ROOM
+	// sounds with ch->bSpeaker set are mixed in mono into SOUND_BUFFER_SPEAKER
+	// sounds with ch->bSpecialDSP set are mixed in mono into SOUND_BUFFER_SPECIALs
 
-// dsp_facingaway fx (2 or 4ch filtering) are then applied to the IFACINGAWAYBUFFER
-// dsp_speaker fx (1ch) are then applied to the ISPEAKERBUFFER
-// dsp_room fx (1ch reverb) are then applied to the IROOMBUFFER
+// dsp_facingaway fx (2 or 4ch filtering) are then applied to the SOUND_BUFFER_FACINGAWAY
+// dsp_speaker fx (1ch) are then applied to the SOUND_BUFFER_SPEAKER
+// dsp_specialdsp fx (1ch) are then applied to the SOUND_BUFFER_SPECIALs
+// dsp_room fx (1ch reverb) are then applied to the SOUND_BUFFER_ROOM
 
-// All buffers are recombined into the IPAINTBUFFER
+// All buffers are recombined into the SOUND_BUFFER_PAINT
 
-// The dsp_water and dsp_player fx are applied in series to the IPAINTBUFFER
+// The dsp_water and dsp_player fx are applied in series to the SOUND_BUFFER_PAINT
 
-// Finally, the IDRYBUFFER buffer is mixed into the IPAINTBUFFER
+// Finally, the SOUND_BUFFER_DRY buffer is mixed into the SOUND_BUFFER_PAINT
 
 extern ConVar dsp_off;
 extern ConVar snd_profile;
@@ -2146,13 +2265,14 @@ extern ConVar snd_soundmixer;
 void MIX_PaintChannels( int endtime, bool bIsUnderwater )
 {
 	VPROF("MIX_PaintChannels");
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
 
 	int 	end;
 	int		count;
 	bool	b_spatial_delays = dsp_enhance_stereo.GetInt() != 0 ? true : false;
 	bool room_fsurround_sav;
 	bool room_fsurround_center_sav;
-	paintbuffer_t	*proom = MIX_GetPPaintFromIPaint(IROOMBUFFER);
+	paintbuffer_t	*proom = MIX_GetPPaintFromIPaint(SOUND_BUFFER_ROOM);
 
 	CheckNewDspPresets();
 
@@ -2194,6 +2314,9 @@ void MIX_PaintChannels( int endtime, bool bIsUnderwater )
 	
 	// get dsp preset gain values, update gain crossfaders, used when mixing dsp processed buffers into paintbuffer
 	SDEBUG_ShowAvgValue();
+	
+	// the cache needs to hold the audio in memory during mixing, so tell it that mixing is starting
+	wavedatacache->OnMixBegin();
 
 	while ( g_paintedtime < endtime )
 	{
@@ -2215,33 +2338,86 @@ void MIX_PaintChannels( int endtime, bool bIsUnderwater )
 		
 		// upsample all mix buffers.
 		// results in 44khz versions of:
-		// IROOMBUFFER, IFACINGBUFFER, IFACINGAWAYBUFFER, IDRYBUFFER, ISPEAKERBUFFER
+		// SOUND_BUFFER_ROOM, SOUND_BUFFER_FACING, SOUND_BUFFER_FACINGAWAY, SOUND_BUFFER_DRY, SOUND_BUFFER_SPEAKER, SOUND_BUFFER_SPECIALs
 		MIX_UpsampleAllPaintbuffers( list, end, count );
 
 		// apply appropriate dsp fx to each buffer, remix buffers into single quad output buffer
 		// apply 2 or 4ch filtering to IFACINGAWAY buffer
 		if ( g_bdirectionalfx )
 		{
-			g_AudioDevice->ApplyDSPEffects( idsp_facingaway, MIX_GetPFrontFromIPaint(IFACINGAWAYBUFFER), MIX_GetPRearFromIPaint(IFACINGAWAYBUFFER), MIX_GetPCenterFromIPaint(IFACINGAWAYBUFFER), count );
+			g_AudioDevice->ApplyDSPEffects( idsp_facingaway, MIX_GetPFrontFromIPaint(SOUND_BUFFER_FACINGAWAY), MIX_GetPRearFromIPaint(SOUND_BUFFER_FACINGAWAY), MIX_GetPCenterFromIPaint(SOUND_BUFFER_FACINGAWAY), count );
 		}
 
 		if ( !g_bDspOff && list.m_hasSpeakerChannels )
 		{
-			// apply 1ch filtering to ISPEAKERBUFFER
-			g_AudioDevice->ApplyDSPEffects( idsp_speaker, MIX_GetPFrontFromIPaint(ISPEAKERBUFFER), MIX_GetPRearFromIPaint(ISPEAKERBUFFER), MIX_GetPCenterFromIPaint(ISPEAKERBUFFER), count );
+			// apply 1ch filtering to SOUND_BUFFER_SPEAKER
+			g_AudioDevice->ApplyDSPEffects( idsp_speaker, MIX_GetPFrontFromIPaint(SOUND_BUFFER_SPEAKER), MIX_GetPRearFromIPaint(SOUND_BUFFER_SPEAKER), MIX_GetPCenterFromIPaint(SOUND_BUFFER_SPEAKER), count );
 			
-			// mix ISPEAKERBUFFER with IROOMBUFFER and IFACINGBUFFER
-			MIX_ScalePaintBuffer( ISPEAKERBUFFER, count, 0.7 );
+			// mix SOUND_BUFFER_SPEAKER with SOUND_BUFFER_ROOM and SOUND_BUFFER_FACING
+			MIX_ScalePaintBuffer( SOUND_BUFFER_SPEAKER, count, 0.7 );
 
-			MIX_MixPaintbuffers( ISPEAKERBUFFER, IFACINGBUFFER, IFACINGBUFFER, count, 1.0 );	// +70% dry speaker
+			MIX_MixPaintbuffers( SOUND_BUFFER_SPEAKER, SOUND_BUFFER_FACING, SOUND_BUFFER_FACING, count, 1.0 );	// +70% dry speaker
 
-			MIX_ScalePaintBuffer( ISPEAKERBUFFER, count, 0.43 );
+			MIX_ScalePaintBuffer( SOUND_BUFFER_SPEAKER, count, 0.43 );
 
-			MIX_MixPaintbuffers( ISPEAKERBUFFER, IROOMBUFFER, IROOMBUFFER, count, 1.0 );		// +30% wet speaker
+			MIX_MixPaintbuffers( SOUND_BUFFER_SPEAKER, SOUND_BUFFER_ROOM, SOUND_BUFFER_ROOM, count, 1.0 );		// +30% wet speaker
+		}
+
+		if ( !g_bDspOff )
+		{
+			// apply 1ch filtering to SOUND_BUFFER_SPECIALs
+			for ( int iDSP = 0; iDSP < list.m_nSpecialDSPs.Count(); ++iDSP )
+			{
+				bool bFoundMixer = false;
+				
+				for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+				{
+					paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+					if ( pSpecialBuffer->nSpecialDSP == list.m_nSpecialDSPs[ iDSP ] && pSpecialBuffer->idsp_specialdsp != -1 )
+					{
+						g_AudioDevice->ApplyDSPEffects( pSpecialBuffer->idsp_specialdsp, MIX_GetPFrontFromIPaint( i ), MIX_GetPRearFromIPaint( i ), MIX_GetPCenterFromIPaint( i ), count );
+
+						// mix SOUND_BUFFER_SPECIALs with SOUND_BUFFER_ROOM and SOUND_BUFFER_FACING
+						MIX_ScalePaintBuffer( i, count, 0.7 );
+
+						MIX_MixPaintbuffers( i, SOUND_BUFFER_FACING, SOUND_BUFFER_FACING, count, 1.0 );	// +70% dry speaker
+
+						MIX_ScalePaintBuffer( i, count, 0.43 );
+
+						MIX_MixPaintbuffers( i, SOUND_BUFFER_ROOM, SOUND_BUFFER_ROOM, count, 1.0 );		// +30% wet speaker
+						
+						bFoundMixer = true;
+
+						break;
+					}
+				}
+
+				// Couldn't find a mixer with the correct DSP, so make a new one!
+				if ( !bFoundMixer )
+				{
+					bool bSurroundCenter = g_AudioDevice->IsSurroundCenter();
+					bool bSurround = g_AudioDevice->IsSurround() || bSurroundCenter;
+
+					int nIndex = g_paintBuffers.AddToTail();
+					MIX_InitializePaintbuffer( &(g_paintBuffers[ nIndex ]), bSurround, bSurroundCenter );
+
+					g_paintBuffers[ nIndex ].flags = SOUND_BUSS_SPECIAL_DSP;
+
+					// special dsp buffer mixes to mono
+					g_paintBuffers[ nIndex ].fsurround = false;
+					g_paintBuffers[ nIndex ].fsurround_center = false;
+
+					g_paintBuffers[ nIndex ].idsp_specialdsp = -1;
+					g_paintBuffers[ nIndex ].nSpecialDSP = list.m_nSpecialDSPs[ iDSP ];
+
+					g_paintBuffers[ nIndex ].nPrevSpecialDSP = g_paintBuffers[ nIndex ].nSpecialDSP;
+					g_paintBuffers[ nIndex ].idsp_specialdsp = DSP_Alloc( g_paintBuffers[ nIndex ].nSpecialDSP, 300, 1 );
+				}
+			}
 		}
 
 		// apply dsp_room effects to room buffer
-		g_AudioDevice->ApplyDSPEffects( Get_idsp_room(), MIX_GetPFrontFromIPaint(IROOMBUFFER), MIX_GetPRearFromIPaint(IROOMBUFFER), MIX_GetPCenterFromIPaint(IROOMBUFFER), count );
+		g_AudioDevice->ApplyDSPEffects( Get_idsp_room(), MIX_GetPFrontFromIPaint(SOUND_BUFFER_ROOM), MIX_GetPRearFromIPaint(SOUND_BUFFER_ROOM), MIX_GetPCenterFromIPaint(SOUND_BUFFER_ROOM), count );
 		
 		// save room buffer surround status, in case we upconvert it
 		room_fsurround_sav = proom->fsurround;
@@ -2251,25 +2427,25 @@ void MIX_PaintChannels( int endtime, bool bIsUnderwater )
 		if ( b_spatial_delays && !g_bDspOff && !DSP_RoomDSPIsOff() )
 		{
 			// upgrade mono room buffer to surround status so we can apply spatial delays to all channels
-			MIX_ConvertBufferToSurround( IROOMBUFFER );
-			g_AudioDevice->ApplyDSPEffects( idsp_spatial, MIX_GetPFrontFromIPaint(IROOMBUFFER),  MIX_GetPRearFromIPaint(IROOMBUFFER), MIX_GetPCenterFromIPaint(IROOMBUFFER), count );
+			MIX_ConvertBufferToSurround( SOUND_BUFFER_ROOM );
+			g_AudioDevice->ApplyDSPEffects( idsp_spatial, MIX_GetPFrontFromIPaint(SOUND_BUFFER_ROOM),  MIX_GetPRearFromIPaint(SOUND_BUFFER_ROOM), MIX_GetPCenterFromIPaint(SOUND_BUFFER_ROOM), count );
 		}
 
 		if ( g_bdirectionalfx )		// KDB: perf
 		{
-			// Recombine IFACING and IFACINGAWAY buffers into IPAINTBUFFER
-			MIX_MixPaintbuffers( IFACINGBUFFER, IFACINGAWAYBUFFER, IPAINTBUFFER, count, DSP_NOROOM_MIX );
+			// Recombine IFACING and IFACINGAWAY buffers into SOUND_BUFFER_PAINT
+			MIX_MixPaintbuffers( SOUND_BUFFER_FACING, SOUND_BUFFER_FACINGAWAY, SOUND_BUFFER_PAINT, count, DSP_NOROOM_MIX );
 			
 			// Add in dsp room fx to paintbuffer, mix at 75%
-			MIX_MixPaintbuffers( IROOMBUFFER, IPAINTBUFFER, IPAINTBUFFER, count, DSP_ROOM_MIX );
+			MIX_MixPaintbuffers( SOUND_BUFFER_ROOM, SOUND_BUFFER_PAINT, SOUND_BUFFER_PAINT, count, DSP_ROOM_MIX );
 		} 
 		else
 		{
-			// Mix IFACING buffer with IROOMBUFFER
-			// (IFACINGAWAYBUFFER contains no data, IFACINGBBUFFER has full dry mix based on distance from listener)
+			// Mix IFACING buffer with SOUND_BUFFER_ROOM
+			// (SOUND_BUFFER_FACINGAWAY contains no data, IFACINGBBUFFER has full dry mix based on distance from listener)
 			// if dsp disabled, mix 100% facingbuffer, otherwise, mix 75% facingbuffer + roombuffer
 			float mix = g_bDspOff ? 1.0 : DSP_ROOM_MIX;
-			MIX_MixPaintbuffers( IROOMBUFFER, IFACINGBUFFER, IPAINTBUFFER, count, mix );	
+			MIX_MixPaintbuffers( SOUND_BUFFER_ROOM, SOUND_BUFFER_FACING, SOUND_BUFFER_PAINT, count, mix );	
 		}
 
 		// restore room buffer surround status, in case we upconverted it 
@@ -2280,39 +2456,42 @@ void MIX_PaintChannels( int endtime, bool bIsUnderwater )
 		if ( bIsUnderwater )
 		{
 			// BUG: if out of water, previous delays will be heard. must clear dly buffers.
-			g_AudioDevice->ApplyDSPEffects( idsp_water, MIX_GetPFrontFromIPaint(IPAINTBUFFER), MIX_GetPRearFromIPaint(IPAINTBUFFER), MIX_GetPCenterFromIPaint(IPAINTBUFFER), count );
+			g_AudioDevice->ApplyDSPEffects( idsp_water, MIX_GetPFrontFromIPaint(SOUND_BUFFER_PAINT), MIX_GetPRearFromIPaint(SOUND_BUFFER_PAINT), MIX_GetPCenterFromIPaint(SOUND_BUFFER_PAINT), count );
 		}
 
 		// find dsp gain
-		SDEBUG_GetAvgIn(IPAINTBUFFER, count);
+		SDEBUG_GetAvgIn(SOUND_BUFFER_PAINT, count);
 
 		// Apply player fx dsp_player (serial in-line) - does nothing if dsp fx are disabled
-		g_AudioDevice->ApplyDSPEffects( idsp_player, MIX_GetPFrontFromIPaint(IPAINTBUFFER),  MIX_GetPRearFromIPaint(IPAINTBUFFER), MIX_GetPCenterFromIPaint(IPAINTBUFFER), count );
+		g_AudioDevice->ApplyDSPEffects( idsp_player, MIX_GetPFrontFromIPaint(SOUND_BUFFER_PAINT),  MIX_GetPRearFromIPaint(SOUND_BUFFER_PAINT), MIX_GetPCenterFromIPaint(SOUND_BUFFER_PAINT), count );
 
 		// display dsp gain
-		SDEBUG_GetAvgOut(IPAINTBUFFER, count);
+		SDEBUG_GetAvgOut(SOUND_BUFFER_PAINT, count);
 
 /*
 		// apply left/center/right/lrear/rrear spatial delays to paint buffer
 
 		if ( b_spatial_delays )
-			g_AudioDevice->ApplyDSPEffects( idsp_spatial, MIX_GetPFrontFromIPaint(IPAINTBUFFER),  MIX_GetPRearFromIPaint(IPAINTBUFFER), MIX_GetPCenterFromIPaint(IPAINTBUFFER), count );
+			g_AudioDevice->ApplyDSPEffects( idsp_spatial, MIX_GetPFrontFromIPaint(SOUND_BUFFER_PAINT),  MIX_GetPRearFromIPaint(SOUND_BUFFER_PAINT), MIX_GetPCenterFromIPaint(SOUND_BUFFER_PAINT), count );
 */
 		// Add dry buffer, set output gain to water * player dsp gain (both 1.0 if not active)
 
-		MIX_MixPaintbuffers( IPAINTBUFFER, IDRYBUFFER, IPAINTBUFFER, count, 1.0);
+		MIX_MixPaintbuffers( SOUND_BUFFER_PAINT, SOUND_BUFFER_DRY, SOUND_BUFFER_PAINT, count, 1.0);
 
 		// clip all values > 16 bit down to 16 bit
 		// NOTE: This is required - the hardware buffer transfer routines no longer perform clipping.
-		MIX_CompressPaintbuffer( IPAINTBUFFER, count );
+		MIX_CompressPaintbuffer( SOUND_BUFFER_PAINT, count );
 
-		// transfer IPAINTBUFFER paintbuffer out to DMA buffer
-		MIX_SetCurrentPaintbuffer( IPAINTBUFFER );
+		// transfer SOUND_BUFFER_PAINT paintbuffer out to DMA buffer
+		MIX_SetCurrentPaintbuffer( SOUND_BUFFER_PAINT );
 
 		g_AudioDevice->TransferSamples( end );
 
 		g_paintedtime = end;
 	}
+
+	// the cache needs to hold the audio in memory during mixing, so tell it that mixing is complete
+	wavedatacache->OnMixEnd();
 }
 
 // Applies volume scaling (evenly) to all fl,fr,rl,rr volumes
@@ -2321,8 +2500,8 @@ void MIX_PaintChannels( int endtime, bool bIsUnderwater )
 
 // Called just before mixing wav data to current paintbuffer.
 // a) if another player in a multiplayer game is speaking, scale all volumes down.
-// b) if mixing to IROOMBUFFER, scale all volumes by ch.dspmix and dsp_room gain
-// c) if mixing to IFACINGAWAYBUFFER, scale all volumes by ch.dspface and dsp_facingaway gain
+// b) if mixing to SOUND_BUFFER_ROOM, scale all volumes by ch.dspmix and dsp_room gain
+// c) if mixing to SOUND_BUFFER_FACINGAWAY, scale all volumes by ch.dspface and dsp_facingaway gain
 // d) If SURROUND_ON, but buffer is not surround, recombined front/rear volumes
 
 // returns false if channel is to be entirely skipped. 
@@ -2375,7 +2554,7 @@ bool MIX_ScaleChannelVolume( paintbuffer_t *ppaint, channel_t *pChannel, int vol
 
 		float dspmixvol = fpmin(dspmix * g_dsp_volume, 1.0f);
 
-		// if dspmix is 1.0, 100% of sound goes to IROOMBUFFER and 0% to IFACINGBUFFER
+		// if dspmix is 1.0, 100% of sound goes to SOUND_BUFFER_ROOM and 0% to SOUND_BUFFER_FACING
 
 		for (i = 0; i < CCHANVOLUMES; i++)
 			volume[i] = (int)((float)(volume[i]) * dspmixvol);
@@ -2423,7 +2602,7 @@ bool MIX_ScaleChannelVolume( paintbuffer_t *ppaint, channel_t *pChannel, int vol
 	if ( mixflag & SOUND_BUSS_FACING )
 	{
 		// facing player
-		// if dspface is 1.0, 100% of sound goes to IFACINGBUFFER
+		// if dspface is 1.0, 100% of sound goes to SOUND_BUFFER_FACING
 
 		for (i = 0; i < CCHANVOLUMES; i++)
 			volume[i] = (int)((float)(volume[i]) * scale * (1.0 - dspmix));
@@ -2431,7 +2610,7 @@ bool MIX_ScaleChannelVolume( paintbuffer_t *ppaint, channel_t *pChannel, int vol
 	else if ( mixflag & SOUND_BUSS_FACINGAWAY )
 	{
 		// facing away from player
-		// if dspface is 0.0, 100% of sound goes to IFACINGAWAYBUFFER
+		// if dspface is 0.0, 100% of sound goes to SOUND_BUFFER_FACINGAWAY
 
 		for (i = 0; i < CCHANVOLUMES; i++)
 			volume[i] = (int)((float)(volume[i]) * (1.0 - scale) * (1.0 - dspmix));
@@ -3442,13 +3621,13 @@ void SW_Mix16Mono_Shift( portable_samplepair_t *pOutput, int *volume, short *pDa
 		mov ecx, outCount;
 		
 BEGINLOAD:
-		movd mm2, WORD PTR [edx+2*esi]	; load first piece o' data from pData
+		movd mm2, WORD PTR [edx+2*esi]	; load first piece of data from pData
 		punpcklwd mm2, mm2				; 0, 0, pData_1st, pData_1st
 
 		add ebx, rateScaleFrac			; do the crazy fixed integer math
 		adc esi, rateScaleInt
 
-		movd mm3, WORD PTR [edx+2*esi]	; load second piece o' data from pData
+		movd mm3, WORD PTR [edx+2*esi]	; load second piece of data from pData
 		punpcklwd mm3, mm3				; 0, 0, pData_2nd, pData_2nd
 		punpckldq mm2, mm3				; pData_2nd, pData_2nd, pData_2nd, pData_2nd
 
@@ -3484,7 +3663,7 @@ BEGINLOAD:
 		sar   edi, 08h                  ; divide by 256
 		add DWORD PTR [eax], edi        ; add to pOutput[i].left
 		
-		movsx edi, WORD PTR [edx+2*esi] ; load same 16 bit val and zero-extend ('cuz I thrashed the reg)
+		movsx edi, WORD PTR [edx+2*esi] ; load same 16 bit val and zero-extend (cuz I thrashed the reg)
 		imul  edi, vol1					; multiply pData[sampleIndex] by volume[1]
 		sar   edi, 08h                  ; divide by 256
 		add DWORD PTR [eax+04h], edi    ; add to pOutput[i].right
@@ -3518,11 +3697,11 @@ void SW_Mix16Mono_NoShift( portable_samplepair_t *pOutput, int *volume, short *p
 		mov ecx, outCount;
 		
 BEGINLOAD:
-		movd mm2, WORD PTR [edx]	; load first piece o' data from pData
+		movd mm2, WORD PTR [edx]	; load first piece o data from pData
 		punpcklwd mm2, mm2				; 0, 0, pData_1st, pData_1st
 		add edx,2						; move to the next sample
 
-		movd mm3, WORD PTR [edx]	; load second piece o' data from pData
+		movd mm3, WORD PTR [edx]	; load second piece o data from pData
 		punpcklwd mm3, mm3				; 0, 0, pData_2nd, pData_2nd
 		punpckldq mm2, mm3				; pData_2nd, pData_2nd, pData_2nd, pData_2nd
 
@@ -3779,9 +3958,17 @@ void Mix16StereoWavtype( channel_t *pChannel, portable_samplepair_t *pOutput, in
 //===============================================================================
 
 
+extern IBaseClientDLL *g_ClientDLL;
+
 // called when voice channel is first opened on this entity
 static CMouthInfo *GetMouthInfoForChannel( channel_t *pChannel )
 {
+#ifndef DEDICATED
+	// If it's a sound inside the client UI, ask the client for the mouthinfo
+	if ( pChannel->soundsource == SOUND_FROM_UI_PANEL )
+		return g_ClientDLL ? g_ClientDLL->GetClientUIMouthInfo() : NULL;
+#endif
+
 	int mouthentity = pChannel->speakerentity == -1 ? pChannel->soundsource : pChannel->speakerentity;
 
 	IClientEntity *pClientEntity = entitylist->GetClientEntity( mouthentity );
@@ -3865,7 +4052,7 @@ void SND_MoveMouth8( channel_t *ch, CAudioSource *pSource, int count )
 				for ( int i = 0; i < pMouth->GetNumVoiceSources(); i++ )
 				{
 					CVoiceData *pVoice  = pMouth->GetVoiceSource(i);
-					CAudioSourceWave *pWave = dynamic_cast<CAudioSourceWave *>(pVoice->m_pAudioSource);
+					CAudioSourceWave *pWave = dynamic_cast<CAudioSourceWave *>(pVoice->GetSource());
 					const char *pName = "unknown";
 					if ( pWave && pWave->GetName() )
 						pName = pWave->GetName();
@@ -3966,12 +4153,17 @@ void SND_ClearMouth( channel_t *pChannel )
 //-----------------------------------------------------------------------------
 bool SND_IsMouth( channel_t *pChannel )
 {
+#ifndef DEDICATED
+	if ( pChannel->soundsource == SOUND_FROM_UI_PANEL )
+		return true;
+#endif
+
 	if ( !entitylist )
 	{
 		return false;
 	}
 
-	if ( pChannel->entchannel == CHAN_VOICE )
+	if ( pChannel->entchannel == CHAN_VOICE || pChannel->entchannel == CHAN_VOICE2 )
 	{
 		return true;
 	}
@@ -4000,14 +4192,8 @@ bool SND_ShouldPause( channel_t *pChannel )
 // Movie recording support
 //===============================================================================
 
-void SND_MovieStart( void )
+void SND_RecordInit()
 {
-	if ( IsX360() )
-		return;
-
-	if ( !cl_movieinfo.IsRecording() )
-		return;
-
 	g_paintedtime = 0;
 	g_soundtime = 0;
 
@@ -4016,6 +4202,17 @@ void SND_MovieStart( void )
 	{
 		snd_surround.SetValue( 2 );
 	}
+}
+
+void SND_MovieStart( void )
+{
+	if ( IsX360() )
+		return;
+
+	if ( !cl_movieinfo.IsRecording() )
+		return;
+
+	SND_RecordInit();
 
 	// 44k: engine playback rate is now 44100...changed from 22050
 	if ( cl_movieinfo.DoWav() )
@@ -4042,11 +4239,12 @@ void SND_MovieEnd( void )
 
 bool SND_IsRecording()
 {
-	if ( cl_movieinfo.IsRecording() && !Con_IsVisible() )
-		return true;
-	return false;
+	return ( ( IsReplayRendering() || cl_movieinfo.IsRecording() ) && !Con_IsVisible() );
 }
 
+
+
+extern IVideoRecorder *g_pVideoRecorder;
 void SND_RecordBuffer( void )
 {
 	if ( IsX360() )
@@ -4069,13 +4267,27 @@ void SND_RecordBuffer( void )
 		tmp[i+1] = CLIP(val);
 	}
 
-	if ( cl_movieinfo.DoWav() )
+	if ( IsReplayRendering() )
 	{
-		WaveAppendTmpFile( cl_movieinfo.moviename, tmp, 16, snd_linear_count );
+#if defined( REPLAY_ENABLED )
+		extern IClientReplayContext *g_pClientReplayContext;
+		IReplayMovieRenderer *pMovieRenderer = g_pClientReplayContext->GetMovieRenderer();
+		if ( IsReplayRendering() && pMovieRenderer && pMovieRenderer->IsAudioSyncFrame() )
+		{
+			pMovieRenderer->RenderAudio( (unsigned char *)tmp, bufferSize, snd_linear_count );
+		}
+#endif
 	}
-
-	if ( cl_movieinfo.DoAVISound() )
+	else
 	{
-		avi->AppendMovieSound( g_hCurrentAVI, tmp, bufferSize );
+		if ( cl_movieinfo.DoWav() )
+		{
+			WaveAppendTmpFile( cl_movieinfo.moviename, tmp, 16, snd_linear_count );
+		}
+
+		if ( cl_movieinfo.DoVideoSound() )
+		{
+			g_pVideoRecorder->AppendAudioSamples( tmp, bufferSize );
+		}
 	}
 }

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,6 +13,7 @@
 #endif
 
 #include "convar.h"
+#include "steam/steamclientpublic.h"
 
 #define SCRIPT_DIR			"scripts/"
 
@@ -76,10 +77,10 @@ extern	float		host_frametime;
 extern  float		host_frametime_unbounded;
 extern  float		host_frametime_stddeviation;
 extern	int			host_framecount;	// incremented every frame, never reset
-extern	float		realtime;			// not bounded in any way, changed at
+extern	double		realtime;			// not bounded in any way, changed at
 // start of every frame, never reset
-void Host_Error (const char *error, ...);
-void Host_EndGame (bool bShowMainMenu, const char *message, ...);
+void Host_Error (PRINTF_FORMAT_STRING const char *error, ...) FMTFUNCTION( 1, 2 );
+void Host_EndGame (bool bShowMainMenu, PRINTF_FORMAT_STRING const char *message, ...) FMTFUNCTION( 2, 3 );
 
 // user message
 #define MAX_USER_MSG_DATA 255
@@ -96,6 +97,7 @@ extern	ConVar		host_showcachemiss;
 
 extern bool			g_bInEditMode;
 extern bool			g_bInCommentaryMode;
+extern bool			g_bAllowSecureServers;
 extern bool			g_bLowViolence;
 
 // Returns true if host is not single stepping/pausing through code/
@@ -103,14 +105,24 @@ extern bool			g_bLowViolence;
 bool Host_ShouldRun( void );
 void Host_FreeToLowMark( bool server );
 void Host_FreeStateAndWorld( bool server );
-void Host_Disconnect( bool bShowMainMenu );
+void Host_Disconnect( bool bShowMainMenu, const char *pszReason = "" );
 void Host_RunFrame( float time );
 void Host_DumpMemoryStats( void );
 void Host_UpdateMapList( void );
 float Host_GetSoundDuration( const char *pSample );
 bool Host_IsSinglePlayerGame( void );
 int Host_GetServerCount( void );
-void Host_AllowQueuedMaterialSystem( bool bAllow );
+bool Host_AllowQueuedMaterialSystem( bool bAllow );
+
+bool Host_IsSecureServerAllowed();
+void FORCEINLINE Host_DisallowSecureServers()
+{
+#if !defined(SWDS)
+	g_bAllowSecureServers = false;
+#endif
+}
+
+bool Host_AllowLoadModule( const char *pFilename, const char *pPathID, bool bAllowUnknown, bool bIsServerOnly = false );
 
 // Force the voice stuff to send a packet out.
 // bFinal is true when the user is done talking.
@@ -124,6 +136,7 @@ class NET_SetConVar;
 void		Host_BuildConVarUpdateMessage( NET_SetConVar *cvarMsg, int flags, bool nonDefault );
 char const *Host_CleanupConVarStringValue( char const *invalue );
 void		Host_SetAudioState( const AudioState_t &audioState );
+void		Host_DefaultMapFileName( const char *pFullMapName, /* out */ char *pDiskName, unsigned int nDiskNameSize );
 
 bool CheckVarRange_Generic( ConVar *pVar, int minVal, int maxVal );
 
@@ -148,6 +161,15 @@ extern int	host_currentframetick;
 // to turn it on when tracking down out-of-sync errors, because it verifies that more
 // things are the same during playback.
 extern ConVar vcr_verbose;
+
+// Set by the game DLL to tell us to do the same timing tricks as timedemo.
+extern bool g_bDedicatedServerBenchmarkMode;
+
+extern uint GetSteamAppID();
+extern EUniverse GetSteamUniverse();
+
+#define STEAMREMOTESTORAGE_CLOUD_OFF	0
+#define STEAMREMOTESTORAGE_CLOUD_ON		1
 
 #endif // HOST_H
 

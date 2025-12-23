@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,11 +6,6 @@
 
 #include "client_pch.h"
 #include <time.h>
-#ifndef SWDS
-#include "io.h"
-#include "keys.h"
-#include "draw.h"
-#endif
 #include "console.h"
 #include "ivideomode.h"
 #include "zone.h"
@@ -35,11 +30,68 @@ bool con_debuglog = false;
 bool con_initialized = false;
 bool con_debuglogmapprefixed = false;
 
+CThreadFastMutex g_AsyncNotifyTextMutex;
+
 static ConVar con_timestamp( "con_timestamp", "0", 0, "Prefix console.log entries with timestamps" );
+
+// In order to avoid excessive opening and closing of the console log file
+// we wrap it in an object and keep the handle open. This is necessary
+// because of the sometimes considerable cost of opening and closing files
+// on Windows. Opening and closing files on Windows is always moderately
+// expensive, but profiling may dramatically underestimate the true cost
+// because some anti-virus software can make closing a file handle take
+// 20-90 ms!
+class ConsoleLogManager
+{
+public:
+	ConsoleLogManager();
+	~ConsoleLogManager();
+
+	void RemoveConsoleLogFile();
+	bool ReadConsoleLogFile( CUtlBuffer& buf );
+	FileHandle_t GetConsoleLogFileHandleForAppend();
+	void CloseFileIfOpen();
+
+private:
+	FileHandle_t m_fh;
+
+	const char *GetConsoleLogFilename() const;
+};
+
+// Wrap the ConsoleLogManager in a function to ensure that the object is always
+// constructed before it is used.
+ConsoleLogManager& GetConsoleLogManager()
+{
+	static ConsoleLogManager object;
+	return object;
+}
+
 void ConsoleLogFileCallback( IConVar *var, const char *pOldValue, float flOldValue )
 {
-	ConVarRef ref( var->GetName() );
-	const char *logFile = ref.GetString();
+	ConVarRef con_logfile( var->GetName() );
+	const char *logFile = con_logfile.GetString();
+	// close any existing file, because we have changed the name
+	GetConsoleLogManager().CloseFileIfOpen();
+
+	// validate the path and the .log/.txt extensions
+	if ( !COM_IsValidPath( logFile ) || !COM_IsValidLogFilename( logFile ) )
+	{
+		ConMsg( "invalid log filename\n" );
+		con_logfile.SetValue( "console.log" );
+		return;
+	}
+	else
+	{
+		const char *extension = Q_GetFileExtension( logFile );
+		if ( !extension || ( Q_strcasecmp( extension, "log" ) && Q_strcasecmp( extension, "txt" ) ) )
+		{
+			char szTemp[MAX_PATH];
+			V_sprintf_safe( szTemp, "%s.log", logFile );
+			con_logfile.SetValue( szTemp );
+			return;
+		}
+	}
+	
 	if ( !COM_IsValidPath( logFile ) )
 	{
 		con_debuglog = CommandLine()->FindParm( "-condebug" ) != 0;
@@ -51,16 +103,6 @@ void ConsoleLogFileCallback( IConVar *var, const char *pOldValue, float flOldVal
 }
 
 ConVar con_logfile( "con_logfile", "", 0, "Console output gets written to this file", false, 0.0f, false, 0.0f, ConsoleLogFileCallback );
-
-const char *GetConsoleLogFilename( void )
-{
-	const char *logFile = con_logfile.GetString();
-	if ( !COM_IsValidPath( logFile ) )
-	{
-		return "console.log";
-	}
-	return logFile;
-}
 
 static const char *GetTimestampString( void )
 {
@@ -75,14 +117,14 @@ static const char *GetTimestampString( void )
 
 #ifndef SWDS
 
-static ConVar con_trace( "con_trace", "0", 0, "Print console text to low level printout." );
-static ConVar con_notifytime( "con_notifytime","8", 0, "How long to display recent console text to the upper part of the game window" );
-static ConVar con_times("contimes", "8", 0, "Number of console lines to overlay for debugging." );
+static ConVar con_trace( "con_trace", "0", FCVAR_MATERIAL_SYSTEM_THREAD, "Print console text to low level printout." );
+static ConVar con_notifytime( "con_notifytime","8", FCVAR_MATERIAL_SYSTEM_THREAD, "How long to display recent console text to the upper part of the game window" );
+static ConVar con_times("contimes", "8", FCVAR_MATERIAL_SYSTEM_THREAD, "Number of console lines to overlay for debugging." );
 static ConVar con_drawnotify( "con_drawnotify", "1", 0, "Disables drawing of notification area (for taking screenshots)." );
 static ConVar con_enable("con_enable", "0", FCVAR_ARCHIVE, "Allows the console to be activated.");
-static ConVar con_filter_enable ( "con_filter_enable","0", 0, "Filters console output based on the setting of con_filter_text. 1 filters completely, 2 displays filtered text brighter than other text." );
-static ConVar con_filter_text ( "con_filter_text","", 0, "Text with which to filter console spew. Set con_filter_enable 1 or 2 to activate." );
-static ConVar con_filter_text_out ( "con_filter_text_out","", 0, "Text with which to filter OUT of console spew. Set con_filter_enable 1 or 2 to activate." );
+static ConVar con_filter_enable ( "con_filter_enable","0", FCVAR_MATERIAL_SYSTEM_THREAD, "Filters console output based on the setting of con_filter_text. 1 filters completely, 2 displays filtered text brighter than other text." );
+static ConVar con_filter_text ( "con_filter_text","", FCVAR_MATERIAL_SYSTEM_THREAD, "Text with which to filter console spew. Set con_filter_enable 1 or 2 to activate." );
+static ConVar con_filter_text_out ( "con_filter_text_out","", FCVAR_MATERIAL_SYSTEM_THREAD, "Text with which to filter OUT of console spew. Set con_filter_enable 1 or 2 to activate." );
 
 
 
@@ -117,7 +159,7 @@ public:
 	int				ProcessNotifyLines( int &left, int &top, int &right, int &bottom, bool bDraw );
 
 	// Draw helpers
-	virtual int		DrawText( vgui::HFont font, int x, int y, wchar_t *fmt, ... );
+	virtual int		DrawText( vgui::HFont font, int x, int y, wchar_t *data );
 
 	virtual bool	ShouldDraw( void );
 
@@ -125,7 +167,7 @@ public:
 	void			Con_NXPrintf( const struct con_nprint_s *info, const char *msg );
 
 	void			AddToNotify( const Color& clr, char const *msg );
-	void			ClearNofify();
+	void			ClearNotify();
 
 private:
 	// Console font
@@ -139,7 +181,7 @@ private:
 		wchar_t		text[MAX_NOTIFY_TEXT_LINE];
 	};
 
-	CUtlVector< CNotifyText >	m_NotifyText;
+	CCopyableUtlVector< CNotifyText >	m_NotifyText;
 
 	enum
 	{
@@ -198,6 +240,9 @@ void Con_ShowConsole_f( void )
 		return;
 	}
 
+	if ( !g_ClientDLL->ShouldAllowConsole() )
+		return;
+
 	// make sure we're allowed to see the console
 	if ( con_enable.GetBool() || developer.GetInt() || CommandLine()->CheckParm("-console") || CommandLine()->CheckParm("-rpt") )
 	{
@@ -251,11 +296,74 @@ void Con_ClearNotify (void)
 {
 	if ( g_pConPanel )
 	{
-		g_pConPanel->ClearNofify();
+		g_pConPanel->ClearNotify();
 	}
 }
 
 #endif // SWDS												
+
+
+ConsoleLogManager::ConsoleLogManager()
+{
+	m_fh = FILESYSTEM_INVALID_HANDLE;
+}
+
+ConsoleLogManager::~ConsoleLogManager()
+{
+	// This fails because of destructor order problems. The file
+	// system has already been shut down by the time this runs.
+	// We'll have to count on the OS to close the file for us.
+	//CloseFileIfOpen();
+}
+
+void ConsoleLogManager::RemoveConsoleLogFile()
+{
+	// Make sure the log file is closed before we try deleting it.
+	CloseFileIfOpen();
+	g_pFileSystem->RemoveFile( GetConsoleLogFilename(), "GAME" );
+}
+
+bool ConsoleLogManager::ReadConsoleLogFile( CUtlBuffer& buf )
+{
+	// Make sure the log file is closed before we try reading it.
+	CloseFileIfOpen();
+	const char *pLogFile = GetConsoleLogFilename();
+	if ( g_pFullFileSystem->ReadFile( pLogFile, "GAME", buf ) )
+		return true;
+
+	return false;
+}
+
+FileHandle_t ConsoleLogManager::GetConsoleLogFileHandleForAppend()
+{
+	if ( m_fh == FILESYSTEM_INVALID_HANDLE )
+	{
+		const char* file = GetConsoleLogFilename();
+		m_fh = g_pFileSystem->Open( file, "a" );
+	}
+
+	return m_fh;
+}
+
+void ConsoleLogManager::CloseFileIfOpen()
+{
+	if ( m_fh != FILESYSTEM_INVALID_HANDLE )
+	{
+		g_pFileSystem->Close( m_fh );
+		m_fh = FILESYSTEM_INVALID_HANDLE;
+	}
+}
+
+const char *ConsoleLogManager::GetConsoleLogFilename() const
+{
+	const char *logFile = con_logfile.GetString();
+	if ( !COM_IsValidPath( logFile ) || !COM_IsValidLogFilename( logFile ) )
+	{
+		return "console.log";
+	}
+	return logFile;
+}
+
 
 /*
 ================
@@ -264,9 +372,17 @@ Con_Init
 */
 void Con_Init (void)
 {
-#ifdef _LINUX
+#ifdef DEDICATED
 	con_debuglog = false; // the dedicated server's console will handle this
 	con_debuglogmapprefixed = false;
+
+	// Check -consolelog arg and set con_logfile if it's present. This gets some messages logged
+	//  that we would otherwise miss due to con_logfile being set in the .cfg file.
+	const char *filename = NULL;
+	if ( CommandLine()->CheckParm( "-consolelog", &filename ) && filename && filename[ 0 ] )
+	{
+		con_logfile.SetValue( filename );
+	}
 #else
 	bool bRPTClient = ( CommandLine()->FindParm( "-rpt" ) != 0 );
 	con_debuglog = bRPTClient || ( CommandLine()->FindParm( "-condebug" ) != 0 );
@@ -276,10 +392,10 @@ void Con_Init (void)
 		con_logfile.SetValue( "console.log" );
 		if ( bRPTClient || ( CommandLine()->FindParm( "-conclearlog" ) ) )
 		{
-			g_pFileSystem->RemoveFile( GetConsoleLogFilename(), "GAME" );
+			GetConsoleLogManager().RemoveConsoleLogFile();
 		}
 	}
-#endif // !_LINUX
+#endif // !DEDICATED
 
 	con_initialized = true;
 }
@@ -296,6 +412,18 @@ void Con_Shutdown (void)
 
 /*
 ================
+Read the console log from disk and return it in 'buf'. Buf should come
+in as an empty TEXT_BUFFER CUtlBuffer.
+Returns true if the log file is successfully read.
+================
+*/
+bool GetConsoleLogFileData( CUtlBuffer& buf )
+{
+	return GetConsoleLogManager().ReadConsoleLogFile( buf );
+}
+
+/*
+================
 Con_DebugLog
 ================
 */
@@ -308,9 +436,7 @@ void Con_DebugLog( const char *fmt, ...)
     Q_vsnprintf(data, sizeof(data), fmt, argptr);
     va_end(argptr);
 
-	const char *file = GetConsoleLogFilename();
-
-	FileHandle_t fh = g_pFileSystem->Open( file, "a" );
+	FileHandle_t fh = GetConsoleLogManager().GetConsoleLogFileHandleForAppend();
 	if (fh != FILESYSTEM_INVALID_HANDLE )
 	{
 		if ( con_debuglogmapprefixed )
@@ -331,11 +457,13 @@ void Con_DebugLog( const char *fmt, ...)
 				g_pFileSystem->Write( timestamp, strlen( timestamp ), fh );
 				g_pFileSystem->Write( ": ", 2, fh );
 			}
-			needTimestamp = V_stristr( data, "\n" );   
+			needTimestamp = V_stristr( data, "\n" ) != 0;   
 		}
 
 		g_pFileSystem->Write( data, strlen(data), fh );
-		g_pFileSystem->Close( fh );
+		// Now that we don't close the file we need to flush it in order
+		// to make sure that the data makes it to the file system.
+		g_pFileSystem->Flush( fh );
 	}
 }
 
@@ -354,6 +482,8 @@ static bool g_bInColorPrint = false;
 extern CThreadLocalInt<> g_bInSpew;
 
 void Con_Printf( const char *fmt, ... );
+
+extern ConVar spew_consolelog_to_debugstring;
 
 void Con_ColorPrint( const Color& clr, char const *msg )
 {
@@ -385,7 +515,7 @@ void Con_ColorPrint( const Color& clr, char const *msg )
 				if ( pszText && ( *pszText != '\0' ) && ( Q_stristr( msg, pszText ) == NULL ))
 				{
 					Color mycolor(200, 200, 200, 150 );
-					g_pCVar->ConsoleColorPrintf( mycolor, msg );
+					g_pCVar->ConsoleColorPrintf( mycolor, "%s", msg );
 					return;
 				}
 				break;
@@ -399,7 +529,7 @@ void Con_ColorPrint( const Color& clr, char const *msg )
 		g_bInColorPrint = true;
 
 		// also echo to debugging console
-		if ( Plat_IsInDebugSession() && !con_trace.GetInt() )
+		if ( Plat_IsInDebugSession() && !con_trace.GetInt() && !spew_consolelog_to_debugstring.GetBool() )
 		{
 			Sys_OutputDebugString(msg);
 		}
@@ -581,13 +711,12 @@ void Con_ColorPrintf( const Color& clr, const char *fmt, ... )
 {
 	va_list		argptr;
 	char		msg[MAXPRINTMSG];
-	static bool	inupdate;
 
 	va_start (argptr,fmt);
 	Q_vsnprintf (msg,sizeof( msg ), fmt,argptr);
 	va_end (argptr);
 
-	LOCAL_THREAD_LOCK();
+	AUTO_LOCK( g_AsyncNotifyTextMutex );
 	if ( !HandleRedirectAndDebugLog( msg ) )
 	{
 		return;
@@ -652,7 +781,7 @@ void Con_SafePrintf (const char *fmt, ...)
 	va_end (argptr);
 
 #ifndef SWDS
-	int			temp;
+	bool		temp;
 	temp = scr_disabled_for_loading;
 	scr_disabled_for_loading = true;
 #endif
@@ -715,10 +844,11 @@ void Con_NXPrintf( const struct con_nprint_s *info, const char *fmt, ... )
 CConPanel::CConPanel( vgui::Panel *parent ) : CBasePanel( parent, "CConPanel" )
 {
 	// Full screen assumed
-	SetSize( videomode->GetModeWidth(), videomode->GetModeHeight() );
+	SetSize( videomode->GetModeStereoWidth(), videomode->GetModeStereoHeight() );
 	SetPos( 0, 0 );
 	SetVisible( true );
-	SetCursor( null );
+	SetMouseInputEnabled( false );
+	SetKeyBoardInputEnabled( false );
 
 	da_default_color[0] = 1.0;
 	da_default_color[1] = 1.0;
@@ -742,7 +872,11 @@ void CConPanel::Con_NPrintf( int idx, const char *msg )
 	if ( idx < 0 || idx >= MAX_DBG_NOTIFY )
 		return;
 
+#ifdef WIN32
     _snwprintf( da_notify[idx].szNotify, sizeof( da_notify[idx].szNotify ) / sizeof( wchar_t ) - 1, L"%S", msg );
+#else
+    _snwprintf( da_notify[idx].szNotify, sizeof( da_notify[idx].szNotify ) / sizeof( wchar_t ) - 1, L"%s", msg );
+#endif
 	da_notify[idx].szNotify[ sizeof( da_notify[idx].szNotify ) / sizeof( wchar_t ) - 1 ] = L'\0';
 
 	// Reset values
@@ -760,7 +894,11 @@ void CConPanel::Con_NXPrintf( const struct con_nprint_s *info, const char *msg )
 	if ( info->index < 0 || info->index >= MAX_DBG_NOTIFY )
 		return;
 
+#ifdef WIN32
 	_snwprintf( da_notify[info->index].szNotify, sizeof( da_notify[info->index].szNotify ) / sizeof( wchar_t ) - 1, L"%S", msg );
+#else
+	_snwprintf( da_notify[info->index].szNotify, sizeof( da_notify[info->index].szNotify ) / sizeof( wchar_t ) - 1, L"%s", msg );
+#endif
 	da_notify[info->index].szNotify[ sizeof( da_notify[info->index].szNotify ) / sizeof( wchar_t ) - 1 ] = L'\0';
 
 	// Reset values
@@ -809,6 +947,9 @@ void CConPanel::AddToNotify( const Color& clr, char const *msg )
 	// Nothing left
 	if ( !msg[0] )
 		return;
+
+	// Protect against background modifications to m_NotifyText.
+	AUTO_LOCK( g_AsyncNotifyTextMutex );
 
 	CNotifyText *current = NULL;
 
@@ -873,8 +1014,11 @@ void CConPanel::AddToNotify( const Color& clr, char const *msg )
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CConPanel::ClearNofify()
+void CConPanel::ClearNotify()
 {
+	// Protect against background modifications to m_NotifyText.
+	AUTO_LOCK( g_AsyncNotifyTextMutex );
+
 	m_NotifyText.RemoveAll();
 }
 
@@ -887,25 +1031,16 @@ void CConPanel::ApplySchemeSettings( vgui::IScheme *pScheme )
 	m_hFontFixed = pScheme->GetFont( "DefaultFixedDropShadow", false );
 }
 
-int CConPanel::DrawText( vgui::HFont font, int x, int y, wchar_t *fmt, ... )
+int CConPanel::DrawText( vgui::HFont font, int x, int y, wchar_t *data )
 {
-	va_list argptr;
-	wchar_t data[ 1024 ];
-	int len;
-
-	va_start(argptr, fmt);
-	len = _snwprintf(data, sizeof( data ) / sizeof( wchar_t ) - 1, fmt, argptr);
-	data[ sizeof( data ) / sizeof( wchar_t ) - 1 ] = L'\0';
-	va_end(argptr);
-
-	len = DrawColoredText( font, 
-		x, 
-		y, 
-		255, 
-		255,
-		255, 
-		255, 
-		data );
+	int len = DrawColoredText( font,
+	                           x,
+	                           y,
+	                           255,
+	                           255,
+	                           255,
+	                           255,
+	                           data );
 
 	return len;
 }
@@ -927,6 +1062,9 @@ bool CConPanel::ShouldDraw()
 	// and if the launcher isn't active
 	if ( !Con_IsVisible() )
 	{
+		// Protect against background modifications to m_NotifyText.
+		AUTO_LOCK( g_AsyncNotifyTextMutex );
+
 		int i;
 		int c = m_NotifyText.Count();
 		for ( i = c - 1; i >= 0; i-- )
@@ -977,16 +1115,24 @@ void CConPanel::DrawNotify( void )
 
 	int fontTall = vgui::surface()->GetFontTall( m_hFontFixed ) + 1;
 
-	Color clr;
+	// Protect against background modifications to m_NotifyText.
+	// DEADLOCK WARNING: Cannot call DrawColoredText while holding g_AsyncNotifyTextMutex or
+	// deadlock can occur while MatQueue0 holds material system lock and attempts to add text
+	// to m_NotifyText.
+	CUtlVector< CNotifyText > textToDraw;
+	{
+		AUTO_LOCK( g_AsyncNotifyTextMutex );
+		textToDraw = m_NotifyText;
+	}
 
-	int c = m_NotifyText.Count();
+	int c = textToDraw.Count();
 	for ( int i = 0; i < c; i++ )
 	{
-		CNotifyText *notify = &m_NotifyText[ i ];
+		CNotifyText *notify = &textToDraw[ i ];
 
 		float timeleft = notify->liferemaining;
 	
-		clr = notify->clr;
+		Color clr = notify->clr;
 
 		if ( timeleft < .5f )
 		{
@@ -1067,13 +1213,13 @@ int CConPanel::ProcessNotifyLines( int &left, int &top, int &right, int &bottom,
 			int fontTall = vgui::surface()->GetFontTall( m_hFontFixed ) + 1;
 
 			len = DrawTextLen( font, da_notify[i].szNotify );
-			x = videomode->GetModeWidth() - 10 - len;
+			x = videomode->GetModeStereoWidth() - 10 - len;
 
-			if ( y + fontTall > videomode->GetModeHeight() - 20 )
+			if ( y + fontTall > videomode->GetModeStereoHeight() - 20 )
 				return count;
 
 			count++;
-			int y = 20 + 10 * i;
+			y = 20 + 10 * i;
 
 			if ( bDraw )
 			{
@@ -1108,6 +1254,11 @@ int CConPanel::ProcessNotifyLines( int &left, int &top, int &right, int &bottom,
 void CConPanel::Paint()
 {
 	VPROF( "CConPanel::Paint" );
+
+#if !defined( SWDS ) && !defined( DEDICATED )
+	if ( IsPC() && !g_ClientDLL->ShouldDrawDropdownConsole() )
+		return;
+#endif
 	
 	DrawDebugAreas();
 
@@ -1136,19 +1287,19 @@ void CConPanel::PaintBackground()
 	{
 		if ( cl.m_NetChannel->IsLoopback() )
 		{
-			Q_snprintf(ver, sizeof( ver ), "Map '%s'", cl.m_szLevelNameShort );
+			Q_snprintf(ver, sizeof( ver ), "Map '%s'", cl.m_szLevelBaseName );
 		}
 		else
 		{
-			Q_snprintf(ver, sizeof( ver ), "Server '%s' Map '%s'", cl.m_NetChannel->GetRemoteAddress().ToString(), cl.m_szLevelNameShort );
+			Q_snprintf(ver, sizeof( ver ), "Server '%s' Map '%s'", cl.m_NetChannel->GetRemoteAddress().ToString(), cl.m_szLevelBaseName );
 		}
-		wchar_t unicode[ 200 ];
-		g_pVGuiLocalize->ConvertANSIToUnicode( ver, unicode, sizeof( unicode ) );
+		wchar_t wUnicode[ 200 ];
+		g_pVGuiLocalize->ConvertANSIToUnicode( ver, wUnicode, sizeof( wUnicode ) );
 
 		int tall = vgui::surface()->GetFontTall( m_hFont );
 
-		int x = wide - DrawTextLen( m_hFont, unicode ) - 2;
-		DrawText( m_hFont, x, tall + 1, unicode );
+		x = wide - DrawTextLen( m_hFont, wUnicode ) - 2;
+		DrawText( m_hFont, x, tall + 1, wUnicode );
 	}
 }
 

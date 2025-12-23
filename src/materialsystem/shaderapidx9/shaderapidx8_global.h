@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,12 +29,8 @@
 #endif
 
 #if !defined( _X360 )
-#include "d3d_async.h"
-typedef D3DDeviceWrapper D3DDev_t;
-D3DDev_t *Dx9Device();
+IDirect3DDevice9 *Dx9Device();
 IDirect3D9 *D3D();
-#else
-typedef IDirect3DDevice D3DDeviceWrapper;
 #endif
 
 

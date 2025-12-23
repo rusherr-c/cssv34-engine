@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,12 +15,14 @@
 #include "sentence.h"
 #include "dme_controls/logpreview.h"
 
+
 //-----------------------------------------------------------------------------
 // Forward declarations
 //-----------------------------------------------------------------------------
 class CDmeSoundClip;
 class CDmeGameSound;
 class CDmeAnimationSet;
+
 
 //-----------------------------------------------------------------------------
 // Info about a particular phoneme to extract
@@ -154,5 +156,6 @@ inline void CExtractInfo::ClearTags()
 	}
 	m_ApplyTags.RemoveAll();
 }
+
 
 #endif // PHONEMEEXTRACTOR_H

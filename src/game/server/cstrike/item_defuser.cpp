@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defuser kit that drops from counter-strike CTS 
 //
@@ -81,7 +81,16 @@ void CItemDefuser::DefuserTouch( CBaseEntity *pOther )
 
 		if( pPlayer->GetTeamNumber() == TEAM_CT && !pPlayer->HasDefuser() )
 		{
-			pPlayer->GiveDefuser();
+            //=============================================================================
+            // HPE_BEGIN:
+            // [dwenger] Added for fun-fact support
+            //=============================================================================
+
+			pPlayer->GiveDefuser( true );
+
+            //=============================================================================
+            // HPE_END
+            //=============================================================================
 
 			if ( pPlayer->IsDead() == false )
 			{

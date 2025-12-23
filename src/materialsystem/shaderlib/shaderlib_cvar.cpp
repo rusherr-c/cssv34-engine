@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -37,6 +37,6 @@ void InitShaderLibCVars( CreateInterfaceFn cvarFactory )
 {
 	if ( g_pCVar )
 	{
-		ConVar_Register( 0, &g_ConVarAccessor );
+		ConVar_Register( FCVAR_MATERIAL_SYSTEM_THREAD, &g_ConVarAccessor );
 	}
 }

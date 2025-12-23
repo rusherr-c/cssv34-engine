@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,12 +10,12 @@
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/itexture.h"
 #include "pixelwriter.h"
-#include "vguimatsurface/imatsystemsurface.h"
-#include "vgui_controls/button.h"
-#include "vgui_controls/textentry.h"
-#include "vgui_controls/radiobutton.h"
-#include "vgui/iinput.h"
-#include "tier1/keyvalues.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
+#include "vgui_controls/Button.h"
+#include "vgui_controls/TextEntry.h"
+#include "vgui_controls/RadioButton.h"
+#include "vgui/IInput.h"
+#include "tier1/KeyValues.h"
 #include "bitmap/imageformat.h"
 
 using namespace vgui;
@@ -377,7 +377,7 @@ void CColorXYPreview::OnMouseReleased( vgui::MouseCode code )
 		if ( m_bDraggingMouse )
 		{
 			m_bDraggingMouse = false;
-			input()->SetMouseCapture( NULL );
+			input()->SetMouseCapture( (VPANEL)0 );
 		}
 	}
 }
@@ -643,7 +643,7 @@ void CColorZPreview::OnMouseReleased( vgui::MouseCode code )
 		if ( m_bDraggingMouse )
 		{
 			m_bDraggingMouse = false;
-			input()->SetMouseCapture( NULL );
+			input()->SetMouseCapture( (VPANEL)0 );
 		}
 	}
 }

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -85,9 +85,9 @@ public:
 	virtual void SetPositionFromSaved( int savedPosition ) = 0;
 };
 
-inline int CalcSampleSize( int bitsPerSample, int channels ) 
+inline int CalcSampleSize( int bitsPerSample, int _channels ) 
 {
-	return (bitsPerSample >> 3) * channels;
+	return (bitsPerSample >> 3) * _channels;
 }
 
 #include "UtlCachedFileData.h"
@@ -138,9 +138,9 @@ public:
 	{
 		return info.m_channels;
 	}
-	void	SetChannels( int channels )
+	void	SetChannels( int _channels )
 	{
-		info.m_channels = channels;
+		info.m_channels = _channels;
 	}
 
 	inline int		SampleSize() const
@@ -362,6 +362,8 @@ public:
 	virtual void			*GetStreamedDataPointer( StreamHandle_t hStream, bool bSync ) = 0;
 	virtual bool			IsDataLoadInProgress( memhandle_t handle ) = 0;
 	virtual void			Flush() = 0;
+	virtual void			OnMixBegin() = 0;
+	virtual void			OnMixEnd() = 0;
 };
 
 extern IAsyncWavDataCache *wavedatacache;
@@ -388,7 +390,7 @@ struct CAudioSourceCachedInfoHandle_t
 
 			if ( pcacheddatasize )
 			{
-				*pcacheddatasize = info->CachedDataSize();
+				*pcacheddatasize = info ? info->CachedDataSize() : 0;
 			}
 
 			// Tag as current

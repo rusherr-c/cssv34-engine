@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -54,7 +54,7 @@ void CCvarToggleCheckButton::Paint()
 
 	// Look up current value
 //	bool value = engine->pfnGetCvarFloat( m_pszCvarName ) > 0.0f ? true : false;
-	ConVarRef var( m_pszCvarName );
+	ConVarRef var( m_pszCvarName, true );
 	if ( !var.IsValid() )
 		return;
 	bool value = var.GetBool();
@@ -75,7 +75,9 @@ void CCvarToggleCheckButton::ApplyChanges()
 
 	m_bStartValue = IsSelected();
 //	engine->Cvar_SetValue( m_pszCvarName, m_bStartValue ? 1.0f : 0.0f );
-	ConVarRef var( m_pszCvarName );
+	ConVarRef var( m_pszCvarName, true );
+	if ( !var.IsValid() )
+		return;
 	var.SetValue( m_bStartValue );
 }
 
@@ -86,7 +88,7 @@ void CCvarToggleCheckButton::Reset()
 	if ( !m_pszCvarName || !m_pszCvarName[ 0 ] ) 
 		return;
 
-	ConVarRef var( m_pszCvarName );
+	ConVarRef var( m_pszCvarName, true );
 	if ( !var.IsValid() )
 		return;
 	m_bStartValue = var.GetBool();

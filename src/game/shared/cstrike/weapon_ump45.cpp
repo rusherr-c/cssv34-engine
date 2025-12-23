@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,14 +34,14 @@ public:
 	virtual bool Deploy();
 	virtual bool Reload();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_UMP45; }
 
 
 private:
 
 	CWeaponUMP45( const CWeaponUMP45 & );
-
-	void UMP45Fire( float flSpread );
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponUMP45, DT_WeaponUMP45 )
@@ -88,26 +88,34 @@ bool CWeaponUMP45::Reload()
 	return ret;
 }
 
+float CWeaponUMP45::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.24f * m_flAccuracy;
+		else
+			return 0.04f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
 void CWeaponUMP45::PrimaryAttack()
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		UMP45Fire( 0.24f * m_flAccuracy );
-	else
-		UMP45Fire( 0.04f * m_flAccuracy );
-}
-
-void CWeaponUMP45::UMP45Fire( float flSpread )
-{
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
-
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #include "class.h"
 #include "icodeprocessor.h"
 
-#include "UtlDict.h"
+#include "utldict.h"
 
 class CCodeProcessor : public ICodeProcessor
 {

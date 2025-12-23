@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,13 +6,13 @@
 
 #include "dme_controls/soundrecordpanel.h"
 #include "filesystem.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui_controls/Button.h"
 #include "vgui_controls/TextEntry.h"
 #include "dme_controls/dmecontrols.h"
 #include "vgui_controls/messagebox.h"
 #include "soundemittersystem/isoundemittersystembase.h"
-#include "vgui/ivgui.h"
+#include "vgui/IVGui.h"
 #include "mathlib/mathlib.h"
 
 // FIXME: Move sound code out of the engine + into a library!

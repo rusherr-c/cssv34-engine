@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,8 +9,6 @@
 //  or project specific include files that are used frequently, but
 //      are changed infrequently
 //
-
-#define _WIN32_WINNT 0x0502
 
 #if !defined(AFX_STDAFX_H__BC4FB757_77BB_4E3A_8842_290307F41798__INCLUDED_)
 #define AFX_STDAFX_H__BC4FB757_77BB_4E3A_8842_290307F41798__INCLUDED_

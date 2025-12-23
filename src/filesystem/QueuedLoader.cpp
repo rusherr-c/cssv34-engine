@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Queued Loading of map resources. !!!!Specifically!!! designed for the map loading process.
 //
@@ -58,6 +58,9 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+
+
 
 #define PRIORITY_HIGH		1
 #define PRIORITY_NORMAL		0
@@ -134,12 +137,18 @@ public:
 	virtual void						EndMapLoading( bool bAbort );
 	virtual bool						AddJob( const LoaderJob_t *pLoaderJob );
 	virtual void						AddMapResource( const char *pFilename );
+	virtual void						DynamicLoadMapResource( const char *pFilename, DynamicResourceCallback_t pCallback, void *pContext, void *pContext2 );
+	virtual void						QueueDynamicLoadFunctor( CFunctor* pFunctor );
+	virtual bool						CompleteDynamicLoad();
+	virtual void						QueueCleanupDynamicLoadFunctor( CFunctor* pFunctor );
+	virtual bool						CleanupDynamicLoad();
 	virtual bool						ClaimAnonymousJob( const char *pFilename, QueuedLoaderCallback_t pCallback, void *pContext, void *pContext2 );
 	virtual bool						ClaimAnonymousJob( const char *pFilename, void **pData, int *pDataSize, LoaderError_t *pError );
 	virtual bool						IsMapLoading() const;
 	virtual bool						IsSameMapLoading() const;
 	virtual bool						IsFinished() const;
 	virtual bool						IsBatching() const;
+	virtual bool						IsDynamic() const;
 	virtual int							GetSpewDetail() const;
 
 	char								*GetFilename( const FileNameHandle_t hFilename, char *pBuff, int nBuffSize );	
@@ -150,6 +159,7 @@ public:
 	void								SubmitPendingJobs();
 
 	void								PurgeAll();
+
 
 private:
 
@@ -167,11 +177,12 @@ private:
 	};
 	typedef CUtlSortVector< FileNameHandle_t, CResourceNameLessFunc > ResourceList_t;
 
-	static void							CQueuedLoader::BuildResources( IResourcePreload *pLoader, ResourceList_t *pList, float *pBuildTime );
-	static void							CQueuedLoader::BuildMaterialResources( IResourcePreload *pLoader, ResourceList_t *pList, float *pBuildTime );
+	static void							BuildResources( IResourcePreload *pLoader, ResourceList_t *pList, float *pBuildTime );
+	static void							BuildMaterialResources( IResourcePreload *pLoader, ResourceList_t *pList, float *pBuildTime );
 
 	void								PurgeQueue();
 	void								CleanQueue();
+	void								SubmitBatchedJobs();
 	void								SubmitBatchedJobsAndWait();
 	void								ParseResourceList( CUtlBuffer &resourceList );
 	void								GetJobRequests();
@@ -181,6 +192,7 @@ private:
 	bool								m_bStarted;
 	bool								m_bActive;
 	bool								m_bBatching;
+	bool								m_bDynamic;
 	bool								m_bCanBatch;
 	bool								m_bLoadForHDR;
 	bool								m_bDoProgress;
@@ -189,6 +201,14 @@ private:
 	unsigned int						m_StartTime;
 	unsigned int						m_EndTime;
 	char								m_szMapNameToCompareSame[MAX_PATH];
+
+	DynamicResourceCallback_t			m_pfnDynamicCallback;
+	CUtlString							m_DynamicFileName;
+	void*								m_pDynamicContext;
+	void*								m_pDynamicContext2;
+	CThreadFastMutex					m_FunctorQueueMutex;
+	CUtlVector< CFunctor* >				m_FunctorQueue;
+	CUtlVector< CFunctor* >				m_CleanupFunctorQueue;
 
 	CUtlFilenameSymbolTable				m_Filenames;
 	CTSList< FileJob_t* >				m_PendingJobs;
@@ -205,6 +225,7 @@ private:
 };
 static CQueuedLoader g_QueuedLoader;
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CQueuedLoader, IQueuedLoader, QUEUEDLOADER_INTERFACE_VERSION, g_QueuedLoader );
+
 
 class CResourcePreloadAnonymous : public IResourcePreload
 {
@@ -248,7 +269,11 @@ static int				g_nAnonymousIOMemoryPeak;
 static int				g_nHighIOSuspensionMark;
 static int				g_nLowIOSuspensionMark;
 
-ConVar loader_spew_info( "loader_spew_info", "0", 0, "0:Off, 1:Timing, 2:Completions, 3:Late Completions, 4:Purges, -1:All" );
+ConVar loader_spew_info( "loader_spew_info", "0", 0, "0:Off, 1:Timing, 2:Completions, 3:Late Completions, 4:Purges, -1:All " );
+
+// Kyle says: this is here only to change the DLL size to force clients to update! This should be removed
+//			  by whoever sees this comment after we've shipped a DLL using it!
+ConVar loader_sped_info_ex( "loader_spew_info_ex", "0", 0, "(internal)" );
 
 CON_COMMAND( loader_dump_table, "" )
 {
@@ -262,7 +287,19 @@ CQueuedLoader::CQueuedLoader() : BaseClass( false )
 {
 	m_bStarted = false;
 	m_bActive = false;
+	m_bBatching = false;
+	m_bDynamic = false;
+	m_bCanBatch = false;
+	m_bLoadForHDR = false;
+	m_bDoProgress = false;
 	m_bSameMap = false;
+
+	m_nSubmitCount = 0;
+
+	m_pfnDynamicCallback = NULL;
+	m_pDynamicContext = NULL;
+	m_pDynamicContext2 = NULL;
+
 	m_szMapNameToCompareSame[0] = '\0';
 
 	m_pProgress = &s_DummyProgress;
@@ -291,7 +328,6 @@ void CQueuedLoader::BuildResources( IResourcePreload *pLoader, ResourceList_t *p
 {
 	float t0 = Plat_FloatTime();
 
-	Assert( pLoader );
 	if ( pLoader )
 	{
 		pList->RedoSort();
@@ -389,6 +425,11 @@ void CQueuedLoader::BuildMaterialResources( IResourcePreload *pLoader, ResourceL
 //-----------------------------------------------------------------------------
 void AdjustAsyncIOSpeed()
 {
+	if ( g_QueuedLoader.IsDynamic() == true )
+	{
+		return;
+	}
+
 	// throttle back the I/O to keep the pending buffers from exhausting memory
 	if ( g_SuspendIO == 0 )
 	{
@@ -563,7 +604,14 @@ void IOAsyncCallback( const FileAsyncRequest_t &asyncRequest, int numReadBytes, 
 	}
 
 	// have data or error, do callback as a computation job
-	g_pThreadPool->QueueCall( IOComputationJob, pFileJob, asyncRequest.pData, numReadBytes, loaderError )->Release();
+	if ( !g_QueuedLoader.IsDynamic() )
+	{
+		g_pThreadPool->QueueCall( IOComputationJob, pFileJob, asyncRequest.pData, numReadBytes, loaderError )->Release();
+	}
+	else
+	{
+		g_QueuedLoader.QueueDynamicLoadFunctor( CreateFunctor( IOComputationJob, pFileJob, asyncRequest.pData, numReadBytes, loaderError ) );
+	}
 	
 	// don't let the i/o starve, possibly get some more work from the pending queue
 	g_QueuedLoader.SubmitPendingJobs();
@@ -726,13 +774,13 @@ bool CQueuedLoader::CFileJobsLessFunc::Less( FileJob_t* const &pFileJobLHS, File
 void CQueuedLoader::SubmitPendingJobs()
 {
 	// prevents contention between I/O and main thread attempting to submit
-	if ( ThreadInMainThread() && g_nActiveJobs != 0 )
+	if ( ThreadInMainThread() && g_nActiveJobs != 0 && m_bDynamic == false )
 	{
 		// main thread can only kick start work if the I/O is idle
 		// once the I/O is kicked off, the I/O thread is responsible for continual draining
 		return;
 	}
-	else if ( !ThreadInMainThread() && g_nActiveJobs != 1 )
+	else if ( !ThreadInMainThread() && g_nActiveJobs != 1 && m_bDynamic == false )
 	{
 		// I/O thread requests more work, but will only fall through and get some when it expects to go idle
 		// I/O thread still has jobs and doesn't need any more yet
@@ -813,7 +861,10 @@ void CQueuedLoader::SubmitPendingJobs()
 		{
 			// prevent dragging the i/o system down for known failures
 			// still need to do callback so subsystems can do the right thing based on file absence
-			g_pThreadPool->QueueCall( IOComputationJob, pFileJob, pFileJob->m_pTargetData, 0, LOADERERROR_FILEOPEN )->Release();
+			if ( IsDynamic() )
+				QueueDynamicLoadFunctor( CreateFunctor( IOComputationJob, pFileJob, pFileJob->m_pTargetData, 0, LOADERERROR_FILEOPEN ) );
+			else
+				g_pThreadPool->QueueCall( IOComputationJob, pFileJob, pFileJob->m_pTargetData, 0, LOADERERROR_FILEOPEN )->Release();
 		}
 	}
 }
@@ -914,7 +965,7 @@ bool CQueuedLoader::AddJob( const LoaderJob_t *pLoaderJob )
 	if ( !pLoaderJob->m_pCallback )
 	{
 		// track anonymous jobs
-		AUTO_LOCK_FM( m_Mutex );
+		AUTO_LOCK( m_Mutex );
 		char szFixedName[MAX_PATH];
 		V_strncpy( szFixedName, pLoaderJob->m_pFilename, sizeof( szFixedName ) );
 		V_FixSlashes( szFixedName );
@@ -1060,9 +1111,9 @@ bool CQueuedLoader::ClaimAnonymousJob( const char *pFilename, void **pData, int 
 }
 
 //-----------------------------------------------------------------------------
-// End of batching. High priority jobs are guaranteed completed before function returns.
+// End of batching. Moves jobs into pending queue and submits but does not wait
 //-----------------------------------------------------------------------------
-void CQueuedLoader::SubmitBatchedJobsAndWait()
+void CQueuedLoader::SubmitBatchedJobs()
 {
 	// end of batching
 	m_bBatching = false;
@@ -1099,6 +1150,14 @@ void CQueuedLoader::SubmitBatchedJobsAndWait()
 	{
 		Msg( "QueuedLoader: High Priority Jobs: %d\n", (int)g_nHighPriorityJobs );
 	}
+}
+
+//-----------------------------------------------------------------------------
+// End of batching. High priority jobs are guaranteed completed before function returns.
+//-----------------------------------------------------------------------------
+void CQueuedLoader::SubmitBatchedJobsAndWait()
+{
+	SubmitBatchedJobs();
 	
 	// finish only the high priority jobs
 	// high priority jobs are expected to be complete at the conclusion of batching
@@ -1161,7 +1220,7 @@ void CQueuedLoader::SpewInfo()
 	int totalClaimed = 0;
 	int totalUnclaimed = 0;
 
-	if ( IsFinished() )
+	if ( IsFinished() || m_bDynamic == true )
 	{
 		// can only access submitted jobs safely when io thread complete
 		int lastPriority = -1;
@@ -1342,55 +1401,67 @@ void CQueuedLoader::GetJobRequests()
 	m_bBatching = true;
 
 	float t0 = Plat_FloatTime();
-	CJob *jobs[5];
 
-	// cubemap textures must be first to install correctly before their cubemap materials are built (and precache the cubmeap textures)
-	// cannot be overlapped, must run serially
-	BuildResources( m_pLoaders[RESOURCEPRELOAD_CUBEMAP], &m_ResourceNames[RESOURCEPRELOAD_CUBEMAP], &m_LoaderTimes[RESOURCEPRELOAD_CUBEMAP] );	
-
-	// Overlapping these is not critical in any way, total time is currently < 2 seconds.
-	// These operations flood calls (AddJob) back into the queued loader (which has to mutex its lists),
-	// so in fact it's slightly slower to queue these at this stage. As these routines age they may become more heavyweight.
-	jobs[0] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_SOUND], &m_ResourceNames[RESOURCEPRELOAD_SOUND], &m_LoaderTimes[RESOURCEPRELOAD_SOUND] );	
-	jobs[1] = g_pThreadPool->QueueCall( BuildMaterialResources, m_pLoaders[RESOURCEPRELOAD_MATERIAL], &m_ResourceNames[RESOURCEPRELOAD_MATERIAL], &m_LoaderTimes[RESOURCEPRELOAD_MATERIAL] );
-	jobs[2] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_STATICPROPLIGHTING], &m_ResourceNames[RESOURCEPRELOAD_STATICPROPLIGHTING], &m_LoaderTimes[RESOURCEPRELOAD_STATICPROPLIGHTING] );	
-	jobs[3] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_MODEL], &m_ResourceNames[RESOURCEPRELOAD_MODEL], &m_LoaderTimes[RESOURCEPRELOAD_MODEL] );	
-	jobs[4] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_ANONYMOUS], &m_ResourceNames[RESOURCEPRELOAD_ANONYMOUS], &m_LoaderTimes[RESOURCEPRELOAD_ANONYMOUS] );
-
-	// all jobs must finish
-	float flLastUpdateT = -1000.0f;
-	// Update as if this takes 2 seconds
-	float flDelta = ( PROGRESS_CREATEDRESOURCES - PROGRESS_PARSEDRESLIST ) * 0.03 / 2.0f;
-	float flProgress = PROGRESS_PARSEDRESLIST;
-	while( true )
+	if ( !IsPC() && !m_bDynamic )
 	{
-		bool bIsDone = true;
-		for ( int i=0; i<ARRAYSIZE( jobs ); i++ )
+		// cubemap textures must be first to install correctly before their cubemap materials are built (and precache the cubmeap textures)
+		// cannot be overlapped, must run serially
+		BuildResources( m_pLoaders[RESOURCEPRELOAD_CUBEMAP], &m_ResourceNames[RESOURCEPRELOAD_CUBEMAP], &m_LoaderTimes[RESOURCEPRELOAD_CUBEMAP] );	
+
+		// Overlapping these is not critical in any way, total time is currently < 2 seconds.
+		// These operations flood calls (AddJob) back into the queued loader (which has to mutex its lists),
+		// so in fact it's slightly slower to queue these at this stage. As these routines age they may become more heavyweight.
+		CJob *jobs[5];
+		jobs[0] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_SOUND], &m_ResourceNames[RESOURCEPRELOAD_SOUND], &m_LoaderTimes[RESOURCEPRELOAD_SOUND] );	
+		jobs[1] = g_pThreadPool->QueueCall( BuildMaterialResources, m_pLoaders[RESOURCEPRELOAD_MATERIAL], &m_ResourceNames[RESOURCEPRELOAD_MATERIAL], &m_LoaderTimes[RESOURCEPRELOAD_MATERIAL] );
+		jobs[2] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_STATICPROPLIGHTING], &m_ResourceNames[RESOURCEPRELOAD_STATICPROPLIGHTING], &m_LoaderTimes[RESOURCEPRELOAD_STATICPROPLIGHTING] );	
+		jobs[3] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_MODEL], &m_ResourceNames[RESOURCEPRELOAD_MODEL], &m_LoaderTimes[RESOURCEPRELOAD_MODEL] );	
+		jobs[4] = g_pThreadPool->QueueCall( BuildResources, m_pLoaders[RESOURCEPRELOAD_ANONYMOUS], &m_ResourceNames[RESOURCEPRELOAD_ANONYMOUS], &m_LoaderTimes[RESOURCEPRELOAD_ANONYMOUS] );
+
+		// all jobs must finish
+		float flLastUpdateT = -1000.0f;
+		// Update as if this takes 2 seconds
+		float flDelta = ( PROGRESS_CREATEDRESOURCES - PROGRESS_PARSEDRESLIST ) * 0.03 / 2.0f;
+		float flProgress = PROGRESS_PARSEDRESLIST;
+		while( true )
 		{
-			if ( !jobs[i]->IsFinished() )
+			bool bIsDone = true;
+			for ( int i=0; i<ARRAYSIZE( jobs ); i++ )
 			{
-				bIsDone = false;
+				if ( !jobs[i]->IsFinished() )
+				{
+					bIsDone = false;
+					break;
+				}
+			}
+			if ( bIsDone )
 				break;
+
+			// Can't sleep; that will allow this thread to be used by the thread pool
+			float newt = Plat_FloatTime();
+			if ( newt - flLastUpdateT > .03 )
+			{
+				m_pProgress->UpdateProgress( flProgress );
+				flProgress = clamp( flProgress + flDelta, PROGRESS_PARSEDRESLIST, PROGRESS_CREATEDRESOURCES );
+
+				// Necessary to take into account any waits for vsync
+				flLastUpdateT = Plat_FloatTime();
 			}
 		}
-		if ( bIsDone )
-			break;
 
-		// Can't sleep; that will allow this thread to be used by the thread pool
-		float newt = Plat_FloatTime();
-		if ( newt - flLastUpdateT > .03 )
+		for ( int i=0; i<ARRAYSIZE( jobs ); i++ )
 		{
-			m_pProgress->UpdateProgress( flProgress );
-			flProgress = clamp( flProgress + flDelta, PROGRESS_PARSEDRESLIST, PROGRESS_CREATEDRESOURCES );
-
-			// Necessary to take into account any waits for vsync
-			flLastUpdateT = Plat_FloatTime();
+			jobs[i]->Release();
 		}
 	}
-
-	for ( int i=0; i<ARRAYSIZE( jobs ); i++ )
+	else
 	{
-		jobs[i]->Release();
+		BuildResources( m_pLoaders[RESOURCEPRELOAD_CUBEMAP], &m_ResourceNames[RESOURCEPRELOAD_CUBEMAP], &m_LoaderTimes[RESOURCEPRELOAD_CUBEMAP] );	
+		BuildResources( m_pLoaders[RESOURCEPRELOAD_SOUND], &m_ResourceNames[RESOURCEPRELOAD_SOUND], &m_LoaderTimes[RESOURCEPRELOAD_SOUND] );	
+		BuildMaterialResources( m_pLoaders[RESOURCEPRELOAD_MATERIAL], &m_ResourceNames[RESOURCEPRELOAD_MATERIAL], &m_LoaderTimes[RESOURCEPRELOAD_MATERIAL] );
+		BuildResources( m_pLoaders[RESOURCEPRELOAD_STATICPROPLIGHTING], &m_ResourceNames[RESOURCEPRELOAD_STATICPROPLIGHTING], &m_LoaderTimes[RESOURCEPRELOAD_STATICPROPLIGHTING] );	
+		BuildResources( m_pLoaders[RESOURCEPRELOAD_MODEL], &m_ResourceNames[RESOURCEPRELOAD_MODEL], &m_LoaderTimes[RESOURCEPRELOAD_MODEL] );	
+		BuildResources( m_pLoaders[RESOURCEPRELOAD_ANONYMOUS], &m_ResourceNames[RESOURCEPRELOAD_ANONYMOUS], &m_LoaderTimes[RESOURCEPRELOAD_ANONYMOUS] );
 	}
 
 	if ( g_QueuedLoader.GetSpewDetail() & LOADER_DETAIL_TIMING )
@@ -1545,9 +1616,6 @@ void CQueuedLoader::ParseResourceList( CUtlBuffer &resourceList )
 //-----------------------------------------------------------------------------
 bool CQueuedLoader::BeginMapLoading( const char *pMapName, bool bLoadForHDR, bool bOptimizeMapReload )
 {
-#ifdef _LINUX
-	return false;
-#else
 	if ( IsPC() )
 	{
 		return false;
@@ -1571,9 +1639,9 @@ bool CQueuedLoader::BeginMapLoading( const char *pMapName, bool bLoadForHDR, boo
 	// these safety watermarks throttle the i/o from flooding memory, when the cores cannot keep up
 	// the delta must be larger than any single operation, otherwise deadlock
 	// markers that are too close will cause excessive suspension
-	MEMORYSTATUS stat;
-	GlobalMemoryStatus( &stat );
-	if ( stat.dwAvailPhys >= 64*1024*1024 )
+	size_t usedMemory, freeMemory;
+	MemAlloc_GlobalMemoryStatus( &usedMemory, &freeMemory );
+	if ( freeMemory >= 64*1024*1024 )
 	{
 		// lots of available memory, can afford to have let the i/o get ahead
 		g_nHighIOSuspensionMark = 10*1024*1024;
@@ -1592,6 +1660,7 @@ bool CQueuedLoader::BeginMapLoading( const char *pMapName, bool bLoadForHDR, boo
 	}
 
 	m_bStarted = true;
+	m_bDynamic = false;
 	m_bLoadForHDR = bLoadForHDR;
 
 	// map pak will be accessed asynchronously throughout loading and into game frame
@@ -1632,7 +1701,7 @@ bool CQueuedLoader::BeginMapLoading( const char *pMapName, bool bLoadForHDR, boo
 	char szBaseName[MAX_PATH];
 	char szFilename[MAX_PATH];
 	V_FileBase( pMapName, szBaseName, sizeof( szBaseName ) );
-	V_snprintf( szFilename, sizeof( szFilename ), "reslists_xbox/%s%s.lst", szBaseName, GetPlatformExt(), sizeof( szFilename ) );
+	V_snprintf( szFilename, sizeof( szFilename ), "reslists_xbox/%s%s.lst", szBaseName, GetPlatformExt() );
 
 	MEM_ALLOC_CREDIT();
 
@@ -1648,7 +1717,7 @@ bool CQueuedLoader::BeginMapLoading( const char *pMapName, bool bLoadForHDR, boo
 	if ( XBX_IsLocalized() )
 	{
 		// find optional localized reslist fixup
-		V_snprintf( szFilename, sizeof( szFilename ), "reslists_xbox/%s%s.lst", XBX_GetLanguageString(), GetPlatformExt(), sizeof( szFilename ) );
+		V_snprintf( szFilename, sizeof( szFilename ), "reslists_xbox/%s%s.lst", XBX_GetLanguageString(), GetPlatformExt() );
 		CUtlBuffer localizedBuffer( 0, 0, CUtlBuffer::TEXT_BUFFER );
 		if ( g_pFullFileSystem->ReadFile( szFilename, "GAME", localizedBuffer, 0, 0 ) )
 		{
@@ -1689,7 +1758,6 @@ bool CQueuedLoader::BeginMapLoading( const char *pMapName, bool bLoadForHDR, boo
 	m_pProgress->EndProgress();
 
 	return m_bActive;
-#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -1800,6 +1868,16 @@ bool CQueuedLoader::IsBatching() const
 	return m_bBatching;
 }
 
+
+//-----------------------------------------------------------------------------
+// Returns true if loader is batching
+//-----------------------------------------------------------------------------
+bool CQueuedLoader::IsDynamic() const
+{
+	return m_bDynamic;
+}
+
+
 int CQueuedLoader::GetSpewDetail() const
 {
 	int spewDetail = loader_spew_info.GetInt();
@@ -1810,3 +1888,91 @@ int CQueuedLoader::GetSpewDetail() const
 
 	return 1 << ( spewDetail - 1 );
 }
+
+
+void CQueuedLoader::DynamicLoadMapResource( const char *pFilename, DynamicResourceCallback_t pCallback, void *pContext, void *pContext2 )
+{
+	Assert( m_bActive == false );
+
+	m_bActive = true;
+	m_bDynamic = true;
+	m_DynamicFileName = pFilename;
+	m_pfnDynamicCallback = pCallback;
+	m_pDynamicContext = pContext;
+	m_pDynamicContext2 = pContext2;
+
+	CleanQueue();
+	AddResourceToTable( m_DynamicFileName );
+
+	// run the distributed precache loaders, generating a batch of i/o requests
+	GetJobRequests();
+
+	// sort and start async fulfilling the i/o requests
+	Assert( m_bBatching && g_nActiveJobs == 0 );
+	SubmitBatchedJobs();
+	Assert( !m_bBatching );
+}
+
+void CQueuedLoader::QueueDynamicLoadFunctor( CFunctor* pFunctor )
+{
+	AUTO_LOCK( m_FunctorQueueMutex );
+	m_FunctorQueue.AddToTail( pFunctor );
+}
+
+bool CQueuedLoader::CompleteDynamicLoad()
+{
+	Assert( m_bActive && m_bDynamic && !m_bBatching );
+	bool bDone = true;
+	if ( m_bDynamic )
+	{
+		CUtlVector< CFunctor* > functors;
+		{
+			AUTO_LOCK( m_FunctorQueueMutex );
+			functors.Swap( m_FunctorQueue );
+		}
+		FOR_EACH_VEC( functors, i )
+		{
+			( *functors[i] )();
+			functors[i]->Release();
+		}
+
+		{
+			AUTO_LOCK( m_FunctorQueueMutex );
+			bDone = m_FunctorQueue.Count() == 0 && g_nQueuedJobs == 0 && g_nActiveJobs == 0;
+		}
+
+		if ( bDone )
+		{
+			if ( m_pfnDynamicCallback )
+			{
+				( *m_pfnDynamicCallback )( m_DynamicFileName, m_pDynamicContext, m_pDynamicContext2 );
+			}
+			m_DynamicFileName.Clear();
+			m_bActive = false;
+			m_bDynamic = false;
+		}
+	}
+	return bDone;
+}
+
+void CQueuedLoader::QueueCleanupDynamicLoadFunctor( CFunctor* pFunctor )
+{
+	Assert( ThreadInMainThread() );
+
+	m_CleanupFunctorQueue.AddToTail( pFunctor );
+}
+
+bool CQueuedLoader::CleanupDynamicLoad()
+{
+	Assert( ThreadInMainThread() );
+
+	FOR_EACH_VEC( m_CleanupFunctorQueue, i )
+	{
+		( *m_CleanupFunctorQueue[i] )();
+		m_CleanupFunctorQueue[i]->Release();
+	}
+	m_CleanupFunctorQueue.Purge();
+
+	return true;
+}
+

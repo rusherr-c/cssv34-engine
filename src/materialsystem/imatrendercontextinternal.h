@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -41,7 +41,7 @@ public:
 	virtual void GetLightmapDimensions( int *, int *) = 0;
 	virtual MorphFormat_t GetBoundMorphFormat() = 0;
 	virtual ITexture *GetRenderTargetEx( int ) = 0;
-	virtual void DrawClearBufferQuad( unsigned char, unsigned char, unsigned char, unsigned char, bool, bool ) = 0;
+	virtual void DrawClearBufferQuad( unsigned char, unsigned char, unsigned char, unsigned char, bool, bool, bool ) = 0;
 
 	virtual bool OnDrawMesh( IMesh *pMesh, int firstIndex, int numIndices ) = 0;
 	virtual bool OnDrawMesh( IMesh *pMesh, CPrimList *pLists, int nLists ) = 0;
@@ -59,8 +59,21 @@ public:
 
 	virtual void SetFrameTime( float frameTime ) = 0;
 	virtual void SetCurrentProxy( void *pProxy ) = 0;
-
+	virtual void MarkRenderDataUnused( bool bBeginFrame ) = 0;
 	virtual CMatCallQueue *GetCallQueueInternal() = 0;
+
+	// Map and unmap a texture. The pRecipient->OnAsyncMapComplete is called when complete. 
+	virtual void AsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) = 0;
+	virtual void AsyncUnmap( ITextureInternal* pTexToUnmap ) = 0;
+	
+	// Copy from a render target to a staging texture, in order with other async commands.
+	virtual void AsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) = 0;
+
+#ifdef DX_TO_GL_ABSTRACTION
+	virtual void DoStartupShaderPreloading( void ) = 0;
+#endif
+
+	virtual void TextureManagerUpdate() = 0;
 };
 
 #endif // IMATRENDERCONTEXTINTERNAL_H

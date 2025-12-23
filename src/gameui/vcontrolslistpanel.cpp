@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,9 @@
 #include <vgui/Cursor.h>
 #include <KeyValues.h>
 
+// NVNT including for input system access
+#include "tier2/tier2.h"
+#include "inputsystem/iinputsystem.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include <tier0/memdbgon.h>
@@ -104,6 +107,9 @@ void VControlsListPanel::StartCaptureMode( HCursor hCursor )
 	EnterEditMode(m_nClickRow, 1, m_pInlineEditPanel);
 	input()->SetMouseFocus(m_pInlineEditPanel->GetVPanel());
 	input()->SetMouseCapture(m_pInlineEditPanel->GetVPanel());
+	// NVNT tell the input system that novint devices
+	// should be set unable to do menu mouse emulation.
+	g_pInputSystem->SetNovintPure(true);
 
 	engine->StartKeyTrapMode();
 
@@ -126,6 +132,9 @@ void VControlsListPanel::EndCaptureMode( HCursor hCursor )
 	LeaveEditMode();
 	RequestFocus();
 	input()->SetMouseFocus(GetVPanel());
+	// NVNT tell the input system that novint devices
+	// should be allowed to do menu mouse emulation.
+	g_pInputSystem->SetNovintPure(false);
 	if (hCursor)
 	{
 		m_pInlineEditPanel->SetCursor(hCursor);

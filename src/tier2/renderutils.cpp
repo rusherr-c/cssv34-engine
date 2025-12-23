@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A set of utilities to render standard shapes
 //
@@ -10,7 +10,13 @@
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/imesh.h"
 #include "materialsystem/imaterial.h"
+#include "tier0/vprof.h"
+#include "tier0/basetypes.h"
+#include "togl/rendermechanism.h"
 
+#if !defined(M_PI)
+	#define M_PI			3.14159265358979323846
+#endif
 
 //-----------------------------------------------------------------------------
 // Globals
@@ -35,27 +41,23 @@ void InitializeStandardMaterials()
 	KeyValues *pVMTKeyValues = new KeyValues( "wireframe" );
 	pVMTKeyValues->SetInt( "$vertexcolor", 1 );
 	s_pWireframe = g_pMaterialSystem->CreateMaterial( "__utilWireframe", pVMTKeyValues );
-	s_pWireframe->IncrementReferenceCount();
 
 	pVMTKeyValues = new KeyValues( "wireframe" );
 	pVMTKeyValues->SetInt( "$vertexcolor", 1 );
 	pVMTKeyValues->SetInt( "$vertexalpha", 1 );
 	pVMTKeyValues->SetInt( "$ignorez", 1 );
 	s_pWireframeIgnoreZ = g_pMaterialSystem->CreateMaterial( "__utilWireframeIgnoreZ", pVMTKeyValues );
-	s_pWireframeIgnoreZ->IncrementReferenceCount();
 
 	pVMTKeyValues = new KeyValues( "unlitgeneric" );
 	pVMTKeyValues->SetInt( "$vertexcolor", 1 );
 	pVMTKeyValues->SetInt( "$vertexalpha", 1 );
 	s_pVertexColor = g_pMaterialSystem->CreateMaterial( "__utilVertexColor", pVMTKeyValues );
-	s_pVertexColor->IncrementReferenceCount();
 
 	pVMTKeyValues = new KeyValues( "unlitgeneric" );
 	pVMTKeyValues->SetInt( "$vertexcolor", 1 );
 	pVMTKeyValues->SetInt( "$vertexalpha", 1 );
 	pVMTKeyValues->SetInt( "$ignorez", 1 );
 	s_pVertexColorIgnoreZ = g_pMaterialSystem->CreateMaterial( "__utilVertexColorIgnoreZ", pVMTKeyValues );
-	s_pVertexColorIgnoreZ->IncrementReferenceCount();
 }
 
 void ShutdownStandardMaterials()
@@ -766,18 +768,22 @@ void RenderQuad( IMaterial *pMaterial, float x, float y, float w, float h,
 //-----------------------------------------------------------------------------
 // Renders a screen space quad
 //-----------------------------------------------------------------------------
+
 void DrawScreenSpaceRectangle( IMaterial *pMaterial, 
 								  int nDestX, int nDestY, int nWidth, int nHeight,	// Rect to draw into in screen space
 								  float flSrcTextureX0, float flSrcTextureY0,		// which texel you want to appear at destx/y
 								  float flSrcTextureX1, float flSrcTextureY1,		// which texel you want to appear at destx+width-1, desty+height-1
 								  int nSrcTextureWidth, int nSrcTextureHeight,		// needed for fixup
 								  void *pClientRenderable,							// Used to pass to the bind proxies
-								  int nXDice, int nYDice )							// Amount to tessellate the 
+								  int nXDice, int nYDice,							// Amount to tessellate the mesh
+								  float fDepth )									// what Z value to put in the verts (def 0.0)
 {
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 
 	if ( ( nWidth <= 0 ) || ( nHeight <= 0 ) )
 		return;
+
+	tmZone( TELEMETRY_LEVEL1, TMZF_NONE, "%s", __FUNCTION__ );
 
 	pRenderContext->MatrixMode( MATERIAL_VIEW );
 	pRenderContext->PushMatrix();
@@ -793,16 +799,20 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 	int ySegments = max( nYDice, 1);
 
 	CMeshBuilder meshBuilder;
+	
 	IMesh* pMesh = pRenderContext->GetDynamicMesh( true );
 	meshBuilder.Begin( pMesh, MATERIAL_QUADS, xSegments * ySegments );
 
 	int nScreenWidth, nScreenHeight;
 	pRenderContext->GetRenderTargetDimensions( nScreenWidth, nScreenHeight );
-	float flLeftX = nDestX - 0.5f;
-	float flRightX = nDestX + nWidth - 0.5f;
 
-	float flTopY = nDestY - 0.5f;
-	float flBottomY = nDestY + nHeight - 0.5f;
+	float flOffset = 0.5f;
+	
+	float flLeftX = nDestX - flOffset;
+	float flRightX = nDestX + nWidth - flOffset;
+
+	float flTopY = nDestY - flOffset;
+	float flBottomY = nDestY + nHeight - flOffset;
 
 	float flSubrectWidth = flSrcTextureX1 - flSrcTextureX0;
 	float flSubrectHeight = flSrcTextureY1 - flSrcTextureY0;
@@ -833,7 +843,7 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 	flBottomY = FLerp( 1, -1, 0, vh, flBottomY );
 
 	// Dice the quad up...
-	if ( xSegments > 1 || ySegments > 1 )
+	if ( ( xSegments > 1 ) || ( ySegments > 1 ) )
 	{
 		// Screen height and width of a subrect
 		float flWidth  = (flRightX - flLeftX) / (float) xSegments;
@@ -848,7 +858,7 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 			for ( int y=0; y < ySegments; y++ )
 			{
 				// Top left
-				meshBuilder.Position3f( flLeftX   + (float) x * flWidth, flTopY - (float) y * flHeight, 0.0f );
+				meshBuilder.Position3f( flLeftX   + (float) x * flWidth, flTopY - (float) y * flHeight, fDepth );
 				meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
 				meshBuilder.TexCoord2f( 0, flLeftU   + (float) x * flUWidth, flTopV + (float) y * flVHeight);
 				meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
@@ -856,7 +866,7 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 				meshBuilder.AdvanceVertex();
 
 				// Top right (x+1)
-				meshBuilder.Position3f( flLeftX   + (float) (x+1) * flWidth, flTopY - (float) y * flHeight, 0.0f );
+				meshBuilder.Position3f( flLeftX   + (float) (x+1) * flWidth, flTopY - (float) y * flHeight, fDepth );
 				meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
 				meshBuilder.TexCoord2f( 0, flLeftU   + (float) (x+1) * flUWidth, flTopV + (float) y * flVHeight);
 				meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
@@ -864,7 +874,7 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 				meshBuilder.AdvanceVertex();
 
 				// Bottom right (x+1), (y+1)
-				meshBuilder.Position3f( flLeftX   + (float) (x+1) * flWidth, flTopY - (float) (y+1) * flHeight, 0.0f );
+				meshBuilder.Position3f( flLeftX   + (float) (x+1) * flWidth, flTopY - (float) (y+1) * flHeight, fDepth );
 				meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
 				meshBuilder.TexCoord2f( 0, flLeftU   + (float) (x+1) * flUWidth, flTopV + (float)(y+1) * flVHeight);
 				meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
@@ -872,7 +882,7 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 				meshBuilder.AdvanceVertex();
 
 				// Bottom left (y+1)
-				meshBuilder.Position3f( flLeftX   + (float) x * flWidth, flTopY - (float) (y+1) * flHeight, 0.0f );
+				meshBuilder.Position3f( flLeftX   + (float) x * flWidth, flTopY - (float) (y+1) * flHeight, fDepth );
 				meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
 				meshBuilder.TexCoord2f( 0, flLeftU   + (float) x * flUWidth, flTopV + (float)(y+1) * flVHeight);
 				meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );
@@ -886,7 +896,7 @@ void DrawScreenSpaceRectangle( IMaterial *pMaterial,
 		for ( int corner=0; corner<4; corner++ )
 		{
 			bool bLeft = (corner==0) || (corner==3);
-			meshBuilder.Position3f( (bLeft) ? flLeftX : flRightX, (corner & 2) ? flBottomY : flTopY, 0.0f );
+			meshBuilder.Position3f( (bLeft) ? flLeftX : flRightX, (corner & 2) ? flBottomY : flTopY, fDepth );
 			meshBuilder.Normal3f( 0.0f, 0.0f, 1.0f );
 			meshBuilder.TexCoord2f( 0, (bLeft) ? flLeftU : flRightU, (corner & 2) ? flBottomV : flTopV );
 			meshBuilder.TangentS3f( 0.0f, 1.0f, 0.0f );

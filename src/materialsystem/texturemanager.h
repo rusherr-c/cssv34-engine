@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,7 +24,7 @@ enum
 	COLOR_CORRECTION_TEXTURE_SIZE = 32
 };
 
-
+class CTextureCompositorTemplate;
 
 //-----------------------------------------------------------------------------
 // Texture manager interface
@@ -46,7 +46,6 @@ public:
 	// Creates a procedural texture
 	// NOTE: Passing in NULL as a texture name will cause it to not
 	// be able to be looked up by name using FindOrLoadTexture.
-	// NOTE: Using compressed textures is not allowed; also 
 	// Also, you may not get a texture with the requested size or format;
 	// you'll get something close though.
 	virtual ITextureInternal *CreateProceduralTexture( 
@@ -56,7 +55,8 @@ public:
 		int					h, 
 		int					d,
 		ImageFormat			fmt,
-		int					nFlags ) = 0;
+		int					nFlags,
+		ITextureRegenerator *generator = NULL) = 0;
 
 	// Creates a texture which is a render target
 	virtual ITextureInternal *CreateRenderTargetTexture( 
@@ -70,7 +70,7 @@ public:
 		unsigned int			renderTargetFlags ) = 0;
 
 	// Loads a texture from disk
-	virtual ITextureInternal *FindOrLoadTexture( const char *pTextureName, const char *pTextureGroupName ) = 0;
+	virtual ITextureInternal *FindOrLoadTexture( const char *pTextureName, const char *pTextureGroupName, int nAdditionalCreationFlags = 0 ) = 0;
 
 	// Call this to reset the filtering state
 	virtual void ResetTextureFilteringState() = 0;
@@ -82,6 +82,10 @@ public:
 	virtual void ReleaseTextures( void ) = 0;
 	virtual void RestoreRenderTargets( void ) = 0;
 	virtual void RestoreNonRenderTargetTextures( void ) = 0;
+
+	// Suspend or resume texture streaming requests
+	virtual void SuspendTextureStreaming( void ) = 0;
+	virtual void ResumeTextureStreaming( void ) = 0;
 
 	// delete any texture that has a refcount <= 0
 	virtual void RemoveUnusedTextures( void ) = 0;
@@ -98,6 +102,7 @@ public:
 	virtual ITextureInternal *ShadowNoise2D() = 0;
 	virtual ITextureInternal *IdentityLightWarp() = 0;
 	virtual ITextureInternal *FullFrameDepthTexture() = 0;
+	virtual ITextureInternal *DebugLuxels2D() = 0;
 
 	// Generates an error texture pattern
 	virtual void GenerateErrorTexture( ITexture *pTexture, IVTFTexture *pVTFTexture ) = 0;
@@ -108,6 +113,9 @@ public:
 	virtual void ForceAllTexturesIntoHardware( void ) = 0;
 
 	virtual bool IsTextureLoaded( const char *pTextureName ) = 0;
+
+	// Mark a texture as now-unreferenced, so it can be checked for removal at a later (and thread-safe) time.
+	virtual void MarkUnreferencedTextureForCleanup( ITextureInternal *pTexture ) = 0;
 
 	virtual void RemoveTexture( ITextureInternal *pTexture ) = 0;
 
@@ -125,6 +133,37 @@ public:
 
 	// See CL_HandlePureServerWhitelist for a description of the pure server stuff.
 	virtual void ReloadFilesInList( IFileList *pFilesToReload ) = 0;
+
+	// Called once per frame by material system "somewhere."
+	virtual void Update( ) = 0;
+
+	// Load a texture asynchronously and then call the provided callback.
+	virtual void AsyncFindOrLoadTexture( const char *pTextureName, const char *pTextureGroupName, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs, bool bComplain, int nAdditionalCreationFlags ) = 0;
+
+	// Stream a render target back to system memory, perform format conversion to the specified destination format, 
+	virtual void AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) = 0;
+
+	virtual void WarmTextureCache() = 0;
+	virtual void CoolTextureCache() = 0;
+
+	virtual void RequestAllMipmaps( ITextureInternal* pTex ) = 0;
+	
+	virtual void EvictAllTextures() = 0;
+
+	virtual void UpdatePostAsync() = 0;
+
+	virtual void ReleaseAsyncScratchVTF( IVTFTexture* pScratchVTF ) = 0;
+
+	virtual bool ThreadInAsyncLoadThread() const = 0;
+	virtual bool ThreadInAsyncReadThread() const = 0;
+
+	virtual bool HasPendingTextureDestroys() const = 0;
+
+	virtual bool AddTextureCompositorTemplate( const char* pName, KeyValues* pTmplDesc ) = 0;
+	virtual bool VerifyTextureCompositorTemplates() = 0;
+
+	virtual CTextureCompositorTemplate* FindTextureCompositorTemplate( const char* pName ) = 0;
+
 };
 
 

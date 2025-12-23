@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,7 @@
 
 
 #include "BaseSaveGameDialog.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "savegame_version.h"
 #include "vgui_controls/PanelListPanel.h"
 #include "vgui_controls/Label.h"
@@ -15,7 +15,7 @@
 #include "tier1/utlbuffer.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include "MouseMessageForwardingPanel.h"
 #include "TGAImagePanel.h"
@@ -165,7 +165,7 @@ CBaseSaveGameDialog::CBaseSaveGameDialog( vgui::Panel *parent, const char *name 
 	CreateSavedGamesList();
 	ScanSavedGames();
 
-	new vgui::Button( this, "loadsave", "" );
+	m_pLoadButton = new vgui::Button( this, "loadsave", "" );
 	SetControlEnabled( "loadsave", false );
 }
 
@@ -298,7 +298,7 @@ bool CBaseSaveGameDialog::ParseSaveData( char const *pszFileName, char const *ps
 	if (fh == FILESYSTEM_INVALID_HANDLE)
 		return false;
 
-	int readok = SaveReadNameAndComment( fh, szMapName, szComment );
+	int readok = SaveReadNameAndComment( fh, szMapName, ARRAYSIZE(szMapName), szComment, ARRAYSIZE(szComment) );
 	g_pFullFileSystem->Close(fh);
 
 	if ( !readok )
@@ -377,6 +377,127 @@ bool CBaseSaveGameDialog::ParseSaveData( char const *pszFileName, char const *ps
 	return true;
 }
 
+void CBaseSaveGameDialog::OnKeyCodeTyped( vgui::KeyCode code )
+{
+	if ( code == KEY_ESCAPE )
+	{
+		OnCommand( "Close" );
+		return;
+	}
+
+	BaseClass::OnKeyCodeTyped( code );
+}
+
+void CBaseSaveGameDialog::OnKeyCodePressed( vgui::KeyCode code )
+{
+	if ( code == KEY_XBUTTON_B )
+	{
+		OnCommand( "Close" );
+		return;
+	}
+	else if ( code == KEY_XSTICK1_DOWN || 
+			  code == KEY_XSTICK2_DOWN || 
+			  code == KEY_XBUTTON_DOWN || 
+			  code == KEY_DOWN )
+	{
+		if ( m_pGameList->GetItemCount() )
+		{
+			Panel *pSelectedPanel = m_pGameList->GetSelectedPanel();
+			if ( !pSelectedPanel )
+			{
+				m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( m_pGameList->FirstItem() ) );
+				m_pGameList->ScrollToItem( m_pGameList->FirstItem() );
+				return;
+			}
+			else
+			{
+				int nNextPanelID = m_pGameList->FirstItem();
+				while ( nNextPanelID != m_pGameList->InvalidItemID() )
+				{
+					if ( m_pGameList->GetItemPanel( nNextPanelID ) == pSelectedPanel )
+					{
+						nNextPanelID = m_pGameList->NextItem( nNextPanelID );
+						if ( nNextPanelID != m_pGameList->InvalidItemID() )
+						{
+							m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( nNextPanelID ) );
+							m_pGameList->ScrollToItem( nNextPanelID );
+							return;
+						}
+
+						break;
+					}
+
+					nNextPanelID = m_pGameList->NextItem( nNextPanelID );
+				}
+			}
+		}
+	}
+	else if ( code == KEY_XSTICK1_UP || 
+			  code == KEY_XSTICK2_UP || 
+			  code == KEY_XBUTTON_UP || 
+			  code == KEY_UP )
+	{
+		if ( m_pGameList->GetItemCount() )
+		{
+			Panel *pSelectedPanel = m_pGameList->GetSelectedPanel();
+			if ( !pSelectedPanel )
+			{
+				m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( m_pGameList->FirstItem() ) );
+				m_pGameList->ScrollToItem( m_pGameList->FirstItem() );
+				return;
+			}
+			else
+			{
+				int nNextPanelID = m_pGameList->FirstItem();
+				if ( m_pGameList->GetItemPanel( nNextPanelID ) != pSelectedPanel )
+				{
+					while ( nNextPanelID != m_pGameList->InvalidItemID() )
+					{
+						int nOldPanelID = nNextPanelID;
+						nNextPanelID = m_pGameList->NextItem( nNextPanelID );
+
+						if ( nNextPanelID != m_pGameList->InvalidItemID() )
+						{
+							if ( m_pGameList->GetItemPanel( nNextPanelID ) == pSelectedPanel )
+							{
+								m_pGameList->SetSelectedPanel( m_pGameList->GetItemPanel( nOldPanelID ) );
+								m_pGameList->ScrollToItem( nOldPanelID  );
+								return;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	else if ( code == KEY_ENTER || code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+	{
+		Panel *pSelectedPanel = m_pGameList->GetSelectedPanel();
+		if ( pSelectedPanel )
+		{
+			if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+			{
+				ConVarRef var( "joystick" );
+				if ( var.IsValid() && !var.GetBool() )
+				{
+					var.SetValue( true );
+				}
+
+				ConVarRef var2( "hud_fastswitch" );
+				if ( var2.IsValid() && var2.GetInt() != 2 )
+				{
+					var2.SetValue( 2 );
+				}
+			}
+
+			m_pLoadButton->DoClick();
+			return;
+		}
+	}
+
+	BaseClass::OnKeyCodePressed( code );
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: timestamp sort function for savegames
 //-----------------------------------------------------------------------------
@@ -396,10 +517,13 @@ int CBaseSaveGameDialog::SaveGameSortFunc( const void *lhs, const void *rhs )
 
 #define MAKEID(d,c,b,a)	( ((int)(a) << 24) | ((int)(b) << 16) | ((int)(c) << 8) | ((int)(d)) )
 
-int SaveReadNameAndComment( FileHandle_t f, char *name, char *comment )
+int SaveReadNameAndComment( FileHandle_t f, OUT_Z_CAP(nameSize) char *name, int nameSize, OUT_Z_CAP(commentSize) char *comment, int commentSize )
 {
 	int i, tag, size, tokenSize, tokenCount;
 	char *pSaveData, *pFieldName, **pTokenList;
+
+	name[0] = '\0';
+	comment[0] = '\0';
 
 	g_pFullFileSystem->Read( &tag, sizeof(int), f );
 	if ( tag != MAKEID('J','S','A','V') )
@@ -413,8 +537,6 @@ int SaveReadNameAndComment( FileHandle_t f, char *name, char *comment )
 		return 0;
 	}
 
-	name[0] = '\0';
-	comment[0] = '\0';
 	g_pFullFileSystem->Read( &size, sizeof(int), f );
 	
 	g_pFullFileSystem->Read( &tokenCount, sizeof(int), f );	// These two ints are the token list
@@ -489,11 +611,13 @@ int SaveReadNameAndComment( FileHandle_t f, char *name, char *comment )
 
 		if (!stricmp(pFieldName, "comment"))
 		{
-			strncpy(comment, pData, nFieldSize);
+			int copySize = MAX(commentSize, nFieldSize);
+			Q_strncpy(comment, pData, copySize);
 		}
 		else if (!stricmp(pFieldName, "mapName"))
 		{
-			strncpy(name, pData, nFieldSize);
+			int copySize = MAX(nameSize, nFieldSize);
+			Q_strncpy(name, pData, copySize);
 		};
 
 		// Move to Start of next field.

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 
 #include "cbase.h"
 #include "bot.h"
-#include "nav_pathfind.h"
+#include "cs_nav_pathfind.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -71,11 +71,11 @@ public:
 			return true;
 
 		// collect all the hiding spots in this area
-		const HidingSpotList *list = area->GetHidingSpotList();
+		const HidingSpotVector *pSpots = area->GetHidingSpots();
 		
-		FOR_EACH_LL( (*list), it )
+		FOR_EACH_VEC( (*pSpots), it )
 		{
-			const HidingSpot *spot = (*list)[ it ];
+			const HidingSpot *spot = (*pSpots)[ it ];
 
 			// if we've filled up, stop searching
 			if (m_count == MAX_SPOTS)
@@ -382,11 +382,11 @@ public:
 	bool operator() ( CNavArea *area )
 	{
 		// collect all the hiding spots in this area
-		const HidingSpotList *list = area->GetHidingSpotList();
+		const HidingSpotVector *pSpots = area->GetHidingSpots();
 		
-		FOR_EACH_LL( (*list), it )
+		FOR_EACH_VEC( (*pSpots), it )
 		{
-			const HidingSpot *spot = (*list)[ it ];
+			const HidingSpot *spot = (*pSpots)[ it ];
 
 			// make sure hiding spot is in range
 			if (m_range > 0.0f)

@@ -132,6 +132,11 @@ public:
 
 	// list statistics
 	int	Count() const;
+	inline bool IsEmpty( void ) const
+	{
+		return ( Head() == InvalidIndex() );
+	}
+
 	I	MaxElementIndex() const;
 	I	NumAllocated( void ) const { return m_NumAlloced; }
 

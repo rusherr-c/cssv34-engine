@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,8 +26,8 @@
 #include "matchmaking/matchmakingbasepanel.h"
 #include "vgui_controls/AnimationController.h"
 
-#include "tier1\utlbuffer.h"
-#include "FileSystem.h"
+#include "tier1/utlbuffer.h"
+#include "filesystem.h"
 
 using namespace vgui;
 
@@ -384,7 +384,7 @@ void COptionsDialogXbox::ApplySchemeSettings( vgui::IScheme *pScheme )
 	{
 		pPanel = pPanelList[ iPanelList ];
 
-		int iX, iY, iZ, iWide, iTall;
+		int  iZ, iWide;
 		bool bVisible;
 		pPanel->GetPos( iX, iY );
 		iZ = ipanel()->GetZPos( pPanel->GetVPanel() );
@@ -582,6 +582,7 @@ void COptionsDialogXbox::HandleInactiveKeyCodePressed( vgui::KeyCode code )
 	{
 		// Change the selected value
 		case KEY_XBUTTON_A:
+		case STEAMCONTROLLER_A:
 			if ( !(*m_pOptions)[ m_iSelection ]->bUnchangeable )
 			{
 				// Don't allow more binds if it's already maxed out
@@ -605,6 +606,7 @@ void COptionsDialogXbox::HandleInactiveKeyCodePressed( vgui::KeyCode code )
 
 		// To the main menu
 		case KEY_XBUTTON_B:
+		case STEAMCONTROLLER_B:
 			if ( m_bOldForceEnglishAudio != x360_audio_english.GetBool() )
 			{
 				// Pop up a dialog to confirm changing the language
@@ -620,17 +622,20 @@ void COptionsDialogXbox::HandleInactiveKeyCodePressed( vgui::KeyCode code )
 		// Move the selection up and down
 		case KEY_XBUTTON_UP:
 		case KEY_XSTICK1_UP:
+		case STEAMCONTROLLER_DPAD_UP:
 			ChangeSelection( -1 );
 			break;
 
 		case KEY_XBUTTON_DOWN:
 		case KEY_XSTICK1_DOWN:
+		case STEAMCONTROLLER_DPAD_DOWN:
 			ChangeSelection( 1 );
 			break;
 
 		// Quickly change in the negative direction
 		case KEY_XBUTTON_LEFT:
 		case KEY_XSTICK1_LEFT:
+		case STEAMCONTROLLER_DPAD_LEFT:
 			if ( !(*m_pOptions)[ m_iSelection ]->bUnchangeable )
 			{
 				if ( eOptionType != OPTION_TYPE_BIND )
@@ -649,6 +654,7 @@ void COptionsDialogXbox::HandleInactiveKeyCodePressed( vgui::KeyCode code )
 		// Quickly change in the positive direction
 		case KEY_XBUTTON_RIGHT:
 		case KEY_XSTICK1_RIGHT:
+		case STEAMCONTROLLER_DPAD_RIGHT:
 			if ( !(*m_pOptions)[ m_iSelection ]->bUnchangeable )
 			{
 				if ( eOptionType != OPTION_TYPE_BIND )
@@ -665,6 +671,7 @@ void COptionsDialogXbox::HandleInactiveKeyCodePressed( vgui::KeyCode code )
 			break;
 
 		case KEY_XBUTTON_X:
+		case STEAMCONTROLLER_X:
 			if ( !(*m_pOptions)[ m_iSelection ]->bUnchangeable )
 			{
 				if ( eOptionType == OPTION_TYPE_BIND )
@@ -682,6 +689,7 @@ void COptionsDialogXbox::HandleInactiveKeyCodePressed( vgui::KeyCode code )
 			break;
 
 		case KEY_XBUTTON_Y:
+		case STEAMCONTROLLER_Y:
 			if ( m_bControllerOptions )
 			{
 				m_bOptionsChanged = true;
@@ -1364,14 +1372,9 @@ void COptionsDialogXbox::UpdateAllBinds( ButtonCode_t code )
 //-----------------------------------------------------------------------------
 void COptionsDialogXbox::FillInDefaultBindings( void )
 {
-	FileHandle_t fh = g_pFullFileSystem->Open( "cfg/config.360.cfg", "rb" );
-	if (fh == FILESYSTEM_INVALID_HANDLE)
+	CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
+	if ( !g_pFullFileSystem->ReadFile( "cfg/config.360.cfg", NULL, buf ) )
 		return;
-
-	int size = g_pFullFileSystem->Size(fh);
-	CUtlBuffer buf( 0, size, CUtlBuffer::TEXT_BUFFER );
-	g_pFullFileSystem->Read( buf.Base(), size, fh );
-	g_pFullFileSystem->Close(fh);
 
 	// Clear out all current bindings
 	for ( int iOption = 0; iOption < m_pOptions->Count(); ++iOption )
@@ -1522,7 +1525,7 @@ bool COptionsDialogXbox::ShouldSkipOption( KeyValues *pKey )
 	return false;
 }
 
-void COptionsDialogXbox::ReadOptionsFromFile( char *pchFileName )
+void COptionsDialogXbox::ReadOptionsFromFile( const char *pchFileName )
 {
 	KeyValues *pOptionKeys = new KeyValues( "options_x360" );
 	pOptionKeys->LoadFromFile( g_pFullFileSystem, pchFileName, NULL );

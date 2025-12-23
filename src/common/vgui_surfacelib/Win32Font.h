@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,21 +20,14 @@
 #undef GetCharABCWidths
 #endif
 
-#include "UtlRBTree.h"
-#include "tier1/UtlSymbol.h"
+#include "utlrbtree.h"
+#include "tier1/utlsymbol.h"
+
+struct newChar_t;
 
 //-----------------------------------------------------------------------------
 // Purpose: encapsulates a windows font
 //-----------------------------------------------------------------------------
-
-// Structure passed to CWin32Font::GetCharsRGBA
-struct newChar_t
-{
-	wchar_t	wch;		// A new character to generate texture data for
-	int		fontWide;	// Texel width of the character
-	int		fontTall;	// Texel height of the character
-	int     offset;		// Offset into the buffer given to GetCharsRGBA
-};
 
 class CWin32Font
 {
@@ -63,6 +56,9 @@ public:
 	// returns the height of the font, in pixels
 	virtual int GetHeight();
 
+	// returns requested height of font.
+	virtual int GetHeightRequested();
+
 	// returns the ascent of the font, in pixels (ascent=units above the base line)
 	virtual int GetAscent();
 
@@ -77,6 +73,10 @@ public:
 
 	// gets the name of this font
 	const char *GetName() { return m_szName.String(); }
+	const char *GetFamilyName() { return NULL; }
+
+	// gets the width of ch given its position around before and after chars
+	void GetKernedCharWidth( wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &abcA );
 
 #if defined( _X360 )
 	// generates texture data for a set of chars

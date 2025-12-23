@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  Utility class to help in socket creation. Works for clients + servers
 //
@@ -12,7 +12,7 @@
 #undef SetPort // winsock screws with the SetPort string... *sigh*
 #define socklen_t int
 #define MSG_NOSIGNAL 0
-#elif _LINUX
+#elif POSIX
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -22,6 +22,9 @@
 #define closesocket close
 #define WSAGetLastError() errno
 #define ioctlsocket ioctl
+#ifdef OSX
+#define MSG_NOSIGNAL 0
+#endif
 #endif
 #include <tier0/dbg.h>
 #include "socketcreator.h"
@@ -38,8 +41,8 @@ bool SocketWouldBlock()
 {
 #ifdef _WIN32
 	return (WSAGetLastError() == WSAEWOULDBLOCK);
-#elif _LINUX
-	return (errno == EAGAIN || errno == EWOULDBLOCK);
+#elif POSIX
+	return (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINPROGRESS);
 #endif
 }
 
@@ -148,7 +151,7 @@ void CSocketCreator::ProcessAccept()
 	if ( newSocket == -1 )
 	{
 		if ( !SocketWouldBlock()
-#ifdef _LINUX
+#ifdef POSIX
 			&& errno != EINTR 
 #endif
 		 )
@@ -237,7 +240,7 @@ int CSocketCreator::ConnectSocket( const netadr_t &netAdr, bool bSingleSocket )
 		tv.tv_sec = 1;
 		FD_ZERO( &writefds );
 		FD_SET( static_cast<u_int>( hSocket ), &writefds );
-		if ( select ( 1, NULL, &writefds, NULL, &tv ) < 1 ) // block for at most 1 second
+		if ( select ( hSocket + 1, NULL, &writefds, NULL, &tv ) < 1 ) // block for at most 1 second
 		{
 			closesocket( hSocket );		// took too long to connect to, give up
 			return -1;

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,6 @@
 #include "hudelement.h"
 #include "hud_numericdisplay.h"
 #include <vgui_controls/Panel.h>
-#include "cbase.h"
 #include "hud.h"
 #include "hud_suitpower.h"
 #include "hud_macros.h"
@@ -97,8 +96,8 @@ void CHudFlashlight::SetFlashlightState( bool flashlightOn )
 	m_bFlashlightOn = flashlightOn;
 }
 
-#define WCHAR_FLASHLIGHT_ON  (L'©')
-#define WCHAR_FLASHLIGHT_OFF (L'®')
+#define WCHAR_FLASHLIGHT_ON  169
+#define WCHAR_FLASHLIGHT_OFF 174
 
 //-----------------------------------------------------------------------------
 // Purpose: draws the flashlight icon

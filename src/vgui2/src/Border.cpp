@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #include "vgui/IScheme.h"
 #include "vgui/ISurface.h"
 
-#include "vgui_border.h"
+#include "VGUI_Border.h"
 #include "vgui_internal.h"
 #include "VPanel.h"
 #include "KeyValues.h"
@@ -266,10 +266,5 @@ void Border::SetName(const char *name)
 IBorder::backgroundtype_e Border::GetBackgroundType()
 {
 	return m_eBackgroundType;
-}
-
-bool vgui::Border::PaintFirst( void )
-{
-	return false;
 }
 

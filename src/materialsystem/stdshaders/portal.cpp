@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -62,7 +62,7 @@ BEGIN_VS_SHADER( Portal_DX90,
 					pNameVar->SetStringValue( "white" );
 				}
 			}
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		}
 
 		if ( params[STATICBLENDTEXTURE]->IsDefined() )

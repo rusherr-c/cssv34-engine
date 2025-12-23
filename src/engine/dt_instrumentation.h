@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,7 +24,7 @@ extern bool g_bDTIEnabled;
 // ------------------------------------------------------------------------------------------ // 
 
 // This is called at startup to enable instrumentation.
-void DTI_Init( const char *pDTIFilename );
+void DTI_Init();
 
 // Calls DTI_Flush and cleans up.
 void DTI_Term();

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,7 +11,7 @@
 #include "cbase.h"
 #include "appframework/tier3app.h"
 #include "workspacemanager.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "FileSystem_Tools.h"
 #include "cmdlib.h"
 #include "vstdlib/random.h"

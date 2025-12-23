@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 #include "cbase.h"
 #include "hudelement.h"
 #include <vgui_controls/Panel.h>
-#include <vgui/isurface.h>
+#include <vgui/ISurface.h>
 #include "clientmode_csnormal.h"
 #include "cs_gamerules.h"
 #include "hud_basetimer.h"
@@ -111,6 +111,9 @@ void CHudRoundTimer::Think()
 		timer = (int)ceil(pRules->GetRoundStartTime()-gpGlobals->curtime);
 	}
 
+	//If the bomb is planted don't draw -- the timer is irrelevant
+	SetVisible(g_PlantedC4s.Count() == 0);
+
 	if(timer > 30)
 	{
 		SetFgColor(m_TextColor);
@@ -198,11 +201,6 @@ void CHudRoundTimer::Paint()
 
 	int timer = (int)ceil( pRules->GetRoundRemainingTime() );
 
-	//If the bomb is planted and the timer is 0, don't draw
-	// EDIT: In CZ the timer is turned off as soon as the bomb is planted, so emulate that behavior here.
-	if( g_PlantedC4s.Count() > 0 )
-		return;
-
 	if ( pRules->IsFreezePeriod() )
 	{
 		// in freeze period countdown to round start time
@@ -228,7 +226,7 @@ void CHudRoundTimer::PaintTime(HFont font, int xpos, int ypos, int mins, int sec
 {
 	surface()->DrawSetTextFont(font);
 	wchar_t unicode[6];
-	swprintf(unicode, L"%d:%.2d", mins, secs);
+	V_snwprintf(unicode, ARRAYSIZE(unicode), L"%d:%.2d", mins, secs);
 	
 	surface()->DrawSetTextPos(xpos, ypos);
 	surface()->DrawUnicodeString( unicode );

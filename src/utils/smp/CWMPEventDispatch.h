@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // CWMPEventDispatch.h : Declaration of the event dispatcher
 //
 

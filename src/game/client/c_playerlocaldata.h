@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defines the player specific data that is sent only to the player
 //			to whom it belongs.
@@ -52,6 +52,7 @@ public:
 	int						m_nStepside;
 	float					m_flFallVelocity;
 	int						m_nOldButtons;
+	float					m_flOldForwardMove;
 	// Base velocity that was passed in to server physics so 
 	//  client can predict conveyors correctly.  Server zeroes it, so we need to store here, too.
 	Vector					m_vecClientBaseVelocity;  

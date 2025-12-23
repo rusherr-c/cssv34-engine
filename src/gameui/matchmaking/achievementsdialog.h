@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,8 @@
 #include "vgui_controls/Label.h"
 #include "tier1/KeyValues.h"
 #include "TGAImagePanel.h"
+
+#define MAX_ACHIEVEMENT_GROUPS 25
 
 class IAchievement;
 
@@ -50,7 +52,9 @@ public:
 
 
 private:
+
 	vgui::Panel	*m_pProgressBg;
+
 	vgui::Panel *m_pProgressBar;
 	vgui::Label *m_pProgressPercent;
 	vgui::Label *m_pNumbering;
@@ -82,15 +86,20 @@ public:
 	~CAchievementsDialog();
 
 	virtual void ApplySchemeSettings( IScheme *pScheme );
+	void ScrollToItem( int nDirection );
+	virtual void OnKeyCodePressed( vgui::KeyCode code );
 	virtual void UpdateAchievementDialogInfo( void );
 	virtual void OnCommand( const char* command );
 
 	virtual void ApplySettings( KeyValues *pResourceData );
 	virtual void OnSizeChanged( int newWide, int newTall );
 
+	MESSAGE_FUNC_PTR( OnCheckButtonChecked, "CheckButtonChecked", panel );
 	MESSAGE_FUNC_PARAMS( OnTextChanged, "TextChanged", data );
 
 	void CreateNewAchievementGroup( int iMinRange, int iMaxRange );
+	void CreateOrUpdateComboItems( bool bCreate );
+	void UpdateAchievementList();
 
 	vgui::PanelListPanel	*m_pAchievementsList;
 	vgui::ImagePanel		*m_pListBG;
@@ -98,9 +107,13 @@ public:
 	vgui::ImagePanel		*m_pPercentageBarBackground;
 	vgui::ImagePanel		*m_pPercentageBar;
 
+	vgui::ImagePanel		*m_pSelectionHighlight;
+
 	vgui::ComboBox			*m_pAchievementPackCombo;
+	vgui::CheckButton		*m_pHideAchievedCheck;
 
 	int m_nUnlocked;
+	int m_nTotalAchievements;
 
 	int m_iFixedWidth;
 
@@ -110,11 +123,15 @@ public:
 		int m_iMaxRange;
 		int m_iNumAchievements;
 		int m_iNumUnlocked;
+		int m_iDropDownGroupID;
 	} achievement_group_t;
 
 	int m_iNumAchievementGroups;
 
-	achievement_group_t m_AchievementGroups[15];
+	achievement_group_t m_AchievementGroups[ MAX_ACHIEVEMENT_GROUPS ];
+
+	int m_nScrollItem;
+	int m_nOldScrollItem;
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -128,10 +145,16 @@ public:
 	~CAchievementDialogItemPanel();
 
 	void SetAchievementInfo ( IAchievement* pAchievement );
-	void UpdateAchievementInfo();
+	IAchievement* GetAchievementInfo( void ) { return m_pSourceAchievement; }
+	void UpdateAchievementInfo( IScheme *pScheme );
 	virtual void ApplySchemeSettings( IScheme *pScheme );
+	void ToggleShowOnHUD( void );
+
+	MESSAGE_FUNC_PTR( OnCheckButtonChecked, "CheckButtonChecked", panel );
 
 private:
+	void PreloadResourceFile( void );
+
 	IAchievement* m_pSourceAchievement;
 	int	m_iSourceAchievementIndex;
 
@@ -146,6 +169,8 @@ private:
 
 	vgui::ImagePanel		*m_pPercentageBarBackground;
 	vgui::ImagePanel		*m_pPercentageBar;
+
+	vgui::CheckButton		*m_pShowOnHUDCheck;
 
 	vgui::IScheme			*m_pSchemeSettings;
 

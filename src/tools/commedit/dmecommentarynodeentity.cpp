@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #include "engine/iclientleafsystem.h"
 #include "toolutils/enginetools_int.h"
 #include "commedittool.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -222,29 +222,21 @@ void CDmeCommentaryNodeEntity::DrawSprite( IMaterial *pMaterial )
 	meshBuilder.Position3f( -SPHERE_RADIUS, -SPHERE_RADIUS, 0.0f );
 	meshBuilder.Color4ub( nBaseR, nBaseG, nBaseB, nAlpha );
 	meshBuilder.TexCoord2f( 0, 0.0f, 1.0f );
-	meshBuilder.BoneWeight( 0, 1.0f );
-	meshBuilder.BoneMatrix( 0, 0 );
 	meshBuilder.AdvanceVertex();
 
 	meshBuilder.Position3f( SPHERE_RADIUS, -SPHERE_RADIUS, 0.0f );
 	meshBuilder.Color4ub( nBaseR, nBaseG, nBaseB, nAlpha );
 	meshBuilder.TexCoord2f( 0, 1.0f, 1.0f );
-	meshBuilder.BoneWeight( 0, 1.0f );
-	meshBuilder.BoneMatrix( 0, 0 );
 	meshBuilder.AdvanceVertex();
 
 	meshBuilder.Position3f( SPHERE_RADIUS, SPHERE_RADIUS, 0.0f );
 	meshBuilder.Color4ub( nBaseR, nBaseG, nBaseB, nAlpha );
 	meshBuilder.TexCoord2f( 0, 1.0f, 0.0f );
-	meshBuilder.BoneWeight( 0, 1.0f );
-	meshBuilder.BoneMatrix( 0, 0 );
 	meshBuilder.AdvanceVertex();
 
 	meshBuilder.Position3f( -SPHERE_RADIUS, SPHERE_RADIUS, 0.0f );
 	meshBuilder.Color4ub( nBaseR, nBaseG, nBaseB, nAlpha );
 	meshBuilder.TexCoord2f( 0, 0.0f, 0.0f );
-	meshBuilder.BoneWeight( 0, 1.0f );
-	meshBuilder.BoneMatrix( 0, 0 );
 	meshBuilder.AdvanceVertex();
 
 	meshBuilder.FastIndex( 0 );

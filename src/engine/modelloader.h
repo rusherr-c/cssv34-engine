@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 struct model_t;
 class IMaterial;
 class IFileList;
-
+class IModelLoadCallback;
 
 #include "utlmemory.h"
 
@@ -41,7 +41,12 @@ public:
 		FMODELLOADER_STATICPROP	= (1<<4),
 		// The model is a detail prop
 		FMODELLOADER_DETAILPROP = (1<<5),
-		FMODELLOADER_REFERENCEMASK = (FMODELLOADER_SERVER | FMODELLOADER_CLIENT | FMODELLOADER_CLIENTDLL | FMODELLOADER_STATICPROP | FMODELLOADER_DETAILPROP ),
+		// The model is dynamically loaded
+		FMODELLOADER_DYNSERVER = (1<<6),
+		FMODELLOADER_DYNCLIENT = (1<<7),
+		FMODELLOADER_DYNAMIC = FMODELLOADER_DYNSERVER | FMODELLOADER_DYNCLIENT,
+
+		FMODELLOADER_REFERENCEMASK = (FMODELLOADER_SERVER | FMODELLOADER_CLIENT | FMODELLOADER_CLIENTDLL | FMODELLOADER_STATICPROP | FMODELLOADER_DETAILPROP | FMODELLOADER_DYNAMIC ),
 
 		// The model was touched by the preload method
 		FMODELLOADER_TOUCHED_BY_PRELOAD = (1<<15),
@@ -81,11 +86,14 @@ public:
 	virtual void		UnreferenceModel( model_t *model, REFERENCETYPE referencetype ) = 0;
 	// Unmasks the specified reference type across all models
 	virtual void		UnreferenceAllModels( REFERENCETYPE referencetype ) = 0;
+	// Set all models to last loaded on server count -1
+	virtual void		ResetModelServerCounts() = 0;
 
 	// For any models with referencetype blank, frees all memory associated with the model
 	//  and frees up the models slot
 	virtual void		UnloadUnreferencedModels( void ) = 0;
 	virtual void		PurgeUnusedModels( void ) = 0;
+	virtual void		UnloadModel( model_t *pModel ) = 0;
 
 	// On the client only, there is some information that is computed at the time we are just
 	//  about to render the map the first time.  If we don't change/unload the map, then we
@@ -100,7 +108,7 @@ public:
 	virtual void		Print( void ) = 0;
 
 	// Validate version/header of a .bsp file
-	virtual bool		Map_IsValid( char const *mapname ) = 0;
+	virtual bool		Map_IsValid( char const *mapname, bool bQuiet = false ) = 0;
 
 	// Recomputes surface flags
 	virtual void		RecomputeSurfaceFlags( model_t *mod ) = 0;
@@ -117,9 +125,38 @@ public:
 	virtual void ReloadFilesInList( IFileList *pFilesToReload ) = 0;
 
 	virtual const char *GetActiveMapName( void ) = 0;
+
+	// Called by app system once per frame to poll and update dynamic models
+	virtual void		UpdateDynamicModels() = 0;
+
+	// Called by server and client engine code to flush unreferenced dynamic models
+	virtual void		FlushDynamicModels() = 0;
+
+	// Called by server and client engine code to flush unreferenced dynamic models
+	virtual void		ForceUnloadNonClientDynamicModels() = 0;
+
+	// Called by client code to load dynamic models, instead of GetModelForName.
+	virtual model_t		*GetDynamicModel( const char *name, bool bClientOnly ) = 0;
+
+	// Called by client code to query dynamic model state
+	virtual bool		IsDynamicModelLoading( model_t *pModel, bool bClientOnly ) = 0;
+
+	// Called by client code to refcount dynamic models
+	virtual void		AddRefDynamicModel( model_t *pModel, bool bClientSideRef ) = 0;
+	virtual void		ReleaseDynamicModel( model_t *pModel, bool bClientSideRef ) = 0;
+
+	// Called by client code
+	virtual bool		RegisterModelLoadCallback( model_t *pModel, bool bClientOnly, IModelLoadCallback *pCallback, bool bCallImmediatelyIfLoaded = true ) = 0;
+
+	// Called by client code or IModelLoadCallback destructor
+	virtual void		UnregisterModelLoadCallback( model_t *pModel, bool bClientOnly, IModelLoadCallback *pCallback ) = 0;
+
+	virtual void		Client_OnServerModelStateChanged( model_t *pModel, bool bServerLoaded ) = 0;
 };
 
 extern IModelLoader *modelloader;
+
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Loads the lump to temporary memory and automatically cleans up the
@@ -139,7 +176,6 @@ public:
 	int					LumpVersion() const;
 	const char			*GetMapName( void );
 	char				*GetLoadName( void );
-	char				*GetDiskName( void );
 	struct worldbrushdata_t	*GetMap( void );
 
 	// Global setup/shutdown
@@ -176,7 +212,7 @@ private:
 // Recomputes translucency for the model...
 //-----------------------------------------------------------------------------
 
-void Mod_RecomputeTranslucency( model_t* mod, int nSkin, int nBody, void /*IClientRenderable*/ *pClientRenderable );
+void Mod_RecomputeTranslucency( model_t* mod, int nSkin, int nBody, void /*IClientRenderable*/ *pClientRenderable, float fInstanceAlphaModulate );
 
 //-----------------------------------------------------------------------------
 // game lumps
@@ -194,6 +230,8 @@ int Mod_GetModelMaterials( model_t* mod, int count, IMaterial** ppMaterial );
 
 bool Mod_MarkWaterSurfaces( model_t *pModel );
 
+void Mod_SetMaterialVarFlag( model_t *pModel, unsigned int flag, bool on );
+
 //-----------------------------------------------------------------------------
 // Hooks the cache notify into the MDL cache system 
 //-----------------------------------------------------------------------------
@@ -204,11 +242,6 @@ void DisconnectMDLCacheNotify( );
 // Initialize studiomdl state
 //-----------------------------------------------------------------------------
 void InitStudioModelState( model_t *pModel );
-
-//-----------------------------------------------------------------------------
-// Convert the full bsp name into the actual platform bsp name
-//-----------------------------------------------------------------------------
-char *GetMapNameOnDisk( char *pDiskName, const char *pFullMapName, unsigned int nDiskNameSize );
 
 extern bool g_bLoadedMapHasBakedPropLighting;
 extern bool g_bBakedPropLightingNoSeparateHDR;

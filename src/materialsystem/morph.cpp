@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -361,7 +361,7 @@ private:
 class CMorphMgrRenderContext : public IMorphMgrRenderContext
 {
 public:
-	enum
+	enum UnnamedEnumsAreNotLegal
 	{
 		MAX_MODEL_MORPHS = 4,
 	};
@@ -373,7 +373,7 @@ public:
 	int m_nMorphCount;
 	CMorph *m_pMorphsToAccumulate[MAX_MODEL_MORPHS];
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	bool m_bInMorphAccumulation;
 #endif
 };
@@ -797,7 +797,7 @@ void CMorph::DisplayMorphStats()
 	int nDestTextureHeight = pDest->GetActualHeight();
 
 #ifdef _DEBUG
-	Msg( "Morph %s:\n", m_pDebugName );
+	Msg( "Morph %s:\n", m_pDebugName.Get() );
 #else
 	Msg( "Morph :\n" );
 #endif
@@ -1640,7 +1640,7 @@ CMorphMgrRenderContext::CMorphMgrRenderContext()
 {
 	m_nMorphCount = 0;
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	m_bInMorphAccumulation = false;
 #endif
 }
@@ -1772,7 +1772,6 @@ void CMorphMgr::AllocateMaterials()
 	pVMTKeyValues->SetString( "$nocull", "1" );
 	pVMTKeyValues->SetString( "$ignorez", "1" );
 	m_pVisualizeMorphAccum = g_pMaterialSystem->CreateMaterial( "___visualizeMorphAccum.vmt", pVMTKeyValues );
-	m_pVisualizeMorphAccum->IncrementReferenceCount();
 
 	if ( !m_bUsingConstantRegisters )
 	{
@@ -1781,14 +1780,12 @@ void CMorphMgr::AllocateMaterials()
 		pVMTKeyValues->SetString( "$nocull", "1" );
 		pVMTKeyValues->SetString( "$ignorez", "1" );
 		m_pRenderMorphWeight = g_pMaterialSystem->CreateMaterial( "___morphweight.vmt", pVMTKeyValues );
-		m_pRenderMorphWeight->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "debugmorphaccumulator" );
 		pVMTKeyValues->SetString( "$basetexture", "_rt_MorphWeight" );
 		pVMTKeyValues->SetString( "$nocull", "1" );
 		pVMTKeyValues->SetString( "$ignorez", "1" );
 		m_pVisualizeMorphWeight = g_pMaterialSystem->CreateMaterial( "___visualizeMorphWeight.vmt", pVMTKeyValues );
-		m_pVisualizeMorphWeight->IncrementReferenceCount();
 	}
 }
 
@@ -2178,7 +2175,7 @@ void CMorphMgr::BeginMorphAccumulation( IMorphMgrRenderContext *pIRenderContext 
 #endif
 	}
 	 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	pMorphRenderContext->m_bInMorphAccumulation = true;
 #endif
 }
@@ -2245,7 +2242,7 @@ void CMorphMgr::EndMorphAccumulation( IMorphMgrRenderContext *pIRenderContext )
 	pRenderContext->EnableClipping( m_bPrevClippingEnabled );
 	pRenderContext->SetFlashlightMode( m_bFlashlightMode );
 
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 	pMorphRenderContext->m_bInMorphAccumulation = false;
 #endif
 }

@@ -1,10 +1,3 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
-//
-// Purpose: 
-//
-// $NoKeywords: $
-//
-//=============================================================================//
 /* Copyright Abandoned 1996, 1999, 2001 MySQL AB
    This file is public domain and comes with NO WARRANTY of any kind */
 

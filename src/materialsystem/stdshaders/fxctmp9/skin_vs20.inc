@@ -1,20 +1,47 @@
 #include "shaderlib/cshader.h"
 class skin_vs20_Static_Index
 {
+private:
+	int m_nUSE_STATIC_CONTROL_FLOW;
+#ifdef _DEBUG
+	bool m_bUSE_STATIC_CONTROL_FLOW;
+#endif
+public:
+	void SetUSE_STATIC_CONTROL_FLOW( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nUSE_STATIC_CONTROL_FLOW = i;
+#ifdef _DEBUG
+		m_bUSE_STATIC_CONTROL_FLOW = true;
+#endif
+	}
+	void SetUSE_STATIC_CONTROL_FLOW( bool i )
+	{
+		m_nUSE_STATIC_CONTROL_FLOW = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bUSE_STATIC_CONTROL_FLOW = true;
+#endif
+	}
 public:
 	skin_vs20_Static_Index( )
 	{
+#ifdef _DEBUG
+		m_bUSE_STATIC_CONTROL_FLOW = false;
+#endif // _DEBUG
+		m_nUSE_STATIC_CONTROL_FLOW = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
+		bool bAllStaticVarsDefined = m_bUSE_STATIC_CONTROL_FLOW;
+		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return 0;
+		return ( 48 * m_nUSE_STATIC_CONTROL_FLOW ) + 0;
 	}
 };
-#define shaderStaticTest_skin_vs20 0
+#define shaderStaticTest_skin_vs20 vsh_forgot_to_set_static_USE_STATIC_CONTROL_FLOW + 0
 class skin_vs20_Dynamic_Index
 {
 private:
@@ -101,6 +128,27 @@ public:
 		m_bLIGHTING_PREVIEW = true;
 #endif
 	}
+private:
+	int m_nNUM_LIGHTS;
+#ifdef _DEBUG
+	bool m_bNUM_LIGHTS;
+#endif
+public:
+	void SetNUM_LIGHTS( int i )
+	{
+		Assert( i >= 0 && i <= 2 );
+		m_nNUM_LIGHTS = i;
+#ifdef _DEBUG
+		m_bNUM_LIGHTS = true;
+#endif
+	}
+	void SetNUM_LIGHTS( bool i )
+	{
+		m_nNUM_LIGHTS = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bNUM_LIGHTS = true;
+#endif
+	}
 public:
 	skin_vs20_Dynamic_Index()
 	{
@@ -120,16 +168,20 @@ public:
 		m_bLIGHTING_PREVIEW = false;
 #endif // _DEBUG
 		m_nLIGHTING_PREVIEW = 0;
+#ifdef _DEBUG
+		m_bNUM_LIGHTS = false;
+#endif // _DEBUG
+		m_nNUM_LIGHTS = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllDynamicVarsDefined = m_bCOMPRESSED_VERTS && m_bDOWATERFOG && m_bSKINNING && m_bLIGHTING_PREVIEW;
+		bool bAllDynamicVarsDefined = m_bCOMPRESSED_VERTS && m_bDOWATERFOG && m_bSKINNING && m_bLIGHTING_PREVIEW && m_bNUM_LIGHTS;
 		Assert( bAllDynamicVarsDefined );
 #endif // _DEBUG
-		return ( 1 * m_nCOMPRESSED_VERTS ) + ( 2 * m_nDOWATERFOG ) + ( 4 * m_nSKINNING ) + ( 8 * m_nLIGHTING_PREVIEW ) + 0;
+		return ( 1 * m_nCOMPRESSED_VERTS ) + ( 2 * m_nDOWATERFOG ) + ( 4 * m_nSKINNING ) + ( 8 * m_nLIGHTING_PREVIEW ) + ( 16 * m_nNUM_LIGHTS ) + 0;
 	}
 };
-#define shaderDynamicTest_skin_vs20 vsh_forgot_to_set_dynamic_COMPRESSED_VERTS + vsh_forgot_to_set_dynamic_DOWATERFOG + vsh_forgot_to_set_dynamic_SKINNING + vsh_forgot_to_set_dynamic_LIGHTING_PREVIEW + 0
+#define shaderDynamicTest_skin_vs20 vsh_forgot_to_set_dynamic_COMPRESSED_VERTS + vsh_forgot_to_set_dynamic_DOWATERFOG + vsh_forgot_to_set_dynamic_SKINNING + vsh_forgot_to_set_dynamic_LIGHTING_PREVIEW + vsh_forgot_to_set_dynamic_NUM_LIGHTS + 0

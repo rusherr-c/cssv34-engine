@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #endif
 
 
-#include "materialsystem/IMaterialSystemHardwareConfig.h"
+#include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "IHardwareConfigInternal.h"
 #include "bitmap/imageformat.h"
 #include "materialsystem/imaterialsystem.h"
@@ -31,14 +31,18 @@ struct ShaderDeviceInfo_t;
 //-----------------------------------------------------------------------------
 #define VENDORID_NVIDIA	0x10DE
 #define VENDORID_ATI	0x1002
-
+#define VENDORID_INTEL  0x8086
 
 //-----------------------------------------------------------------------------
 // ShaderAPI constants
 //-----------------------------------------------------------------------------
 enum
 {
+#if defined( DX_TO_GL_ABSTRACTION )
+	MAXUSERCLIPPLANES = 2,
+#else
 	MAXUSERCLIPPLANES = 6,
+#endif	
 	MAX_NUM_LIGHTS = 4,
 	MAX_OUTPUTS = 3,
 };
@@ -129,7 +133,7 @@ struct HardwareCaps_t : public MaterialAdapterInfo_t
 	bool m_SupportsNonPow2Textures : 1;
 	bool m_PreferDynamicTextures : 1;
 	bool m_HasProjectedBumpEnv : 1;
-	bool m_SupportsSRGB : 1;
+	bool m_SupportsSRGB : 1; // Means both read and write
 	bool m_bSupportsSpheremapping : 1;
 	bool m_UseFastClipping : 1;
 	bool m_bNeedsATICentroidHack : 1;
@@ -144,12 +148,16 @@ struct HardwareCaps_t : public MaterialAdapterInfo_t
 	bool m_bSoftwareVertexProcessing : 1;
 	bool m_bScissorSupported : 1;
 	bool m_bSupportsFloat32RenderTargets : 1;
-	bool m_bSupportsNormalMapCompression : 1;
 	bool m_bSupportsBorderColor : 1;
-	bool m_bDX10Card : 1;							// Indicates DX10 part running DX9 path
+	bool m_bDX10Card : 1;							// Indicates DX10 part with performant vertex textures running DX9 path
+	bool m_bDX10Blending : 1;						// Indicates DX10 part that does DX10 blending (but may not have performant vertex textures, such as Intel parts)
+	bool m_bSupportsStaticControlFlow : 1;			// Useful on OpenGL, where we have a mix of support...
+	bool m_FakeSRGBWrite : 1;						// Gotta do this on OpenGL.  Mostly hidden, but some high level code needs to know
+	bool m_CanDoSRGBReadFromRTs : 1;				// Gotta do this on OpenGL.  Mostly hidden, but some high level code needs to know
+	bool m_bSupportsGLMixedSizeTargets : 1;			// on OpenGL, are mixed size depth buffers supported - aka ARB_framebuffer_object
+	bool m_bCanStretchRectFromTextures : 1;			// Does the device expose D3DDEVCAPS2_CAN_STRETCHRECT_FROM_TEXTURES (or is it >DX9?)
 
 	HDRType_t m_MaxHDRType;
-
 };
 
 
@@ -177,12 +185,13 @@ public:
 	virtual bool HasSetDeviceGammaRamp() const;
 	virtual bool SupportsCompressedTextures() const;
 	virtual VertexCompressionType_t SupportsCompressedVertices() const;
-	virtual bool SupportsNormalMapCompression() const;
 	virtual bool SupportsBorderColor() const;
 	virtual bool SupportsFetch4() const;
+	virtual bool CanStretchRectFromTextures() const;
 	virtual bool SupportsVertexAndPixelShaders() const;
 	virtual bool SupportsPixelShaders_1_4() const;
 	virtual bool SupportsPixelShaders_2_0() const;
+	virtual bool SupportsStaticControlFlow() const;
 	virtual bool SupportsVertexShaders_2_0() const;
 	virtual int  MaximumAnisotropicLevel() const;
 	virtual int  MaxTextureWidth() const;
@@ -222,6 +231,9 @@ public:
 	virtual int	 GetMaxDXSupportLevel() const;
 	virtual bool SpecifiesFogColorInLinearSpace() const;
 	virtual bool SupportsSRGB() const;
+	virtual bool FakeSRGBWrite() const;
+	virtual bool CanDoSRGBReadFromRTs() const;
+	virtual bool SupportsGLMixedSizeTargets() const;
 	virtual bool IsAAEnabled() const;
 	virtual int  GetVertexTextureCount() const;
 	virtual int  GetMaxVertexTextureDimension() const;
@@ -250,11 +262,8 @@ public:
 
 	const HardwareCaps_t& ActualCaps() const { return m_ActualCaps; }
 	const HardwareCaps_t& Caps() const { return m_Caps; }
-	virtual bool GetHDREnabled( void ) const { return m_bHDREnabled; }
-	virtual void SetHDREnabled( bool bEnable ) { m_bHDREnabled = bEnable; }
-
-	virtual float GetShadowSlopeScaleDepthBias() const;
-	virtual float GetShadowDepthBias() const;
+	virtual bool GetHDREnabled( void ) const;
+	virtual void SetHDREnabled( bool bEnable );
 
 protected:
 	// Gets the recommended configuration associated with a particular dx level

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 #include "dme_controls/AssetBuilder.h"
 #include "dme_controls/DmePanel.h"
 #include "dme_controls/dmecontrols_utils.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui_controls/ListPanel.h"
 #include "vgui_controls/MenuButton.h"
 #include "vgui_controls/TextEntry.h"
@@ -19,8 +19,8 @@
 #include "vgui_controls/PropertySheet.h"
 #include "vgui_controls/PropertyPage.h"
 #include "vgui/ischeme.h"
-#include "vgui/ivgui.h"
-#include "vgui/isurface.h"
+#include "vgui/IVGui.h"
+#include "vgui/ISurface.h"
 #include "tier1/tier1.h"
 #include "movieobjects/dmemakefile.h"
 #include "matsys_controls/picker.h"
@@ -83,9 +83,9 @@ CCompileStatusBar::CCompileStatusBar( vgui::Panel *pParent, const char *pPanelNa
 	m_CompilingId = vgui::surface()->DrawGetTextureId( "vgui/progressbar" );
 	if ( m_CompilingId == -1 ) // we didn't find it, so create a new one
 	{
-		m_CompilingId = vgui::surface()->CreateNewTextureID();	
+		m_CompilingId = vgui::surface()->CreateNewTextureID();
+		vgui::surface()->DrawSetTextureFile( m_CompilingId, "vgui/progressbar", true, false );
 	}
-	vgui::surface()->DrawSetTextureFile( m_CompilingId, "vgui/progressbar", true, false );
 }
 
 CCompileStatusBar::~CCompileStatusBar()
@@ -1505,7 +1505,7 @@ void CAssetBuilderFrame::UpdateFileName( )
 	}
 	else
 	{
-		Q_snprintf( pBuf, sizeof(pBuf), "%s - s%s", pMakefileType->m_pHumanReadableName, pFileName, pMakeFile->IsDirty() ? " *" : "" );
+		Q_snprintf( pBuf, sizeof(pBuf), "%s - %s%s", pMakefileType->m_pHumanReadableName, pFileName, pMakeFile->IsDirty() ? " *" : "" );
 	}
 	SetTitle( pBuf, true );
 }
@@ -1680,7 +1680,7 @@ void CAssetBuilderFrame::OnFileNew( )
 	{
 		KeyValues *pContextKeyValues = new KeyValues( "FileNew" );
 		const char *pFileName = g_pDataModel->GetFileName( pMakeFile->GetFileId() );
-		m_pFileOpenStateMachine->SaveFile( pContextKeyValues, pFileName, ASSET_FILE_FORMAT, 0 );
+		m_pFileOpenStateMachine->SaveFile( pContextKeyValues, pFileName, ASSET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY );
 		return;
 	}
 
@@ -1694,7 +1694,7 @@ void CAssetBuilderFrame::OnFileOpen( )
 	CDmeMakefile *pMakeFile = m_pAssetBuilder->GetMakeFile();
 	if ( pMakeFile && pMakeFile->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pFileName = g_pDataModel->GetFileName( pMakeFile->GetFileId() );
 	}
 	KeyValues *pContextKeyValues = new KeyValues( "FileOpen" );
@@ -1709,7 +1709,7 @@ void CAssetBuilderFrame::OnFileSave( )
 
 	KeyValues *pContextKeyValues = new KeyValues( "FileSave" );
 	const char *pFileName = g_pDataModel->GetFileName( pMakeFile->GetFileId() );
-	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, pFileName, ASSET_FILE_FORMAT, 0 );
+	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, pFileName, ASSET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 void CAssetBuilderFrame::OnFileSaveAs( )
@@ -1719,7 +1719,7 @@ void CAssetBuilderFrame::OnFileSaveAs( )
 		return;
 
 	KeyValues *pContextKeyValues = new KeyValues( "FileSave" );
-	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, ASSET_FILE_FORMAT, 0 );
+	m_pFileOpenStateMachine->SaveFile( pContextKeyValues, NULL, ASSET_FILE_FORMAT, FOSM_SHOW_PERFORCE_DIALOGS );
 }
 
 

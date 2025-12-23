@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include <tier0/platform.h>
 #include "bitmap/float_bm.h"
 #include "mathlib/mathlib.h"

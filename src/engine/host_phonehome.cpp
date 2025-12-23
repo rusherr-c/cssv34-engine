@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,11 +8,13 @@
 #if !defined( _X360 )
 #include <windows.h>
 #endif
-#else _LINUX
+#elif defined(POSIX)
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pwd.h>
 #include <sys/types.h>
+#else
+#error
 #endif
 
 #include "host.h"
@@ -63,7 +65,7 @@ public:
 
 	virtual void Init()
 	{
-		/*char build_identifier[ 32 ];
+		char build_identifier[ 32 ];
 
 		Q_strncpy( build_identifier, "VLV_INTERNAL                    ", sizeof( build_identifier ) );
 		int iBI = CommandLine()->FindParm("-bi");
@@ -100,13 +102,13 @@ public:
 
 				m_pSocket = new CBlockingUDPSocket();
 			}
-		}*/
+		}
 		
 	}
 
 	virtual void Message( byte msgtype, char const *mapname )
 	{
-		/*if ( !m_bPhoneHome )
+		if ( !m_bPhoneHome )
 			return;
 
 		if ( !m_pSocket )
@@ -159,15 +161,15 @@ public:
 			break;
 		}
 
-		SendSessionMessage( msgtype, mapname );*/
+		SendSessionMessage( msgtype, mapname );
 	}
 
 private:
 
 	void	ExitApp()
 	{
-		//byte msgtype = 212;
-		//Error( g_pszExitMsg, msgtype );
+		byte msgtype = 212;
+		Error( g_pszExitMsg, msgtype );
 	}
 
 	//-----------------------------------------------------------------------------
@@ -175,7 +177,7 @@ private:
 	//-----------------------------------------------------------------------------
 	inline void Encrypt8ByteSequence( IceKey& cipher, const unsigned char *plainText, unsigned char *cipherText)
 	{
-		//cipher.encrypt(plainText, cipherText);
+		cipher.encrypt(plainText, cipherText);
 	}
 
 	//-----------------------------------------------------------------------------
@@ -183,7 +185,7 @@ private:
 	//-----------------------------------------------------------------------------
 	void EncryptBuffer( IceKey& cipher, unsigned char *bufData, uint bufferSize)
 	{
-		/*unsigned char *cipherText = bufData;
+		unsigned char *cipherText = bufData;
 		unsigned char *plainText = bufData;
 		uint bytesEncrypted = 0;
 
@@ -194,23 +196,23 @@ private:
 			bytesEncrypted += 8;
 			cipherText += 8;
 			plainText += 8;
-		}*/
+		}
 	}
 
 	void BuildMessage( bf_write& buf, byte msgtype, char const *mapname, unsigned int uSessionID )
 	{
 	
-		/*bf_write	encrypted;
-		byte		encrypted_data[ 2048 ];
+		bf_write	encrypted;
+		ALIGN4 byte		encrypted_data[ 2048 ] ALIGN4_POST;
 
 		buf.WriteByte( C2M_PHONEHOME );
 		buf.WriteByte( '\n' );
 		buf.WriteByte( C2M_PHONEHOME_PROTOCOL_VERSION );
 		buf.WriteLong( uSessionID ); // sessionid (request new id by sending 0)
-		*/
+
 		// encryption object
-		//IceKey cipher(1); /* medium encryption level */
-		/*unsigned char ucEncryptionKey[8] = { 191, 1, 0, 222, 85, 39, 154, 1 };
+		IceKey cipher(1); /* medium encryption level */
+		unsigned char ucEncryptionKey[8] = { 191, 1, 0, 222, 85, 39, 154, 1 };
 		cipher.set( ucEncryptionKey );
 
 		encrypted.StartWriting( encrypted_data, sizeof( encrypted_data ) );
@@ -296,16 +298,16 @@ private:
 		EncryptBuffer( cipher, (unsigned char *)encrypted.GetData(), encrypted.GetNumBytesWritten() );
 
 		buf.WriteShort( (int)encrypted.GetNumBytesWritten() );
-		buf.WriteBytes( (unsigned char *)encrypted.GetData(), encrypted.GetNumBytesWritten() );*/
+		buf.WriteBytes( (unsigned char *)encrypted.GetData(), encrypted.GetNumBytesWritten() );
 	}
 
 	void SendSessionMessage( byte msgtype, char const *mapname )
 	{
-		/*if ( m_uSessionID == 0 )
+		if ( m_uSessionID == 0 )
 			return;
 
 		bf_write	buf;
-		byte		data[ 2048 ];
+		ALIGN4 byte		data[ 2048 ] ALIGN4_POST;
 		
 		buf.StartWriting( data, sizeof( data ) );
 
@@ -325,7 +327,7 @@ private:
 
 		if ( m_pSocket->WaitForMessage( PHONE_HOME_TIMEOUT ) )
 		{	
-			byte		readbuf[ 128 ];
+			ALIGN4 byte		readbuf[ 128 ] ALIGN4_POST;
 
 			bf_read		replybuf( readbuf, sizeof( readbuf ) );
 
@@ -347,15 +349,15 @@ private:
 					}
 				}
 			}
-		}*/
+		}
 	}
 
 	bool RequestSessionId( unsigned int& id )
 	{
-		/*id = 0u;
+		id = 0u;
 
 		bf_write	buf;
-		byte		data[ 2048 ];
+		ALIGN4 byte		data[ 2048 ] ALIGN4_POST;
 		
 		buf.StartWriting( data, sizeof( data ) );
 
@@ -370,7 +372,7 @@ private:
 			m_pSocket->SendSocketMessage( sa, (const byte *)buf.GetData(), buf.GetNumBytesWritten() ); //lint !e534
 			if ( m_pSocket->WaitForMessage( PHONE_HOME_TIMEOUT ) )
 			{	
-				byte		readbuf[ 128 ];
+				ALIGN4 byte		readbuf[ 128 ] ALIGN4_POST;
 
 				bf_read		replybuf( readbuf, sizeof( readbuf ) );
 
@@ -396,7 +398,7 @@ private:
 				}
 
 			}
-		}*/
+		}
 
 		return false;
 	}
@@ -404,7 +406,7 @@ private:
 	// FIXME, this is BS
 	bool IsExternalBuild()
 	{
-		/*if ( CommandLine()->FindParm( "-publicbuild" ) )
+		if ( CommandLine()->FindParm( "-publicbuild" ) )
 		{
 			return true;
 		}
@@ -424,7 +426,7 @@ private:
 				return false;
 			}
 			return true;
-		}*/
+		}
 		return false;
 	}
 

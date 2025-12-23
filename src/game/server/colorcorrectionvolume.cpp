@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Color correction entity.
 //
@@ -162,7 +162,10 @@ void CColorCorrectionVolume::Spawn( void )
 
 bool CColorCorrectionVolume::PassesTriggerFilters( CBaseEntity *pEntity )
 {
-	return (pEntity->IsPlayer());
+	if( pEntity == UTIL_GetLocalPlayer() )
+		return true;
+
+	return false;
 }
 
 void CColorCorrectionVolume::StartTouch( CBaseEntity *pEntity )

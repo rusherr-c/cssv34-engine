@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: The various ammo types for HL2	
 //
@@ -14,8 +14,8 @@
 
 const char *pszItemCrateModelName[] =
 {
-	{"models/items/item_item_crate.mdl"},
-	("models/items/item_beacon_crate.mdl"),
+	"models/items/item_item_crate.mdl",
+	"models/items/item_beacon_crate.mdl",
 };
 
 //-----------------------------------------------------------------------------

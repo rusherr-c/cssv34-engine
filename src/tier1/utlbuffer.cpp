@@ -615,7 +615,9 @@ void CUtlBuffer::GetStringInternal( char *pString, size_t maxLenInChars )
 		return;
 	}
 
-	Assert( maxLenInChars != 0 );
+	// This can legitimately be zero if we were told that the buffer is zero length, and
+	// we're asking to duplicate the buffer, so let that pass, too.
+	Assert( maxLenInChars != 0 || PeekStringLength() == 0 );
 
 	if ( maxLenInChars == 0 )
 	{

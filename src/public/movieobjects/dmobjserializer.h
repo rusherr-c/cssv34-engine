@@ -1,4 +1,4 @@
-//======= Copyright © 1996-2006, Valve Corporation, All rights reserved. ======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Serialize and Unserialize Wavefront OBJ <-> DME Data
 //
@@ -39,6 +39,8 @@ public:
 	virtual bool Unserialize( CUtlBuffer &buf, const char *pEncodingName, int nEncodingVersion,
 							  const char *pSourceFormatName, int nSourceFormatVersion,
 							  DmFileId_t fileid, DmConflictResolution_t idConflictResolution, CDmElement **ppRoot );
+	virtual const char *GetImportedFormat() const { return NULL; }
+	virtual int GetImportedVersion() const { return 1; }
 
 	CDmElement *ReadOBJ( const char *pFilename, CDmeMesh **ppCreatedMesh = NULL, bool bLoadAllDeltas = true, bool bAbsolute = true );
 

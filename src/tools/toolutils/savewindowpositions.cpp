@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,10 +9,10 @@
 #include "vgui_controls/Panel.h"
 #include "vgui_controls/PHandle.h"
 #include "vgui_controls/ToolWindow.h"
-#include "vgui/isurface.h"
+#include "vgui/ISurface.h"
 #include "vgui_controls/PropertySheet.h"
-#include "tier1/UtlSymbol.h"
-#include "tier1/UtlBuffer.h"
+#include "tier1/utlsymbol.h"
+#include "tier1/utlbuffer.h"
 #include "tier1/KeyValues.h"
 #include "filesystem.h"
 

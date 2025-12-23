@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -367,7 +367,7 @@ void CStudioRender::GenerateMorphAccumulator( mstudiomodel_t *pSubModel )
 		return;
 
 	// HACK - Just turn off scissor for this model if it is doing morph accumulation
-	//DisableScissor();
+	DisableScissor();
 
 	// Next, accumulate morphs for appropriate meshes
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
@@ -442,9 +442,9 @@ int CStudioRender::R_StudioRenderFinal( IMatRenderContext *pRenderContext,
 	return numTrianglesRendered;
 }
 
-//static ConVar r_flashlightscissor( "r_flashlightscissor", "1", FCVAR_CHEAT );
+static ConVar r_flashlightscissor( "r_flashlightscissor", "1", 0 );
 
-/*void CStudioRender::EnableScissor( FlashlightState_t *state )
+void CStudioRender::EnableScissor( FlashlightState_t *state )
 {
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 
@@ -463,7 +463,7 @@ void CStudioRender::DisableScissor()
 	{
 		pRenderContext->SetScissorRect( -1, -1, -1, -1, false );
 	}
-}*/
+}
 
 
 //-----------------------------------------------------------------------------
@@ -492,13 +492,13 @@ void CStudioRender::DrawShadows( const DrawModelInfo_t& info, int flags, int bon
 			Assert( m_ShadowState[i].m_pFlashlightState && m_ShadowState[i].m_pWorldToTexture );
 			pRenderContext->SetFlashlightStateEx( *m_ShadowState[i].m_pFlashlightState, *m_ShadowState[i].m_pWorldToTexture, m_ShadowState[i].m_pFlashlightDepthTexture );
 
-			//EnableScissor( m_ShadowState[i].m_pFlashlightState );
+			EnableScissor( m_ShadowState[i].m_pFlashlightState );
 
 			R_StudioRenderModel( pRenderContext, info.m_Skin, info.m_Body, info.m_HitboxSet, info.m_pClientEntity,
 				info.m_pHardwareData->m_pLODs[info.m_Lod].ppMaterials, 
 				info.m_pHardwareData->m_pLODs[info.m_Lod].pMaterialFlags, flags, boneMask, info.m_Lod, info.m_pColorMeshes );
 
-			//DisableScissor();
+			DisableScissor();
 		}
 	}
 	pRenderContext->SetFlashlightMode( false );
@@ -551,11 +551,11 @@ void CStudioRender::DrawFlashlightDecals( const DrawModelInfo_t& info, int lod )
 			Assert( m_ShadowState[i].m_pFlashlightState && m_ShadowState[i].m_pWorldToTexture );
 			pRenderContext->SetFlashlightStateEx( *m_ShadowState[i].m_pFlashlightState, *m_ShadowState[i].m_pWorldToTexture, m_ShadowState[i].m_pFlashlightDepthTexture );
 
-			//EnableScissor( m_ShadowState[i].m_pFlashlightState );
+			EnableScissor( m_ShadowState[i].m_pFlashlightState );
 
 			DrawDecal( info, lod, info.m_Body );
 
-			//DisableScissor();
+			DisableScissor();
 		}
 	}
 	pRenderContext->SetFlashlightMode( false );
@@ -564,18 +564,18 @@ void CStudioRender::DrawFlashlightDecals( const DrawModelInfo_t& info, int lod )
 
 static matrix3x4_t *ComputeSkinMatrix( mstudioboneweight_t &boneweights, matrix3x4_t *pPoseToWorld, matrix3x4_t &result )
 {
-	float flWeight0, flWeight1, flWeight2, flWeight3;
+	float flWeight0, flWeight1, flWeight2;
 
 	switch( boneweights.numbones )
 	{
 	default:
 	case 1:
-		return &pPoseToWorld[boneweights.bone[0]];
+		return &pPoseToWorld[(unsigned)boneweights.bone[0]];
 
 	case 2:
 		{
-			matrix3x4_t &boneMat0 = pPoseToWorld[boneweights.bone[0]];
-			matrix3x4_t &boneMat1 = pPoseToWorld[boneweights.bone[1]];
+			matrix3x4_t &boneMat0 = pPoseToWorld[(unsigned)boneweights.bone[0]];
+			matrix3x4_t &boneMat1 = pPoseToWorld[(unsigned)boneweights.bone[1]];
 			flWeight0 = boneweights.weight[0];
 			flWeight1 = boneweights.weight[1];
 
@@ -597,9 +597,9 @@ static matrix3x4_t *ComputeSkinMatrix( mstudioboneweight_t &boneweights, matrix3
 
 	case 3:
 		{
-			matrix3x4_t &boneMat0 = pPoseToWorld[boneweights.bone[0]];
-			matrix3x4_t &boneMat1 = pPoseToWorld[boneweights.bone[1]];
-			matrix3x4_t &boneMat2 = pPoseToWorld[boneweights.bone[2]];
+			matrix3x4_t &boneMat0 = pPoseToWorld[(unsigned)boneweights.bone[0]];
+			matrix3x4_t &boneMat1 = pPoseToWorld[(unsigned)boneweights.bone[1]];
+			matrix3x4_t &boneMat2 = pPoseToWorld[(unsigned)boneweights.bone[2]];
 			flWeight0 = boneweights.weight[0];
 			flWeight1 = boneweights.weight[1];
 			flWeight2 = boneweights.weight[2];
@@ -620,7 +620,10 @@ static matrix3x4_t *ComputeSkinMatrix( mstudioboneweight_t &boneweights, matrix3
 		return &result;
 
 	case 4:
+		Assert(0);
+#if (MAX_NUM_BONES_PER_VERT > 3)
 		{
+			// Don't compile this if MAX_NUM_BONES_PER_VERT is too low
 			matrix3x4_t &boneMat0 = pPoseToWorld[boneweights.bone[0]];
 			matrix3x4_t &boneMat1 = pPoseToWorld[boneweights.bone[1]];
 			matrix3x4_t &boneMat2 = pPoseToWorld[boneweights.bone[2]];
@@ -628,7 +631,7 @@ static matrix3x4_t *ComputeSkinMatrix( mstudioboneweight_t &boneweights, matrix3
 			flWeight0 = boneweights.weight[0];
 			flWeight1 = boneweights.weight[1];
 			flWeight2 = boneweights.weight[2];
-			flWeight3 = boneweights.weight[3];
+			float flWeight3 = boneweights.weight[3];
 
 			result[0][0] = boneMat0[0][0] * flWeight0 + boneMat1[0][0] * flWeight1 + boneMat2[0][0] * flWeight2 + boneMat3[0][0] * flWeight3;
 			result[0][1] = boneMat0[0][1] * flWeight0 + boneMat1[0][1] * flWeight1 + boneMat2[0][1] * flWeight2 + boneMat3[0][1] * flWeight3;
@@ -644,6 +647,7 @@ static matrix3x4_t *ComputeSkinMatrix( mstudioboneweight_t &boneweights, matrix3
 			result[2][3] = boneMat0[2][3] * flWeight0 + boneMat1[2][3] * flWeight1 + boneMat2[2][3] * flWeight2 + boneMat3[2][3] * flWeight3;
 		}
 		return &result;
+#endif
 	}
 
 	Assert(0);
@@ -778,7 +782,10 @@ static matrix3x4_t *ComputeSkinMatrixSSE( mstudioboneweight_t &boneweights, matr
 		return &result;
 
 	case 4:
+		Assert(0);
+#if (MAX_NUM_BONES_PER_VERT > 3)
 		{
+			// Don't compile this if MAX_NUM_BONES_PER_VERT is too low
 			matrix3x4_t &boneMat0 = pPoseToWorld[boneweights.bone[0]];
 			matrix3x4_t &boneMat1 = pPoseToWorld[boneweights.bone[1]];
 			matrix3x4_t &boneMat2 = pPoseToWorld[boneweights.bone[2]];
@@ -858,8 +865,9 @@ static matrix3x4_t *ComputeSkinMatrixSSE( mstudioboneweight_t &boneweights, matr
 			}
 		}
 		return &result;
+#endif
 	}
-#elif _LINUX
+#elif POSIX
 #warning "ComputeSkinMatrixSSE C implementation only"
 	return ComputeSkinMatrix( boneweights, pPoseToWorld, result );
 #elif defined( _X360 )
@@ -1084,15 +1092,15 @@ public:
 		Vector *pSrcNorm;
 		Vector4D *pSrcTangentS = NULL;
 
-		ALIGN16 ModelVertexDX8_t dstVertex;
+		ALIGN16 ModelVertexDX8_t dstVertex ALIGN16_POST;
 		dstVertex.m_flBoneWeights[0] = 1.0f;
 		dstVertex.m_flBoneWeights[1] = 0.0f;
 		dstVertex.m_nBoneIndices = 0;
 		dstVertex.m_nColor = 0xFFFFFFFF;
 		dstVertex.m_vecUserData.Init( 1.0f, 0.0f, 0.0f, 1.0f );
 
-		ALIGN16 matrix3x4_t temp;
-		ALIGN16 matrix3x4_t *pSkinMat;
+		ALIGN16 matrix3x4_t temp ALIGN16_POST;
+		ALIGN16 matrix3x4_t *pSkinMat ALIGN16_POST;
 
 		int ntemp[PREFETCH_VERT_COUNT];
 
@@ -1351,7 +1359,7 @@ public:
 		Vector *pSrcPos;
 		Vector *pSrcNorm;
 		
-		ALIGN16 ModelVertexDX8_t dstVertexBuf[N_VERTS_TO_DO_AT_ONCE];;
+		ALIGN16 ModelVertexDX8_t dstVertexBuf[N_VERTS_TO_DO_AT_ONCE] ALIGN16_POST;
 		for(int i=0;i<N_VERTS_TO_DO_AT_ONCE;i++)
 		{
 			dstVertexBuf[i].m_flBoneWeights[0] = 1.0f;
@@ -1382,8 +1390,8 @@ public:
 			}
 		}
 
-		ALIGN16 matrix3x4_t temp;
-		ALIGN16 matrix3x4_t *pSkinMat;
+		ALIGN16 matrix3x4_t temp ALIGN16_POST;
+		ALIGN16 matrix3x4_t *pSkinMat ALIGN16_POST;
 
 		// Mouth related stuff...
 		float fIllum = 1.0f;
@@ -1724,8 +1732,8 @@ void CStudioRender::R_StudioSoftwareProcessMesh_Normals( mstudiomesh_t* pmesh, C
 		int numVertices, unsigned short* pGroupToMesh, StudioModelLighting_t lighting, bool doFlex, float r_blend,
 		bool bShowNormals, bool bShowTangentFrame )
 {
-	ALIGN16 matrix3x4_t temp;
-	ALIGN16 matrix3x4_t *pSkinMat;
+	ALIGN16 matrix3x4_t temp ALIGN16_POST;
+	ALIGN16 matrix3x4_t *pSkinMat ALIGN16_POST;
 
 	Vector *pSrcPos = NULL;
 	Vector *pSrcNorm = NULL;
@@ -1842,62 +1850,12 @@ void CStudioRender::R_StudioSoftwareProcessMesh_Normals( mstudiomesh_t* pmesh, C
 
 #pragma warning (default:4701)
 
-//-----------------------------------------------------------------------------
-// Purpose: 
-//
-//  ** Only execute this function if device supports stream offset **
-//
-// Input  : pmesh - pointer to a studio mesh
-//          lod - integer lod (0 is most detailed)
-// Output : none
-//-----------------------------------------------------------------------------
-template< class T >
-void CStudioRender::ComputeFlexedVertex_StreamOffset( mstudioflex_t *pflex, 
-	T *pvanim, int vertCount, float w1, float w2, float w3, float w4 )
-{
-	float w12 = w1 - w2;
-	float w34 = w3 - w4;
 
-	CachedPosNorm_t *pFlexedVertex = NULL;
-	for (int j = 0; j < pflex->numverts; j++)
-	{
-		int n = pvanim[j].index;
 
-		// only flex the indices that are (still) part of this mesh at this lod
-		if ( n >= vertCount )
-			continue;
+template
+void CCachedRenderData::ComputeFlexedVertex_StreamOffset<mstudiovertanim_t>( studiohdr_t *pStudioHdr, mstudioflex_t *pflex, 
+														 mstudiovertanim_t *pvanim, int vertCount, float w1, float w2, float w3, float w4 );
 
-		float s = pvanim[j].speed;
-		float b = pvanim[j].side;
-
-		Vector4DAligned vPosition, vNormal;
-		pvanim[j].GetDeltaFixed4DAligned( &vPosition );
-		pvanim[j].GetNDeltaFixed4DAligned( &vNormal );
-
-		if ( !m_VertexCache.IsThinVertexFlexed(n) )
-		{
-			// Add a new flexed vert to the flexed vertex list
-			pFlexedVertex = m_VertexCache.CreateThinFlexVertex(n);
-
-			Assert( pFlexedVertex != NULL);
-
-			pFlexedVertex->m_Position.InitZero();
-			pFlexedVertex->m_Normal.InitZero();
-		}
-		else
-		{
-			pFlexedVertex = m_VertexCache.GetThinFlexVertex(n);
-		}
-
-		s *= 1.0f / 255.0f;
-		b *= 1.0f / 255.0f;
-
-		float wa = w2 + w12 * s;
-		float wb = w4 + w34 * s;
-		float w = wa + ( wb - wa ) * b;
-		Vector4DWeightMAD( w, vPosition, pFlexedVertex->m_Position, vNormal, pFlexedVertex->m_Normal );
-	}
-}
 
 
 void CStudioRender::R_StudioProcessFlexedMesh_StreamOffset( mstudiomesh_t* pmesh, int lod )
@@ -1937,16 +1895,29 @@ void CStudioRender::R_StudioProcessFlexedMesh_StreamOffset( mstudiomesh_t* pmesh
 			}
 		}
 
+#ifdef PLATFORM_WINDOWS
 		if ( pflex[i].vertanimtype == STUDIO_VERT_ANIM_NORMAL )
 		{
 			mstudiovertanim_t *pvanim = pflex[i].pVertanim( 0 );
-			ComputeFlexedVertex_StreamOffset( &pflex[i], pvanim, vertCount, w1, w2, w3, w4 );
+			m_VertexCache.ComputeFlexedVertex_StreamOffset_Optimized( m_pStudioHdr, &pflex[i], pvanim, vertCount, w1, w2, w3, w4 );
 		}
 		else
 		{
 			mstudiovertanim_wrinkle_t *pvanim = pflex[i].pVertanimWrinkle( 0 );
-			ComputeFlexedVertex_StreamOffset( &pflex[i], pvanim, vertCount, w1, w2, w3, w4 );
+			m_VertexCache.ComputeFlexedVertexWrinkle_StreamOffset_Optimized( m_pStudioHdr, &pflex[i], pvanim, vertCount, w1, w2, w3, w4 );
 		}
+#else // PLATFORM_WINDOWS
+		if ( pflex[i].vertanimtype == STUDIO_VERT_ANIM_NORMAL )
+		{
+			mstudiovertanim_t *pvanim = pflex[i].pVertanim( 0 );
+			m_VertexCache.ComputeFlexedVertex_StreamOffset( m_pStudioHdr, &pflex[i], pvanim, vertCount, w1, w2, w3, w4 );
+		}
+		else
+		{
+			mstudiovertanim_wrinkle_t *pvanim = pflex[i].pVertanimWrinkle( 0 );
+			m_VertexCache.ComputeFlexedVertex_StreamOffset( m_pStudioHdr, &pflex[i], pvanim, vertCount, w1, w2, w3, w4 );
+		}
+#endif // PLATFORM_WINDOWS
 	}
 }
 
@@ -2307,7 +2278,7 @@ int CStudioRender::R_StudioDrawStaticMesh( IMatRenderContext *pRenderContext, ms
 		((lighting != LIGHTING_HARDWARE) && (lighting != LIGHTING_MOUTH) ));
 
 	// software lighting case
-	if ( bDoSoftwareLighting )
+	if ( bDoSoftwareLighting || m_pRC->m_Config.m_bStatsMode == true )
 	{
 		if ( m_pRC->m_Config.bNoSoftware )
 			return 0;
@@ -2320,7 +2291,10 @@ int CStudioRender::R_StudioDrawStaticMesh( IMatRenderContext *pRenderContext, ms
 		VertexFormat_t fmt = ComputeSWSkinVertexFormat( pMaterial );
 		bool bDX8Vertex = ( UserDataSize( fmt ) != 0 );
 
-		Assert( ( pGroup->m_Flags & ( MESHGROUP_IS_FLEXED | MESHGROUP_IS_DELTA_FLEXED ) ) == 0 );
+		if ( m_pRC->m_Config.m_bStatsMode == false )
+		{
+			Assert( ( pGroup->m_Flags & ( MESHGROUP_IS_FLEXED | MESHGROUP_IS_DELTA_FLEXED ) ) == 0 );
+		}
 
 		CMeshBuilder meshBuilder;
 		IMesh* pMesh = pRenderContext->GetDynamicMeshEx( fmt, false, 0, pGroup->m_pMesh );
@@ -2330,9 +2304,17 @@ int CStudioRender::R_StudioDrawStaticMesh( IMatRenderContext *pRenderContext, ms
 			pGroup->m_NumVertices, pGroup->m_pGroupIndexToMeshIndex, 
 			lighting, false, r_blend, bNeedsTangentSpace, bDX8Vertex, pMaterial);
 
-		meshBuilder.End();
+		if ( m_pRC->m_Config.m_bStatsMode == true )
+		{
+			R_GatherStats( pGroup, meshBuilder, pMesh, pMaterial );
+		}
+		else
+		{
+			meshBuilder.End();
 
-		numTrianglesRendered = R_StudioDrawGroupSWSkin( pGroup, pMesh );
+			numTrianglesRendered = R_StudioDrawGroupSWSkin( pGroup, pMesh );
+		}
+
 		MatSysQueueMark( g_pMaterialSystem, "END R_StudioDrawStaticMesh\n" );
 		return numTrianglesRendered;
 	}

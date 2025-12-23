@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Loads mesh data from dmx files 
 //
@@ -339,7 +339,6 @@ static void AddToDeltaList( DeltaState_t *pDeltaStateData, int nUniqueVertex )
 //-----------------------------------------------------------------------------
 // Loads the vertices from the delta state
 //-----------------------------------------------------------------------------
-#define MAX_POSITION_DELTA 8.0f
 
 static bool LoadDeltaState(
 	CDmeVertexDeltaData *pDeltaState,
@@ -390,21 +389,6 @@ static bool LoadDeltaState(
 		// move it into the new space, we must rotate it
 		VectorRotate( positions[i], mat, vecDelta );
 		vecDelta *= flScale;
-		if ( fabs( vecDelta.x ) > MAX_POSITION_DELTA )
-		{
-			MdlWarning( "Encountered vertex in delta state \"%s\" with a component larger than %.2f! Clamping...\n", pDeltaState->GetName(), MAX_POSITION_DELTA );
-			vecDelta.x = ( vecDelta.x >= 0.0f ) ? MAX_POSITION_DELTA : -MAX_POSITION_DELTA;
-		}
-		if ( fabs( vecDelta.y ) > MAX_POSITION_DELTA )
-		{
-			MdlWarning( "Encountered vertex in delta state \"%s\" with a component larger than %.2f! Clamping...\n", pDeltaState->GetName(), MAX_POSITION_DELTA );
-			vecDelta.y = ( vecDelta.y >= 0.0f ) ? MAX_POSITION_DELTA : -MAX_POSITION_DELTA;
-		}
-		if ( fabs( vecDelta.z ) > MAX_POSITION_DELTA )
-		{
-			MdlWarning( "Encountered vertex in delta state \"%s\" with a component larger than %.2f! Clamping...\n", pDeltaState->GetName(), MAX_POSITION_DELTA );
-			vecDelta.z = ( vecDelta.z >= 0.0f ) ? MAX_POSITION_DELTA : -MAX_POSITION_DELTA;
-		}
 
 		int nPositionIndex = pDeltaStateData->m_PositionDeltas.AddToTail( vecDelta );
 
@@ -496,6 +480,8 @@ static void ParseFaceData( CDmeVertexData *pVertexData, int material, int v1, in
 static bool LoadMesh( CDmeMesh *pMesh, CDmeVertexData *pBindState, const matrix3x4_t& mat, float flScale, 
 	int nBoneAssign, int *pBoneRemap, s_source_t *pSource )
 {
+	pMesh->CollapseRedundantNormals( normal_blend );
+
 	// Load the vertices
 	int nStartingVertex = g_numverts;
 	int nStartingNormal = g_numnormals;
@@ -598,9 +584,25 @@ static bool LoadMeshes( const LoadMeshInfo_t &info, CDmeDag *pDag, const matrix3
 	matrix3x4_t dagToBindPose;
 	CDmeTransform *pDagTransform = pDag->GetTransform();
 	int nFoundIndex = info.m_pModel->GetJointTransformIndex( pDagTransform );
-	if ( nFoundIndex >= 0 /* && ( pDag == info.m_pModel || CastElement< CDmeJoint >( pDag ) ) */ )
+
+	// Update autoskin to autoskin to non-DmeJoint's if they are children of the DmeModel (i.e. they have no parent bone)
+	if ( nFoundIndex >= 0 )
 	{
-		nBoneAssign = nFoundIndex;
+		if ( pDag == info.m_pModel || CastElement< CDmeJoint >( pDag ) )
+		{
+			nBoneAssign = nFoundIndex;
+		}
+		else
+		{
+			for ( int i = 0; i < info.m_pModel->GetChildCount(); ++i )
+			{
+				if ( info.m_pModel->GetChild( i ) == pDag )
+				{
+					nBoneAssign = nFoundIndex;
+					break;
+				}
+			}
+		}
 	}
 
 	if ( nFoundIndex >= 0 )
@@ -762,7 +764,7 @@ static bool AddDagJoint( CDmeModel *pModel, CDmeDag *pDag, s_node_t *pNodes, int
 	CDmeTransform *pDmeTransform = pDag->GetTransform();
 	const char *pTransformName = pDmeTransform->GetName();
 	int nJointIndex = boneMap.m_nBoneCount++;
-	if ( nJointIndex > MAXSTUDIOSRCBONES )
+	if ( nJointIndex >= MAXSTUDIOSRCBONES )
 	{
 		MdlWarning( "DMX Model has too many bones [%d, max can be %d]!\n", boneMap.m_nBoneCount, MAXSTUDIOSRCBONES );
 		return false;

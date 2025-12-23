@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -70,8 +70,8 @@ void R_TimeRefresh_f (void)
 	view.angles[2] = 0;
 	view.x = 0;
 	view.y = 0;
-	view.width = videomode->GetModeWidth();
-	view.height = videomode->GetModeHeight();
+	view.width = videomode->GetModeStereoWidth();
+	view.height = videomode->GetModeStereoHeight();
 	view.fov = 75;
 	view.fovViewmodel = 75;
 	view.m_flAspectRatio = 1.0f;
@@ -132,12 +132,8 @@ void R_ResetLightStyles( void )
 {
 	for ( int i=0 ; i<256 ; i++ )
 	{
-		// normal light value
-		if ( d_lightstylevalue[i] != 264 )
-		{
-			d_lightstylevalue[i] = 264;		
-			d_lightstyleframe[i] = r_framecount;
-		}
+		d_lightstylevalue[i] = 264;
+		d_lightstyleframe[i] = r_framecount;
 	}
 }
 
@@ -147,7 +143,7 @@ void R_RemoveAllDecalsFromAllModels();
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-CON_COMMAND_F( r_cleardecals, "Usage r_cleardecals <permanent>.", FCVAR_CLIENTCMD_CAN_EXECUTE  )
+CON_COMMAND_F( r_cleardecals, "Usage r_cleardecals <permanent>.", FCVAR_CLIENTCMD_CAN_EXECUTE | FCVAR_SERVER_CAN_EXECUTE  )
 {
 	if ( host_state.worldmodel  )
 	{

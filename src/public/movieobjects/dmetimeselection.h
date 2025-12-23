@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -54,7 +54,7 @@ public:
 	RecordingState_t	GetRecordingState() const;
 
 private:
-	CDmeTimeSelection & operator =( const CDmeTimeSelection& src ) { Assert( 0 ); }
+	CDmeTimeSelection & operator =( const CDmeTimeSelection& src );
 
 	void				ConvertToRelative( DmeTime_t time );
 	void				ConvertToAbsolute( DmeTime_t time );

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -257,7 +257,7 @@ void CChoreoActorWidget::redraw( CChoreoWidgetDrawHelper& drawHelper )
 
 	rcName.left += 18;
 	char n[ 512 ];
-	strcpy( n, actor->GetName() );
+	V_strcpy_safe( n, actor->GetName() );
 
 	drawHelper.DrawColoredText( "Arial", 
 		m_pView->GetFontSize() + 5, 

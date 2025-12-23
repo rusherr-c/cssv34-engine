@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -409,12 +409,12 @@ void RecomputeClipbrushes( bool bEnabled )
 				if ( pBrush->IsBox() )
 				{
 					cboxbrush_t *pBox = &pBSP->map_boxbrushes[pBrush->GetBox()];
-					for ( int i = 0; i < 3; i++ )
+					for ( int idxSide = 0; idxSide < 3; idxSide++ )
 					{
 						Vector normal = vec3_origin;
-						normal[i] = 1.0f;
-						AddPlaneToList( planeList, normal, pBox->maxs[i], true );
-						AddPlaneToList( planeList, -normal, -pBox->mins[i], true );
+						normal[idxSide] = 1.0f;
+						AddPlaneToList( planeList, normal, pBox->maxs[idxSide], true );
+						AddPlaneToList( planeList, -normal, -pBox->mins[idxSide], true );
 					}
 				}
 				else

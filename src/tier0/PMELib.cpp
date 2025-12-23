@@ -1,10 +1,10 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
-//=============================================================================//
+//===========================================================================//
 
 #ifdef _WIN32
 #include <windows.h>
@@ -12,18 +12,18 @@
 #pragma warning( disable : 4530 )   // warning: exception handler -GX option
 
 #include "tier0/valve_off.h"
-#include "tier0/PMELib.h"
+#include "tier0/pmelib.h"
 #if _MSC_VER >=1300
 #else
 #include "winioctl.h"
 #endif
 #include "tier0/valve_on.h"
 
-#include "tier0/IOCTLCodes.h"
+#include "tier0/ioctlcodes.h"
 
-#if defined( WIN64 ) || defined( _WIN32 )
-#include <intrin.h>
-#endif // WIN64 || _WIN32
+// NOTE: This has to be the last file included!
+#include "tier0/memdbgon.h"
+
 
 PME* PME::_singleton = 0;
 
@@ -130,10 +130,10 @@ HRESULT PME::Close(void)
 
 	if (hFile)					// if we have no driver handle, return FALSE
 	{
-        HRESULT hr = CloseHandle(hFile);
+        BOOL result = CloseHandle(hFile);
 
         hFile = NULL;
-		return hr;
+		return result ? S_OK : HRESULT_FROM_WIN32( GetLastError() );
 	}  
     else
 	    return E_DRIVER_NOT_OPEN;
@@ -238,13 +238,12 @@ HRESULT PME::SelectP5P6PerformanceEvent(uint32 dw_event, uint32 dw_counter,
 //---------------------------------------------------------------------------
 HRESULT PME::ReadMSR(uint32 dw_reg, int64 * pi64_value)
 {
-	HRESULT	hr;
 	DWORD	dw_ret_len;
 
 	if (bDriverOpen == false)				// driver is not going
 		return E_DRIVER_NOT_OPEN;
 
-	hr = DeviceIoControl
+	BOOL result = DeviceIoControl
 	(
 		hFile,						// Handle to device
 		(DWORD) IOCTL_READ_MSR,		// IO Control code for Read
@@ -256,6 +255,7 @@ HRESULT PME::ReadMSR(uint32 dw_reg, int64 * pi64_value)
 		NULL						// NULL means wait till op. completes
 	);
 
+	HRESULT hr = result ? S_OK : HRESULT_FROM_WIN32( GetLastError() );
 	if (hr == S_OK && dw_ret_len != sizeof(int64))
 		hr = E_BAD_DATA;
 
@@ -264,13 +264,12 @@ HRESULT PME::ReadMSR(uint32 dw_reg, int64 * pi64_value)
 
 HRESULT PME::ReadMSR(uint32 dw_reg, uint64 * pi64_value)
 {
-	HRESULT	hr;
 	DWORD	dw_ret_len;
 
 	if (bDriverOpen == false)				// driver is not going
 		return E_DRIVER_NOT_OPEN;
 
-	hr = DeviceIoControl
+	BOOL result = DeviceIoControl
 	(
 		hFile,						// Handle to device
 		(DWORD) IOCTL_READ_MSR,		// IO Control code for Read
@@ -282,6 +281,7 @@ HRESULT PME::ReadMSR(uint32 dw_reg, uint64 * pi64_value)
 		NULL						// NULL means wait till op. completes
 	);
 
+	HRESULT hr = result ? S_OK : HRESULT_FROM_WIN32( GetLastError() );
 	if (hr == S_OK && dw_ret_len != sizeof(uint64))
 		hr = E_BAD_DATA;
 
@@ -293,7 +293,6 @@ HRESULT PME::ReadMSR(uint32 dw_reg, uint64 * pi64_value)
 //---------------------------------------------------------------------------
 HRESULT PME::WriteMSR(uint32 dw_reg, const int64 & i64_value)
 {
-	HRESULT	hr;
 	DWORD	dw_buffer[3];
 	DWORD	dw_ret_len;
 
@@ -303,7 +302,7 @@ HRESULT PME::WriteMSR(uint32 dw_reg, const int64 & i64_value)
 	dw_buffer[0]				= dw_reg;			// setup the 12 byte input
 	*((int64*)(&dw_buffer[1]))= i64_value;
 
-	hr = DeviceIoControl
+	BOOL result = DeviceIoControl
 	(
 		hFile,						// Handle to device
 		(DWORD) IOCTL_WRITE_MSR,	// IO Control code for Read
@@ -315,6 +314,7 @@ HRESULT PME::WriteMSR(uint32 dw_reg, const int64 & i64_value)
 		NULL					  	// NULL means wait till op. completes.
 	);
 
+	HRESULT hr = result ? S_OK : HRESULT_FROM_WIN32( GetLastError() );
 	if (hr == S_OK && dw_ret_len != 0)
 		hr = E_BAD_DATA;
 
@@ -325,7 +325,6 @@ HRESULT PME::WriteMSR(uint32 dw_reg, const int64 & i64_value)
 
 HRESULT PME::WriteMSR(uint32 dw_reg, const uint64 & i64_value)
 {
-	HRESULT	hr;
 	DWORD	dw_buffer[3];
 	DWORD	dw_ret_len;
 
@@ -335,7 +334,7 @@ HRESULT PME::WriteMSR(uint32 dw_reg, const uint64 & i64_value)
 	dw_buffer[0]				= dw_reg;			// setup the 12 byte input
 	*((uint64*)(&dw_buffer[1]))= i64_value;
 
-	hr = DeviceIoControl
+	BOOL result = DeviceIoControl
 	(
 		hFile,						// Handle to device
 		(DWORD) IOCTL_WRITE_MSR,	// IO Control code for Read
@@ -348,6 +347,7 @@ HRESULT PME::WriteMSR(uint32 dw_reg, const uint64 & i64_value)
 	);
 
     //E_POINTER
+	HRESULT hr = result ? S_OK : HRESULT_FROM_WIN32( GetLastError() );
 	if (hr == S_OK && dw_ret_len != 0)
 		hr = E_BAD_DATA;
 
@@ -438,32 +438,31 @@ double PME::GetCPUClockSpeedSlow(void)
     while (start_ms <= GetTickCount());
 
     // read timestamp (you could use QueryPerformanceCounter in hires mode if you want)
-
-#ifndef WIN64
+#ifdef COMPILER_MSVC64 
+    RDTSC(start_tsc);
+#else
     __asm
     {
         rdtsc
         mov dword ptr [start_tsc+0],eax
         mov dword ptr [start_tsc+4],edx
     }
-#else
-	start_tsc = __rdtsc();
 #endif
 
     // wait for end
     stop_ms = start_ms + 1000; // longer wait gives better resolution
     while (stop_ms > GetTickCount());
 
-#ifndef WIN64
     // read timestamp (you could use QueryPerformanceCounter in hires mode if you want)
+#ifdef COMPILER_MSVC64
+    RDTSC(stop_tsc);
+#else
     __asm
     {
         rdtsc
         mov dword ptr [stop_tsc+0],eax
         mov dword ptr [stop_tsc+4],edx
     }
-#else
-	stop_tsc = __rdtsc();
 #endif
 
 

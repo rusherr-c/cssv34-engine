@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 #include "datamodel/dmelementfactoryhelper.h"
 #include "movieobjects/dmeeditortypedictionary.h"
 #include "toolutils/enginetools_int.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlbuffer.h"
 #include "tier1/convar.h"
 #include "particles/particles.h"
@@ -482,9 +482,16 @@ CDmeParticleFunction* CDmeParticleSystemDefinition::AddChild( CDmeParticleSystem
 	return pFunction;
 }
 
+//-----------------------------------------------------------------------------
+// Remove
 void CDmeParticleSystemDefinition::RemoveFunction( ParticleFunctionType_t type, CDmeParticleFunction *pFunction )
 {
 	int nIndex = FindFunction( type, pFunction );
+	RemoveFunction( type, nIndex );
+}
+
+void CDmeParticleSystemDefinition::RemoveFunction( ParticleFunctionType_t type, int nIndex )
+{
 	if ( nIndex >= 0 )
 	{
 		m_ParticleFunction[type].Remove(nIndex);

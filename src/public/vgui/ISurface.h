@@ -87,8 +87,8 @@ struct CharRenderInfo
 	// Text pos
 	int				x, y;
 	// Top left and bottom right
-
-	Vertex_t		verts[ 2 ];
+	// This is now a pointer to an array maintained by the surface, to avoid copying the data on the 360
+	Vertex_t		*verts;
 	int				textureId;
 	int				abcA;
 	int				abcB;

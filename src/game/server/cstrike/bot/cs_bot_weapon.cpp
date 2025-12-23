@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -47,7 +47,7 @@ void CCSBot::FireWeaponAtEnemy( void )
 		GetTimeSinceAcquiredCurrentEnemy() >= GetProfile()->GetAttackDelay() &&
 		!IsSurprised())
 	{
-		if (!(IsRecognizedEnemyProtectedByShield() && IsPlayerFacingMe( enemy )) &&	// dont shoot at enemies behind shields
+		if (!(IsRecognizedEnemyProtectedByShield() && IsPlayerFacingMe( enemy )) &&	// don't shoot at enemies behind shields
 			!IsReloading() && 
 			!IsActiveWeaponClipEmpty() && 
 			//gpGlobals->curtime > m_reacquireTimestamp &&
@@ -57,13 +57,22 @@ void CCSBot::FireWeaponAtEnemy( void )
 			Vector toAimSpot = m_aimSpot - EyePosition();
 			float rangeToEnemy = toAimSpot.NormalizeInPlace();
 
+			if ( IsUsingSniperRifle() )
+			{
+				// check our accuracy versus our target distance
+				float fProjectedSpread = rangeToEnemy * GetActiveCSWeapon()->GetInaccuracy();
+				float fRequiredSpread = IsUsing( WEAPON_AWP ) ? 50.0f : 25.0f;	// AWP will kill with any hit
+				if ( fProjectedSpread > fRequiredSpread )
+					return;
+			}
+
 			// get actual view direction vector
 			Vector aimDir = GetViewVector();
 
 			float onTarget = DotProduct( toAimSpot, aimDir );
 
 			// aim more precisely with a sniper rifle
-			// because rifles' bullets spray, dont have to be very precise
+			// because rifles' bullets spray, don't have to be very precise
 			const float halfSize = (IsUsingSniperRifle()) ? HalfHumanWidth : 2.0f * HalfHumanWidth;
 
 			// aiming tolerance depends on how close the target is - closer targets subtend larger angles
@@ -123,7 +132,7 @@ void CCSBot::FireWeaponAtEnemy( void )
 				if (IsUsingPistol())
 				{
 					// high-skill bots fire their pistols quickly at close range
-					const float closePistolRange = 999999.9f;
+					const float closePistolRange = 360.0f;
 					if (GetProfile()->GetSkill() > 0.75f && rangeToEnemy < closePistolRange)
 					{
 						// fire as fast as possible
@@ -182,7 +191,7 @@ void CCSBot::SetAimOffset( float accuracy )
 			m_aimSpreadTimestamp = gpGlobals->curtime;
 
 		// focusTime is the time it takes for a bot to "focus in" for very good aim, from 2 to 5 seconds
-		const float focusTime = max( 5.0f * (1.0f - accuracy), 2.0f );
+		const float focusTime = MAX( 5.0f * (1.0f - accuracy), 2.0f );
 		float focusInterval = gpGlobals->curtime - m_aimSpreadTimestamp;
 
 		float focusAccuracy = focusInterval / focusTime;
@@ -192,7 +201,7 @@ void CCSBot::SetAimOffset( float accuracy )
 		if (focusAccuracy > maxFocusAccuracy)
 			focusAccuracy = maxFocusAccuracy;
 
-		accuracy = max( accuracy, focusAccuracy );
+		accuracy = MAX( accuracy, focusAccuracy );
 	}
 
 	//PrintIfWatched( "Accuracy = %4.3f\n", accuracy );
@@ -284,7 +293,8 @@ bool CCSBot::AdjustZoom( float range )
 		SecondaryAttack();
 
 		// pause after zoom to allow "eyes" to refocus
-		m_zoomTimer.Start( 0.25f + (1.0f - GetProfile()->GetSkill()) );
+// 		m_zoomTimer.Start( 0.25f + (1.0f - GetProfile()->GetSkill()) );
+		m_zoomTimer.Start( 0.25f );
 	}
 
 	return adjustZoom;
@@ -375,15 +385,7 @@ bool CCSBot::IsUsingShotgun( void ) const
 	if (weapon == NULL)
 		return false;
 
-	switch( weapon->GetWeaponID() )
-	{
-		case WEAPON_M3:
-		case WEAPON_XM1014:
-			return true;
-
-		default:
-			return false;
-	}
+	return weapon->IsKindOf(WEAPONTYPE_SHOTGUN);
 }
 
 //--------------------------------------------------------------------------------------------------------------
@@ -1274,7 +1276,7 @@ bool CCSBot::BumpWeapon( CBaseCombatWeapon *pWeapon )
 					// we have a primary weapon - drop it if the one on the ground is better
 					for( int i = 0; i < GetProfile()->GetWeaponPreferenceCount(); ++i )
 					{
-						int prefID = GetProfile()->GetWeaponPreference( i );
+						CSWeaponID prefID = GetProfile()->GetWeaponPreference( i );
 
 						if (!IsPrimaryWeapon( prefID ))
 							continue;

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Act busy tool; main UI smarts class
 //
@@ -21,14 +21,14 @@
 #include "vmtdoc.h"
 #include "vgui/ilocalize.h"
 #include "dme_controls/elementpropertiestree.h"
-#include "dme_controls/vmtpanel.h"
+#include "matsys_controls/vmtpanel.h"
 #include "vmttool.h"
 #include "movieobjects/dmeeditortypedictionary.h"
 #include "dme_controls/attributestringchoicepanel.h"
-#include "dme_controls/mdlsequencepicker.h"
+#include "matsys_controls/mdlsequencepicker.h"
 #include "istudiorender.h"
 #include "materialsystem/imaterialsystem.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "toolutils/toolwindowfactory.h"
 #include "toolutils/basepropertiescontainer.h"
 #include "toolutils/savewindowpositions.h"
@@ -879,7 +879,7 @@ void CVMTTool::OnNew()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_SAVE_QUERY,
+		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY,
 			new KeyValues( "OnNew" ) );
 		return;
 	}
@@ -892,7 +892,7 @@ void CVMTTool::OnOpen( )
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetFileName();
 	}
 
@@ -903,7 +903,7 @@ void CVMTTool::OnSave()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( m_pDoc->GetFileName(), "vmt", NULL );
+		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -911,7 +911,7 @@ void CVMTTool::OnSaveAs()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( NULL, "vmt", NULL );
+		SaveFile( NULL, "vmt", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -919,7 +919,7 @@ void CVMTTool::OnClose()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnClose" ) );
 		return;
 	}
@@ -971,7 +971,7 @@ void CVMTTool::OpenSpecificFile( const char *pFileName )
 
 		if ( m_pDoc->IsDirty() )
 		{
-			nFlags = FOSM_SHOW_SAVE_QUERY;
+			nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 			pSaveFileName = m_pDoc->GetFileName();
 		}
 	}
@@ -996,7 +996,7 @@ bool CVMTTool::CanQuit()
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
 		// Show Save changes Yes/No/Cancel and re-quit if hit yes/no
-		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetFileName(), "vmt", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnQuit" ) );
 		return false;
 	}

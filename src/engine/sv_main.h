@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Expose functions from sv_main.cpp.
 //
@@ -40,7 +40,7 @@ void SV_ResetModInfo( void );
 
 class IRecipientFilter;
 void SV_StartSound ( IRecipientFilter& filter, edict_t *pSoundEmittingEntity, int iChannel, const char *pSample, 
-	float flVolume, soundlevel_t iSoundLevel, int iFlags, int iPitch, const Vector *pOrigin, float soundtime, int speakerentity, CUtlVector< Vector >* pUtlVecOrigins );
+	float flVolume, soundlevel_t iSoundLevel, int iFlags, int iPitch, int iSpecialDSP, const Vector *pOrigin, float soundtime, int speakerentity, CUtlVector< Vector >* pUtlVecOrigins );
 
 
 int SV_ModelIndex (const char *name);
@@ -52,7 +52,6 @@ int SV_FindOrAddGeneric(const char *name, bool preload );
 int SV_DecalIndex(const char *name);
 int SV_FindOrAddDecal(const char *name, bool preload );
 
-void SV_ForceExactFile( const char *name );
 void SV_ForceSimpleMaterial( const char *name );
 void SV_ForceModelBounds( const char *name, const Vector &mins, const Vector &maxs );
 
@@ -64,8 +63,11 @@ class IServerEntity;
 void SV_ExecuteClientMessage (CGameClient *cl);
 
 bool SV_ActivateServer();
+void SV_InitGameServerSteam();
 
+#ifdef ENABLE_RPT
 void SV_NotifyRPTOfDisconnect( int nClientSlot );
+#endif // ENABLE_RPT
 
 // sv_redirect.cpp
 

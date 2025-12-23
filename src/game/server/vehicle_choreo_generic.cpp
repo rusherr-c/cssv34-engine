@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -854,8 +854,8 @@ void CChoreoGenericServerVehicle::GetVehicleViewPosition( int nRole, Vector *pAb
 	if ( GetVehicle()->m_bForcePlayerEyePoint )
 	{
 		// Call to BaseClass because CBasePlayer::EyePosition calls this function.
-		*pAbsOrigin = pPlayer->BaseClass::EyePosition();
-		*pAbsAngles = pPlayer->BaseClass::EyeAngles();
+	  *pAbsOrigin = pPlayer->CBaseCombatCharacter::EyePosition();
+	  *pAbsAngles = pPlayer->CBaseCombatCharacter::EyeAngles();
 		return;
 	}
 

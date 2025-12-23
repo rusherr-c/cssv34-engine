@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -71,7 +71,9 @@ IMPLEMENT_SERVERCLASS_ST(CWeaponBugBait, DT_WeaponBugBait)
 END_SEND_TABLE()
 
 LINK_ENTITY_TO_CLASS( weapon_bugbait, CWeaponBugBait );
+#ifndef HL2MP
 PRECACHE_WEAPON_REGISTER( weapon_bugbait );
+#endif
 
 BEGIN_DATADESC( CWeaponBugBait )
 

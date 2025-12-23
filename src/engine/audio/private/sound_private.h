@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -59,7 +59,7 @@ void S_AmbientOn (void);
 void S_FreeChannel(channel_t *ch);
 
 // resync the sample-timing adjustment clock (for scheduling a group of waves with precise timing - e.g. machine gun sounds)
-extern void S_SyncClockAdjust();
+extern void S_SyncClockAdjust( clocksync_index_t );
 
 //=============================================================================
 
@@ -94,6 +94,7 @@ void MIX_PaintNullChannels( int endtime );
 
 bool AllocDsps( bool bLoadPresetFile );
 void FreeDsps( bool bReleaseTemplateMemory );
+void ForceCleanDspPresets( void );
 void CheckNewDspPresets( void );
 
 void DSP_Process( int idsp, portable_samplepair_t *pbfront, portable_samplepair_t *pbrear, portable_samplepair_t *pbcenter, int sampleCount );

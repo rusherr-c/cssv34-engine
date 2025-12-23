@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -13,8 +13,8 @@
 #include <windows.h>
 #include "vstdlib/cvar.h"
 #include "appframework/vguimatsysapp.h"
-#include "FileSystem.h"
-#include "materialsystem/IMaterialSystem.h"
+#include "filesystem.h"
+#include "materialsystem/imaterialsystem.h"
 #include "vgui/IVGui.h"
 #include "vgui/ISystem.h"
 #include "vgui_controls/Panel.h"
@@ -26,27 +26,28 @@
 #include "tier0/dbg.h"
 #include "vgui_controls/Frame.h"
 #include "vgui_controls/AnimationController.h"
-#include "datamodel/dmelementfactoryhelper.h"
 #include "tier0/icommandline.h"
 #include "materialsystem/MaterialSystem_Config.h"
 #include "VGuiMatSurface/IMatSystemSurface.h"
-#include "datamodel/dmelement.h"
 #include "filesystem_init.h"
 #include "vstdlib/iprocessutils.h"
-#include "dmserializers/idmserializers.h"
-#include "dme_controls/dmecontrols.h"
-#include "dme_controls/mdlpicker.h"
+#include "matsys_controls/matsyscontrols.h"
+#include "matsys_controls/mdlpicker.h"
 #include "IStudioRender.h"
 #include "datacache/idatacache.h"
 #include "datacache/imdlcache.h"
 #include "vphysics_interface.h"
 #include "vgui_controls/frame.h"
 #include "materialsystem/IMaterialSystemHardwareConfig.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "tier3/tier3.h"
 #include "vgui_controls/consoledialog.h"
 #include "icvar.h"
 #include "vgui/keycode.h"
+#include "tier2/p4helpers.h"
+#include "p4lib/ip4.h"
+#include "ivtex.h"
+#include "modelbrowsermaterialproxies.h"
 
 using namespace vgui;
 
@@ -56,6 +57,7 @@ using namespace vgui;
 //-----------------------------------------------------------------------------
 const MaterialSystem_Config_t *g_pMaterialSystemConfig;
 
+static CModelBrowserMaterialProxyFactory g_materialProxyFactory;
 
 //-----------------------------------------------------------------------------
 // Spew func
@@ -106,20 +108,20 @@ static ConVar	r_eyeshift_x	( "r_eyeshift_x", "0", FCVAR_ARCHIVE ); // eye X posi
 static ConVar	r_eyeshift_y	( "r_eyeshift_y", "0", FCVAR_ARCHIVE ); // eye Y position
 static ConVar	r_eyeshift_z	( "r_eyeshift_z", "0", FCVAR_ARCHIVE ); // eye Z position
 static ConVar	r_eyesize		( "r_eyesize", "0", FCVAR_ARCHIVE ); // adjustment to iris textures
-static ConVar	mat_softwareskin( "mat_softwareskin", "0" );
+static ConVar	mat_softwareskin( "mat_softwareskin", "0", FCVAR_CHEAT );
 static ConVar	r_nohw			( "r_nohw", "0", FCVAR_CHEAT );
 static ConVar	r_nosw			( "r_nosw", "0", FCVAR_CHEAT );
 static ConVar	r_teeth			( "r_teeth", "1" );
 static ConVar	r_drawentities	( "r_drawentities", "1", FCVAR_CHEAT );
 static ConVar	r_flex			( "r_flex", "1" );
 static ConVar	r_eyes			( "r_eyes", "1" );
-static ConVar	r_skin			( "r_skin","0" );
+static ConVar	r_skin			( "r_skin","0", FCVAR_CHEAT );
 static ConVar	r_maxmodeldecal ( "r_maxmodeldecal", "50" );
 static ConVar	r_modelwireframedecal ( "r_modelwireframedecal", "0", FCVAR_CHEAT );
 static ConVar	mat_wireframe	( "mat_wireframe", "0", FCVAR_CHEAT );
 static ConVar	mat_normals		( "mat_normals", "0", FCVAR_CHEAT );
 static ConVar	r_eyeglintlodpixels ( "r_eyeglintlodpixels", "0", FCVAR_CHEAT );
-static ConVar	r_rootlod		( "r_rootlod", "0", FCVAR_CHEAT );
+static ConVar	r_rootlod		( "r_rootlod", "0" );
 
 static StudioRenderConfig_t s_StudioRenderConfig;
 
@@ -203,15 +205,25 @@ bool CModelBrowserApp::Create()
 		{ "vphysics.dll",			VPHYSICS_INTERFACE_VERSION },
 		{ "datacache.dll",			DATACACHE_INTERFACE_VERSION },
 		{ "datacache.dll",			MDLCACHE_INTERFACE_VERSION },
+		{ "vtex_dll",				IVTEX_VERSION_STRING },
 
 		{ "", "" }	// Required to terminate the list
 	};
 
-	AddSystem( g_pDataModel, VDATAMODEL_INTERFACE_VERSION );
-	AddSystem( g_pDmElementFramework, VDMELEMENTFRAMEWORK_VERSION );
-	AddSystem( g_pDmSerializers, DMSERIALIZERS_INTERFACE_VERSION );
+	if ( !AddSystems( appSystems ) )
+		return false;
 
-	return AddSystems( appSystems );
+	if ( !CommandLine()->CheckParm( "-nop4" ))
+	{
+		AppModule_t hModule = LoadModule( "p4lib" );
+		AddSystem( hModule, P4_INTERFACE_VERSION );
+	}
+	else
+	{
+		g_p4factory->SetDummyMode( true );
+	}
+
+	return true;
 }
 
 
@@ -227,14 +239,16 @@ bool CModelBrowserApp::PreInit( )
 
 	// initialize interfaces
 	CreateInterfaceFn appFactory = GetFactory(); 
-	if (!vgui::VGui_InitDmeInterfacesList( "ModelBrowser", &appFactory, 1 ))
+	if (!vgui::VGui_InitMatSysInterfacesList( "ModelBrowser", &appFactory, 1 ))
 		return false;
 
-	if ( !g_pFullFileSystem || !g_pMaterialSystem || !g_pVGui || !g_pVGuiSurface || !g_pDataModel || !g_pMatSystemSurface )
+	if ( !g_pFullFileSystem || !g_pMaterialSystem || !g_pVGui || !g_pVGuiSurface || !g_pMatSystemSurface || !g_pVTex )
 	{
 		Warning( "Model browser is missing a required interface!\n" );
 		return false;
 	}
+
+	g_p4factory->SetOpenFileChangeList( "ModelBrowser Auto Checkout" );
 
 	return true;
 }
@@ -400,6 +414,7 @@ int CModelBrowserApp::Main()
 	SpewActivate( "console", 1 );
 
 	g_pMaterialSystem->ModInit();
+	g_pMaterialSystem->SetMaterialProxyFactory( &g_materialProxyFactory );
 	if (!SetVideoMode())
 		return 0;
 

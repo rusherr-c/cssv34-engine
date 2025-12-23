@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -76,11 +76,11 @@ BEGIN_VS_SHADER( MonitorScreen_DX9,
 	{
 		if (params[BASETEXTURE]->IsDefined())
 		{
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		}
 		if (params[TEXTURE2]->IsDefined())
 		{
-			LoadTexture( TEXTURE2 );
+			LoadTexture( TEXTURE2, TEXTUREFLAGS_SRGB );
 		}
 	}
 

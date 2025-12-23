@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -72,7 +72,7 @@ public:
 	// Resets the content and makes size "uiTotal"
 	void Reset( uint64 uiTotal ) {
 		BaseClass::RemoveAll();
-		BaseClass::EnsureCapacity( (int) min( 100, uiTotal ) );
+		BaseClass::EnsureCapacity( min( 100, (int)uiTotal ) );
 		m_uiBase = 0;
 		m_uiTotal = uiTotal;
 	}

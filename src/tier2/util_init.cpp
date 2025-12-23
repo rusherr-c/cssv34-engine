@@ -1,4 +1,4 @@
-//========= Copyright © 2005-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: perform initialization needed in most command line programs
 //
@@ -42,4 +42,9 @@ void InitCommandLineProgram( int argc, char **argv )
 	CommandLine()->CreateCmdLine( argc, argv );
 	InitDefaultFileSystem();
 	InstallProgressReportHandler( PrintFReportHandler );
+
+	// By default, command line programs should not use the new assert dialog,
+	// and any asserts should be fatal, unless we are being debugged
+	if ( !Plat_IsInDebugSession() )
+		SpewOutputFunc( DefaultSpewFuncAbortOnAsserts );
 }

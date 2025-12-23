@@ -22,6 +22,27 @@ public:
 		m_bONLY_PROJECT_POSITION = true;
 #endif
 	}
+private:
+	int m_nCOLOR_DEPTH;
+#ifdef _DEBUG
+	bool m_bCOLOR_DEPTH;
+#endif
+public:
+	void SetCOLOR_DEPTH( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nCOLOR_DEPTH = i;
+#ifdef _DEBUG
+		m_bCOLOR_DEPTH = true;
+#endif
+	}
+	void SetCOLOR_DEPTH( bool i )
+	{
+		m_nCOLOR_DEPTH = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bCOLOR_DEPTH = true;
+#endif
+	}
 public:
 	depthwrite_vs30_Static_Index( )
 	{
@@ -29,19 +50,23 @@ public:
 		m_bONLY_PROJECT_POSITION = false;
 #endif // _DEBUG
 		m_nONLY_PROJECT_POSITION = 0;
+#ifdef _DEBUG
+		m_bCOLOR_DEPTH = false;
+#endif // _DEBUG
+		m_nCOLOR_DEPTH = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bONLY_PROJECT_POSITION;
+		bool bAllStaticVarsDefined = m_bONLY_PROJECT_POSITION && m_bCOLOR_DEPTH;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 8 * m_nONLY_PROJECT_POSITION ) + 0;
+		return ( 8 * m_nONLY_PROJECT_POSITION ) + ( 8 * m_nCOLOR_DEPTH ) + 0;
 	}
 };
-#define shaderStaticTest_depthwrite_vs30 vsh_forgot_to_set_static_ONLY_PROJECT_POSITION + 0
+#define shaderStaticTest_depthwrite_vs30 vsh_forgot_to_set_static_ONLY_PROJECT_POSITION + vsh_forgot_to_set_static_COLOR_DEPTH + 0
 class depthwrite_vs30_Dynamic_Index
 {
 private:

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 /* CDbgOutput.cpp
 
 *****************************************************************************/
@@ -9,7 +10,7 @@
 
 #include "vgui/IVGui.h"
 #include "vgui/IPanel.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "vgui_controls/Frame.h"
 
 #include "CMDRipperMain.h"

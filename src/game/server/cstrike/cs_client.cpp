@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,7 +29,7 @@
 #include "cs_gamerules.h"
 #include "cs_bot.h"
 #include "tier0/vprof.h"
-
+#include "teamplayroundbased_gamerules.h"
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -100,6 +100,17 @@ void ClientActive( edict_t *pEdict, bool bLoadGame )
 
 	CCSPlayer *pPlayer = ToCSPlayer( CBaseEntity::Instance( pEdict ) );
 	FinishClientPutInServer( pPlayer );
+
+	CSingleUserRecipientFilter user( pPlayer );
+	user.MakeReliable();
+
+	// send the 4 end of match conditions.  long frag limit, long max rounds, long rounds needed won, and long time
+	UserMessageBegin( user, "MatchEndConditions" );
+	WRITE_LONG( fraglimit.GetInt() );
+	WRITE_LONG( mp_maxrounds.GetInt() );
+	WRITE_LONG( mp_winlimit.GetInt() );
+	WRITE_LONG( mp_timelimit.GetInt() );
+	MessageEnd();
 }
 
 
@@ -133,24 +144,25 @@ void ClientGamePrecache( void )
 	CBaseEntity::PrecacheScriptSound( "Bounce.RifleShell" );
 	CBaseEntity::PrecacheScriptSound( "Bounce.ShotgunShell" );
 
-	// Flashbang-related files
-	engine->ForceExactFile( "sprites/white.vmt" );
-	engine->ForceExactFile( "sprites/white.vtf" );
-	engine->ForceExactFile( "vgui/white.vmt" );
-	engine->ForceExactFile( "vgui/white.vtf" );
-	engine->ForceExactFile( "effects/flashbang.vmt" );
-	engine->ForceExactFile( "effects/flashbang_white.vmt" );
-
-	// Smoke grenade-related files
-	engine->ForceExactFile( "particle/particle_smokegrenade1.vmt" );
-	engine->ForceExactFile( "particle/particle_smokegrenade.vtf" );
-
-	// Sniper scope
-	engine->ForceExactFile( "sprites/scope_arc.vmt" );
-	engine->ForceExactFile( "sprites/scope_arc.vtf" );
-
-	// DSP presets - don't want people avoiding the deafening + ear ring
-	engine->ForceExactFile( "scripts/dsp_presets.txt" );
+// Moved to pure_server_minimal.txt
+//	// Flashbang-related files
+//	engine->ForceExactFile( "sprites/white.vmt" );
+//	engine->ForceExactFile( "sprites/white.vtf" );
+//	engine->ForceExactFile( "vgui/white.vmt" );
+//	engine->ForceExactFile( "vgui/white.vtf" );
+//	engine->ForceExactFile( "effects/flashbang.vmt" );
+//	engine->ForceExactFile( "effects/flashbang_white.vmt" );
+//
+//	// Smoke grenade-related files
+//	engine->ForceExactFile( "particle/particle_smokegrenade1.vmt" );
+//	engine->ForceExactFile( "particle/particle_smokegrenade.vtf" );
+//
+//	// Sniper scope
+//	engine->ForceExactFile( "sprites/scope_arc.vmt" );
+//	engine->ForceExactFile( "sprites/scope_arc.vtf" );
+//
+//	// DSP presets - don't want people avoiding the deafening + ear ring
+//	engine->ForceExactFile( "scripts/dsp_presets.txt" );
 }
 
 

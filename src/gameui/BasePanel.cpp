@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -22,15 +22,20 @@
 #include "filesystem.h"
 #include "GameConsole.h"
 #include "GameUI_Interface.h"
+#include "vgui_controls/PropertyDialog.h"
+#include "vgui_controls/PropertySheet.h"
+#include "materialsystem/materialsystem_config.h"
+#include "materialsystem/imaterialsystem.h"
+#include "sourcevr/isourcevirtualreality.h"
 
 using namespace vgui;
 
 #include "GameConsole.h"
 #include "ModInfo.h"
 
-#include "igameuifuncs.h"
-#include "loadingdialog.h"
-#include "backgroundmenubutton.h"
+#include "IGameUIFuncs.h"
+#include "LoadingDialog.h"
+#include "BackgroundMenuButton.h"
 #include "vgui_controls/AnimationController.h"
 #include "vgui_controls/ImagePanel.h"
 #include "vgui_controls/Label.h"
@@ -63,9 +68,14 @@ using namespace vgui;
 #include "ixboxsystem.h"
 #include "matchmaking/matchmakingbasepanel.h"
 #include "matchmaking/achievementsdialog.h"
+#include "iachievementmgr.h"
+#include "UtlSortVector.h"
+
+#include "game/client/IGameClientExports.h"
+
 #include "OptionsSubAudio.h"
 #include "hl2orange.spa.h"
-#include "iachievementmgr.h"
+#include "CustomTabExplanationDialog.h"
 #if defined( _X360 )
 #include "xbox/xbox_launch.h"
 #else
@@ -73,7 +83,7 @@ using namespace vgui;
 #endif
 
 #include "../engine/imatchmaking.h"
-#include "tier1/UtlString.h"
+#include "tier1/utlstring.h"
 #include "steam/steam_api.h"
 
 #undef MessageBox	// Windows helpfully #define's this to MessageBoxA, we're using vgui::MessageBox
@@ -94,6 +104,8 @@ extern const char *COM_GetModDirectory( void );
 
 extern ConVar x360_audio_english;
 extern bool bSteamCommunityFriendsVersion;
+
+static vgui::DHANDLE<vgui::PropertyDialog> g_hOptionsDialog;
 
 //-----------------------------------------------------------------------------
 // Purpose: singleton accessor
@@ -190,9 +202,9 @@ void CGameMenuItem::SetRightAlignedText(bool state)
 //-----------------------------------------------------------------------------
 class CGameMenu : public vgui::Menu
 {
+public:
 	DECLARE_CLASS_SIMPLE( CGameMenu, vgui::Menu );
 
-public:
 	CGameMenu(vgui::Panel *parent, const char *name) : BaseClass(parent, name) 
 	{
 		if ( GameUI().IsConsoleUI() )
@@ -222,6 +234,8 @@ public:
 		{
 			m_pConsoleFooter = NULL;
 		}
+
+		m_hMainMenuOverridePanel = NULL;
 	}
 
 	virtual void ApplySchemeSettings(IScheme *pScheme)
@@ -238,10 +252,34 @@ public:
 	{
 	}
 
+	void SetMainMenuOverride( vgui::VPANEL panel )
+	{
+		m_hMainMenuOverridePanel = panel;
+
+		if ( m_hMainMenuOverridePanel )
+		{
+			// We've got an override panel. Nuke all our menu items.
+			DeleteAllItems();
+		}
+	}
+
 	virtual void SetVisible(bool state)
 	{
+		if ( m_hMainMenuOverridePanel )
+		{
+			// force to be always visible
+			ipanel()->SetVisible( m_hMainMenuOverridePanel, true );
+
+			// move us to the back instead of going invisible
+			if ( !state )
+			{
+				ipanel()->MoveToBack(m_hMainMenuOverridePanel);
+			}
+		}
+
 		// force to be always visible
 		BaseClass::SetVisible(true);
+
 		// move us to the back instead of going invisible
 		if (!state)
 		{
@@ -287,14 +325,38 @@ public:
 		InvalidateLayout();
 	}
 
+	virtual void OnSetFocus()
+	{
+		if ( m_hMainMenuOverridePanel )
+		{
+			Panel *pMainMenu = ipanel()->GetPanel( m_hMainMenuOverridePanel, "ClientDLL" );
+			if ( pMainMenu )
+			{
+				pMainMenu->PerformLayout();
+			}
+		}
+
+		BaseClass::OnSetFocus();
+	}
+
 	virtual void OnCommand(const char *command)
 	{
 		m_KeyRepeat.Reset();
 
+
 		if (!stricmp(command, "Open"))
 		{
-			MoveToFront();
-			RequestFocus();
+			if ( m_hMainMenuOverridePanel )
+			{
+				// force to be always visible
+				ipanel()->MoveToFront( m_hMainMenuOverridePanel );
+				ipanel()->RequestFocus( m_hMainMenuOverridePanel );
+			}
+			else
+			{
+				MoveToFront();
+				RequestFocus();
+			}
 		}
 		else
 		{
@@ -326,6 +388,53 @@ public:
 		}
 
 		m_KeyRepeat.KeyDown( code );
+
+		int nDir = 0;
+
+		switch ( code )
+		{
+		case KEY_XBUTTON_UP:
+		case KEY_XSTICK1_UP:
+		case KEY_XSTICK2_UP:
+		case KEY_UP:
+		case STEAMCONTROLLER_DPAD_UP:
+			nDir = -1;
+			break;
+
+		case KEY_XBUTTON_DOWN:
+		case KEY_XSTICK1_DOWN:
+		case KEY_XSTICK2_DOWN:
+		case KEY_DOWN:
+		case STEAMCONTROLLER_DPAD_DOWN:
+			nDir = 1;
+			break;
+		}
+
+		if ( nDir != 0 )
+		{
+			CUtlSortVector< SortedPanel_t, CSortedPanelYLess > vecSortedButtons;
+			VguiPanelGetSortedChildButtonList( this, (void*)&vecSortedButtons );
+
+			if ( VguiPanelNavigateSortedChildButtonList( (void*)&vecSortedButtons, nDir ) != -1 )
+			{
+				// Handled!
+				return;
+			}
+		}
+		else if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+		{
+			CUtlSortVector< SortedPanel_t, CSortedPanelYLess > vecSortedButtons;
+			VguiPanelGetSortedChildButtonList( this, (void*)&vecSortedButtons );
+
+			for ( int i = 0; i < vecSortedButtons.Count(); i++ )
+			{
+				if ( vecSortedButtons[ i ].pButton->IsArmed() )
+				{
+					vecSortedButtons[ i ].pButton->DoClick();
+					return;
+				}
+			}
+		}
 
 		BaseClass::OnKeyCodePressed( code );
 
@@ -366,8 +475,16 @@ public:
 	{
 		BaseClass::OnKillFocus();
 
-		// force us to the rear when we lose focus (so it looks like the menu is always on the background)
-		surface()->MovePopupToBack(GetVPanel());
+		if ( m_hMainMenuOverridePanel )
+		{
+			// force us to the rear when we lose focus (so it looks like the menu is always on the background)
+			surface()->MovePopupToBack( m_hMainMenuOverridePanel );
+		}
+		else
+		{
+			// force us to the rear when we lose focus (so it looks like the menu is always on the background)
+			surface()->MovePopupToBack(GetVPanel());
+		}
 
 		m_KeyRepeat.Reset();
 	}
@@ -380,7 +497,7 @@ public:
 		}
 	}
 
-	void UpdateMenuItemState( bool isInGame, bool isMultiplayer )
+	void UpdateMenuItemState( bool isInGame, bool isMultiplayer, bool isInReplay, bool isVREnabled, bool isVRActive )
 	{
 		bool isSteam = IsPC() && ( CommandLine()->FindParm("-steam") != 0 );
 		bool bIsConsoleUI = GameUI().IsConsoleUI();
@@ -402,6 +519,22 @@ public:
 				{
 					shouldBeVisible = false;
 				}
+				if (!isInReplay && kv->GetInt("OnlyInReplay") )
+				{
+					shouldBeVisible = false;
+				}
+				else if (!isVREnabled && kv->GetInt("OnlyWhenVREnabled") )
+				{
+					shouldBeVisible = false;
+				}
+				else if ( ( !isVRActive || ShouldForceVRActive() ) && kv->GetInt( "OnlyWhenVRActive" ) )
+				{
+					shouldBeVisible = false;
+				}
+				else if (isVRActive && kv->GetInt("OnlyWhenVRInactive") )
+				{
+					shouldBeVisible = false;
+				}
 				else if (isMultiplayer && kv->GetInt("notmulti"))
 				{
 					shouldBeVisible = false;
@@ -415,6 +548,12 @@ public:
 					shouldBeVisible = false;
 				}
 				else if ( !bIsConsoleUI && kv->GetInt( "ConsoleOnly" ) )
+				{
+					shouldBeVisible = false;
+				}
+
+				// If we're playing back a replay, hide everything else
+				if ( isInReplay && !kv->GetInt("OnlyInReplay") )
 				{
 					shouldBeVisible = false;
 				}
@@ -477,10 +616,30 @@ public:
 		}
 	}
 
+	MESSAGE_FUNC_INT( OnCursorEnteredMenuItem, "CursorEnteredMenuItem", VPanel);
+
 private:
 	CFooterPanel *m_pConsoleFooter;
 	vgui::CKeyRepeatHandler	m_KeyRepeat;
+	vgui::VPANEL	m_hMainMenuOverridePanel;
 };
+
+//-----------------------------------------------------------------------------
+// Purpose: Respond to cursor entering a menuItem.
+//-----------------------------------------------------------------------------
+void CGameMenu::OnCursorEnteredMenuItem(int VPanel)
+{
+	VPANEL menuItem = (VPANEL)VPanel;
+	MenuItem *item = static_cast<MenuItem *>(ipanel()->GetPanel(menuItem, GetModuleName()));
+	KeyValues *pCommand = item->GetCommand();
+	if ( !pCommand->GetFirstSubKey() )
+		return;
+	const char *pszCmd = pCommand->GetFirstSubKey()->GetString();
+	if ( !pszCmd || !pszCmd[0] )
+		return;
+
+	BaseClass::OnCursorEnteredMenuItem( VPanel );
+}
 
 static CBackgroundMenuButton* CreateMenuButton( CBasePanel *parent, const char *panelName, const wchar_t *panelText )
 {
@@ -533,6 +692,11 @@ CBasePanel::CBasePanel() : Panel(NULL, "BaseGameUIPanel")
 	m_pAsyncJob = NULL;
 	m_pStorageDeviceValidatedNotify = NULL;
 
+	m_iRenderTargetImageID = -1;
+	m_iBackgroundImageID = -1;
+	m_iProductImageID = -1;
+	m_iLoadingImageID = -1;
+
 	if ( GameUI().IsConsoleUI() )
 	{
 		m_pConsoleAnimationController = new AnimationController( this );
@@ -565,7 +729,8 @@ CBasePanel::CBasePanel() : Panel(NULL, "BaseGameUIPanel")
 
 	m_pGameMenu = NULL;
 	m_pGameLogo = NULL;
-#ifndef NO_STEAM
+	m_hMainMenuOverridePanel = NULL;
+
 	if ( SteamClient() )
 	{
 		HSteamPipe steamPipe = SteamClient()->CreateSteamPipe();
@@ -577,7 +742,6 @@ CBasePanel::CBasePanel() : Panel(NULL, "BaseGameUIPanel")
 
 		SteamClient()->BReleaseSteamPipe( steamPipe );
 	}
-#endif
 
 	CreateGameMenu();
 	CreateGameLogo();
@@ -667,9 +831,36 @@ void CBasePanel::ArmFirstMenuItem( void )
 CBasePanel::~CBasePanel()
 {
 	g_pBasePanel = NULL;
+
+	if ( vgui::surface() )
+	{
+		if ( m_iRenderTargetImageID != -1 )
+		{
+			vgui::surface()->DestroyTextureID( m_iRenderTargetImageID );
+			m_iRenderTargetImageID = -1;
+		}
+
+		if ( m_iBackgroundImageID != -1 )
+		{
+			vgui::surface()->DestroyTextureID( m_iBackgroundImageID );
+			m_iBackgroundImageID = -1;
+		}
+
+		if ( m_iProductImageID != -1 )
+		{
+			vgui::surface()->DestroyTextureID( m_iProductImageID );
+			m_iProductImageID = -1;
+		}
+
+		if ( m_iLoadingImageID != -1 )
+		{
+			vgui::surface()->DestroyTextureID( m_iLoadingImageID );
+			m_iLoadingImageID = -1;
+		}
+	}
 }
 
-static char *g_rgValidCommands[] =
+static const char *g_rgValidCommands[] =
 {
 	"OpenGameMenu",
 	"OpenPlayerListDialog",
@@ -943,6 +1134,15 @@ void CBasePanel::SetBackgroundRenderState(EBackgroundState state)
 	// apply state change transition
 	float frametime = engine->Time();
 
+	if ( m_eBackgroundState == BACKGROUND_INITIAL && ( state == BACKGROUND_DISCONNECTED || state == BACKGROUND_MAINMENU ) )
+	{
+		ConVar* dev_loadtime_mainmenu = cvar->FindVar( "dev_loadtime_mainmenu" );
+		if (dev_loadtime_mainmenu) {
+			dev_loadtime_mainmenu->SetValue( frametime );
+		}
+	}
+
+
 	m_bRenderingBackgroundTransition = false;
 	m_bFadingInMenus = false;
 
@@ -1127,11 +1327,11 @@ void CBasePanel::DrawBackgroundImage()
 	surface()->DrawSetColor( 255, 255, 255, alpha );
 	surface()->DrawSetTexture( iImageID );
 	surface()->DrawTexturedRect( 0, 0, wide, tall );
-#ifdef _X360
+
 	if ( IsX360() && m_ExitingFrameCount )
 	{
 		// Make invisible when going back to appchooser
-		m_pGameMenu->BaseClass::SetVisible( false );
+		m_pGameMenu->CGameMenu::BaseClass::SetVisible( false );
 
 		IScheme *pScheme = vgui::scheme()->GetIScheme( vgui::scheme()->GetScheme( "SourceScheme" ) );
 		HFont hFont = pScheme->GetFont( "ChapterTitle" );
@@ -1143,7 +1343,6 @@ void CBasePanel::DrawBackgroundImage()
 		surface()->DrawSetTextColor( 255, 255, 255, alpha );
 		surface()->DrawPrintText( pString, wcslen( pString ) );
 	}
-#endif
 
 	// 360 always use the progress bar, TCR Requirement, and never this loading plaque
 	if ( IsPC() && ( m_bRenderingBackgroundTransition || m_eBackgroundState == BACKGROUND_LOADING ) )
@@ -1253,9 +1452,17 @@ void CBasePanel::UpdateGameMenus()
 	// check our current state
 	bool isInGame = GameUI().IsInLevel();
 	bool isMulti = isInGame && (engine->GetMaxClients() > 1);
+	bool isInReplay = GameUI().IsInReplay();
+	bool isVREnabled = materials->GetCurrentConfigForVideoCard().m_nVRModeAdapter == materials->GetCurrentAdapter();
+	bool isVRActive = UseVR();
 
 	// iterate all the menu items
-	m_pGameMenu->UpdateMenuItemState( isInGame, isMulti );
+	m_pGameMenu->UpdateMenuItemState( isInGame, isMulti, isInReplay, isVREnabled, isVRActive );
+
+	if ( m_hMainMenuOverridePanel )
+	{
+		vgui::ivgui()->PostMessage( m_hMainMenuOverridePanel, new KeyValues( "UpdateMenu" ), NULL );
+	}
 
 	// position the menu
 	InvalidateLayout();
@@ -1277,8 +1484,8 @@ CGameMenu *CBasePanel::RecursiveLoadGameMenu(KeyValues *datafile)
 		const char *cmd = dat->GetString("command", NULL);
 		const char *name = dat->GetString("name", label);
 
-//		if ( !Q_stricmp( cmd, "OpenFriendsDialog" ) && bSteamCommunityFriendsVersion )
-//			continue;
+		if ( cmd && !Q_stricmp( cmd, "OpenFriendsDialog" ) && bSteamCommunityFriendsVersion )
+			continue;
 
 		menu->AddMenuItem(name, label, cmd, this, dat);
 	}
@@ -1516,8 +1723,11 @@ void CBasePanel::ApplySchemeSettings(IScheme *pScheme)
 	if ( IsX360() )
 	{
 		// 360 uses FullFrameFB1 RT for map to map transitioning
-		m_iRenderTargetImageID = surface()->CreateNewTextureID();
-		surface()->DrawSetTextureFile( m_iRenderTargetImageID, "console/rt_background", false, false );
+		if ( m_iRenderTargetImageID == -1 )
+		{
+			m_iRenderTargetImageID = surface()->CreateNewTextureID();
+			surface()->DrawSetTextureFile( m_iRenderTargetImageID, "console/rt_background", false, false );
+		}
 	}
 
 	int screenWide, screenTall;
@@ -1541,22 +1751,33 @@ void CBasePanel::ApplySchemeSettings(IScheme *pScheme)
 		V_FileBase( pGameDir, gameName, sizeof( gameName ) );
 		V_snprintf( filename, sizeof( filename ), "vgui/appchooser/background_%s%s", gameName, ( bIsWidescreen ? "_widescreen" : "" ) );
 	}
-	m_iBackgroundImageID = surface()->CreateNewTextureID();
+
+	if ( m_iBackgroundImageID == -1 )
+	{
+		m_iBackgroundImageID = surface()->CreateNewTextureID();
+	}
 	surface()->DrawSetTextureFile( m_iBackgroundImageID, filename, false, false );
 
 	if ( IsX360() )
 	{
 		// 360 uses a product image during application exit
 		V_snprintf( filename, sizeof( filename ), "vgui/appchooser/background_orange%s", ( bIsWidescreen ? "_widescreen" : "" ) );
-		m_iProductImageID = surface()->CreateNewTextureID();
+
+		if ( m_iProductImageID == -1 )
+		{
+			m_iProductImageID = surface()->CreateNewTextureID();
+		}
 		surface()->DrawSetTextureFile( m_iProductImageID, filename, false, false );
 	}
 
 	if ( IsPC() )
 	{
 		// load the loading icon
-		m_iLoadingImageID = surface()->CreateNewTextureID();
-		surface()->DrawSetTextureFile( m_iLoadingImageID, "console/startup_loading", false, false );
+		if ( m_iLoadingImageID == -1 )
+		{
+			m_iLoadingImageID = surface()->CreateNewTextureID();
+			surface()->DrawSetTextureFile( m_iLoadingImageID, "Console/startup_loading", false, false );
+		}
 	}
 }
 
@@ -1580,6 +1801,7 @@ void CBasePanel::OnGameUIActivated()
 		engine->SetMapLoadFailed( false );
 		ShowMessageDialog( MD_LOAD_FAILED_WARNING );
 	}
+
 
 	if ( !m_bEverActivated )
 	{
@@ -1761,23 +1983,42 @@ void CBasePanel::RunMenuCommand(const char *command)
 	{
 		if ( IsPC() )
 		{
-#ifndef NO_STEAM
-			if ( !SteamUser() || !SteamUser()->BLoggedOn() )
+			if ( !steamapicontext->SteamUser() || !steamapicontext->SteamUser()->BLoggedOn() )
 			{
 				vgui::MessageBox *pMessageBox = new vgui::MessageBox("#GameUI_Achievements_SteamRequired_Title", "#GameUI_Achievements_SteamRequired_Message");
 				pMessageBox->DoModal();
 				return;
 			}
 			OnOpenAchievementsDialog();
-#else
-			return;
-#endif
 		}
 		else
 		{
 			OnOpenAchievementsDialog_Xbox();
 		}
 	}
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Use cs-specific achievements dialog
+    //=============================================================================
+
+    else if ( !Q_stricmp( command, "OpenCSAchievementsDialog" ) )
+    {
+        if ( IsPC() )
+        {
+            if ( !steamapicontext->SteamUser() || !steamapicontext->SteamUser()->BLoggedOn() )
+            {
+                vgui::MessageBox *pMessageBox = new vgui::MessageBox("#GameUI_Achievements_SteamRequired_Title", "#GameUI_Achievements_SteamRequired_Message", this );
+                pMessageBox->DoModal();
+                return;
+            }
+
+			OnOpenCSAchievementsDialog();
+        }
+    }
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
 	else if ( !Q_stricmp( command, "AchievementsDialogClosing" ) )
 	{
 		if ( IsX360() )
@@ -1800,8 +2041,22 @@ void CBasePanel::RunMenuCommand(const char *command)
 			StartExitingProcess();
 		}
 		else
-		{		
-			// hide everything while we quit
+		{
+            //=============================================================================
+            // HPE_BEGIN:
+            // [dwenger] Shut down achievements panel
+            //=============================================================================
+
+            if ( GameClientExports() )
+            {
+                GameClientExports()->ShutdownAchievementPanel();
+            }
+
+            //=============================================================================
+            // HPE_END
+            //=============================================================================
+
+            // hide everything while we quit
 			SetVisible( false );
 			vgui::surface()->RestrictPaintToSinglePanel( GetVPanel() );
 			engine->ClientCmd_Unrestricted( "quit\n" );
@@ -1914,7 +2169,6 @@ void CBasePanel::RunMenuCommand(const char *command)
 		if ( !IsX360() )
 		{
 			char szSteamURL[50];
-			char szAppId[50];
 
 			// hide everything while we quit
 			SetVisible( false );
@@ -1922,14 +2176,10 @@ void CBasePanel::RunMenuCommand(const char *command)
 			engine->ClientCmd_Unrestricted( "quit\n" );
 
 			// Construct Steam URL. Pattern is steam://run/<appid>/<language>. (e.g. Ep1 In French ==> steam://run/380/french)
-			V_strcpy(szSteamURL, "steam://run/");
-			itoa( engine->GetAppID(), szAppId, 10 );
-			V_strcat( szSteamURL, szAppId, sizeof( szSteamURL ) );
-			V_strcat( szSteamURL, "/", sizeof( szSteamURL ) );
-			V_strcat( szSteamURL, COptionsSubAudio::GetUpdatedAudioLanguage(), sizeof( szSteamURL ) );
+			V_snprintf( szSteamURL, sizeof(szSteamURL), "steam://run/%d/%s", engine->GetAppID(), COptionsSubAudio::GetUpdatedAudioLanguage() );
 
 			// Set Steam URL for re-launch in registry. Launcher will check this registry key and exec it in order to re-load the game in the proper language
-#ifndef _X360
+#if defined( WIN32 ) && !defined( _X360 )
 			HKEY hKey;
 
 			if ( IsPC() && RegOpenKeyEx( HKEY_CURRENT_USER, "Software\\Valve\\Source", NULL, KEY_WRITE, &hKey) == ERROR_SUCCESS )
@@ -1938,6 +2188,16 @@ void CBasePanel::RunMenuCommand(const char *command)
 
 				RegCloseKey(hKey);
 			}
+#elif defined( OSX ) || defined( LINUX )
+			FILE *fp = fopen( "/tmp/hl2_relaunch", "w+" );
+			if ( fp )
+			{
+				fprintf( fp, "%s\n", szSteamURL );
+			}
+			fclose( fp );
+#elif defined( _X360 )
+#else
+#error
 #endif
 		}
 	}
@@ -1995,8 +2255,20 @@ bool CBasePanel::IsPromptableCommand( const char *command )
 		 !Q_stricmp( command, "OpenOptionsDialog" ) ||
 		 !Q_stricmp( command, "OpenControllerDialog" ) ||
 		 !Q_stricmp( command, "OpenLoadCommentaryDialog" ) ||
-		 !Q_stricmp( command, "OpenLoadSingleplayerCommentaryDialog" ) ||
-		 !Q_stricmp( command, "OpenAchievementsDialog" ) )
+         !Q_stricmp( command, "OpenLoadSingleplayerCommentaryDialog" ) ||
+         !Q_stricmp( command, "OpenAchievementsDialog" ) ||
+
+         //=============================================================================
+         // HPE_BEGIN:
+         // [dwenger] Use cs-specific achievements dialog
+         //=============================================================================
+
+		 !Q_stricmp( command, "OpenCSAchievementsDialog" ) )
+
+         //=============================================================================
+         // HPE_END
+         //=============================================================================
+
 	{
 		 return true;
 	}
@@ -2060,9 +2332,21 @@ void CBasePanel::ExecuteAsync( CAsyncJobContext *pAsync )
 bool CBasePanel::CommandRequiresSignIn( const char *command )
 {
 	// Blech again!
-	if ( !Q_stricmp( command, "OpenAchievementsDialog" ) || 
-		 !Q_stricmp( command, "OpenLoadGameDialog" ) ||
-		 !Q_stricmp( command, "OpenSaveGameDialog" ) || 
+	if ( !Q_stricmp( command, "OpenAchievementsDialog" ) ||
+
+        //=============================================================================
+        // HPE_BEGIN:
+        // [dwenger] Use cs-specific achievements dialog
+        //=============================================================================
+
+         !Q_stricmp( command, "OpenCSAchievementsDialog" ) ||
+
+         //=============================================================================
+         // HPE_END
+         //=============================================================================
+
+         !Q_stricmp( command, "OpenLoadGameDialog" ) ||
+		 !Q_stricmp( command, "OpenSaveGameDialog" ) ||
 		 !Q_stricmp( command, "OpenRankingsDialog" ) )
 		return true;
 
@@ -2494,12 +2778,33 @@ public:
 		GameUI().PreventEngineHideGameUI();
 	}
 
-	void OnKeyCodePressed(KeyCode code)
+	void OnKeyCodeTyped(KeyCode code)
 	{
 		// ESC cancels
 		if ( code == KEY_ESCAPE )
 		{
 			Close();
+		}
+		else
+		{
+			BaseClass::OnKeyCodeTyped(code);
+		}
+	}
+
+	void OnKeyCodePressed(KeyCode code)
+	{
+		// ESC cancels
+		if ( code == KEY_XBUTTON_B || code == STEAMCONTROLLER_B || code == STEAMCONTROLLER_START )
+		{
+			Close();
+		}
+		else if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+		{
+			OnCommand( "SaveAndQuit" );
+		}
+		else if ( code == KEY_XBUTTON_X || code == STEAMCONTROLLER_X )
+		{
+			OnCommand( "Quit" );
 		}
 		else
 		{
@@ -2518,7 +2823,7 @@ public:
 			// find a new name to save
 			char saveName[128];
 			CSaveGameDialog::FindSaveSlot( saveName, sizeof(saveName) );
-			if ( saveName && saveName[ 0 ] )
+			if ( saveName[ 0 ] )
 			{
 				// save the game
 				char sz[ 256 ];
@@ -2565,10 +2870,23 @@ public:
 		GameUI().PreventEngineHideGameUI();
 	}
 
-	void OnKeyCodePressed(KeyCode code)
+	void OnKeyCodeTyped(KeyCode code)
 	{
 		// ESC cancels
 		if (code == KEY_ESCAPE)
+		{
+			Close();
+		}
+		else
+		{
+			BaseClass::OnKeyCodeTyped(code);
+		}
+	}
+
+	void OnKeyCodePressed(KeyCode code)
+	{
+		// ESC cancels
+		if (code == KEY_XBUTTON_B || code == STEAMCONTROLLER_B)
 		{
 			Close();
 		}
@@ -2747,6 +3065,7 @@ void CBasePanel::OnOpenOptionsDialog()
 	if ( !m_hOptionsDialog.Get() )
 	{
 		m_hOptionsDialog = new COptionsDialog(this);
+		g_hOptionsDialog = m_hOptionsDialog;
 		PositionDialog( m_hOptionsDialog );
 	}
 
@@ -2852,12 +3171,17 @@ void CBasePanel::OnOpenCreateMultiplayerGameDialog()
 //-----------------------------------------------------------------------------
 void CBasePanel::OnOpenChangeGameDialog()
 {
+#ifdef POSIX
+	// Alfred says this is old legacy code that allowed you to walk through looking for
+	// gameinfos and switch and it's not needed anymore. So I'm killing this assert...
+#else
 	if (!m_hChangeGameDialog.Get())
 	{
 		m_hChangeGameDialog = new CChangeGameDialog(this);
 		PositionDialog(m_hChangeGameDialog);
 	}
 	m_hChangeGameDialog->Activate();
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -2901,6 +3225,9 @@ void CBasePanel::OpenLoadSingleplayerCommentaryDialog()
 	m_hNewGameDialog->Activate();
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
 void CBasePanel::OnOpenAchievementsDialog()
 {
 	if (!m_hAchievementsDialog.Get())
@@ -2910,6 +3237,41 @@ void CBasePanel::OnOpenAchievementsDialog()
 	}
 	m_hAchievementsDialog->Activate();
 }
+
+//=============================================================================
+// HPE_BEGIN:
+// [dwenger] Use cs-specific achievements dialog
+//=============================================================================
+
+void CBasePanel::OnOpenCSAchievementsDialog()
+{
+    if ( GameClientExports() )
+    {
+		int screenWide = 0;
+		int screenHeight = 0;
+		engine->GetScreenSize( screenWide, screenHeight );
+
+		// [smessick] For lower resolutions, open the Steam achievements instead of the CSS achievements screen.
+		if ( screenWide < GameClientExports()->GetAchievementsPanelMinWidth() )
+		{
+			ISteamFriends *friends = steamapicontext->SteamFriends();
+			if ( friends )
+			{
+				friends->ActivateGameOverlay( "Achievements" );
+			}
+		}
+		else
+		{
+			// Display the CSS achievements screen.
+			GameClientExports()->CreateAchievementsPanel( this );
+			GameClientExports()->DisplayAchievementPanel();
+		}
+    }
+}
+
+//=============================================================================
+// HPE_END
+//=============================================================================
 
 void CBasePanel::OnOpenAchievementsDialog_Xbox()
 {
@@ -3266,13 +3628,6 @@ void CBasePanel::OnGameUIHidden()
 	{
 		PostMessage( m_hOptionsDialog.Get(), new KeyValues( "GameUIHidden" ) );
 	}
-
-	// HACKISH: Force this dialog closed so it gets data updates upon reopening.
-	vgui::Frame* pAchievementsFrame = m_hAchievementsDialog.Get();
-	if ( pAchievementsFrame )
-	{
-		pAchievementsFrame->Close();
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -3298,6 +3653,33 @@ void CBasePanel::SetMenuAlpha(int alpha)
 		m_pGameMenuButtons[i]->SetAlpha(alpha);
 	}
 	m_bForceTitleTextUpdate = true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+int CBasePanel::GetMenuAlpha( void ) 
+{ 
+	return m_pGameMenu->GetAlpha(); 
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CBasePanel::SetMainMenuOverride( vgui::VPANEL panel )
+{
+	m_hMainMenuOverridePanel = panel;
+
+	if ( m_pGameMenu )
+	{
+		m_pGameMenu->SetMainMenuOverride( panel );
+	}
+
+	if ( m_hMainMenuOverridePanel )
+	{
+		// Parent it to this panel
+		ipanel()->SetParent( m_hMainMenuOverridePanel, GetVPanel() );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -4348,7 +4730,25 @@ void CMainMenuGameLogo::ApplySchemeSettings( vgui::IScheme *pScheme )
 {
 	BaseClass::ApplySchemeSettings( pScheme );
 
-	LoadControlSettings( "Resource/GameLogo.res" );
+	KeyValues *pConditions = new KeyValues( "conditions" );
+	if ( pConditions )
+	{
+		char background[MAX_PATH];
+		engine->GetMainMenuBackgroundName( background, sizeof(background) );
+
+		KeyValues *pSubKey = new KeyValues( background );
+		if ( pSubKey )
+		{
+			pConditions->AddSubKey( pSubKey );
+		}	
+	}
+
+	LoadControlSettings( "Resource/GameLogo.res", NULL, NULL, pConditions );
+
+	if ( pConditions )
+	{
+		pConditions->deleteThis();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -4410,3 +4810,23 @@ static void CC_GameUIHideDialog( const CCommand &args )
 	GameUI().CloseMessageDialog( 0 );
 }
 static ConCommand gameui_hide_dialog( "gameui_hide_dialog", CC_GameUIHideDialog, "asdf", 0 );
+
+static void RefreshOptionsDialog( const CCommand &args )
+{
+	if ( g_hOptionsDialog )
+	{
+		CBasePanel* pBasePanel = (CBasePanel*) g_hOptionsDialog->GetParent();
+		g_hOptionsDialog->Close();
+		delete g_hOptionsDialog.Get();
+		if ( pBasePanel )
+		{
+			pBasePanel->OnOpenOptionsDialog();
+			COptionsDialog *pOptionsDialog = dynamic_cast<COptionsDialog*>( g_hOptionsDialog.Get() );
+			if ( pOptionsDialog )
+			{
+				pOptionsDialog->GetPropertySheet()->SetActivePage( pOptionsDialog->GetOptionsSubMultiplayer() );
+			}
+		}
+	}
+}
+static ConCommand refresh_options_dialog( "refresh_options_dialog", RefreshOptionsDialog, "Refresh the options dialog.", 0 );

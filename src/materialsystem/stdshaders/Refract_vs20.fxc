@@ -93,6 +93,7 @@ VS_OUTPUT main( const VS_INPUT v )
 	// Projected position
 	float4 vProjPos = mul( float4( worldPos, 1 ), cViewProj );
 	o.vProjPos_POSITION = vProjPos;
+	vProjPos.z = dot( float4( worldPos, 1 ), cViewProjZ );
 	o.worldPos_projPosZ = float4( worldPos.xyz, vProjPos.z );
 	//o.projNormal.xyz = mul( worldNormal, cViewProj );
 

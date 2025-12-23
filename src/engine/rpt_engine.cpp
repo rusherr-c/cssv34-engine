@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:	Deals with remote perf testing on customer machines
 //
@@ -8,11 +8,12 @@
 
 #include "server_pch.h"
 #include "cl_rcon.h"
-#include "steam/steam_api.h"
+#include "cl_steamauth.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+#ifdef ENABLE_RPT
 //-----------------------------------------------------------------------------
 // Remote perf testing
 // 
@@ -206,9 +207,17 @@ CON_COMMAND_F( rpt_start, "", FCVAR_DONTRECORD | FCVAR_HIDDEN )
 	RPTClient().CreateListenSocket( rptAddr );
 
 	char pDir[MAX_PATH];
+#ifdef WIN32
 	int nDay, nMonth, nYear;
 	GetCurrentDate( &nDay, &nMonth, &nYear );
 	Q_snprintf( pDir, sizeof(pDir), "rpt/%d_%d_%d", nMonth, nDay, nYear );
+#elif POSIX
+	time_t now = time(NULL);
+	struct tm *tm = localtime( &now );
+	Q_snprintf( pDir, sizeof(pDir), "rpt/%d_%d_%d", tm->tm_mon, tm->tm_wday, tm->tm_year + 1900 );
+#else
+#error
+#endif
 	RPTClient().SetRemoteFileDirectory( pDir );
 
 	// Send a command to the server indicating we want to connect to a remote client
@@ -242,10 +251,10 @@ CON_COMMAND_F( rpt_end, "", FCVAR_DONTRECORD | FCVAR_HIDDEN )
 
 // This is the steam id for user 'remote_perf_test'. See wiki for password.
 // http://intranet.valvesoftware.com/wiki/index.php/Debugging_problems_on_customer_machines
-static uint64 s_ValveMask = 0xFAB2423BFFA352AF;
+static uint64 s_ValveMask = 0xFAB2423BFFA352AFull;
 static uint64 s_pValveIDs[] =
 {
-	76561197995463203 ^ s_ValveMask,
+	76561197995463203ll ^ s_ValveMask,
 };
 	
 
@@ -272,14 +281,9 @@ static bool PlayerIsValveEmployee( int nClientSlot )
 		return false;
 
 	// If Steam is running and connected to beta, player is valve
-#ifndef NO_STEAM
-	if ( SteamUtils() )
-	{
-		EUniverse eUniverse = SteamUtils()->GetConnectedUniverse();
-		if ( k_EUniverseBeta == eUniverse )
-			return true;
-	}
-#endif
+	if ( k_EUniverseBeta == GetSteamUniverse() )
+		return true;
+	
 	if ( !pClient->IsFullyAuthenticated() )
 		return false;
 
@@ -408,3 +412,5 @@ CON_COMMAND_F( rpt, "Issue an rpt command.", FCVAR_DONTRECORD | FCVAR_HIDDEN )
 
 
 #endif   // SWDS
+
+#endif // ENABLE_RPT

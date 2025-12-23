@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "UtlBuffer.h"
+#include "tier1/utlbuffer.h"
 #include "IGameServerData.h"
 extern IGameServerData *g_pGameServerData;
 

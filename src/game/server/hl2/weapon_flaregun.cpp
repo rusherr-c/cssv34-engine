@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		Flare gun (fffsssssssssss!!)
 //
@@ -657,7 +657,7 @@ void CFlare::AddToActiveFlares( void )
 	}
 }
 
-#if 1
+#if 0
 
 IMPLEMENT_SERVERCLASS_ST(CFlaregun, DT_Flaregun)
 END_SEND_TABLE()

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -28,13 +28,20 @@ void FX_FireBullets(
 	int	iWeaponID,
 	int	iMode,
 	int iSeed,
-	float flSpread
+	float fInaccuracy,
+	float fSpread,
+	float flSoundTime = 0.0f
 	);
 
 // This runs on both the client and the server.
 // On the server, it dispatches a TE_PlantBomb to visible clients.
 // On the client, it plays the planting animation.
-void FX_PlantBomb( int iPlayer, const Vector &vOrigin );
-
+enum PlantBombOption_t
+{
+	PLANTBOMB_PLANT, // play the planting animation
+	PLANTBOMB_ABORT, // abort the planting animation
+	// NOTE: If you add additional items to this enum then m_option in CTEPlantBomb will need to have its SendPropInt setting changed to have more than one bit.
+};
+void FX_PlantBomb( int iPlayer, const Vector &vOrigin, PlantBombOption_t option );
 
 #endif // FX_CS_SHARED_H

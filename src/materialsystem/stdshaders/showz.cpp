@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Visualize shadow z buffers.  Designed to be used when drawing a screen-aligned
 //          quad with a floating-point z-buffer so that the large z-range is divided down
@@ -10,7 +10,6 @@
 #include "convar.h"
 #include "BaseVSShader.h"
 
-//#include "showz_vs11.inc"
 #include "showz_vs20.inc"
 #include "showz_ps20.inc"
 #include "showz_ps20b.inc"
@@ -19,7 +18,6 @@
 #include "tier0/memdbgon.h"
 
 static ConVar r_showz_power( "r_showz_power", "1.0f", FCVAR_CHEAT );
-
 
 BEGIN_VS_SHADER_FLAGS( showz, "Help for ShowZ", SHADER_NOT_EDITABLE )
 	BEGIN_SHADER_PARAMS
@@ -36,6 +34,8 @@ BEGIN_VS_SHADER_FLAGS( showz, "Help for ShowZ", SHADER_NOT_EDITABLE )
 
 	SHADER_FALLBACK
 	{
+//		if ( g_pHardwareConfig->GetDXSupportLevel() < 90 )
+//			return "Wireframe";
 		return 0;
 	}
 
@@ -49,15 +49,12 @@ BEGIN_VS_SHADER_FLAGS( showz, "Help for ShowZ", SHADER_NOT_EDITABLE )
 		{
 			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 
-			showz_vs20_Static_Index vshIndex;
-			pShaderShadow->SetVertexShader( "showz_vs20", vshIndex.GetIndex() );
-
-			int nShadowFilterMode = g_pHardwareConfig->GetShadowFilterMode();	// Based upon vendor and device dependent formats
+			DECLARE_STATIC_VERTEX_SHADER( showz_vs20 );
+			SET_STATIC_VERTEX_SHADER( showz_vs20 );
 
 			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{
 				DECLARE_STATIC_PIXEL_SHADER( showz_ps20b );
-				SET_STATIC_PIXEL_SHADER_COMBO( FLASHLIGHTDEPTHFILTERMODE, nShadowFilterMode );
 				SET_STATIC_PIXEL_SHADER_COMBO( DEPTH_IN_ALPHA, params[ALPHADEPTH]->GetIntValue() );
 				SET_STATIC_PIXEL_SHADER( showz_ps20b );
 			}
@@ -70,14 +67,14 @@ BEGIN_VS_SHADER_FLAGS( showz, "Help for ShowZ", SHADER_NOT_EDITABLE )
 
 			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 1, 0, 0 );
 
-			pShaderShadow->EnableSRGBWrite( false );
+			pShaderShadow->EnableSRGBWrite( true );  // The back buffer is sRGB, we should always set this true!
 		}
 		DYNAMIC_STATE
 		{
 			BindTexture( SHADER_SAMPLER0, BASETEXTURE, FRAME );	// Bind shadow depth map
 
-			showz_vs20_Dynamic_Index vshIndex;
-			pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
+			DECLARE_DYNAMIC_VERTEX_SHADER( showz_vs20 );
+			SET_DYNAMIC_VERTEX_SHADER( showz_vs20 );
 
 			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{

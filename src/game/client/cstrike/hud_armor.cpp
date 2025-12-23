@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #include "cbase.h"
 #include "hudelement.h"
 #include <vgui_controls/Panel.h>
-#include <vgui/isurface.h>
+#include <vgui/ISurface.h>
 #include "clientmode_csnormal.h"
 #include "cs_gamerules.h"
 #include "hud_numericdisplay.h"
@@ -55,6 +55,7 @@ CHudArmor::CHudArmor( const char *pName ) : CHudNumericDisplay( NULL, "HudArmor"
 
 void CHudArmor::Init()
 {
+	SetIndent(true);
 }
 
 void CHudArmor::ApplySchemeSettings( IScheme *scheme )
@@ -104,14 +105,14 @@ void CHudArmor::Paint()
 		{
 			if( m_pArmor_HelmetIcon )
 			{
-				m_pArmor_HelmetIcon->DrawSelf( 0, icon_ypos, icon_wide, icon_tall, GetFgColor() );
+				m_pArmor_HelmetIcon->DrawSelf( icon_xpos, icon_ypos, icon_wide, icon_tall, GetFgColor() );
 			}
 		}
 		else
 		{
 			if( m_pArmorIcon )
 			{
-				m_pArmorIcon->DrawSelf( 0, icon_ypos, icon_wide, icon_tall, GetFgColor() );
+				m_pArmorIcon->DrawSelf( icon_xpos, icon_ypos, icon_wide, icon_tall, GetFgColor() );
 			}
 		}
 

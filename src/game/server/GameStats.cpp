@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 
 
 #include "igamesystem.h"
-#include "GameStats.h"
+#include "gamestats.h"
 #include "tier1/utlstring.h"
 #include "filesystem.h"
 #include "tier1/utlbuffer.h"
@@ -357,7 +357,7 @@ void CBaseGameStats::Event_PreSaveGameLoaded( char const *pSaveName, bool bInGam
 	StatsLog( "CBaseGameStats::Event_PreSaveGameLoaded [%s] %s\n", pSaveName, bInGame ? "in-game" : "at console" );
 }
 
-bool CBaseGameStats::SaveToFileNOW( void )
+bool CBaseGameStats::SaveToFileNOW( bool bForceSyncWrite /* = false */ )
 {
 	if ( !StatsTrackingIsFullyEnabled() )
 		return false;
@@ -391,7 +391,7 @@ bool CBaseGameStats::SaveToFileNOW( void )
 
 	// StatsLog( "SaveToFileNOW '%s'\n", fullpath );
 
-	if( CBGSDriver.m_bShuttingDown ) //write synchronously
+	if( CBGSDriver.m_bShuttingDown || bForceSyncWrite ) //write synchronously
 	{
 		filesystem->WriteFile( fullpath, GAMESTATS_PATHID, buf );
 
@@ -465,24 +465,24 @@ void CBaseGameStats::Event_IncrementCountedStatistic( const Vector& vecAbsOrigin
 bool CBaseGameStats::UploadStatsFileNOW( void )
 {
 	if( !StatsTrackingIsFullyEnabled() )
-		return false;
-	
-	if ( !filesystem->FileExists( gamestats->GetStatSaveFileName(), GAMESTATS_PATHID ) )
 	{
+		StatsLog( "UploadStatsFileNOW: stats tracking not fully enabled, not uploading file\n" );
+		return false;
+	}
+	
+	if (!HaveValidData() )
+	{
+		StatsLog( "UploadStatsFileNOW: no valid game data, not uploading file\n" );
 		return false;
 	}
 
-	time_t curtime;
-	VCRHook_Time( reinterpret_cast<long*>(&curtime) );
+	if ( !filesystem->FileExists( gamestats->GetStatSaveFileName(), GAMESTATS_PATHID ) )
+	{
+		StatsLog( "UploadStatsFileNOW: can't find stats file, not uploading file\n" );
+		return false;
+	}
 
-	// For now always send updates after every time they run the engine!!
-#if 0
-#if !defined( _DEBUG )
-	int elapsed = curtime - m_tLastUpload;
-	if ( elapsed < ONE_DAY_IN_SECONDS )
-		return;
-#endif
-#endif
+	int curtime = Plat_FloatTime();
 
 	CBGSDriver.m_tLastUpload = curtime;
 
@@ -499,6 +499,7 @@ bool CBaseGameStats::UploadStatsFileNOW( void )
 	unsigned int uBlobSize = buf.TellPut();
 	if ( uBlobSize == 0 )
 	{
+		StatsLog( "UploadStatsFileNOW: can't read stats file, not uploading file\n" );
 		return false;
 	}
 
@@ -506,10 +507,12 @@ bool CBaseGameStats::UploadStatsFileNOW( void )
 
 	if( gamestatsuploader )
 	{
-		return gamestatsuploader->UploadGameStats( "",
+		bool bRet = gamestatsuploader->UploadGameStats( "",
 												   1,
 												   uBlobSize,
 												   pvBlobData );
+
+		StatsLog( "UploadStatsFileNow: UploadGameStats %s\n", bRet ? "succeeded" : "failed" );
 	}
 
 	return false;
@@ -730,6 +733,26 @@ void CBaseGameStats_Driver::LevelInitPreEntity()
 	m_bInLevel = true;
 	m_bFirstLevel = false;
 
+	if ( Q_stricmp( s_szPseudoUniqueID, "unknown" ) == 0 )
+	{
+		// "unknown" means this is a dedicated server and we weren't able to generate a unique ID (e.g. Linux server).
+		// Change the unique ID to be a hash of IP & port.  We couldn't do this earlier because IP is not known until level
+		// init time.
+		ConVar *hostip = cvar->FindVar( "hostip" );
+		ConVar *hostport = cvar->FindVar( "hostport" );
+		if ( hostip && hostport )
+		{
+			int crcInput[2];
+			crcInput[0] = hostip->GetInt();
+			crcInput[1] = hostport->GetInt();
+			if ( crcInput[0] && crcInput[1] )
+			{
+				CRC32_t crc = CRC32_ProcessSingleBuffer( crcInput, sizeof( crcInput ) );
+				Q_snprintf( s_szPseudoUniqueID, ARRAYSIZE( s_szPseudoUniqueID ), "H:%x", crc );
+			}
+		}
+	}
+
 	PossibleMapChange();
 
 	m_flPauseStartTime = 0.0f;
@@ -762,7 +785,7 @@ void CBaseGameStats_Driver::LevelShutdownPreEntity()
 		gamestats->Event_LevelShutdown( flElapsed );
 
 		if( gamestats->AutoSave_OnLevelShutdown() )
-			gamestats->SaveToFileNOW();
+			gamestats->SaveToFileNOW( true );
 
 		if( gamestats->AutoUpload_OnLevelShutdown() )
 			gamestats->UploadStatsFileNOW();

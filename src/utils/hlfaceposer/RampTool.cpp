@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -27,7 +27,7 @@
 #include "tier1/strtools.h"
 #include "faceposer_models.h"
 #include "UtlBuffer.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "iscenetokenprocessor.h"
 #include "choreoviewcolors.h"
 #include "MatSysWin.h"
@@ -1569,7 +1569,7 @@ void RampTool::RepositionHSlider( void )
 	}
 	m_pHorzScrollBar->setBounds( 0, h2() - m_nScrollbarHeight, w2() - m_nScrollbarHeight, m_nScrollbarHeight );
 
-	m_flLeftOffset = max( 0, m_flLeftOffset );
+	m_flLeftOffset = max( 0.f, m_flLeftOffset );
 	m_flLeftOffset = min( (float)pixelsneeded, m_flLeftOffset );
 
 	m_pHorzScrollBar->setRange( 0, pixelsneeded );

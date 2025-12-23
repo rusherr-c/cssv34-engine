@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Model loading / unloading interface
 //
@@ -597,6 +597,7 @@ void COverlayMgr::RenderOverlays( int nSortGroup )
 	int iCurrentRenderOrder = 0;
 	int iHighestRenderOrder = 0;
 	bool bLightmappedMaterial = false;
+	int nMaxIndices = pRenderContext->GetMaxIndicesToRender();
 	while ( iCurrentRenderOrder <= iHighestRenderOrder )
 	{
 		int nNextRenderQueue;
@@ -608,6 +609,9 @@ void COverlayMgr::RenderOverlays( int nSortGroup )
 
 			Assert( renderQueue.m_nVertexCount > 0 );
 
+			int nMaxVertices = pRenderContext->GetMaxVerticesToRender( !bWireframeFragments ? renderQueueHead.m_pMaterial : g_materialWorldWireframe );
+			if ( nMaxVertices == 0 )
+				continue;
 
 			// Run this list for each bind proxy
             OverlayFragmentHandle_t hStartFragment = renderQueue.m_hFirstFragment;
@@ -617,8 +621,10 @@ void COverlayMgr::RenderOverlays( int nSortGroup )
 
 				IMesh* pMesh = 0;								// only init when we actually have something
 				CMeshBuilder meshBuilder;
-
-				int nIndex = 0;
+				CUtlVectorFixedGrowable<int,256> polyList;
+				int nCurrVertexCount = 0;
+				int nCurrIndexCount = 0;
+				bool bBoundMaterial = false;
 
 				// We just need to make sure there's a unique sort ID for that. Then we bind once per queue
 				OverlayFragmentHandle_t hFragment = hStartFragment;
@@ -647,21 +653,44 @@ void COverlayMgr::RenderOverlays( int nSortGroup )
 						continue;
 
 					int nVertCount = pFragment->m_aPrimVerts.Count();
+					int nIndexCount = 3 * ( nVertCount - 2 );
+
+					if ( pMesh )
+					{					  
+						// Would this cause an overflow? Flush!
+						if ( ( ( nCurrVertexCount + nVertCount ) > nMaxVertices ) ||
+							 ( ( nCurrIndexCount + nIndexCount ) > nMaxIndices ) )
+						{
+							CIndexBuilder &indexBuilder = meshBuilder;
+							indexBuilder.FastPolygonList( 0, polyList.Base(), polyList.Count() );
+							meshBuilder.End();
+							pMesh->Draw();
+							pMesh = NULL;
+							polyList.RemoveAll();
+							nCurrIndexCount = nCurrVertexCount = 0;
+						}
+					}
+
+					nCurrVertexCount += nVertCount;
+					nCurrIndexCount += nIndexCount;
+
 					const overlayvert_t *pVert = &(pFragment->m_aPrimVerts[0]);
 								 
 					int iVert;
-					if (! pMesh)								// have we output any vertices yet? if first verts, init material and meshbuilder
+					if ( !pMesh )								// have we output any vertices yet? if first verts, init material and meshbuilder
 					{
-						if ( !bWireframeFragments )
+						if ( !bWireframeFragments && !bBoundMaterial )
 						{
 							pRenderContext->Bind( renderQueueHead.m_pMaterial, pOverlay->m_pBindProxy /*proxy*/ );
 							pRenderContext->BindLightmapPage( renderQueueHead.m_nLightmapPage );
 							bLightmappedMaterial = renderQueueHead.m_pMaterial->GetPropertyFlag( MATERIAL_PROPERTY_NEEDS_LIGHTMAP ) ||
 								renderQueueHead.m_pMaterial->GetPropertyFlag( MATERIAL_PROPERTY_NEEDS_BUMPED_LIGHTMAPS );
+							bBoundMaterial = true;
 						}
 						// Create the mesh/mesh builder.
 						pMesh = pRenderContext->GetDynamicMesh();
-						meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, renderQueue.m_nVertexCount, renderQueue.m_nIndexCount );
+						meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, MIN( renderQueue.m_nVertexCount, nMaxVertices ), 
+							MIN( renderQueue.m_nIndexCount, nMaxIndices ) );
 					}
 
 					if ( bLightmappedMaterial )
@@ -693,21 +722,13 @@ void COverlayMgr::RenderOverlays( int nSortGroup )
 							meshBuilder.AdvanceVertex();
 						}
 					}
-
-					// FIXME: Make this part of a single loop?
-					nVertCount -= 2;
-					for ( iVert = 0; iVert < nVertCount; ++iVert )
-					{
-						meshBuilder.FastIndex( nIndex );
-						meshBuilder.FastIndex( nIndex + iVert + 1 );
-						meshBuilder.FastIndex( nIndex + iVert + 2 );
-					}
-					nVertCount += 2;
-					
-					nIndex += nVertCount;
+					polyList.AddToTail( nVertCount );
 				}
+
 				if (pMesh)
 				{
+					CIndexBuilder &indexBuilder = meshBuilder;
+					indexBuilder.FastPolygonList( 0, polyList.Base(), polyList.Count() );
 					meshBuilder.End();
 					pMesh->Draw();
 				}
@@ -1558,9 +1579,9 @@ void COverlayMgr::DoClipFragment( moverlayfragment_t *pFragment, cplane_t *pClip
 	if ( !pFragment )
 		return;
 
-	float	flDists[128];
-	int		nSides[128];
-	int		nSideCounts[3];
+	float	flDists[128] = {};
+	int		nSides[128] = {};
+	int		nSideCounts[3] = {};
 
 	//
 	// Determine "sidedness" of all the polygon points.
@@ -1917,7 +1938,6 @@ void Overlay_TriTLToBR(
 			}
 			else
 			{
-				int nIndices[3];
 				nIndices[0] = nSnapV * nWidth + nSnapU;
 				nIndices[1] = nNextV * nWidth + nSnapU;
 				nIndices[2] = nSnapV * nWidth + nNextU;
@@ -1954,7 +1974,6 @@ void Overlay_TriTLToBR(
 				}
 				else
 				{
-					float flCfs[3];
 					CalcBarycentricCooefs( vecFlatVerts[0], vecFlatVerts[1], vecFlatVerts[2], vecIntersectPoint, flCfs[0], flCfs[1], flCfs[2] );
 					vecWorld = ( vecVerts[0] * flCfs[0] ) + ( vecVerts[1] * flCfs[1] ) + ( vecVerts[2] * flCfs[2] );
 				}
@@ -2007,7 +2026,6 @@ void Overlay_TriTLToBR(
 			}
 			else
 			{
-				int nIndices[3];
 				nIndices[0] = nNextV * nWidth + nSnapU;
 				nIndices[1] = nNextV * nWidth + nNextU;
 				nIndices[2] = nSnapV * nWidth + nNextU;
@@ -2044,7 +2062,6 @@ void Overlay_TriTLToBR(
 				}
 				else
 				{
-					float flCfs[3];
 					CalcBarycentricCooefs( vecFlatVerts[0], vecFlatVerts[1], vecFlatVerts[2], vecIntersectPoint, flCfs[0], flCfs[1], flCfs[2] );
 					vecWorld = ( vecVerts[0] * flCfs[0] ) + ( vecVerts[1] * flCfs[1] ) + ( vecVerts[2] * flCfs[2] );
 				}
@@ -2125,7 +2142,6 @@ void Overlay_TriBLToTR(
 			}
 			else
 			{
-				int nIndices[3];
 				nIndices[0] = nSnapV * nWidth + nSnapU;
 				nIndices[1] = nNextV * nWidth + nNextU;
 				nIndices[2] = nSnapV * nWidth + nNextU;
@@ -2162,7 +2178,6 @@ void Overlay_TriBLToTR(
 				}
 				else
 				{
-					float flCfs[3];
 					CalcBarycentricCooefs( vecFlatVerts[0], vecFlatVerts[1], vecFlatVerts[2], vecIntersectPoint, flCfs[0], flCfs[1], flCfs[2] );
 					vecWorld = ( vecVerts[0] * flCfs[0] ) + ( vecVerts[1] * flCfs[1] ) + ( vecVerts[2] * flCfs[2] );
 				}
@@ -2215,7 +2230,6 @@ void Overlay_TriBLToTR(
 			}
 			else
 			{
-				int nIndices[3];
 				nIndices[0] = nSnapV * nWidth + nSnapU;
 				nIndices[1] = nNextV * nWidth + nSnapU;
 				nIndices[2] = nNextV * nWidth + nNextU;
@@ -2252,7 +2266,6 @@ void Overlay_TriBLToTR(
 				}
 				else
 				{
-					float flCfs[3];
 					CalcBarycentricCooefs( vecFlatVerts[0], vecFlatVerts[1], vecFlatVerts[2], vecIntersectPoint, flCfs[0], flCfs[1], flCfs[2] );
 					vecWorld = ( vecVerts[0] * flCfs[0] ) + ( vecVerts[1] * flCfs[1] ) + ( vecVerts[2] * flCfs[2] );
 				}

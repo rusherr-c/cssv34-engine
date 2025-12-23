@@ -1,11 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: X360 XAudio Version
 //
 //=====================================================================================//
 
+
 #include "audio_pch.h"
-#if 0
 #include "snd_dev_xaudio.h"
 #include "UtlLinkedList.h"
 #include "session.h"
@@ -16,14 +16,19 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-// assuming worst case 5fps = 200ms @ 44.1Khz = ~8K samples
-#define XAUDIO_BUFFER_SAMPLES	8192
-// packet return has a latency, so need a decent pool
-#define MAX_XAUDIO_PACKETS		32	
+// The outer code mixes in PAINTBUFFER_SIZE (# of samples) chunks (see MIX_PaintChannels), we will never need more than
+// that many samples in a buffer.  This ends up being about 20ms per buffer
+#define XAUDIO2_BUFFER_SAMPLES	8192
+// buffer return has a latency, so need a decent pool
+#define MAX_XAUDIO2_BUFFERS		32
+
 
 #define SURROUND_HEADPHONES		0
 #define SURROUND_STEREO			2
 #define SURROUND_DIGITAL5DOT1	5
+
+// 5.1 means there are a max of 6 channels
+#define MAX_DEVICE_CHANNELS		6
 
 ConVar snd_xaudio_spew_packets( "snd_xaudio_spew_packets", "0", 0, "Spew XAudio packet delivery" );
 
@@ -62,6 +67,7 @@ public:
 	static		CAudioXAudio *m_pSingleton;
 
 	CXboxVoice *GetVoiceData( void ) { return &m_VoiceData; }
+	IXAudio2	*GetXAudio2( void ) { return m_pXAudio2; }
 
 private:
 	int			TransferStereo( const portable_samplepair_t *pFront, int paintedTime, int endTime, char *pOutptuBuffer );
@@ -71,13 +77,17 @@ private:
 	int			m_deviceSampleBits;					// bits per sample (16)
 	int			m_deviceSampleCount;				// count of mono samples in output buffer
 	int			m_deviceDmaSpeed;					// samples per second per output buffer
-	
-	XAUDIOPACKET		m_Packets[MAX_XAUDIO_PACKETS];
-	IXAudioSourceVoice	*m_pSourceVoice;
-	char				*m_pOutputBuffer;
+	int			m_clockDivider;
+
+	IXAudio2				*m_pXAudio2;
+	IXAudio2MasteringVoice	*m_pMasteringVoice;
+	IXAudio2SourceVoice		*m_pSourceVoice;
+
+	XAUDIO2_BUFFER		m_Buffers[MAX_XAUDIO2_BUFFERS];
+	BYTE				*m_pOutputBuffer;
 	int					m_bufferSizeBytes;			// size of a single hardware output buffer, in bytes
-	CInterlockedUInt	m_PacketTail;
-	CInterlockedUInt	m_PacketHead;
+	CInterlockedUInt	m_BufferTail;
+	CInterlockedUInt	m_BufferHead;
 	
 	CXboxVoice			m_VoiceData;
 };
@@ -87,10 +97,32 @@ CAudioXAudio *CAudioXAudio::m_pSingleton = NULL;
 //-----------------------------------------------------------------------------
 // XAudio packet completion callback
 //-----------------------------------------------------------------------------
-void CALLBACK XAudioPacketCallback( LPCXAUDIOVOICEPACKETCALLBACK pCallbackData )
+class XAudio2VoiceCallback : public IXAudio2VoiceCallback
 {
-	CAudioXAudio::m_pSingleton->XAudioPacketCallback( (int)pCallbackData->pPacketContext );
-}
+public:
+    XAudio2VoiceCallback() {}
+    ~XAudio2VoiceCallback() {}
+
+    void OnStreamEnd() {}
+
+    void OnVoiceProcessingPassEnd() {}
+
+    void OnVoiceProcessingPassStart( UINT32 SamplesRequired ) {}
+
+    void OnBufferEnd( void *pBufferContext ) 
+	{
+		CAudioXAudio::m_pSingleton->XAudioPacketCallback( (int)pBufferContext );
+	}
+
+    void OnBufferStart( void *pBufferContext ) {}
+
+    void OnLoopEnd( void *pBufferContext ) {}
+
+    void OnVoiceError( void *pBufferContext, HRESULT Error ) {}
+};
+XAudio2VoiceCallback s_XAudio2VoiceCallback;
+
+
 
 //-----------------------------------------------------------------------------
 // Create XAudio Device
@@ -118,6 +150,16 @@ CXboxVoice *Audio_GetXVoice( void )
 	if ( CAudioXAudio::m_pSingleton )
 	{
 		return CAudioXAudio::m_pSingleton->GetVoiceData();
+	}
+
+	return NULL;
+}
+
+IXAudio2 *Audio_GetXAudio2( void )
+{
+	if ( CAudioXAudio::m_pSingleton )
+	{
+		return CAudioXAudio::m_pSingleton->GetXAudio2();
 	}
 
 	return NULL;
@@ -168,66 +210,78 @@ bool CAudioXAudio::Init( void )
 
     // initialize the XAudio Engine
 	// Both threads on core 2
-    XAUDIOENGINEINIT EngineInit = { 0 };
-    EngineInit.pEffectTable = &XAudioDefaultEffectTable;
-    EngineInit.ThreadUsage = XAUDIOTHREADUSAGE_THREAD4 | XAUDIOTHREADUSAGE_THREAD5;
-
-	HRESULT hr = XAudioInitialize( &EngineInit );
+	m_pXAudio2 = NULL;
+	HRESULT hr = XAudio2Create( &m_pXAudio2, 0, XboxThread5 );
 	if ( FAILED( hr ) )
 		return false;
 
-	XAUDIOCHANNELMAPENTRY channelMapEntries[] =
-	{
-		{ XAUDIOSPEAKER_FRONTLEFT, XAUDIOSPEAKER_FRONTLEFT, 1.0f },
-		{ XAUDIOSPEAKER_FRONTRIGHT, XAUDIOSPEAKER_FRONTRIGHT, 1.0f },
-		{ XAUDIOSPEAKER_FRONTCENTER, XAUDIOSPEAKER_FRONTCENTER, 1.0f },
-		{ XAUDIOSPEAKER_LOWFREQUENCY, XAUDIOSPEAKER_LOWFREQUENCY, 1.0f },
-		{ XAUDIOSPEAKER_BACKLEFT, XAUDIOSPEAKER_BACKLEFT, 1.0f },
-		{ XAUDIOSPEAKER_BACKRIGHT, XAUDIOSPEAKER_BACKRIGHT, 1.0f }
-	};
-	XAUDIOCHANNELMAP channelMap = { 6, channelMapEntries };
-	XAUDIOVOICEOUTPUTENTRY voiceOutputEntry = { NULL, &channelMap };
-	XAUDIOVOICEOUTPUT voiceOutput = { 1, &voiceOutputEntry };
-
-	if ( !m_bSurround )
-	{
-		channelMapEntries[XAUDIOSPEAKER_FRONTCENTER].Volume = 0;
-		channelMapEntries[XAUDIOSPEAKER_LOWFREQUENCY].Volume = 0;
-		channelMapEntries[XAUDIOSPEAKER_BACKLEFT].Volume = 0;
-		channelMapEntries[XAUDIOSPEAKER_BACKRIGHT].Volume = 0;
-	}
-
-	// setup the playback buffer
-    XAUDIOSOURCEVOICEINIT SourceVoiceInit = { 0 };
-	SourceVoiceInit.Format.SampleType = XAUDIOSAMPLETYPE_16BITPCM;
-    SourceVoiceInit.Format.ChannelCount = m_deviceChannels;
-    SourceVoiceInit.Format.SampleRate = m_deviceDmaSpeed;
-	SourceVoiceInit.MaxOutputVoiceCount = 1;
-    SourceVoiceInit.MaxPacketCount = MAX_XAUDIO_PACKETS;
-	SourceVoiceInit.MaxChannelMapEntryCount = 6;
-	SourceVoiceInit.pVoiceOutput = &voiceOutput;
-	SourceVoiceInit.pfnPacketCompletionCallback = ::XAudioPacketCallback;
+	// create the mastering voice, this will upsample to the devices target hw output rate
+    m_pMasteringVoice = NULL;
+	hr = m_pXAudio2->CreateMasteringVoice( &m_pMasteringVoice );
+	if ( FAILED( hr ) )
+        return false;
 	
-    m_pSourceVoice = NULL;
-	hr = XAudioCreateSourceVoice( &SourceVoiceInit, &m_pSourceVoice );
+	// 16 bit PCM
+	WAVEFORMATEX waveFormatEx = { 0 };
+	waveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
+	waveFormatEx.nChannels = m_deviceChannels;
+	waveFormatEx.nSamplesPerSec = m_deviceDmaSpeed;
+	waveFormatEx.wBitsPerSample = 16;
+	waveFormatEx.nBlockAlign = ( waveFormatEx.nChannels * waveFormatEx.wBitsPerSample ) / 8;
+	waveFormatEx.nAvgBytesPerSec = waveFormatEx.nSamplesPerSec * waveFormatEx.nBlockAlign;
+	waveFormatEx.cbSize = 0;
+
+	m_pSourceVoice = NULL;
+	hr = m_pXAudio2->CreateSourceVoice( 
+			&m_pSourceVoice, 
+			&waveFormatEx, 
+			0,
+			XAUDIO2_DEFAULT_FREQ_RATIO,
+			&s_XAudio2VoiceCallback,
+			NULL,
+			NULL );
 	if ( FAILED( hr ) )
         return false;
 
-	m_bufferSizeBytes = XAUDIO_BUFFER_SAMPLES * (m_deviceSampleBits/8) * m_deviceChannels;
-	m_pOutputBuffer = new char[MAX_XAUDIO_PACKETS * m_bufferSizeBytes];
+	float volumes[MAX_DEVICE_CHANNELS];
+	for ( int i = 0; i < MAX_DEVICE_CHANNELS; i++ )
+	{
+		if ( !m_bSurround && i >= 2 )
+		{
+			volumes[i] = 0;
+		}
+		else
+		{
+			volumes[i] = 1.0;
+		}
+	}
+	m_pSourceVoice->SetChannelVolumes( m_deviceChannels, volumes );
+
+	m_bufferSizeBytes = XAUDIO2_BUFFER_SAMPLES * (m_deviceSampleBits/8) * m_deviceChannels;
+	m_pOutputBuffer = new BYTE[MAX_XAUDIO2_BUFFERS * m_bufferSizeBytes];
 	ClearBuffer();
 
-	V_memset( m_Packets, 0, MAX_XAUDIO_PACKETS * sizeof( XAUDIOPACKET ) );
-	for ( int i = 0; i < MAX_XAUDIO_PACKETS; i++ )
+	V_memset( m_Buffers, 0, MAX_XAUDIO2_BUFFERS * sizeof( XAUDIO2_BUFFER ) );
+	for ( int i = 0; i < MAX_XAUDIO2_BUFFERS; i++ )
 	{
-		m_Packets[i].pBuffer = m_pOutputBuffer + i*m_bufferSizeBytes;
-		m_Packets[i].pContext = (LPVOID)i;
+		m_Buffers[i].pAudioData = m_pOutputBuffer + i*m_bufferSizeBytes;
+		m_Buffers[i].pContext = (LPVOID)i;
 	}
-	m_PacketHead = 0;
-	m_PacketTail = 0;
+	m_BufferHead = 0;
+	m_BufferTail = 0;
 
 	// number of mono samples output buffer may hold
-	m_deviceSampleCount = m_bufferSizeBytes/(DeviceSampleBytes());
+	m_deviceSampleCount = MAX_XAUDIO2_BUFFERS * (m_bufferSizeBytes/(DeviceSampleBytes()));
+	
+	// NOTE: This really shouldn't be tied to the # of bufferable samples.
+	// This just needs to be large enough so that it doesn't fake out the sampling in 
+	// GetSoundTime().  Basically GetSoundTime() assumes a cyclical time stamp and finds wraparound cases
+	// but that means it needs to get called much more often than once per cycle.  So this number should be
+	// much larger than the framerate in terms of output time
+	m_clockDivider = m_deviceSampleCount / DeviceChannels();
+
+	// not really part of XAudio2, but mixer xma lacks one-time init, so doing it here
+	XMAPlaybackInitialize();
 
 	hr = m_pSourceVoice->Start( 0 );
     if ( FAILED( hr ) )
@@ -252,13 +306,26 @@ void CAudioXAudio::Shutdown( void )
 {
 	if ( m_pSourceVoice )
 	{
-		m_pSourceVoice->Stop( XAUDIOSTOP_IMMEDIATE );
-		m_pSourceVoice->Release();
-
+		m_pSourceVoice->Stop( 0 );
+		m_pSourceVoice->DestroyVoice();
+		m_pSourceVoice = NULL;
 		delete[] m_pOutputBuffer;
 	}
 
-	XAudioShutDown();
+	if ( m_pMasteringVoice )
+	{
+		m_pMasteringVoice->DestroyVoice();
+		m_pMasteringVoice = NULL;
+	}
+
+	// need to release ref to XAudio2
+	m_VoiceData.VoiceShutdown();
+
+	if ( m_pXAudio2 )
+	{
+		m_pXAudio2->Release();
+		m_pXAudio2 = NULL;
+	}
 
 	if ( this == CAudioXAudio::m_pSingleton )
 	{
@@ -272,32 +339,32 @@ void CAudioXAudio::Shutdown( void )
 void CAudioXAudio::XAudioPacketCallback( int hCompletedBuffer )
 {
 	// packet completion expected to be sequential
-	Assert( hCompletedBuffer == (int)( m_PacketTail % MAX_XAUDIO_PACKETS ) );
+	Assert( hCompletedBuffer == (int)( m_PacketTail % MAX_XAUDIO2_BUFFERS ) );
 
-	m_PacketTail++;
+	m_BufferTail++;
 
 	if ( snd_xaudio_spew_packets.GetBool() )
 	{
-		if ( m_PacketTail == m_PacketHead )
+		if ( m_BufferTail == m_BufferHead )
 		{
 			Warning( "XAudio: Starved\n" );
 		}
 		else
 		{
-			Msg( "XAudio: Packet Callback, Submit: %2d, Free: %2d\n", m_PacketHead - m_PacketTail, MAX_XAUDIO_PACKETS - ( m_PacketHead - m_PacketTail ) );
+			Msg( "XAudio: Packet Callback, Submit: %2d, Free: %2d\n", m_BufferHead - m_BufferTail, MAX_XAUDIO2_BUFFERS - ( m_BufferHead - m_BufferTail ) );
 		}
 	}
 
-	if ( m_PacketTail == m_PacketHead )
+	if ( m_BufferTail == m_BufferHead )
 	{
 		// very bad, out of packets, xaudio is starving
 		// mix thread didn't keep up with audio clock and submit packets
 		// submit a silent buffer to keep stream playing and audio clock running
-		int head = m_PacketHead++;
-		XAUDIOPACKET *pPacket = &m_Packets[head % MAX_XAUDIO_PACKETS];
-		V_memset( pPacket->pBuffer, 0, m_bufferSizeBytes );
-		pPacket->BufferSize = m_bufferSizeBytes;
-		m_pSourceVoice->SubmitPacket( pPacket, XAUDIOSUBMITPACKET_DISCONTINUITY );
+		int head = m_BufferHead++;
+		XAUDIO2_BUFFER *pBuffer = &m_Buffers[head % MAX_XAUDIO2_BUFFERS];
+		V_memset( pBuffer->pAudioData, 0, m_bufferSizeBytes );
+		pBuffer->AudioBytes = m_bufferSizeBytes;
+		m_pSourceVoice->SubmitSourceBuffer( pBuffer );
 	}
 }
 
@@ -307,10 +374,12 @@ void CAudioXAudio::XAudioPacketCallback( int hCompletedBuffer )
 //-----------------------------------------------------------------------------
 int	CAudioXAudio::GetOutputPosition( void )
 {
-	DWORD tempPosition = 0;
-	m_pSourceVoice->GetStreamPosition( &tempPosition );
+	XAUDIO2_VOICE_STATE state;
 
-	return ( tempPosition % XAUDIO_BUFFER_SAMPLES );
+	state.SamplesPlayed = 0;
+	m_pSourceVoice->GetState( &state );
+
+	return ( state.SamplesPlayed % m_clockDivider );
 }
 
 //-----------------------------------------------------------------------------
@@ -320,7 +389,7 @@ void CAudioXAudio::Pause( void )
 {
 	if ( m_pSourceVoice )
 	{
-		m_pSourceVoice->Stop( XAUDIOSTOP_IMMEDIATE );
+		m_pSourceVoice->Stop( 0 );
 	}
 }
 
@@ -372,7 +441,7 @@ int CAudioXAudio::PaintBegin( float mixAheadTime, int soundtime, int paintedtime
 //-----------------------------------------------------------------------------
 void CAudioXAudio::ClearBuffer( void )
 {
-	V_memset( m_pOutputBuffer, 0, MAX_XAUDIO_PACKETS * m_bufferSizeBytes );
+	V_memset( m_pOutputBuffer, 0, MAX_XAUDIO2_BUFFERS * m_bufferSizeBytes );
 }
 
 //-----------------------------------------------------------------------------
@@ -478,28 +547,35 @@ int CAudioXAudio::TransferSurroundInterleaved( const portable_samplepair_t *pFro
 //-----------------------------------------------------------------------------
 void CAudioXAudio::TransferSamples( int endTime )
 {
-	XAUDIOPACKET *pPacket;
+	XAUDIO2_BUFFER *pBuffer;
 
-	if ( m_PacketHead - m_PacketTail >= MAX_XAUDIO_PACKETS )
+	if ( m_BufferHead - m_BufferTail >= MAX_XAUDIO2_BUFFERS )
 	{
-		DevWarning( "XAudio: No Free Packets!\n" );
+		DevWarning( "XAudio: No Free Buffers!\n" );
 		return;
 	}
 
-	unsigned int packet = m_PacketHead++;
-	pPacket = &m_Packets[packet % MAX_XAUDIO_PACKETS];
+	int sampleCount = endTime - g_paintedtime;
+	if ( sampleCount > XAUDIO2_BUFFER_SAMPLES )
+	{
+		DevWarning( "XAudio: Overflowed mix buffer!\n" );
+		endTime = g_paintedtime + XAUDIO2_BUFFER_SAMPLES;
+	}
+
+	unsigned int nBuffer = m_BufferHead++;
+	pBuffer = &m_Buffers[nBuffer % MAX_XAUDIO2_BUFFERS];
 
 	if ( !m_bSurround )
 	{
-		pPacket->BufferSize = TransferStereo( PAINTBUFFER, g_paintedtime, endTime, (char *)pPacket->pBuffer );
+		pBuffer->AudioBytes = TransferStereo( PAINTBUFFER, g_paintedtime, endTime, (char *)pBuffer->pAudioData );
 	}
 	else
 	{
-		pPacket->BufferSize = TransferSurroundInterleaved( PAINTBUFFER, REARPAINTBUFFER, CENTERPAINTBUFFER, g_paintedtime, endTime, (char *)pPacket->pBuffer );
+		pBuffer->AudioBytes = TransferSurroundInterleaved( PAINTBUFFER, REARPAINTBUFFER, CENTERPAINTBUFFER, g_paintedtime, endTime, (char *)pBuffer->pAudioData );
 	}
 
-    // submit packet
-	m_pSourceVoice->SubmitPacket( pPacket, XAUDIOSUBMITPACKET_DISCONTINUITY );
+    // submit buffer
+	m_pSourceVoice->SubmitSourceBuffer( pBuffer );
 }
 
 //-----------------------------------------------------------------------------
@@ -515,32 +591,49 @@ const char *CAudioXAudio::DeviceName( void )
 	return "XAudio: Stereo"; 
 }
 
+CXboxVoice::CXboxVoice()
+{
+	m_pXHVEngine = NULL;
+}
+
 //-----------------------------------------------------------------------------
 // Initialize Voice
 //-----------------------------------------------------------------------------
 void CXboxVoice::VoiceInit( void )
 {
-	// Set the processing modes
-	XHV_PROCESSING_MODE rgMode = XHV_VOICECHAT_MODE;
-
-	// Set up parameters for the voice chat engine
-	XHV_INIT_PARAMS xhvParams = {0};
-	xhvParams.dwMaxRemoteTalkers            = MAX_PLAYERS;
-	xhvParams.dwMaxLocalTalkers             = 1;
-	xhvParams.localTalkerEnabledModes       = &rgMode;
-	xhvParams.remoteTalkerEnabledModes      = &rgMode;
-	xhvParams.dwNumLocalTalkerEnabledModes  = 1;
-	xhvParams.dwNumRemoteTalkerEnabledModes = 1;
-
-	// Create the engine
-	HRESULT hr = XHVCreateEngine( &xhvParams, NULL, &m_pXHVEngine );
-
-	if ( hr != S_OK )
+	if ( !m_pXHVEngine )
 	{
-		Warning( "Couldn't load XHV engine!\n" );
+		// Set the processing modes
+		XHV_PROCESSING_MODE rgMode = XHV_VOICECHAT_MODE;
+
+		// Set up parameters for the voice chat engine
+		XHV_INIT_PARAMS xhvParams = {0};
+		xhvParams.dwMaxRemoteTalkers = MAX_PLAYERS;
+		xhvParams.dwMaxLocalTalkers = XUSER_MAX_COUNT;
+		xhvParams.localTalkerEnabledModes = &rgMode;
+		xhvParams.remoteTalkerEnabledModes = &rgMode;
+		xhvParams.dwNumLocalTalkerEnabledModes = 1;
+		xhvParams.dwNumRemoteTalkerEnabledModes = 1;
+		xhvParams.pXAudio2 = CAudioXAudio::m_pSingleton->GetXAudio2();
+
+		// Create the engine
+		HRESULT hr = XHV2CreateEngine( &xhvParams, NULL, &m_pXHVEngine );
+		if ( hr != S_OK )
+		{
+			Warning( "Couldn't load XHV engine!\n" );
+		}
 	}
 
-	VoiceResetLocalData();
+	VoiceResetLocalData( );
+}
+
+void CXboxVoice::VoiceShutdown( void )
+{
+	if ( !m_pXHVEngine )
+		return;
+	
+	m_pXHVEngine->Release();
+	m_pXHVEngine = NULL;
 }
 
 void CXboxVoice::AddPlayerToVoiceList( CClientInfo *pClient, bool bLocal )
@@ -777,4 +870,3 @@ void CXboxVoice::RemoveAllTalkers( CClientInfo *pLocal )
 		}
 	}
 }
-#endif

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Heightfield class
 //
@@ -15,7 +15,7 @@
 #include "tier2/utlstreambuffer.h"
 #include "bitmap/bitmap.h"
 #include "bitmap/psd.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 
 
 //-----------------------------------------------------------------------------

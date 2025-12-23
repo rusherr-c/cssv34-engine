@@ -1,4 +1,4 @@
-//=========== (C) Copyright 1999 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -19,15 +19,15 @@
 #include "materialsystem/materialsystem_config.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "vstdlib/random.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "filesystem_init.h"
-#include "tier0/ICommandLine.h"
+#include "tier0/icommandline.h"
 #include "tier1/KeyValues.h"
-#include "tier1/UtlBuffer.h"
+#include "tier1/utlbuffer.h"
 #include "tier1/lzmadecoder.h"
 #include "materialsystem/imesh.h"
 #include "materialsystem/shader_vcs_version.h"
-#include "../thirdparty/bzip2/bzlib.h"
+#include "../utils/bzip2/bzlib.h"
 
 
 class CShaderUtilTemp : public CBaseAppSystem< IShaderUtil >
@@ -100,7 +100,7 @@ public:
 	virtual ITexture *GetRenderTargetEx( int nRenderTargetID ) { return 0; }
 
 	// Tells the material system to draw a buffer clearing quad
-	virtual void DrawClearBufferQuad( unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool bClearColor, bool bClearDepth ) {}
+	virtual void DrawClearBufferQuad( unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool bClearColor, bool bClearAlpha, bool bClearDepth ) OVERRIDE {}
 
 #if defined( _X360 )
 	virtual void ReadBackBuffer( Rect_t *pSrcRect, Rect_t *pDstRect, unsigned char *pData, ImageFormat dstFormat, int nDstStride ) {}
@@ -125,6 +125,16 @@ public:
 		pInfo->m_nLookupCount = 0;
 		pInfo->m_flDefaultWeight = 0.0f;
 	}
+	virtual void OnThreadEvent( uint32 threadEvent ) {}
+
+	ShaderAPITextureHandle_t GetShaderAPITextureBindHandle( ITexture *pTexture, int nFrame, int nTextureChannel ) { return 0; }
+
+ 	// Remove any materials from memory that aren't in use as determined
+ 	// by the IMaterial's reference count.
+ 	virtual void UncacheUnusedMaterials( bool bRecomputeStateSnapshots = false ) {}
+
+	virtual MaterialThreadMode_t			GetThreadMode( ) { return MATERIAL_SINGLE_THREADED; }
+	virtual bool							IsRenderThreadSafe( ) { return true; }
 };
 
 
@@ -454,7 +464,7 @@ void CShaderAPITestApp::DisplayAdapterInfo()
 		KeyValues *pConfiguration = new KeyValues( "Config" );
 		g_pShaderDeviceMgr->GetRecommendedConfigurationInfo( i, info.m_nDXSupportLevel, pConfiguration );
 		pConfiguration->RecursiveSaveToFile( buf, 1 );
-		Msg( "\tConfiguration:\n%s", buf.Base() );
+		Msg( "\tConfiguration:\n%s", ( const char * )buf.Base() );
 		Msg( "\n" );
 
 		int nModeCount = g_pShaderDeviceMgr->GetModeCount( i );
@@ -862,10 +872,9 @@ bool CShaderAPITestApp::CreateDynamicCombos_Ver5( uint8 *pComboBuffer, bool bVer
 
 		case 0x40000000:								// lzma compressed
 			{
-				CLZMA lzDecoder;
 				nBlockSize &= 0x3fffffff;
 
-				size_t nOutsize = lzDecoder.Uncompress(
+				size_t nOutsize = CLZMA::Uncompress(
 					reinterpret_cast<uint8 *>( pCompressedShaders ),
 					pUnpackBuffer );
 				pCompressedShaders += nBlockSize;
@@ -885,6 +894,7 @@ bool CShaderAPITestApp::CreateDynamicCombos_Ver5( uint8 *pComboBuffer, bool bVer
 		while ( pReadPtr < pUnpackBuffer+nBlockSize )
 		{
 			uint32 nCombo_ID = NextULONG( pReadPtr );
+			(void)nCombo_ID; // Suppress local variable is initialized but not referenced warning
 			uint32 nShaderSize = NextULONG( pReadPtr );
 
 			CUtlBuffer buf( pReadPtr, nShaderSize );
@@ -914,7 +924,7 @@ void CShaderAPITestApp::LoadShaderFile( const char *pName, bool bVertexShader )
 {
 	// next, try the fxc dir
 	char pFileName[MAX_PATH];
-	Q_snprintf( pFileName, MAX_PATH, "..\\hl2\\shaders\\fxc\\%.vcs", pName );
+	Q_snprintf( pFileName, MAX_PATH, "..\\hl2\\shaders\\fxc\\%s.vcs", pName );
 
 	FileHandle_t hFile = g_pFullFileSystem->Open( pFileName, "rb", "EXECUTABLE_PATH" );
 	if ( hFile == FILESYSTEM_INVALID_HANDLE )
@@ -931,7 +941,7 @@ void CShaderAPITestApp::LoadShaderFile( const char *pName, bool bVertexShader )
 	StaticComboRecord_t *pRecords = (StaticComboRecord_t *)malloc( nComboSize );
 	g_pFullFileSystem->Read( pRecords, nComboSize, hFile );
 
-	for ( int i = 0; i < header.m_nNumStaticCombos - 1; ++i )
+	for ( unsigned int i = 0; i < header.m_nNumStaticCombos - 1; ++i )
 	{
 		int nStartingOffset = pRecords[i].m_nFileOffset;
 		int nEndingOffset = pRecords[i+1].m_nFileOffset;

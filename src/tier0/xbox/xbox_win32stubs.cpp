@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: XBox win32 replacements - Mocks trivial windows flow
 //
@@ -97,6 +97,13 @@ LONG_PTR GetWindowLongPtr(HWND hWnd, int nIndex)
 	return GetWindowLong( hWnd, idx );
 }
 
+LONG_PTR GetWindowLongPtrW(HWND hWnd, int nIndex)
+{
+	AssertMsg( false, "GetWindowLongPtrW does not exist on Xbox 360." );
+	return GetWindowLongPtr( hWnd, nIndex );
+}
+
+
 LONG SetWindowLong(HWND hWnd, int nIndex, LONG dwNewLong)
 {
 	LONG	oldLong;
@@ -140,6 +147,12 @@ LONG_PTR SetWindowLongPtr(HWND hWnd, int nIndex, LONG_PTR dwNewLong)
 	}
 
 	return SetWindowLong( hWnd, idx, dwNewLong );
+}
+
+LONG_PTR SetWindowLongPtrW(HWND hWnd, int nIndex, LONG_PTR dwNewLong)
+{
+	AssertMsg( false, "SetWindowLongPtrW does not exist on Xbox 360." );
+	return SetWindowLongPtr( hWnd, nIndex, dwNewLong  );
 }
 
 HWND CreateWindow(LPCTSTR lpClassName, LPCTSTR lpWindowName, DWORD dwStyle, int x, int y, int nWidth, int nHeight, HWND hWndParent, HMENU hMenu, HINSTANCE hInstance, LPVOID lpParam)

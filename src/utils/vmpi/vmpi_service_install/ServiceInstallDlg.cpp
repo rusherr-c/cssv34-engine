@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -854,7 +854,7 @@ void CServiceInstallDlg::OnInstall()
 		return;
 
 	// Create the directory.
-	Msg( "Creating install directory %s.\n", strInstallLocation.GetString() );
+	Msg( "Creating install directory %s.\n", strInstallLocation );
 	if ( !CreateDirectory_R( strInstallLocation ) )
 	{
 		Warning( "Unable to create directory: %s.", (const char*)strInstallLocation );
@@ -925,7 +925,7 @@ bool CServiceInstallDlg::DoUninstall( bool bShowMessage )
 		if ( AnyNonInstallFilesInDirectory( strInstallLocation ) )
 		{		
 			char str[512];
-			V_snprintf( str, sizeof( str ), "Warning: this will delete all files under this directory: \n%s\nContinue?", strInstallLocation.GetString() );
+			V_snprintf( str, sizeof( str ), "Warning: this will delete all files under this directory: \n%s\nContinue?", strInstallLocation );
 			if ( AfxMessageBox( str, MB_YESNO ) != IDYES )
 				return false;
 		}
@@ -946,11 +946,11 @@ bool CServiceInstallDlg::DoUninstall( bool bShowMessage )
 		if ( !NukeDirectory( strInstallLocation, errorFile ) )
 		{
 			if ( errorFile[0] )
-				Msg( "NukeDirectory( %s ) failed.\nError on file: %s\n", strInstallLocation.GetString(), errorFile );
+				Msg( "NukeDirectory( %s ) failed.\nError on file: %s\n", strInstallLocation, errorFile );
 			else
-				Msg( "NukeDirectory( %s ) failed.\n", strInstallLocation.GetString() );
+				Msg( "NukeDirectory( %s ) failed.\n", strInstallLocation );
 			
-			Msg( "Uninstall complete, but files are left over in %s.\n", strInstallLocation.GetString() );
+			Msg( "Uninstall complete, but files are left over in %s.\n", strInstallLocation );
 			
 			bSuccess = false;
 		}

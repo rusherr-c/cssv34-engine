@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: unusedcontent.cpp : Defines the entry point for the console application.
 //
@@ -14,7 +14,7 @@
 #include "utlrbtree.h"
 #include "utlvector.h"
 #include "utldict.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "FileSystem_Tools.h"
 #include "FileSystem_Helpers.h"
 #include "KeyValues.h"
@@ -609,7 +609,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )

@@ -1,10 +1,12 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=====================================================================================//
 
 #include "audio_pch.h"
+#include "fmtstr.h"
+#include "sysexternal.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -77,20 +79,20 @@ public:
 
 
 //-----------------------------------------------------------------------------
-// Purpose: Create an approprite mixer type given the data format
+// Purpose: Create an appropriate mixer type given the data format
 // Input  : *data - data access abstraction
 //			format - pcm or adpcm (1 or 2 -- RIFF format)
 //			channels - number of audio channels (1 = mono, 2 = stereo)
 //			bits - bits per sample
 // Output : CAudioMixer * abstract mixer type that maps mixing to appropriate code
 //-----------------------------------------------------------------------------
-CAudioMixer *CreateWaveMixer( IWaveData *data, int format, int channels, int bits, int initialStreamPosition )
+CAudioMixer *CreateWaveMixer( IWaveData *data, int format, int nChannels, int bits, int initialStreamPosition )
 {
 	CAudioMixer *pMixer = NULL;
 
 	if ( format == WAVE_FORMAT_PCM )
 	{
-		if ( channels > 1 )
+		if ( nChannels > 1 )
 		{
 			if ( bits == 8 )
 				pMixer = new CAudioMixerWave8Stereo( data );
@@ -123,7 +125,7 @@ CAudioMixer *CreateWaveMixer( IWaveData *data, int format, int channels, int bit
 
 	if ( pMixer )
 	{
-		Assert( CalcSampleSize(bits, channels) == pMixer->GetMixSampleSize() );
+		Assert( CalcSampleSize(bits, nChannels ) == pMixer->GetMixSampleSize() );
 	}
 	else
 	{
@@ -139,6 +141,12 @@ CAudioMixer *CreateWaveMixer( IWaveData *data, int format, int channels, int bit
 //-----------------------------------------------------------------------------
 CAudioMixerWave::CAudioMixerWave( IWaveData *data ) : m_pData(data)
 {
+	CAudioSource *pSource = GetSource();
+	if ( pSource )
+	{
+		pSource->ReferenceAdd( this );
+	}
+
 	m_fsample_index = 0;
 	m_sample_max_loaded = 0;
 	m_sample_loaded_index = -1;
@@ -153,13 +161,17 @@ CAudioMixerWave::CAudioMixerWave( IWaveData *data ) : m_pData(data)
 //-----------------------------------------------------------------------------
 CAudioMixerWave::~CAudioMixerWave( void )
 {
-	GetSource()->ReferenceRemove( this );
+	CAudioSource *pSource = GetSource();
+	if ( pSource )
+	{
+		pSource->ReferenceRemove( this );
+	}
 	delete m_pData;
 }
 
 bool CAudioMixerWave::IsReadyToMix()
-{ 
-	return m_pData->IsReadyToMix(); 
+{
+	return m_pData->IsReadyToMix();
 }
 
 //-----------------------------------------------------------------------------
@@ -174,7 +186,8 @@ bool CAudioMixerWave::IsReadyToMix()
 int	CAudioMixerWave::GetOutputData( void **pData, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] )
 {
 	int samples_loaded;
-
+	// clear this out in case the underlying code leaves it unmodified
+	*pData = NULL;
 	samples_loaded = m_pData->ReadSourceData( pData, m_sample_max_loaded, sampleCount, copyBuf );
 
 	// keep track of total samples loaded
@@ -264,6 +277,30 @@ int CAudioMixerWave::SkipSamples( channel_t *pChannel, int sampleCount, int outp
 	return nRetVal;
 }
 
+// wrapper routine to append without overflowing the temp buffer
+static uint AppendToBuffer( char *pBuffer, const char *pSampleData, size_t nBytes, const char *pBufferEnd )
+{
+#if defined(_WIN32) && !defined(_X360)
+	// FIXME: Some clients are crashing here. Let's try to detect why.
+	if ( nBytes > 0 && ( (size_t)pBuffer <= 0xFFF || (size_t)pSampleData <= 0xFFF ) )
+	{
+		Warning( "AppendToBuffer received potentially bad values (%p, %p, %u, %p)\n", pBuffer, pSampleData, (int)nBytes, pBufferEnd );
+	}
+#endif
+
+	if ( pBufferEnd > pBuffer )
+	{
+		size_t nAvail = pBufferEnd - pBuffer;
+		size_t nCopy = MIN( nBytes, nAvail );
+		Q_memcpy( pBuffer, pSampleData, nCopy );
+		return nCopy;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
 // Load a static copy buffer (g_temppaintbuffer) with the requested number of samples, 
 // with the first sample(s) in the buffer always set up as the last sample(s) of the previous load.
 // Return a pointer to the head of the copy buffer.
@@ -298,14 +335,18 @@ char *CAudioMixerWave::LoadMixBuffer( channel_t *pChannel, int sample_load_reque
 	}
 
 	int samplesize = GetMixSampleSize();
+	const int nTempCopyBufferSize = ( TEMP_COPY_BUFFER_SIZE * sizeof( portable_samplepair_t ) );
 	char *pCopy = (char *)g_temppaintbuffer;
+	const char *pCopyBufferEnd = pCopy + nTempCopyBufferSize;
+
+
 
 	if ( IsX360() || IsDebug() )
 	{	
 		// for safety, 360 always validates sample request, due to new xma audio code and possible logic flaws
 		// PC can expect number of requested samples to be within tolerances due to exisiting aged code
 		// otherwise buffer overruns cause hard to track random crashes
-		if ( ( ( sample_load_request + 1 ) * samplesize ) > ( TEMP_COPY_BUFFER_SIZE * sizeof( portable_samplepair_t ) ) )
+		if ( ( ( sample_load_request + 1 ) * samplesize ) > nTempCopyBufferSize )
 		{
 			// make sure requested samples will fit in temp buffer.
 			// if this assert fails, then pitch is too high (ie: > 2.0) or the sample counters have diverged.
@@ -379,13 +420,9 @@ char *CAudioMixerWave::LoadMixBuffer( channel_t *pChannel, int sample_load_reque
 	if ( cCopySamps )
 	{
 		pSample = cCopySamps == 1 ? pSample + samplesize : pSample;
-		Q_memcpy( pCopy, pSample, samplesize * cCopySamps );
-		pCopy += samplesize * cCopySamps;
+		pCopy += AppendToBuffer( pCopy, pSample, samplesize * cCopySamps, pCopyBufferEnd );
 	}
 
-	// don't overflow copy buffer
-	Assert ( (PAINTBUFFER_MEM_SIZE * sizeof( portable_samplepair_t )) > ( ( samples_loaded + 1 ) * samplesize ) );
-	
 	// copy loaded samples from pData into pCopy
 	// and update pointer to free space in copy buffer
 	if ( ( samples_loaded * samplesize ) != 0 && !pData )
@@ -402,9 +439,8 @@ char *CAudioMixerWave::LoadMixBuffer( channel_t *pChannel, int sample_load_reque
 		return NULL;
 	}
 
-	Q_memcpy( pCopy, pData, samples_loaded * samplesize );
-	pCopy += samples_loaded * samplesize;
-	
+	pCopy += AppendToBuffer( pCopy, pData, samples_loaded * samplesize, pCopyBufferEnd );
+
 	// if we loaded fewer samples than we wanted to, and we're not
 	// delaying, load more samples or, if we run out of samples from non-looping source, 
 	// pad copy buffer.
@@ -431,8 +467,7 @@ char *CAudioMixerWave::LoadMixBuffer( channel_t *pChannel, int sample_load_reque
 					return NULL;
 				}
 
-				Q_memcpy( pCopy, pData, samples_loaded_retry * samplesize );
-				pCopy += samples_loaded_retry * samplesize;
+				pCopy += AppendToBuffer( pCopy, pData, samples_loaded_retry * samplesize, pCopyBufferEnd );
 				samples_loaded += samples_loaded_retry;
 			}
 		}
@@ -448,8 +483,11 @@ char *CAudioMixerWave::LoadMixBuffer( channel_t *pChannel, int sample_load_reque
 		// non-looping source hit end of data, fill rest of g_temppaintbuffer with 0
 		int samples_zero_fill = sample_load_request - samples_loaded;
 
-		Q_memset( pCopy, 0, samples_zero_fill * samplesize );
-		pCopy += samples_zero_fill * samplesize;
+		int nAvail = pCopyBufferEnd - pCopy;
+		int nFill = samples_zero_fill * samplesize;
+		nFill = MIN( nAvail, nFill );
+		Q_memset( pCopy, 0, nFill );
+		pCopy += nFill;
 		samples_loaded += samples_zero_fill;
 	}
 
@@ -475,7 +513,7 @@ char *CAudioMixerWave::LoadMixBuffer( channel_t *pChannel, int sample_load_reque
 double RoundToFixedPoint( double rate, int samples, bool bInterpolated_pitch )
 {
 	fixedint fixp_rate;
-	__int64 d64_newSamps;		// need to use double precision int to avoid overflow
+	int64 d64_newSamps;		// need to use double precision int to avoid overflow
 
 	double newSamps;
 
@@ -488,7 +526,7 @@ double RoundToFixedPoint( double rate, int samples, bool bInterpolated_pitch )
 	
 	// get number of new samples, convert back to float
 
-	d64_newSamps = (__int64)fixp_rate * (__int64)samples;
+	d64_newSamps = (int64)fixp_rate * (int64)samples;
 
 	if ( bInterpolated_pitch )
 		newSamps = FIX_14TODOUBLE(d64_newSamps);
@@ -564,6 +602,8 @@ int CAudioMixerWave::MixDataToDevice_( IAudioDevice *pDevice, channel_t *pChanne
 	// shouldn't be playing this if finished, but return if we are
 	if ( m_finished )
 		return 0;
+
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
 
 	// save this to compute total output
 	int startingOffset = outputOffset;
@@ -686,7 +726,7 @@ int CAudioMixerWave::MixDataToDevice_( IAudioDevice *pDevice, channel_t *pChanne
 			Assert( floor( sampleFraction + RoundToFixedPoint(rate, (outputSampleCount-1), bInterpolated_pitch) ) <= samples_loaded );
 
 			int saveIndex = MIX_GetCurrentPaintbufferIndex();
-			for ( int i = 0 ; i < CPAINTBUFFERS; i++ )
+			for ( int i = 0 ; i < g_paintBuffers.Count(); i++ )
 			{
 				if ( g_paintBuffers[i].factive )
 				{

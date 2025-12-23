@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,6 +14,8 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+ConVar gl_amd_occlusion_workaround( "gl_amd_occlusion_workaround", "1" );
 
 DEFINE_FALLBACK_SHADER( Occlusion, Occlusion_DX9 )
 
@@ -50,7 +52,18 @@ BEGIN_VS_SHADER_FLAGS( Occlusion_DX9, "Help for Occlusion", SHADER_NOT_EDITABLE 
 			DECLARE_STATIC_VERTEX_SHADER( writez_vs20 );
 			SET_STATIC_VERTEX_SHADER( writez_vs20 );
 
-			//no pixel shader, doubles fill rate.
+			// No pixel shader on Direct3D, doubles fill rate
+			if ( g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() )
+			{
+				DECLARE_STATIC_PIXEL_SHADER( white_ps20 );
+				SET_STATIC_PIXEL_SHADER( white_ps20 );
+
+				// Workaround for weird AMD bug - if sRGB write isn't enabled here then sRGB write enable in subsequent world rendering passes will randomly not take effect (even though we're enabling it) in the driver.
+				if ( ( IsLinux() || IsWindows() ) && gl_amd_occlusion_workaround.GetBool() )
+				{
+					pShaderShadow->EnableSRGBWrite( true );
+				}
+			}
 
 			// Set stream format (note that this shader supports compression)
 			unsigned int flags = VERTEX_POSITION | VERTEX_FORMAT_COMPRESSED;
@@ -65,7 +78,12 @@ BEGIN_VS_SHADER_FLAGS( Occlusion_DX9, "Help for Occlusion", SHADER_NOT_EDITABLE 
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( COMPRESSED_VERTS, (int)vertexCompression );
 			SET_DYNAMIC_VERTEX_SHADER( writez_vs20 );
 
-			//no pixel shader, doubles fill rate.
+			// No pixel shader on Direct3D, doubles fill rate
+			if ( g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() )
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( white_ps20 );
+				SET_DYNAMIC_PIXEL_SHADER( white_ps20 );
+			}
 		}
 		Draw();
 	}

@@ -1,12 +1,12 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================
 
 #include "filesystem.h"
-#include "matsys_controls/BaseAssetPicker.h"
-#include "tier1/keyvalues.h"
+#include "matsys_controls/baseassetpicker.h"
+#include "tier1/KeyValues.h"
 #include "tier1/utlntree.h"
 #include "tier1/utlrbtree.h"
 #include "vgui_controls/ListPanel.h"
@@ -14,13 +14,13 @@
 #include "vgui_controls/ComboBox.h"
 #include "vgui_controls/Button.h"
 #include "vgui_controls/Splitter.h"
-#include "vgui_controls/treeview.h"
+#include "vgui_controls/TreeView.h"
 #include "vgui_controls/ImageList.h"
 #include "vgui_controls/CheckButton.h"
-#include "vgui/isurface.h"
-#include "vgui/iinput.h"
-#include "vgui/ivgui.h"
-#include "vgui/cursor.h"
+#include "vgui/ISurface.h"
+#include "vgui/IInput.h"
+#include "vgui/IVGui.h"
+#include "vgui/Cursor.h"
 
 
 using namespace vgui;
@@ -157,7 +157,7 @@ DirHandle_t CAssetTreeView::AddSubDirectory( DirHandle_t hParent, const char *pD
 {
 	DirHandle_t hSubdir = m_DirectoryStructure.Alloc();
 	m_DirectoryStructure[hSubdir] = pDirName;
-	Q_strlower( m_DirectoryStructure[hSubdir].GetForModify() );
+	m_DirectoryStructure[hSubdir].ToLower();
 
 	DirHandle_t hChild = m_DirectoryStructure.FirstChild( hParent );
 	m_DirectoryStructure.LinkChildBefore( hParent, hChild, hSubdir );
@@ -585,7 +585,9 @@ bool CAssetCache::DoesExtensionMatch( CachedAssetList_t& info, const char *pFile
 //-----------------------------------------------------------------------------
 bool CAssetCache::AddFilesInDirectory( CachedAssetList_t& list, const char *pStartingFile, const char *pFilePath, DirHandle_t hCurrentDir, float flStartTime, float flDuration )
 {
-	Assert( list.m_hFind != FILESYSTEM_INVALID_FIND_HANDLE );
+	// Indicates no files found
+	if ( list.m_hFind == FILESYSTEM_INVALID_FIND_HANDLE )
+		return true;
 
 	// generate children
 	// add all the items
@@ -599,6 +601,13 @@ bool CAssetCache::AddFilesInDirectory( CachedAssetList_t& list, const char *pSta
 
 		if ( g_pFullFileSystem->FindIsDirectory( list.m_hFind ) )
 		{
+			// If .svn is in the name, don't add this directory!!
+			if ( strstr (pszFileName, ".svn") )
+			{
+				pszFileName = g_pFullFileSystem->FindNext( list.m_hFind );
+				continue;
+			}
+
 			if ( Q_strnicmp( pszFileName, ".", 2 ) && Q_strnicmp( pszFileName, "..", 3 ) )
 			{
 				DirHandle_t hDirHandle = list.m_pFileTree->AddSubDirectory( hCurrentDir, pszFileName );
@@ -1047,17 +1056,17 @@ void CBaseAssetPicker::Activate()
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CBaseAssetPicker::OnKeyCodeTyped( KeyCode code )
+void CBaseAssetPicker::OnKeyCodePressed( KeyCode code )
 {
 	if (( code == KEY_UP ) || ( code == KEY_DOWN ) || ( code == KEY_PAGEUP ) || ( code == KEY_PAGEDOWN ))
 	{
-		KeyValues *pMsg = new KeyValues("KeyCodeTyped", "code", code);
+		KeyValues *pMsg = new KeyValues("KeyCodePressed", "code", code);
 		vgui::ipanel()->SendMessage( m_pAssetBrowser->GetVPanel(), pMsg, GetVPanel());
 		pMsg->deleteThis();
 	}
 	else
 	{
-		BaseClass::OnKeyCodeTyped( code );
+		BaseClass::OnKeyCodePressed( code );
 	}
 }
 
@@ -1245,6 +1254,15 @@ void CBaseAssetPicker::RescanAssets()
 
 
 //-----------------------------------------------------------------------------
+// Returns the mod path to the item index
+//-----------------------------------------------------------------------------
+const char *CBaseAssetPicker::GetModPath( int nModIndex )
+{
+	return s_AssetCache.ModInfo( nModIndex ).m_Path.Get();
+}
+
+
+//-----------------------------------------------------------------------------
 // Command handler
 //-----------------------------------------------------------------------------
 void CBaseAssetPicker::OnCommand( const char *pCommand )
@@ -1383,10 +1401,10 @@ void CBaseAssetPicker::OnTextChanged( KeyValues *pKeyValues )
 
 	if ( pSource == m_pModSelector )
 	{
-		KeyValues *pKeyValues = m_pModSelector->GetActiveItemUserData();
-		if ( pKeyValues )
+		KeyValues *pKeyValuesActive = m_pModSelector->GetActiveItemUserData();
+		if ( pKeyValuesActive )
 		{
-			m_nCurrentModFilter = pKeyValues->GetInt( "mod", -1 ); 
+			m_nCurrentModFilter = pKeyValuesActive->GetInt( "mod", -1 );
 			RefreshAssetList();
 		}
 		return;
@@ -1465,7 +1483,7 @@ const char *CBaseAssetPicker::GetSelectedAsset( int nAssetIndex )
 int CBaseAssetPicker::GetSelectedAssetModIndex( )
 {
 	if ( m_pAssetBrowser->GetSelectedItemsCount() == 0 )
-		return NULL;
+		return 0;
 
 	int nIndex = m_pAssetBrowser->GetSelectedItem( 0 );
 	KeyValues *pItemKeyValues = m_pAssetBrowser->GetItem( nIndex );

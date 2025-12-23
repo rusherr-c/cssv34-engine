@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Linux support for the IGame interface
 //
@@ -14,7 +14,6 @@
 #include "ivideomode.h"
 #include "igame.h"
 
-#define HWND int
 #define UINT unsigned int
 #define WPARAM int
 #define LPARAM int
@@ -23,6 +22,7 @@
 #include "server.h"
 #include "cdll_int.h"
 
+#ifdef SWDS
 void ForceReloadProfile( void );
 
 void ClearIOStates( void );
@@ -46,6 +46,7 @@ public:
 	virtual void	InputDetachFromGameWindow();
 
 	void*			GetMainWindow( void );
+	void*			GetMainDeviceWindow( void );
 	void**			GetMainWindowAddress( void );
 
 	void			SetWindowXY( int x, int y );
@@ -155,6 +156,11 @@ void *CGame::GetMainWindow( void )
 	return 0;
 }
 
+void *CGame::GetMainDeviceWindow( void )
+{
+	return 0;
+}
+
 void **CGame::GetMainWindowAddress( void )
 {
 	return NULL;
@@ -209,3 +215,4 @@ void CGame::GetDesktopInfo( int &width, int &height, int &refreshRate )
 	refreshRate = 0;
 }
 
+#endif

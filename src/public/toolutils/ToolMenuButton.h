@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -13,7 +13,7 @@
 
 #include "vgui_controls/menubutton.h"
 #include "tier1/utldict.h"
-#include "tier1/UtlSymbol.h"
+#include "tier1/utlsymbol.h"
 
 
 //-----------------------------------------------------------------------------

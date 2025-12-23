@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -38,24 +38,22 @@ public:
 	virtual bool Reload();
 	virtual void WeaponIdle();
 
-	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_P228; }
+ 	virtual float GetInaccuracy() const;
 
+	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_P228; }
 
 private:
 	
 	CWeaponP228( const CWeaponP228 & );
-	void P228Fire( float flSpread );
 
 	float m_flLastFire;
 };
 
-IMPLEMENT_NETWORKCLASS_ALIASED( WeaponP228, DT_WeaponP228 )
-
-BEGIN_NETWORK_TABLE( CWeaponP228, DT_WeaponP228 )
-END_NETWORK_TABLE()
-
+#if defined CLIENT_DLL
 BEGIN_PREDICTION_DATA( CWeaponP228 )
+	DEFINE_FIELD( m_flLastFire, FIELD_FLOAT ),
 END_PREDICTION_DATA()
+#endif
 
 LINK_ENTITY_TO_CLASS( weapon_p228, CWeaponP228 );
 PRECACHE_WEAPON_REGISTER( weapon_p228 );
@@ -83,31 +81,38 @@ bool CWeaponP228::Deploy( )
 	return BaseClass::Deploy();
 }
 
+IMPLEMENT_NETWORKCLASS_ALIASED( WeaponP228, DT_WeaponP228 )
+
+BEGIN_NETWORK_TABLE( CWeaponP228, DT_WeaponP228 )
+END_NETWORK_TABLE()
+
+
+float CWeaponP228::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 1.5f * (1 - m_flAccuracy);
+		else if (pPlayer->GetAbsVelocity().Length2D() > 5)
+			return 0.255f * (1 - m_flAccuracy);
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			return 0.075f * (1 - m_flAccuracy);
+		else
+			return 0.15f * (1 - m_flAccuracy);
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
+
 void CWeaponP228::PrimaryAttack( void )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
-		return;
-
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		P228Fire( 1.5f * (1 - m_flAccuracy) );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 5)
-		P228Fire( 0.255f * (1 - m_flAccuracy) );
-	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
-		P228Fire( 0.075f * (1 - m_flAccuracy) );
-	else
-		P228Fire( 0.15f * (1 - m_flAccuracy) );
-}
-
-void CWeaponP228::P228Fire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
-	pPlayer->m_iShotsFired++;
-
-	if (pPlayer->m_iShotsFired > 1)
 		return;
 
 	// Mark the time of this shot and determine the accuracy modifier based on the last shot fired...
@@ -122,14 +127,17 @@ void CWeaponP228::P228Fire( float flSpread )
 	
 	if (m_iClip1 <= 0)
 	{
-		if (m_bFireOnEmpty)
+		if ( m_bFireOnEmpty )
 		{
 			PlayEmptySound();
-			m_flNextPrimaryAttack = gpGlobals->curtime + 0.2;
+			m_flNextPrimaryAttack = gpGlobals->curtime + 0.1f;
+			m_bFireOnEmpty = false;
 		}
 
 		return;
 	}
+
+	pPlayer->m_iShotsFired++;
 
 	m_iClip1--;
 	
@@ -149,7 +157,8 @@ void CWeaponP228::P228Fire( float flSpread )
 		GetWeaponID(),
 		Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		flSpread );
+		GetInaccuracy(),
+		GetSpread());
 	
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->curtime + GetCSWpnData().m_flCycleTime;
 
@@ -162,6 +171,9 @@ void CWeaponP228::P228Fire( float flSpread )
 	SetWeaponIdleTime( gpGlobals->curtime + 2 );
 
 	//ResetPlayerShieldAnim();
+
+	// update accuracy
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyImpulseFire[Primary_Mode];
 
 	QAngle angle = pPlayer->GetPunchAngle();
 	angle.x -= 2;

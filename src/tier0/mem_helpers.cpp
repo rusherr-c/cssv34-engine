@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,6 +8,20 @@
 #include "mem_helpers.h"
 #include <string.h>
 #include <malloc.h>
+
+bool g_bInitMemory = true;
+
+#ifdef POSIX
+void DoApplyMemoryInitializations( void *pMem, int nSize )
+{
+}
+
+size_t CalcHeapUsed()
+{
+	return 0;
+}
+
+#else
 
 unsigned long g_dwFeeFee = 0xffeeffee;
 
@@ -67,11 +81,9 @@ void InitializeToRandom( void *pMem, int nSize )
 	}
 }
 
-bool g_bInitMemory = true;
 
 void DoApplyMemoryInitializations( void *pMem, int nSize )
 {
-#if !defined( _LINUX )
 	if ( !pMem )
 		return;
 	
@@ -123,23 +135,22 @@ void DoApplyMemoryInitializations( void *pMem, int nSize )
 #endif
 		}
 	}
-#endif
 }
 
-int CalcHeapUsed()
+size_t CalcHeapUsed()
 {
-#if defined( _LINUX ) || defined( _X360 )
+#if defined( _X360 )
 	return 0;
 #else
 	_HEAPINFO	hinfo;
 	int			heapstatus;
-	int			nTotal;
+	intp			nTotal;
 
 	nTotal = 0;
 	hinfo._pentry = NULL;
 	while( ( heapstatus = _heapwalk( &hinfo ) ) == _HEAPOK )
 	{
-		nTotal += (int)((hinfo._useflag == _USEDENTRY) ? hinfo._size : 0);
+		nTotal += (hinfo._useflag == _USEDENTRY) ? hinfo._size : 0;
 	}
 
 	switch (heapstatus)
@@ -157,3 +168,5 @@ int CalcHeapUsed()
 	return nTotal;
 #endif
 }
+#endif
+

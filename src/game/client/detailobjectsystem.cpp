@@ -1,4 +1,4 @@
-//===== Copyright Å© 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Draws grasses and other small objects  
 //
@@ -6,22 +6,25 @@
 // $NoKeywords: $
 //===========================================================================//
 #include "cbase.h"
-#include <algorithm>
-#include "DetailObjectSystem.h"
-#include "GameBspFile.h"
-#include "UtlBuffer.h"
+#include "detailobjectsystem.h"
+#include "gamebspfile.h"
+#include "tier1/utlbuffer.h"
 #include "tier1/utlmap.h"
 #include "view.h"
-#include "ClientMode.h"
-#include "IViewRender.h"
-#include "BSPTreeData.h"
+#include "clientmode.h"
+#include "iviewrender.h"
+#include "bsptreedata.h"
 #include "tier0/vprof.h"
 #include "engine/ivmodelinfo.h"
-#include "materialsystem/IMesh.h"
+#include "materialsystem/imesh.h"
 #include "model_types.h"
 #include "env_detail_controller.h"
 #include "tier0/icommandline.h"
 #include "c_world.h"
+
+#include "tier0/valve_minmax_off.h"
+#include <algorithm>
+#include "tier0/valve_minmax_on.h"
 
 #if defined(DOD_DLL) || defined(CSTRIKE_DLL)
 #define USE_DETAIL_SHAPES
@@ -161,6 +164,7 @@ public:
 	virtual bool				GetShadowCastDirection( Vector *pDirection, ShadowType_t shadowType ) const	{ return false; }
 	virtual bool				UsesPowerOfTwoFrameBufferTexture();
 	virtual bool				UsesFullFrameBufferTexture();
+	virtual bool				IgnoresZBuffer( void ) const { return false; }
 	virtual bool				LODTest() { return true; }
 
 	virtual ClientShadowHandle_t	GetShadowHandle() const;
@@ -612,7 +616,7 @@ void CDetailModel::GetRenderBoundsWorldspace( Vector& mins, Vector& maxs )
 
 bool CDetailModel::ShouldReceiveProjectedTextures( int flags )
 {
-	return true;
+	return false;
 }
 
 bool CDetailModel::UsesPowerOfTwoFrameBufferTexture()
@@ -1313,7 +1317,7 @@ void CDetailModel::UpdatePlayerAvoid( void )
 	Vector vecMaxAvoid(0,0,0);
 
 	CPlayerEnumerator avoid( flRadius, m_Origin );
-	partition->EnumerateElementsInSphere( PARTITION_CLIENT_SOLID_EDICTS, m_Origin, flRadius, false, &avoid );
+	::partition->EnumerateElementsInSphere( PARTITION_CLIENT_SOLID_EDICTS, m_Origin, flRadius, false, &avoid );
 
 	// Okay, decide how to avoid if there's anything close by
 	int c = avoid.GetObjectCount();
@@ -1473,7 +1477,7 @@ void CDetailObjectSystem::LevelInitPreEntity()
 		PrecacheMaterial( DETAIL_SPRITE_MATERIAL );
 		IMaterial *pMat = m_DetailSpriteMaterial;
 		// adjust for non-square textures (cropped)
-		float flRatio = pMat->GetMappingWidth() / pMat->GetMappingHeight();
+		float flRatio = (float)( pMat->GetMappingWidth() ) / pMat->GetMappingHeight();
 		if ( flRatio > 1.0 )
 		{
 			for( int i = 0; i<m_DetailSpriteDict.Count(); i++ )
@@ -1518,8 +1522,8 @@ void CDetailObjectSystem::LevelInitPostEntity()
 
 	if ( GetDetailController() )
 	{
-		cl_detailfade.SetValue( min( m_flDefaultFadeStart, GetDetailController()->m_flFadeStartDist ) );
-		cl_detaildist.SetValue( min( m_flDefaultFadeEnd, GetDetailController()->m_flFadeEndDist ) );
+		cl_detailfade.SetValue( MIN( m_flDefaultFadeStart, GetDetailController()->m_flFadeStartDist ) );
+		cl_detaildist.SetValue( MIN( m_flDefaultFadeEnd, GetDetailController()->m_flFadeEndDist ) );
 	}
 	else
 	{
@@ -1613,7 +1617,7 @@ void CDetailObjectSystem::UnserializeDetailSprites( CUtlBuffer& buf )
 		buf.Get( &m_DetailSpriteDict[i], sizeof(DetailSpriteDictLump_t) );
 		int flipi = m_DetailSpriteDictFlipped.AddToTail();
 		m_DetailSpriteDictFlipped[flipi] = m_DetailSpriteDict[i];
-		V_swap( m_DetailSpriteDictFlipped[flipi].m_TexUL.x, m_DetailSpriteDictFlipped[flipi].m_TexLR.x );
+		::V_swap( m_DetailSpriteDictFlipped[flipi].m_TexUL.x, m_DetailSpriteDictFlipped[flipi].m_TexLR.x );
 	}
 }
 
@@ -1678,8 +1682,8 @@ void CDetailObjectSystem::ScanForCounts( CUtlBuffer& buf,
 		{
 			// need to pad nfast to next sse boundary
 			nFast += ( 0 - nFast ) & 3;
-			nMaxFast = max( nMaxFast, nNumFastInLeaf );
-			nMaxOld = max( nMaxOld, nNumOldInLeaf );
+			nMaxFast = MAX( nMaxFast, nNumFastInLeaf );
+			nMaxOld = MAX( nMaxOld, nNumOldInLeaf );
 			nNumOldInLeaf = 0;
 			nNumFastInLeaf = 0;
 			detailObjectLeaf = lump.m_Leaf;
@@ -1700,8 +1704,8 @@ void CDetailObjectSystem::ScanForCounts( CUtlBuffer& buf,
 
 	// need to pad nfast to next sse boundary
 	nFast += ( 0 - nFast ) & 3;
-	nMaxFast = max( nMaxFast, nNumFastInLeaf );
-	nMaxOld = max( nMaxOld, nNumOldInLeaf );
+	nMaxFast = MAX( nMaxFast, nNumFastInLeaf );
+	nMaxOld = MAX( nMaxOld, nNumOldInLeaf );
 
 	buf.SeekGet( CUtlBuffer::SEEK_HEAD, oldpos );
 	*pNumFastSpritesToAllocate = nFast;
@@ -1987,7 +1991,7 @@ int CDetailObjectSystem::CountFastSpritesInLeafList( int nLeafCount, LeafIndex_t
 		if ( pData )
 		{
 			nCount += pData->m_nNumSprites;
-			nMax = max( nMax, pData->m_nNumSprites );
+			nMax = MAX( nMax, pData->m_nNumSprites );
 		}
 	}
 	*nMaxFoundInLeaf = ( nMax + 3 ) & ~3;					// round up
@@ -2113,7 +2117,7 @@ int CDetailObjectSystem::SortSpritesBackToFront( int nLeaf, const Vector &viewOr
 
 
 #define MAGIC_NUMBER (1<<23)
-#ifdef BIG_ENDIAN
+#ifdef VALVE_BIG_ENDIAN
 #define MANTISSA_LSB_OFFSET 3
 #else
 #define MANTISSA_LSB_OFFSET 0
@@ -2121,7 +2125,7 @@ int CDetailObjectSystem::SortSpritesBackToFront( int nLeaf, const Vector &viewOr
 static fltx4 Four_MagicNumbers={ MAGIC_NUMBER, MAGIC_NUMBER, MAGIC_NUMBER, MAGIC_NUMBER };
 static fltx4 Four_255s={ 255.0, 255.0, 255.0, 255.0 };
 
-static __declspec(align(16)) int32 And255Mask[4]= {0xff,0xff,0xff,0xff};
+static ALIGN16 int32 And255Mask[4] ALIGN16_POST = {0xff,0xff,0xff,0xff};
 #define PIXMASK ( * ( reinterpret_cast< fltx4 *>( &And255Mask ) ) )
 
 int CDetailObjectSystem::BuildOutSortedSprites( CFastDetailLeafSpriteList *pData,
@@ -2265,7 +2269,10 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 		nMaxQuadsToDraw = nMaxVerts / 4;
 	}
 
-	int nQuadsToDraw = min( nQuadCount, nMaxQuadsToDraw );
+	if ( nMaxQuadsToDraw == 0 )
+		return;
+
+	int nQuadsToDraw = MIN( nQuadCount, nMaxQuadsToDraw );
 	int nQuadsRemaining = nQuadsToDraw;
 
 	meshBuilder.Begin( pMesh, MATERIAL_QUADS, nQuadsToDraw );
@@ -2303,7 +2310,7 @@ void CDetailObjectSystem::RenderFastSprites( const Vector &viewOrigin, const Vec
 					nQuadsRemaining = nQuadsToDraw;
 					meshBuilder.Begin( pMesh, MATERIAL_QUADS, nQuadsToDraw );
 				}
-				int nToDraw = min( nCount, nQuadsRemaining );
+				int nToDraw = MIN( nCount, nQuadsRemaining );
 				nCount -= nToDraw;
 				nQuadsRemaining -= nToDraw;
 				while( nToDraw-- )
@@ -2399,6 +2406,9 @@ void CDetailObjectSystem::RenderTranslucentDetailObjects( const Vector &viewOrig
 	{
 		nMaxQuadsToDraw = nMaxVerts / 4;
 	}
+
+	if ( nMaxQuadsToDraw == 0 )
+		return;
 
 	int nQuadsToDraw = nQuadCount;
 	if ( nQuadsToDraw > nMaxQuadsToDraw )
@@ -2509,8 +2519,11 @@ void CDetailObjectSystem::RenderFastTranslucentDetailObjectsInLeaf( const Vector
 	{
 		nMaxQuadsToDraw = nMaxVerts / 4;
 	}
+	
+	if ( nMaxQuadsToDraw == 0 )
+		return;
 		
-	int nQuadsToDraw = min( nCount, nMaxQuadsToDraw );
+	int nQuadsToDraw = MIN( nCount, nMaxQuadsToDraw );
 	int nQuadsRemaining = nQuadsToDraw;
 		
 	meshBuilder.Begin( pMesh, MATERIAL_QUADS, nQuadsToDraw );
@@ -2529,7 +2542,7 @@ void CDetailObjectSystem::RenderFastTranslucentDetailObjectsInLeaf( const Vector
 			nQuadsRemaining = nQuadsToDraw;
 			meshBuilder.Begin( pMesh, MATERIAL_QUADS, nQuadsToDraw );
 		}
-		int nToDraw = min( nCount, nQuadsRemaining );
+		int nToDraw = MIN( nCount, nQuadsRemaining );
 		nCount -= nToDraw;
 		nQuadsRemaining -= nToDraw;
 		while( nToDraw-- )
@@ -2647,6 +2660,10 @@ void CDetailObjectSystem::RenderTranslucentDetailObjectsInLeaf( const Vector &vi
 	{
 		nMaxQuadsToDraw = nMaxVerts / 4;
 	}
+
+	if ( nMaxQuadsToDraw == 0 )
+		return;
+
 	int nQuadsToDraw = nQuadCount;
 	if ( nQuadsToDraw > nMaxQuadsToDraw )
 	{
@@ -2783,7 +2800,7 @@ void CDetailObjectSystem::BuildDetailObjectRenderLists( const Vector &vViewOrigi
 	{
 		m_flCurFadeSqDist = 0;
 	}
-	m_flCurFadeSqDist = min( m_flCurFadeSqDist, m_flCurMaxSqDist -1  );
+	m_flCurFadeSqDist = MIN( m_flCurFadeSqDist, m_flCurMaxSqDist -1  );
 	m_flCurFalloffFactor = 255.0f / ( m_flCurMaxSqDist - m_flCurFadeSqDist );
 
 

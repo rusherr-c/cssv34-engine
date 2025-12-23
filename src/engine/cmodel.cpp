@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: BSP collision!
 //
@@ -377,13 +377,16 @@ cmodel_t *CM_LoadMap( const char *name, bool allowReusePrevious, unsigned *check
 //-----------------------------------------------------------------------------
 vcollide_t* CM_VCollideForModel( int modelindex, const model_t* pModel )
 {
-	switch( pModel->type )
+	if ( pModel )
 	{
-	case mod_brush:
-		return CM_GetVCollide( modelindex-1 );
-	case mod_studio:
-		Assert( modelloader->IsLoaded( pModel ) );
-		return g_pMDLCache->GetVCollide( pModel->studio );
+		switch( pModel->type )
+		{
+		case mod_brush:
+			return CM_GetVCollide( modelindex-1 );
+		case mod_studio:
+			Assert( modelloader->IsLoaded( pModel ) );
+			return g_pMDLCache->GetVCollide( pModel->studio );
+		}
 	}
 
 	return 0;
@@ -695,12 +698,102 @@ int	CM_BoxClusters_headnode ( CCollisionBSPData *pBSPData, const Vector& mins, c
 }
 #endif
 
+static int FASTCALL CM_BrushBoxContents( CCollisionBSPData *pBSPData, const Vector &vMins, const Vector &vMaxs, cbrush_t *pBrush )
+{
+	if ( pBrush->IsBox())
+	{
+		cboxbrush_t *pBox = &pBSPData->map_boxbrushes[pBrush->GetBox()];
+		if ( !IsBoxIntersectingBox( vMins, vMaxs, pBox->mins, pBox->maxs ) )
+			return 0;
+	}
+	else
+	{
+		if (!pBrush->numsides)
+			return 0;
+		Vector vCenter = 0.5f *(vMins + vMaxs);
+		Vector vExt = vMaxs - vCenter;
+		int			i, j;
+
+		cplane_t	*plane;
+		float		dist;
+		Vector		vOffset;
+		float		d1;
+		cbrushside_t	*side;
+
+		for (i=0 ; i<pBrush->numsides ; i++)
+		{
+			side = &pBSPData->map_brushsides[pBrush->firstbrushside+i];
+			plane = side->plane;
+
+			// FIXME: special case for axial
+
+			// general box case
+
+			// push the plane out appropriately for mins/maxs
+
+			// FIXME: use signbits into 8 way lookup for each mins/maxs
+			for (j=0 ; j<3 ; j++)
+			{
+				if (plane->normal[j] < 0)
+					vOffset[j] = vExt[j];
+				else
+					vOffset[j] = -vExt[j];
+			}
+			dist = DotProduct (vOffset, plane->normal);
+			dist = plane->dist - dist;
+
+			d1 = DotProduct (vCenter, plane->normal) - dist;
+
+			// if completely in front of face, no intersection
+			if (d1 > 0)
+				return 0;
+
+		}
+	}
+
+	// inside this brush
+	return pBrush->contents;
+}
+
+static int FASTCALL CM_BrushPointContents( CCollisionBSPData *pBSPData, const Vector &vPos, cbrush_t *pBrush )
+{
+	if ( pBrush->IsBox())
+	{
+		cboxbrush_t *pBox = &pBSPData->map_boxbrushes[pBrush->GetBox()];
+		if ( !IsPointInBox( vPos, pBox->mins, pBox->maxs ) )
+			return 0;
+	}
+	else
+	{
+		if (!pBrush->numsides)
+			return 0;
+
+		cplane_t	*plane;
+		cbrushside_t	*side;
+
+		for ( int i = 0 ; i < pBrush->numsides; i++ )
+		{
+			side = &pBSPData->map_brushsides[pBrush->firstbrushside+i];
+			plane = side->plane;
+
+			float flDist = DotProduct (vPos, plane->normal) - plane->dist;
+
+			// if completely in front of face, no intersection
+			if (flDist > 0)
+				return 0;
+		}
+	}
+
+	// inside this brush
+	return pBrush->contents;
+}
 /*
 ==================
 CM_PointContents
 
 ==================
 */
+
 int CM_PointContents ( const Vector &p, int headnode)
 {
 	int		l;
@@ -713,7 +806,16 @@ int CM_PointContents ( const Vector &p, int headnode)
 
 	l = CM_PointLeafnum_r (pBSPData, p, headnode);
 
-	return pBSPData->map_leafs[l].contents;
+	cleaf_t *pLeaf = &pBSPData->map_leafs[l];
+	int nContents = pLeaf->contents;
+	for ( int i = 0; i < pLeaf->numleafbrushes; i++ )
+	{
+		int nBrush = pBSPData->map_leafbrushes[pLeaf->firstleafbrush + i];
+		cbrush_t * RESTRICT pBrush = &pBSPData->map_brushes[nBrush];
+		nContents |= CM_BrushPointContents( pBSPData, p, pBrush );
+	}
+	
+	return nContents;
 }
 
 
@@ -765,10 +867,15 @@ BOX TRACING
 // Custom SIMD implementation for box brushes
 
 const fltx4 Four_DistEpsilons={DIST_EPSILON,DIST_EPSILON,DIST_EPSILON,DIST_EPSILON};
-const int32 ALIGN16 g_CubeFaceIndex0[4]= {0,1,2,-1};
-const int32 ALIGN16 g_CubeFaceIndex1[4]= {3,4,5,-1};
+const int32 ALIGN16 g_CubeFaceIndex0[4] ALIGN16_POST = {0,1,2,-1};
+const int32 ALIGN16 g_CubeFaceIndex1[4] ALIGN16_POST = {3,4,5,-1};
 bool IntersectRayWithBoxBrush( TraceInfo_t *pTraceInfo, const cbrush_t *pBrush, cboxbrush_t *pBox )
 {
+	// Suppress floating-point exceptions in this function because invDelta's
+	// components can get arbitrarily large -- up to FLT_MAX -- and overflow
+	// when multiplied. Only applicable when FP_EXCEPTIONS_ENABLED is defined.
+	FPExceptionDisabler hideExceptions;
+
 	// Load the unaligned ray/box parameters into SIMD registers
 	fltx4 start = LoadUnaligned3SIMD(pTraceInfo->m_start.Base());
 	fltx4 extents = LoadUnaligned3SIMD(pTraceInfo->m_extents.Base());
@@ -822,14 +929,14 @@ bool IntersectRayWithBoxBrush( TraceInfo_t *pTraceInfo, const cbrush_t *pBrush, 
 		offsetMinsExpanded = SubSIMD(offsetMinsExpanded, Four_DistEpsilons);
 		offsetMaxsExpanded = AddSIMD(offsetMaxsExpanded, Four_DistEpsilons);
 
-		fltx4 tmins = MulSIMD( offsetMinsExpanded, invDelta );
-		fltx4 tmaxs = MulSIMD( offsetMaxsExpanded, invDelta );
+		tmins = MulSIMD( offsetMinsExpanded, invDelta );
+		tmaxs = MulSIMD( offsetMaxsExpanded, invDelta );
 
 		fltx4 minface0 = LoadAlignedSIMD( (float *) g_CubeFaceIndex0 );
 		fltx4 minface1 = LoadAlignedSIMD( (float *) g_CubeFaceIndex1 );
 		fltx4 faceMask = CmpLeSIMD( tmins, tmaxs );
-		fltx4 mint = MinSIMD( tmins, tmaxs );
-		fltx4 maxt = MaxSIMD( tmins, tmaxs );
+		mint = MinSIMD( tmins, tmaxs );
+		maxt = MaxSIMD( tmins, tmaxs );
 		fltx4 faceId = MaskedAssign( faceMask, minface0, minface1 );
 		// only axes where we cross a plane are relevant
 		mint = MaskedAssign( crossPlane, mint, Four_Negative_FLT_MAX );
@@ -854,9 +961,9 @@ bool IntersectRayWithBoxBrush( TraceInfo_t *pTraceInfo, const cbrush_t *pBrush, 
 		faceId = MaskedAssign( faceMask, faceId_xy, faceRot );
 		fltx4 lastInTmp = SplatXSIMD( max_xyz );
 
-		fltx4 firstOut = MinSIMD(firstOutTmp, Four_Ones);
-		fltx4 lastIn = MaxSIMD(lastInTmp, Four_Zeros);
-		fltx4 separation = CmpGtSIMD(lastIn, firstOut);
+		firstOut = MinSIMD(firstOutTmp, Four_Ones);
+		lastIn = MaxSIMD(lastInTmp, Four_Zeros);
+		separation = CmpGtSIMD(lastIn, firstOut);
 		Assert(IsAllZeros(separation));
 		if ( IsAllZeros(separation) )
 		{
@@ -986,14 +1093,14 @@ bool IntersectRayWithBox( const Ray_t &ray, const VectorAligned &inInvDelta, con
 		offsetMinsExpanded = SubSIMD(offsetMinsExpanded, Four_DistEpsilons);
 		offsetMaxsExpanded = AddSIMD(offsetMaxsExpanded, Four_DistEpsilons);
 
-		fltx4 tmins = MulSIMD( offsetMinsExpanded, invDelta );
-		fltx4 tmaxs = MulSIMD( offsetMaxsExpanded, invDelta );
+		tmins = MulSIMD( offsetMinsExpanded, invDelta );
+		tmaxs = MulSIMD( offsetMaxsExpanded, invDelta );
 
 		fltx4 minface0 = LoadAlignedSIMD( (float *) g_CubeFaceIndex0 );
 		fltx4 minface1 = LoadAlignedSIMD( (float *) g_CubeFaceIndex1 );
 		fltx4 faceMask = CmpLeSIMD( tmins, tmaxs );
-		fltx4 mint = MinSIMD( tmins, tmaxs );
-		fltx4 maxt = MaxSIMD( tmins, tmaxs );
+		mint = MinSIMD( tmins, tmaxs );
+		maxt = MaxSIMD( tmins, tmaxs );
 		fltx4 faceId = MaskedAssign( faceMask, minface0, minface1 );
 		// only axes where we cross a plane are relevant
 		mint = MaskedAssign( crossPlane, mint, Four_Negative_FLT_MAX );
@@ -1019,9 +1126,9 @@ bool IntersectRayWithBox( const Ray_t &ray, const VectorAligned &inInvDelta, con
 		faceId = MaskedAssign( faceMask, faceId_xy, faceRot );
 		fltx4 lastInTmp = SplatXSIMD( max_xyz );
 
-		fltx4 firstOut = MinSIMD(firstOutTmp, Four_Ones);
-		fltx4 lastIn = MaxSIMD(lastInTmp, Four_Zeros);
-		fltx4 separation = CmpGtSIMD(lastIn, firstOut);
+		firstOut = MinSIMD(firstOutTmp, Four_Ones);
+		lastIn = MaxSIMD(lastInTmp, Four_Zeros);
+		separation = CmpGtSIMD(lastIn, firstOut);
 		Assert(IsAllZeros(separation));
 		if ( IsAllZeros(separation) )
 		{
@@ -1077,16 +1184,16 @@ bool IntersectRayWithBox( const Ray_t &ray, const VectorAligned &inInvDelta, con
 					}
 					pTrace->plane.type = faceIndex;
 					pTrace->contents = CONTENTS_SOLID;
-					Vector start;
-					VectorAdd( ray.m_Start, ray.m_StartOffset, start );
+					Vector startVec;
+					VectorAdd( ray.m_Start, ray.m_StartOffset, startVec );
 
 					if (pTrace->fraction == 1)
 					{
-						VectorAdd(start, ray.m_Delta, pTrace->endpos);
+						VectorAdd( startVec, ray.m_Delta, pTrace->endpos);
 					}
 					else
 					{
-						VectorMA( start, pTrace->fraction, ray.m_Delta, pTrace->endpos );
+						VectorMA( startVec, pTrace->fraction, ray.m_Delta, pTrace->endpos );
 					}
 					return true;
 				}
@@ -1460,8 +1567,8 @@ void FASTCALL CM_TraceToLeaf( TraceInfo_t * RESTRICT pTraceInfo, int ndxLeaf, fl
 		//
 		// trace ray/swept box against all displacement surfaces in this leaf
 		//
-		TraceCounter_t * RESTRICT pCounters = pTraceInfo->GetDispCounters();
-		TraceCounter_t count = pTraceInfo->GetCount();
+		pCounters = pTraceInfo->GetDispCounters();
+		count = pTraceInfo->GetCount();
 
 		if (IsX360())
 		{
@@ -1907,14 +2014,14 @@ static void FASTCALL CM_RecursiveHullCheckImpl( TraceInfo_t *pTraceInfo, int num
 	}
 
 	// move up to the node
-	frac = clamp( frac, 0, 1 );
+	frac = clamp( frac, 0.f, 1.f );
 	midf = p1f + (p2f - p1f)*frac;
 	VectorLerp( p1, p2, frac, mid );
 
 	CM_RecursiveHullCheckImpl<IS_POINT>(pTraceInfo, node->children[side], p1f, midf, p1, mid);
 
 	// go past the node
-	frac2 = clamp( frac2, 0, 1 );
+	frac2 = clamp( frac2, 0.f, 1.f );
 	midf = p1f + (p2f - p1f)*frac2;
 	VectorLerp( p1, p2, frac2, mid );
 
@@ -2468,7 +2575,7 @@ int CM_WriteAreaBits ( byte *buffer, int buflen, int area )
 	{
 		if ( buflen < 32 )
 		{
-			Sys_Error( "CM_WriteAreaBits with buffer % size < 32\n", buflen );
+			Sys_Error( "CM_WriteAreaBits with buffer size < 32\n" );
 		}
 
 		Q_memset( buffer, 0, 32 );
@@ -2572,7 +2679,12 @@ int	CM_BoxVisible( const Vector& mins, const Vector& maxs, const byte *visbits, 
 		int cluster = CM_LeafCluster( leafList[i] );
 		int offset = cluster>>3;
 
-		if ( offset > vissize )
+		if ( offset == -1 )
+		{
+			return false;
+		}
+
+		if ( offset > vissize || offset < 0 )
 		{
 			Sys_Error( "CM_BoxVisible:  cluster %i, offset %i out of bounds %i\n", cluster, offset, vissize );
 		}

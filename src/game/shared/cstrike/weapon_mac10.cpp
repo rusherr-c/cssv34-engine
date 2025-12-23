@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,13 +34,12 @@ public:
 	virtual bool Deploy();
 	virtual bool Reload();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_MAC10; }
 
 
 private:
-
-	void MAC10Fire( float flSpread );
-
 	CWeaponMAC10( const CWeaponMAC10 & );
 };
 
@@ -89,14 +88,34 @@ bool CWeaponMAC10::Reload()
 }
 
 
-void CWeaponMAC10::MAC10Fire( float flSpread )
+float CWeaponMAC10::GetInaccuracy() const
 {
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.375f * m_flAccuracy;
+		else
+			return 0.03f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
+void CWeaponMAC10::PrimaryAttack()
+{
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
+		return;
 
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
@@ -109,17 +128,3 @@ void CWeaponMAC10::MAC10Fire( float flSpread )
 	else														// standing
 		pPlayer->KickBack (0.775, 0.425, 0.2, 0.03, 3, 2.75, 9);
 }
-
-
-void CWeaponMAC10::PrimaryAttack()
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if ( !pPlayer )
-		return;
-
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		MAC10Fire( 0.375f * m_flAccuracy );
-	else
-		MAC10Fire( 0.03f * m_flAccuracy );
-}
-

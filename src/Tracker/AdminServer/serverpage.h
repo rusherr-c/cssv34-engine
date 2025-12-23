@@ -1,4 +1,4 @@
-//======== (C) Copyright 1999, 2000 Valve, L.L.C. All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -25,7 +25,7 @@
 #include <VGUI_ListPanel.h>
 #include <VGUI_PHandle.h>
 
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "netadr.h"
 #include "Server.h"
 //#include "serversession.h"
@@ -85,7 +85,7 @@ public:
 	virtual void		PerformLayout();
 
 	// updates status text at bottom of window
-	virtual void		UpdateStatusText(const char *format, ...);
+	virtual void		UpdateStatusText(PRINTF_FORMAT_STRING const char *format, ...);
 
 	// context menu access
 	virtual CServerContextMenu *GetContextMenu();		

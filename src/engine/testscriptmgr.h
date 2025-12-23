@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -84,7 +84,6 @@ private:
 
 	// Console command handlers.
 	friend void Test_Wait( const CCommand &args );
-	friend void Test_RunFrame( const CCommand &args );
 	friend void Test_RunFrame( const CCommand &args );
 	friend void Test_StartLoop( const CCommand &args );
 	friend void Test_LoopCount( const CCommand &args );

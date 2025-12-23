@@ -1,5 +1,5 @@
 
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,7 +26,7 @@
 
 
 #ifndef INCLUDED_STEAM_COMMON_STEAMCOMMON_H
-	#include "SteamCommon.h"
+	#include "steamcommon.h"
 #endif
 
 

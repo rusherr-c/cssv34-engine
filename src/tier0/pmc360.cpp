@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Inner workings of Performance Monitor Counters on the xbox 360; 
 // they let vprof track L2 dcache misses, LHS, etc.
@@ -29,9 +29,9 @@ void CPMCData::InitializeOnceProgramWide( void )
 {
 #if !defined( _CERT )
 	// Select a set of sixteen counters
-	PMCInstallSetup( &PMCDefaultSetups[PMC_SETUP_FLUSHREASONS_PB0T0] );
+	DmPMCInstallAndStart( PMC_SETUP_FLUSHREASONS_PB0T0 );
 	// Reset the Performance Monitor Counters in preparation for a new sampling run.
-	PMCResetCounters();
+	DmPMCResetCounters();
 #endif
 	s_bInitialized = true;
 }
@@ -45,30 +45,30 @@ void CPMCData::Start()
 {
 #if !defined( _CERT )
 	// stop the stopwatches, save off the counter, start them again.
-	PMCStop();
+	DmPMCStop();
 
 	PMCState pmcstate;
 	// Get the counters.
-	PMCGetCounters( &pmcstate );
+	DmPMCGetCounters( &pmcstate );
 
 	// in the default state as set up by InitializeOnceProgramWide, 
 	// counters 9 and 6 are L2 misses and LHS respectively
 	m_OnStart.L2CacheMiss = pmcstate.pmc[9];
 	m_OnStart.LHS = pmcstate.pmc[6];
 
-	PMCStart();
+	DmPMCStart();
 #endif
 }
 
 void CPMCData::End()
 {
 #if !defined( _CERT )
-	PMCStop();
+	DmPMCStop();
 
 	// get end-state counters
 	PMCState pmcstate;
 	// Get the counters.
-	PMCGetCounters( &pmcstate );
+	DmPMCGetCounters( &pmcstate );
 
 	// in the default state as set up by InitializeOnceProgramWide, 
 	// counters 9 and 6 are l2 misses and LHS respectively
@@ -81,7 +81,7 @@ void CPMCData::End()
 	m_Delta.L2CacheMiss = endL2 - m_OnStart.L2CacheMiss;
 	m_Delta.LHS = endLHS - m_OnStart.LHS;
 
-	PMCStart();
+	DmPMCStart();
 #endif
 }
 

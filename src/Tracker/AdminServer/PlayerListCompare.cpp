@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -134,7 +134,7 @@ int __cdecl PlayerFragsCompare(const void *elem1, const void *elem2 )
 //-----------------------------------------------------------------------------
 int __cdecl PlayerTimeCompare( vgui::ListPanel *pPanel, const vgui::ListPanelItem &item1, const vgui::ListPanelItem &item2 )
 {
-	int h1,h2,m1,m2,s1,s2;
+	int h1 = 0, h2 = 0, m1 = 0, m2 = 0, s1 = 0, s2 = 0;
 	float t1=0,t2=0;
 
 	const char *time1 = item1.kv->GetString("time");

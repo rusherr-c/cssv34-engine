@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1199,7 +1199,7 @@ void TimelineItem::SetExpressionInfo( CFlexAnimationTrack *track, int flexnum )
 	m_szTrackName[ 0 ] = 0;
 	if ( track )
 	{
-		strcpy( m_szTrackName, track->GetFlexControllerName() );
+		V_strcpy_safe( m_szTrackName, track->GetFlexControllerName() );
 		SetActive( track->IsTrackActive() );
 	}
 

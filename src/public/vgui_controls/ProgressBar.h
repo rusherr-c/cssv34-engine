@@ -28,7 +28,7 @@ class ProgressBar : public Panel
 
 public:
 	ProgressBar(Panel *parent, const char *panelName);
-	virtual ~ProgressBar();
+	~ProgressBar();
 
 	// 'progress' is in the range [0.0f, 1.0f]
 	MESSAGE_FUNC_FLOAT( SetProgress, "SetProgress", progress );
@@ -94,9 +94,17 @@ class ContinuousProgressBar : public ProgressBar
 
 public:
 	ContinuousProgressBar(Panel *parent, const char *panelName);
-	virtual ~ContinuousProgressBar() {}
+	MESSAGE_FUNC_FLOAT( SetPrevProgress, "SetPrevProgress", prevProgress );
+
+	void SetGainColor( Color color ) { m_colorGain = color; }
+	void SetLossColor( Color color ) { m_colorLoss = color; }
 
 	virtual void Paint();
+
+protected:
+	float _prevProgress;
+	Color m_colorGain;
+	Color m_colorLoss;
 };
 
 } // namespace vgui

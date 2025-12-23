@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #ifdef STUBD3D
 
 #include "locald3dtypes.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #ifdef USE_FOPEN
 #include <stdio.h>

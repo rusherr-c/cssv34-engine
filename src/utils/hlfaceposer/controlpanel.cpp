@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -337,6 +337,8 @@ void ControlPanel::dumpModelInfo() { }
 
 void ControlPanel::ChangeModel( const char *filename )
 {
+	HCURSOR hPrevCursor = SetCursor( LoadCursor( NULL, IDC_WAIT ) );
+
 	// init all the selection tabs based on the current model
 	initSequenceChoices();
 	initBodypartChoices();
@@ -372,6 +374,8 @@ void ControlPanel::ChangeModel( const char *filename )
 
 	SetSuffix( va( " - %s.mdl", models->GetActiveModelName() ) );
 	redraw();
+
+	SetCursor( hPrevCursor );
 }
 
 

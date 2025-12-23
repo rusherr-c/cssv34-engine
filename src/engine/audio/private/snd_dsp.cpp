@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,6 +9,7 @@
 
 
 #include "audio_pch.h"
+#include "snd_mix_buf.h"
 
 #include "iprediction.h"
 #include "../../common.h"		// for parsing routines
@@ -23,6 +24,10 @@
 #define MSEC_TO_SAMPS(a)	(((a)*SOUND_DMA_SPEED) / 1000)		// convert milliseconds to # samples in equivalent time
 #define SEC_TO_SAMPS(a)		((a)*SOUND_DMA_SPEED)				// convert seconds to # samples in equivalent time
 
+// Suppress the noisy warnings caused by CLIP_DSP
+#if defined(__clang__)
+	#pragma GCC diagnostic ignored "-Wself-assign"
+#endif
 #define CLIP_DSP(x) (x)
 
 extern ConVar das_debug;
@@ -1403,7 +1408,7 @@ void DLY_SetNormalizingGain ( dly_t *pdly, int feedback )
 
 	// limit gain reduction to N% PMAX
 
-	gain = clamp (gain, (PMAX * DLY_NORMALIZING_REDUCTION_MAX), PMAX);		
+	gain = clamp (gain, (float)(PMAX * DLY_NORMALIZING_REDUCTION_MAX), (float)PMAX);		
 	
 	gain = ((float)b/(float)PMAX) * gain;	// scale final gain by pdly->b.
 
@@ -1840,7 +1845,7 @@ void RMP_Init( rmp_t *prmp, float ramptime, int initval, int targetval, bool bEn
 	// init fixed point iterator to iterate along the height of the ramp 'rise'
 	// always iterates from 0..'rise', increasing in value
 
-	POS_ONE_Init( &prmp->ps, abs( rise ), fabsf((float) rise) / ((float) run) );
+	POS_ONE_Init( &prmp->ps, ABS( rise ), ABS((float) rise) / ((float) run) );
 	
 	prmp->yprev = initval;
 	prmp->initval = initval;
@@ -2419,9 +2424,9 @@ rva_t * RVA_Alloc ( int *D, int *a, int *b, int m, flt_t *pflt, int fparallel, f
 			
 			// value of ftaps is the seed for all tap values 
 
-			float t1 = max(MSEC_TO_SAMPS(5), D[i] * (1.0 - ftaps * 3.141592) );	
-			float t2 = max(MSEC_TO_SAMPS(7), D[i] * (1.0 - ftaps * 1.697043) );	
-			float t3 = max(MSEC_TO_SAMPS(10), D[i] * (1.0 - ftaps * 0.96325) ); 
+			float t1 = max((double)MSEC_TO_SAMPS(5), D[i] * (1.0 - ftaps * 3.141592) );	
+			float t2 = max((double)MSEC_TO_SAMPS(7), D[i] * (1.0 - ftaps * 1.697043) );	
+			float t3 = max((double)MSEC_TO_SAMPS(10), D[i] * (1.0 - ftaps * 0.96325) ); 
 
 			DLY_ChangeTaps( prva->pdlys[i], (int)t1, (int)t2, (int)t3, D[i] );
 		}
@@ -2442,11 +2447,11 @@ rva_t * RVA_Alloc ( int *D, int *a, int *b, int m, flt_t *pflt, int fparallel, f
 
 		for (i = 0; i < m; i++)
 		{
-			int D = prva->pdlys[i]->D;
+			int Do = prva->pdlys[i]->D;
 
-			modtime = (float)D / (float)(SOUND_DMA_SPEED);	// seconds per delay
-			depth = (fmoddly / 1000.0) / modtime;								// convert milliseconds to 'depth' %
-			depth = clamp (depth, 0.01, 0.99);
+			modtime = (float)Do / (float)(SOUND_DMA_SPEED);	// seconds per delay
+			depth = (fmoddly * 0.001f) / modtime;								// convert milliseconds to 'depth' %
+			depth = clamp (depth, 0.01f, 0.99f);
 			modtime = modtime * fmodrate;										// modulate every N delay passes
 
 			ramptime = fpmin(20.0f/1000.0f, modtime / 2);							// ramp between delay values in N ms
@@ -2730,16 +2735,15 @@ void RVA_ConstructDelays( float *rgd, float *rgf, int m, int *D, int *a, int *b,
 		if (i < 3)
 			dm = 0.0;
 		else
-			dm = max( RVA_MIN_SEPARATION * (i/3), ((i/3) * ((float)d * 0.18)) );
+			dm = max( (double)(RVA_MIN_SEPARATION * (i/3)), ((i/3) * ((float)d * 0.18)) );
 
 		d += (int)dm;
 		D[i] = MSEC_TO_SAMPS(d);		
 
 		// D[i] = MSEC_TO_SAMPS(d + ((i/3) * RVA_MIN_SEPARATION));		// (i/3) counts 0,0,0 1,1,1 2,2,2 ... separate all reverbs by 5ms
-		
+
 		// feedback - due to wall/floor/ceiling reflectivity
-		
-		a[i] = (int) min (0.999 * PMAX, (float)PMAX * r);
+		a[i] = (int) min (0.999 * PMAX, (double)PMAX * r);
 
 		if (bpredelay)
 			a[i] = -a[i];		// flag delay as predelay
@@ -2838,7 +2842,7 @@ rva_t * RVA_Params ( prc_t *pprc )
 
 	// limit # delays 1-12
 
-	m = clamp (numdelays, RVA_BASEM, CRVA_DLYS);
+	m = clamp (numdelays, (float)RVA_BASEM, (float)CRVA_DLYS);
 
 	// set up D (delay) a (feedback) b (gain) arrays
 
@@ -2878,13 +2882,13 @@ rva_t * RVA_Params ( prc_t *pprc )
 			{
 				// set feedback for smallest delay
 
-				a[i] = (int) min (0.999 * PMAX, (float)PMAX * feedback );
+				a[i] = (int) min (0.999 * PMAX, (double)PMAX * feedback );
 			}
 			else
 			{
 				// adjust feedback down for larger delays so that decay time is constant
 
-				a[i] = (int) min (0.999 * PMAX, (float)PMAX * DLY_NormalizeFeedback( D[0], feedback, D[i] ) );
+				a[i] = (int) min (0.999 * PMAX, (double)PMAX * DLY_NormalizeFeedback( D[0], feedback, D[i] ) );
 			}
 			
 			b[i] = (int) ((float)(gain * PMAX) / (float)m);
@@ -3145,7 +3149,7 @@ dfr_t * DFR_Params ( prc_t *pprc )
 	
 	// limit m, n to half max number of delays
 
-	n = clamp (numdelays, DFR_BASEN, CDFR_DLYS/2);
+	n = clamp (Float2Int(numdelays), DFR_BASEN, CDFR_DLYS/2);
 
 	// compute delays for diffusors
 
@@ -3159,7 +3163,7 @@ dfr_t * DFR_Params ( prc_t *pprc )
 
 		// feedback and gain of diffusor
 
-		a[i] = min (0.999 * PMAX, dfrfbs[i] * PMAX * feedback);
+		a[i] = min (0.999 * PMAX, (double)(dfrfbs[i] * PMAX * feedback));
 		b[i] = (int) ( (float)(gain * (float)PMAX) );
 	}
 
@@ -3658,18 +3662,18 @@ ptc_t * PTC_Alloc( float timeslice, float timexfade, float fstep )
 
 	// get size of region to cut or duplicate
 
-	tcutdup = fabsf((fstep - 1.0) * timeslice);
+	tcutdup = abs((fstep - 1.0) * timeslice);
 
 	// to prevent buffer overruns:
 
 	// make sure timeslice is greater than cut/dup time
 	
-	tslice = max ( tslice, 1.1 * tcutdup);
+	tslice = max ( (double)tslice, 1.1 * tcutdup);
 
 	// make sure xfade time smaller than cut/dup time, and smaller than (timeslice-cutdup) time
 
-	txfade = min ( txfade, 0.9 * tcutdup );
-	txfade = min ( txfade, 0.9 * (tslice - tcutdup));
+	txfade = min ( (double)txfade, 0.9 * tcutdup );
+	txfade = min ( (double)txfade, 0.9 * (tslice - tcutdup));
 
 	pptc->cxfade =		MSEC_TO_SAMPS( txfade );
 	pptc->ccut =		MSEC_TO_SAMPS( tcutdup );
@@ -4289,7 +4293,7 @@ efo_t *EFO_Alloc ( float threshold, float attack_sec, float decay_sec, bool bexp
 				RMP_SetEnd( &pefo->rmp_decay );
 
 				pefo->thresh = threshold;
-				pefo->thresh_off = max(1, threshold - EFO_HYST_AMP);
+				pefo->thresh_off = max(1.f, threshold - EFO_HYST_AMP);
 				pefo->bgateon = false;
 				pefo->bexp = bexp;
 			}
@@ -5039,7 +5043,7 @@ amp_t * AMP_Params ( prc_t *pprc )
 	if (pprc->prm[amp_imodrate] > 0.0)
 	{
 		ramptime = pprc->prm[amp_imodglide] / 1000.0;			// get ramp time in seconds
-		modtime = 1.0 / max(pprc->prm[amp_imodrate], 0.01);		// time between modulations in seconds
+		modtime = 1.0 / max((double)pprc->prm[amp_imodrate], 0.01);		// time between modulations in seconds
 		depth = pprc->prm[amp_imoddepth];						// depth of modulations 0-1.0
 	}
 
@@ -5067,7 +5071,7 @@ struct nul_t
 	int type;
 };
 
-nul_t nuls[] = {0};
+nul_t nuls[] = {{0}};
 
 void NULL_Init ( nul_t *pnul ) { }
 void NULL_InitAll( ) { }
@@ -5105,9 +5109,9 @@ bool PRC_InitAll( prc_t *prcs, int count )
 	prc_GetNext_t pfnGetNext;		// get next function
 	prc_GetNextN_t pfnGetNextN;		// get next function, batch version
 	prc_Free_t pfnFree;	
-	prc_Mod_t pfnMod;
+	prc_Mod_t pfnMod;	
 
-	bool fok = true;
+	bool fok = true;;
 
 	if ( count == 0 )
 		count = 1;
@@ -5120,88 +5124,88 @@ bool PRC_InitAll( prc_t *prcs, int count )
 		{
 		default:
 		case PRC_NULL:
-			pfnFree		= (prc_Free_t)&NULL_Free;
-			pfnGetNext	= (prc_GetNext_t)&NULL_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&NULL_GetNextN;
-			pfnParam	= &NULL_VParams;
-			pfnMod		= (prc_Mod_t)&NULL_Mod;
+			pfnFree		= (prc_Free_t)NULL_Free;
+			pfnGetNext	= (prc_GetNext_t)NULL_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)NULL_GetNextN;
+			pfnParam	= NULL_VParams;
+			pfnMod		= (prc_Mod_t)NULL_Mod;
 			break;
 		case PRC_DLY:
-			pfnFree		= (prc_Free_t)&DLY_Free;
-			pfnGetNext	= (prc_GetNext_t)&DLY_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&DLY_GetNextN;
-			pfnParam	= &DLY_VParams;
-			pfnMod		= (prc_Mod_t)&DLY_Mod;
+			pfnFree		= (prc_Free_t)DLY_Free;
+			pfnGetNext	= (prc_GetNext_t)DLY_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)DLY_GetNextN;
+			pfnParam	= DLY_VParams;
+			pfnMod		= (prc_Mod_t)DLY_Mod;
 			break;
 		case PRC_RVA:
-			pfnFree		= (prc_Free_t)&RVA_Free;
-			pfnGetNext	= (prc_GetNext_t)&RVA_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&RVA_GetNextN;
-			pfnParam	= &RVA_VParams;
-			pfnMod		= (prc_Mod_t)&RVA_Mod;
+			pfnFree		= (prc_Free_t)RVA_Free;
+			pfnGetNext	= (prc_GetNext_t)RVA_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)RVA_GetNextN;
+			pfnParam	= RVA_VParams;
+			pfnMod		= (prc_Mod_t)RVA_Mod;
 			break;
 		case PRC_FLT:
-			pfnFree		= (prc_Free_t)&FLT_Free;
-			pfnGetNext	= (prc_GetNext_t)&FLT_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&FLT_GetNextN;
-			pfnParam	= &FLT_VParams;
-			pfnMod		= (prc_Mod_t)&FLT_Mod;
+			pfnFree		= (prc_Free_t)FLT_Free;
+			pfnGetNext	= (prc_GetNext_t)FLT_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)FLT_GetNextN;
+			pfnParam	= FLT_VParams;
+			pfnMod		= (prc_Mod_t)FLT_Mod;
 			break;
 		case PRC_CRS:
-			pfnFree		= (prc_Free_t)&CRS_Free;
-			pfnGetNext	= (prc_GetNext_t)&CRS_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&CRS_GetNextN;
-			pfnParam	= &CRS_VParams;
-			pfnMod		= (prc_Mod_t)&CRS_Mod;
+			pfnFree		= (prc_Free_t)CRS_Free;
+			pfnGetNext	= (prc_GetNext_t)CRS_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)CRS_GetNextN;
+			pfnParam	= CRS_VParams;
+			pfnMod		= (prc_Mod_t)CRS_Mod;
 			break;
 		case PRC_PTC:
-			pfnFree		= (prc_Free_t)&PTC_Free;
-			pfnGetNext	= (prc_GetNext_t)&PTC_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&PTC_GetNextN;
-			pfnParam	= &PTC_VParams;
-			pfnMod		= (prc_Mod_t)&PTC_Mod;
+			pfnFree		= (prc_Free_t)PTC_Free;
+			pfnGetNext	= (prc_GetNext_t)PTC_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)PTC_GetNextN;
+			pfnParam	= PTC_VParams;
+			pfnMod		= (prc_Mod_t)PTC_Mod;
 			break;
 		case PRC_ENV:
-			pfnFree		= (prc_Free_t)&ENV_Free;
-			pfnGetNext	= (prc_GetNext_t)&ENV_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&ENV_GetNextN;
-			pfnParam	= &ENV_VParams;
-			pfnMod		= (prc_Mod_t)&ENV_Mod;
+			pfnFree		= (prc_Free_t)ENV_Free;
+			pfnGetNext	= (prc_GetNext_t)ENV_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)ENV_GetNextN;
+			pfnParam	= ENV_VParams;
+			pfnMod		= (prc_Mod_t)ENV_Mod;
 			break;
 		case PRC_LFO:
-			pfnFree		= (prc_Free_t)&LFO_Free;
-			pfnGetNext	= (prc_GetNext_t)&LFO_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&LFO_GetNextN;
-			pfnParam	= &LFO_VParams;
-			pfnMod		= (prc_Mod_t)&LFO_Mod;
+			pfnFree		= (prc_Free_t)LFO_Free;
+			pfnGetNext	= (prc_GetNext_t)LFO_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)LFO_GetNextN;
+			pfnParam	= LFO_VParams;
+			pfnMod		= (prc_Mod_t)LFO_Mod;
 			break;
 		case PRC_EFO:
-			pfnFree		= (prc_Free_t)&EFO_Free;
-			pfnGetNext	= (prc_GetNext_t)&EFO_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&EFO_GetNextN;
-			pfnParam	= &EFO_VParams;
-			pfnMod		= (prc_Mod_t)&EFO_Mod;
+			pfnFree		= (prc_Free_t)EFO_Free;
+			pfnGetNext	= (prc_GetNext_t)EFO_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)EFO_GetNextN;
+			pfnParam	= EFO_VParams;
+			pfnMod		= (prc_Mod_t)EFO_Mod;
 			break;
 		case PRC_MDY:
-			pfnFree		= (prc_Free_t)&MDY_Free;
-			pfnGetNext	= (prc_GetNext_t)&MDY_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&MDY_GetNextN;
-			pfnParam	= &MDY_VParams;
-			pfnMod		= (prc_Mod_t)&MDY_Mod;
+			pfnFree		= (prc_Free_t)MDY_Free;
+			pfnGetNext	= (prc_GetNext_t)MDY_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)MDY_GetNextN;
+			pfnParam	= MDY_VParams;
+			pfnMod		= (prc_Mod_t)MDY_Mod;
 			break;
 		case PRC_DFR:
-			pfnFree		= (prc_Free_t)&DFR_Free;
-			pfnGetNext	= (prc_GetNext_t)&DFR_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&DFR_GetNextN;
-			pfnParam	= &DFR_VParams;
-			pfnMod		= (prc_Mod_t)&DFR_Mod;
+			pfnFree		= (prc_Free_t)DFR_Free;
+			pfnGetNext	= (prc_GetNext_t)DFR_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)DFR_GetNextN;
+			pfnParam	= DFR_VParams;
+			pfnMod		= (prc_Mod_t)DFR_Mod;
 			break;
 		case PRC_AMP:
-			pfnFree		= (prc_Free_t)&AMP_Free;
-			pfnGetNext	= (prc_GetNext_t)&AMP_GetNext;
-			pfnGetNextN	= (prc_GetNextN_t)&AMP_GetNextN;
-			pfnParam	= &AMP_VParams;
-			pfnMod		= (prc_Mod_t)&AMP_Mod;
+			pfnFree		= (prc_Free_t)AMP_Free;
+			pfnGetNext	= (prc_GetNext_t)AMP_GetNext;
+			pfnGetNextN	= (prc_GetNextN_t)AMP_GetNextN;
+			pfnParam	= AMP_VParams;
+			pfnMod		= (prc_Mod_t)AMP_Mod;
 			break;
 		}
 
@@ -5467,7 +5471,7 @@ pset_t * PSET_Alloc ( int ipsettemplate )
 
 	// find free slot
 	int i = 0;
-	for (; i < CPSETS; i++)
+	for (i = 0; i < CPSETS; i++)
 	{
 		if ( !psets[i].fused )
 			break;
@@ -5478,13 +5482,13 @@ pset_t * PSET_Alloc ( int ipsettemplate )
 
 	if (das_debug.GetInt())
 	{
-		int j = 0;
-		for (int i = 0; i < CPSETS; i++)
+		int nSlots = 0;
+		for ( int j = 0; j < CPSETS; j++)
 		{
-			if ( psets[i].fused )
-				j++;
+			if ( psets[j].fused )
+				nSlots++;
 		}
-		DevMsg("total preset slots used: %d \n", j);
+		DevMsg("total preset slots used: %d \n", nSlots );
 	}
 	
 
@@ -5918,7 +5922,7 @@ int idsp_speaker;
 int idsp_spatial;
 int idsp_automatic;
 
-ConVar dsp_off		("dsp_off", "0", FCVAR_CHEAT );						// set to 1 to disable all dsp processing
+ConVar dsp_off		("dsp_off", "0", FCVAR_CHEAT | FCVAR_ALLOWED_IN_COMPETITIVE );						// set to 1 to disable all dsp processing
 ConVar dsp_slow_cpu ("dsp_slow_cpu", "0", FCVAR_ARCHIVE|FCVAR_DEMO );	// set to 1 if cpu bound - ie: does not process dsp_room fx
 ConVar snd_profile	("snd_profile", "0", FCVAR_DEMO );					// 1 - profile dsp, 2 - mix, 3 - load sound, 4 - all sound
 ConVar dsp_volume	("dsp_volume", "1.0", FCVAR_ARCHIVE|FCVAR_DEMO );	// 0.0 - 2.0; master dsp volume control
@@ -6291,7 +6295,7 @@ void DSP_SetPreset( int idsp, int ipsetnew)
 		// set up new dsp mix min & max, db_min & db_drop params so that new channels get new mix values
 
 		// NOTE: only new sounds will get the new mix min/max values set in their dspmix param
-		// NOTE: so - no crossfade is needed betweeen dspmix and dspmix prev, but this also means
+		// NOTE: so - no crossfade is needed between dspmix and dspmix prev, but this also means
 		// NOTE: that currently playing ambients will not see changes to dspmix at all.
 		
 		float mix_min = pdsp->ppset[0]->mix_min;
@@ -6965,6 +6969,7 @@ void ADSP_SetupAutoReverb( prc_t *pprc_rva, auto_params_t *pa )
 
 //					prctype		size	#dly	feedback
 
+#if 0
 #define PRC_DFRA_S	{PRC_DFR,	{0.5,	2,		0.10},	NULL,NULL,NULL,NULL,NULL}	// S room
 #define PRC_DFRA_M	{PRC_DFR,	{0.75,	2,		0.12},	NULL,NULL,NULL,NULL,NULL}	// M room
 #define PRC_DFRA_L	{PRC_DFR,	{1.0,	3,		0.13},	NULL,NULL,NULL,NULL,NULL}	// L room
@@ -6972,18 +6977,20 @@ void ADSP_SetupAutoReverb( prc_t *pprc_rva, auto_params_t *pa )
 
 prc_t g_prc_dfr_auto[] = {PRC_DFRA_S, PRC_DFRA_M, PRC_DFRA_L, PRC_DFRA_VL, PRC_DFRA_VL};
 
+//$BUGBUGBUG: I think this should be sizeof(prc_t), not sizeof(pset_t)...
 #define CDFRTEMPLATES  (sizeof(g_prc_dfr_auto)/sizeof(pset_t))		// number of diffusor templates
 
 // copy diffusor template from preset list, based on room size
 
 void ADSP_SetupAutoDiffusor( prc_t *pprc_dfr, auto_params_t *pa )
 {
-	int i = clamp(pa->size, 0, CDFRTEMPLATES - 1);
+	int i = clamp(pa->size, 0, (int)CDFRTEMPLATES - 1);
 
 	// copy diffusor preset based on size
 
 	*pprc_dfr = g_prc_dfr_auto[i];
 }
+#endif
 
 // return index to processor given processor type and preset
 // skips N processors of similar type
@@ -7868,7 +7875,7 @@ inline void DSP_ProcessQuadToStereo(dsp_t *pdsp, portable_samplepair_t *pbfront,
 	if ( bcrossfading )
 	{
 		int r;
-		int fl, fr, rl, rr;
+		int rl, rr;
 		int flp, frp, rlp, rrp;
 		int xf_fl, xf_fr, xf_rl, xf_rr;
 		int avl, avr;
@@ -8064,7 +8071,6 @@ inline void DSP_ProcessQuadToQuad(dsp_t *pdsp, portable_samplepair_t *pbfront, p
 	if ( bcrossfading )
 	{
 		int r;
-		int fl, fr, rl, rr;
 		int flp, frp, rlp, rrp;
 		int xf_fl, xf_fr, xf_rl, xf_rr;
 		bool bexp = pdsp->bexpfade;
@@ -8395,7 +8401,6 @@ inline void DSP_Process5To5(dsp_t *pdsp, portable_samplepair_t *pbfront, portabl
 	if ( bcrossfading )
 	{
 		int r;
-		int fl, fr, rl, rr, fc;
 		int flp, frp, rlp, rrp, fcp;
 		int xf_fl, xf_fr, xf_rl, xf_rr, xf_fc;
 		bool bexp = pdsp->bexpfade;
@@ -8811,6 +8816,18 @@ void FreeDsps( bool bReleaseTemplateMemory )
 	idsp_spatial = 0;
 	idsp_automatic = 0;
 
+	for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+	{
+		paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+		if ( pSpecialBuffer->nSpecialDSP != 0 )
+		{
+			DSP_Free( pSpecialBuffer->idsp_specialdsp );
+			pSpecialBuffer->idsp_specialdsp = 0;
+			pSpecialBuffer->nPrevSpecialDSP = 0;
+			pSpecialBuffer->nSpecialDSP = 0;
+		}
+	}
+
 	DSP_FreeAll();
 	
 	// only unlock and free psettemplate memory on engine shutdown
@@ -9089,7 +9106,7 @@ bool DSP_LoadPresetFile( void )
 
 	CUtlBuffer buf;
 
-	if ( !g_pFullFileSystem->ReadFile( szFile, NULL, buf ) )
+	if ( !g_pFullFileSystem->ReadFile( szFile, "GAME", buf ) )
 	{
 		Error( "DSP_LoadPresetFile: unable to open '%s'\n", szFile );
 		return bResult;
@@ -9231,7 +9248,7 @@ bool DSP_LoadPresetFile( void )
 			
 			cproc++;
 			if (cproc > CPSET_PRCS)
-				DevMsg("DSP PARSE ERROR!!! dsp_presets.txt: missing } or too many processors in preset #: %3.0f \n", ipreset);
+				DevMsg("DSP PARSE ERROR!!! dsp_presets.txt: missing } or too many processors in preset #: %d \n", ipreset);
 			cproc = min(cproc, CPSET_PRCS); // don't overflow # procs
 		}
 		
@@ -9376,6 +9393,16 @@ void CheckNewDspPresets( void )
 		DSP_SetPreset( idsp_automatic, iautomatic );
 		ipset_automatic_prev = iautomatic;
 	}
+
+	for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+	{
+		paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+		if ( pSpecialBuffer->nSpecialDSP != pSpecialBuffer->nPrevSpecialDSP && !DSP_IsCrossfading( pSpecialBuffer->idsp_specialdsp ) )
+		{
+			DSP_SetPreset( pSpecialBuffer->idsp_specialdsp, pSpecialBuffer->nSpecialDSP );
+			pSpecialBuffer->nPrevSpecialDSP = pSpecialBuffer->nSpecialDSP;
+		}
+	}
 }
 
 // create idsp_room preset from set of values, reload the preset.
@@ -9454,6 +9481,15 @@ void DSP_DEBUGReloadPresetFile( void )
 	dsp_speaker.SetValue( 0 );
 	dsp_spatial.SetValue( 0 );
 	//dsp_automatic.SetValue( 0 );
+
+	CUtlVector< int > specialDSPs;
+	for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+	{
+		paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+
+		specialDSPs.AddToTail( pSpecialBuffer->nSpecialDSP );
+		pSpecialBuffer->nSpecialDSP = 0;
+	}
 	
 	CheckNewDspPresets();
 
@@ -9465,6 +9501,15 @@ void DSP_DEBUGReloadPresetFile( void )
 	dsp_speaker.SetValue( ispeaker );
 	dsp_spatial.SetValue( ispatial );
 	//dsp_automatic.SetValue( iautomatic );
+
+	int nSpecialDSPNum = 0;
+	for ( int i = SOUND_BUFFER_SPECIAL_START; i < g_paintBuffers.Count(); ++i )
+	{
+		paintbuffer_t *pSpecialBuffer = MIX_GetPPaintFromIPaint( i );
+
+		pSpecialBuffer->nSpecialDSP = specialDSPs[ nSpecialDSPNum ];
+		nSpecialDSPNum++;
+	}
 
 	CheckNewDspPresets();
 

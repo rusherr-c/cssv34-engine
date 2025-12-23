@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Handles all the functions for implementing remote access to the engine
 //
@@ -36,7 +36,7 @@ void Host_Stats_f (void)
 {
 	char stats[512];
 	g_ServerRemoteAccess.GetStatsString(stats, sizeof(stats));
-	ConMsg("CPU   In    Out   Uptime  Users   FPS    Players\n%s\n", stats);
+	ConMsg("CPU    In_(KB/s)  Out_(KB/s)  Uptime  Map_changes  FPS      Players  Connects\n%s\n", stats);
 }
 static ConCommand stats("stats", Host_Stats_f, "Prints server performance variables" );
 
@@ -73,7 +73,7 @@ ra_listener_id CServerRemoteAccess::GetNextListenerID( bool authConnection, cons
 bool GetStringHelper( CUtlBuffer & cmd, char *outBuf, int bufSize )
 {
 	outBuf[0] = 0;
-	cmd.GetStringManualCharCount(outBuf, bufSize);
+	cmd.GetStringManualCharCount( outBuf, bufSize );
 	if ( !cmd.IsValid() )
 	{
 		cmd.Purge();
@@ -265,9 +265,8 @@ void CServerRemoteAccess::WriteDataRequest( CRConServer *pNetworkListener, ra_li
 			case SERVERDATA_SEND_CONSOLE_LOG:
 				{
 #ifndef SWDS
-					const char *pLogFile = GetConsoleLogFilename();
-					CUtlBuffer buf( 1024, 0, CUtlBuffer::TEXT_BUFFER );
-					if ( g_pFullFileSystem->ReadFile( pLogFile, "GAME", buf ) )
+					CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
+					if ( GetConsoleLogFileData( buf ) )
 					{
 						HZIP hZip = CreateZipZ( 0, 1024 * 1024, ZIP_MEMORY );
 						void *pMem;
@@ -387,7 +386,7 @@ void CServerRemoteAccess::LogCommand( ra_listener_id listener, const char *msg )
 	if ( !sv_rcon_log.GetBool() )
 		return;
 		
-	if ( listener >= 0 && listener < (ra_listener_id)m_ListenerIDs.Count() && m_ListenerIDs[listener].m_bHasAddress )
+	if ( listener < (ra_listener_id)m_ListenerIDs.Count() && m_ListenerIDs[listener].m_bHasAddress )
 	{
 		Log( "rcon from \"%s\": %s\n", m_ListenerIDs[listener].adr.ToString(), msg );
 	}
@@ -429,31 +428,43 @@ void CServerRemoteAccess::CheckPassword( CRConServer *pNetworkListener, ra_liste
 //-----------------------------------------------------------------------------
 bool CServerRemoteAccess::IsAuthenticated( ra_listener_id listener )
 {
-	Assert( listener >= 0 && listener < (ra_listener_id)m_ListenerIDs.Count() );
+	// Checking for >= 0 is tautological because ra_listener_id is unsigned
+	Assert( /*listener >= 0 &&*/ listener < (ra_listener_id)m_ListenerIDs.Count() );
 	return m_ListenerIDs[listener].authenticated;
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: send a bad password packet
+// Returns TRUE if socket was closed
 //-----------------------------------------------------------------------------
 void CServerRemoteAccess::BadPassword( CRConServer *pNetworkListener, ra_listener_id listener )
 {
-	// allocate a spot in the list for the response
-	int i = m_ResponsePackets.AddToTail();
-	m_ResponsePackets[i].responderID = listener; // record who we need to respond to
-
-	CUtlBuffer &response = m_ResponsePackets[i].packet;
 	ListenerStore_t& listenerStore = m_ListenerIDs[listener];
-
-	// build the response
-	response.PutInt(-1); // special flag for bad password
-	response.PutInt(SERVERDATA_AUTH_RESPONSE);
-	response.PutString("");
-	response.PutString("");
 
 	listenerStore.authenticated = false;
 
-	pNetworkListener->HandleFailedRconAuth( listenerStore.adr );
+	if ( pNetworkListener->HandleFailedRconAuth( listenerStore.adr ) )
+	{
+		// Close the socket if too many failed attempts
+		pNetworkListener->BCloseAcceptedSocket( listener );
+	}
+	else
+	{
+		//
+		// Respond to the rcon user
+		//
+
+		// allocate a spot in the list for the response
+		int i = m_ResponsePackets.AddToTail();
+		m_ResponsePackets[i].responderID = listener; // record who we need to respond to
+		CUtlBuffer &response = m_ResponsePackets[i].packet;
+
+		// build the response
+		response.PutInt(-1); // special flag for bad password
+		response.PutInt(SERVERDATA_AUTH_RESPONSE);
+		response.PutString("");
+		response.PutString("");
+	}
 }
 
 
@@ -624,9 +635,9 @@ bool CServerRemoteAccess::LookupValue(const char *variable, CUtlBuffer &value)
 	}
 	else if (!stricmp(variable, "stats"))
 	{
-		char stats[512];
-		GetStatsString(stats, sizeof(stats));
-		value.PutString(stats);
+		char szStats[512];
+		GetStatsString( szStats, sizeof( szStats ) );
+		value.PutString( szStats );
 		value.PutChar(0);
 	}
 	else if (!stricmp(variable, "banlist"))
@@ -761,14 +772,15 @@ void CServerRemoteAccess::GetStatsString(char *buf, int bufSize)
 	sv.GetNetStats( avgIn, avgOut );
 
 	// format: CPU percent, Bandwidth in, Bandwidth out, uptime, changelevels, framerate, total players
-	_snprintf(buf, bufSize - 1, "%5.2f %5.2f %5.2f %7i %5i %7.2f %7i",
+	_snprintf(buf, bufSize - 1, "%-6.2f %-10.2f %-11.2f %-7i %-12i %-8.2f %-8i %-8i",
 				sv.GetCPUUsage() * 100, 
-				avgIn, 
-				avgOut,
+				avgIn / 1024.0f,
+				avgOut / 1024.0f,
 				(int)(Sys_FloatTime()) / 60,
 				sv.GetSpawnCount() - 1,
 				1.0/host_frametime, // frame rate
-				sv.GetNumClients() - sv.GetNumProxies());
+				sv.GetNumClients() - sv.GetNumProxies(),
+				sv.GetNumConnections());
 	buf[bufSize - 1] = 0;
 };
 

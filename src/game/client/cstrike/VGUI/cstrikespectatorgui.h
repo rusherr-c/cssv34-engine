@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -35,6 +35,14 @@ public:
 	virtual void UpdateSpectatorPlayerList( void );
 	virtual void Update( void );
 	virtual bool NeedsUpdate( void );
+	//=============================================================================
+	// HPE_BEGIN:
+	// [smessick]
+	//=============================================================================
+	virtual void ShowPanel( bool bShow );
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 
 protected:
 
@@ -54,7 +62,7 @@ protected:
 	vgui::Label *m_pCTScore;
 	vgui::Label *m_pTerLabel;
 	vgui::Label *m_pTerScore;
-	vgui::Panel *m_pTimer;
+	vgui::Label *m_pTimer;
 	vgui::Label *m_pTimerLabel;
 	vgui::Panel *m_pDivider;
 	vgui::Label *m_pExtraInfo;

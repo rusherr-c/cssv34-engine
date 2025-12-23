@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,39 +36,44 @@ public:
 	virtual bool Reload();
 	virtual void WeaponIdle();
 
-	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_XM1014; }
+ 	virtual float GetInaccuracy() const;
+	virtual float GetSpread() const;
 
+	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_XM1014; }
 
 private:
 
 	CWeaponXM1014( const CWeaponXM1014 & );
 
 	float m_flPumpTime;
-	CNetworkVar( int, m_fInSpecialReload );
+	CNetworkVar( int, m_reloadState );	// special reload state for shotgun
 
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponXM1014, DT_WeaponXM1014 )
 
 BEGIN_NETWORK_TABLE( CWeaponXM1014, DT_WeaponXM1014 )
-	#ifdef CLIENT_DLL
-		RecvPropInt( RECVINFO( m_fInSpecialReload ) )
-	#else
-		SendPropInt( SENDINFO( m_fInSpecialReload ), 2, SPROP_UNSIGNED )
-	#endif
+#ifdef CLIENT_DLL
+	RecvPropInt( RECVINFO( m_reloadState ) )
+#else
+	SendPropInt( SENDINFO( m_reloadState ), 2, SPROP_UNSIGNED )
+#endif
 END_NETWORK_TABLE()
 
+#if defined(CLIENT_DLL)
 BEGIN_PREDICTION_DATA( CWeaponXM1014 )
+	DEFINE_PRED_FIELD( m_reloadState, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
 END_PREDICTION_DATA()
+#endif
 
 LINK_ENTITY_TO_CLASS( weapon_xm1014, CWeaponXM1014 );
 PRECACHE_WEAPON_REGISTER( weapon_xm1014 );
 
 
-
 CWeaponXM1014::CWeaponXM1014()
 {
 	m_flPumpTime = 0;
+	m_reloadState = 0;
 }
 
 void CWeaponXM1014::Spawn()
@@ -78,12 +83,29 @@ void CWeaponXM1014::Spawn()
 	BaseClass::Spawn();
 }
 
+float CWeaponXM1014::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+		return 0.0f;
+	else
+		return BaseClass::GetInaccuracy();
+}
+
+float CWeaponXM1014::GetSpread() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+		return 0.0725f;
+
+	return GetCSWpnData().m_fSpread[Primary_Mode];
+}
 
 void CWeaponXM1014::PrimaryAttack()
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
+
+	float flCycleTime = GetCSWpnData().m_flCycleTime;
 
 	// don't fire underwater
 	if (pPlayer->GetWaterLevel() == 3)
@@ -118,6 +140,7 @@ void CWeaponXM1014::PrimaryAttack()
 	pPlayer->SetAnimation( PLAYER_ATTACK1 );
 
 	// Dispatch the FX right away with full accuracy.
+	float flCurAttack = CalculateNextAttackTime( flCycleTime );
 	FX_FireBullets( 
 		pPlayer->entindex(),
 		pPlayer->Weapon_ShootPosition(), 
@@ -125,8 +148,9 @@ void CWeaponXM1014::PrimaryAttack()
 		GetWeaponID(),
 		Primary_Mode,
 		CBaseEntity::GetPredictionRandomSeed() & 255, // wrap it for network traffic so it's the same between client and server
-		0.0725 // flSpread
-		);
+		GetInaccuracy(),
+		GetSpread(), // flSpread
+		flCurAttack );
 
 	if (!m_iClip1 && pPlayer->GetAmmoCount( m_iPrimaryAmmoType ) <= 0)
 	{
@@ -137,13 +161,14 @@ void CWeaponXM1014::PrimaryAttack()
 	if (m_iClip1 != 0)
 		m_flPumpTime = gpGlobals->curtime + 0.5;
 
-	m_flNextPrimaryAttack = gpGlobals->curtime + 0.25;
-	m_flNextSecondaryAttack = gpGlobals->curtime + 0.25;
 	if (m_iClip1 != 0)
 		SetWeaponIdleTime( gpGlobals->curtime + 2.5 );
 	else
 		SetWeaponIdleTime( gpGlobals->curtime + 0.25 );
-	m_fInSpecialReload = 0;
+	m_reloadState = 0;
+
+	// update accuracy
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyImpulseFire[Primary_Mode];
 
 	// Update punch angles.
 	QAngle angle = pPlayer->GetPunchAngle();
@@ -177,12 +202,12 @@ bool CWeaponXM1014::Reload()
 	//MIKETODO: shotgun reloading (wait until we get content)
 	
 	// check to see if we're ready to reload
-	if (m_fInSpecialReload == 0)
+	if (m_reloadState == 0)
 	{
 		pPlayer->SetAnimation( PLAYER_RELOAD );
 
 		SendWeaponAnim( ACT_SHOTGUN_RELOAD_START );
-		m_fInSpecialReload = 1;
+		m_reloadState = 1;
 		pPlayer->m_flNextAttack = gpGlobals->curtime + 0.5;
 		SetWeaponIdleTime( gpGlobals->curtime + 0.5 );
 		m_flNextPrimaryAttack = gpGlobals->curtime + 0.5;
@@ -194,12 +219,12 @@ bool CWeaponXM1014::Reload()
 
 		return true;
 	}
-	else if (m_fInSpecialReload == 1)
+	else if (m_reloadState == 1)
 	{
 		if (m_flTimeWeaponIdle > gpGlobals->curtime)
 			return true;
 		// was waiting for gun to move to side
-		m_fInSpecialReload = 2;
+		m_reloadState = 2;
 
 		SendWeaponAnim( ACT_VM_RELOAD );
 		SetWeaponIdleTime( gpGlobals->curtime + 0.5 );
@@ -228,7 +253,7 @@ bool CWeaponXM1014::Reload()
 		if ( pPlayer )
 			 pPlayer->RemoveAmmo( 1, m_iPrimaryAmmoType );
 
-		m_fInSpecialReload = 1;
+		m_reloadState = 1;
 	}
 	
 
@@ -250,11 +275,11 @@ void CWeaponXM1014::WeaponIdle()
 
 	if (m_flTimeWeaponIdle < gpGlobals->curtime)
 	{
-		if (m_iClip1 == 0 && m_fInSpecialReload == 0 && pPlayer->GetAmmoCount( m_iPrimaryAmmoType ))
+		if (m_iClip1 == 0 && m_reloadState == 0 && pPlayer->GetAmmoCount( m_iPrimaryAmmoType ))
 		{
 			Reload( );
 		}
-		else if (m_fInSpecialReload != 0)
+		else if (m_reloadState != 0)
 		{
 			if (m_iClip1 != 7 && pPlayer->GetAmmoCount( m_iPrimaryAmmoType ))
 			{
@@ -267,7 +292,7 @@ void CWeaponXM1014::WeaponIdle()
 				SendWeaponAnim( ACT_SHOTGUN_RELOAD_FINISH );
 				
 				// play cocking sound
-				m_fInSpecialReload = 0;
+				m_reloadState = 0;
 				SetWeaponIdleTime( gpGlobals->curtime + 1.5 );
 			}
 		}

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -49,6 +49,9 @@
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "soundsystem/isoundsystem.h"
 #include "tier1/tier1.h"
+#include "valve_ipc_win32.h"
+#include "threadtools.h"
+#include "vstdlib/IKeyValuesSystem.h"
 
 bool g_bOldFileDialogs = false;
 
@@ -79,6 +82,31 @@ CreateInterfaceFn g_Factory;
 CSysModule *g_pFSDialogModule = 0;
 CreateInterfaceFn g_FSDialogFactory = 0;
 
+
+class CHlmvIpcServer : public CValveIpcServerUtl
+{
+public:
+	CHlmvIpcServer() : CValveIpcServerUtl( "HLMV_IPC_SERVER" ) {}
+	~CHlmvIpcServer();
+
+public:
+	bool HasCommands();
+	void AppendCommand( char *pszCommand );
+	char *GetCommand();
+	void PopCommand();
+
+protected:
+	virtual BOOL ExecuteCommand( CUtlBuffer &cmd, CUtlBuffer &res );
+
+protected:
+	CThreadFastMutex m_mtx;
+	CUtlVector< char * > m_lstCommands;
+}
+g_HlmvIpcServer;
+
+CValveIpcClientUtl g_HlmvIpcClient( "HLMV_IPC_SERVER" );
+bool g_bHlmvMaster = false;	// This hlmv is controlling a controlled hlmv instance
+bool g_bHlmvControlled = false;	// This hlmv is being controlled by a master hlmv instance
 
 void LoadFileSystemDialogModule()
 {
@@ -171,8 +199,10 @@ struct AccelTableEntry_t
 	unsigned char  flags;
 };
 
-#define NUM_ACCELERATORS 21
-AccelTableEntry_t accelTable[NUM_ACCELERATORS] = {	{VK_F5, IDC_FILE_REFRESH,		mx::ACCEL_VIRTKEY},
+AccelTableEntry_t accelTable[] =					{{VK_F1, IDC_FLUSH_SHADERS,		mx::ACCEL_VIRTKEY},
+													{VK_F5, IDC_FILE_REFRESH,		mx::ACCEL_VIRTKEY},
+													{'u', IDC_FILE_UNLOADALLMERGEDMODELS, mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
+													{'U', IDC_FILE_UNLOADALLMERGEDMODELS, mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
 													{'w', IDC_ACCEL_WIREFRAME,		mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
 													{'W', IDC_ACCEL_WIREFRAME,		mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
 													{'a', IDC_ACCEL_ATTACHMENTS,	mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
@@ -193,6 +223,7 @@ AccelTableEntry_t accelTable[NUM_ACCELERATORS] = {	{VK_F5, IDC_FILE_REFRESH,		mx
 													{'T', IDC_ACCEL_TANGENTS,		mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
 													{'s', IDC_ACCEL_SHADOW,			mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY},
 													{'S', IDC_ACCEL_SHADOW,			mx::ACCEL_CONTROL | mx::ACCEL_VIRTKEY}};
+#define NUM_ACCELERATORS ARRAYSIZE( accelTable )
 
 
 MDLViewer::MDLViewer ()
@@ -204,7 +235,7 @@ MDLViewer::MDLViewer ()
 	// create menu stuff
 	mb = new mxMenuBar (this);
 	mxMenu *menuFile = new mxMenu ();
-	mxMenu *menuOptions = new mxMenu ();
+	menuOptions = new mxMenu ();
 	menuView = new mxMenu ();
 	mxMenu *menuHelp = new mxMenu ();
 
@@ -246,7 +277,25 @@ MDLViewer::MDLViewer ()
 		menuFile->add ("Load Weapon...", IDC_FILE_LOADMERGEDMODEL_STEAM);
 	}
 
-	menuFile->add ("Unload Weapon", IDC_FILE_UNLOADMERGEDMODEL);
+	mxMenu *menuUnloadWeapon = new mxMenu ();
+	menuUnloadWeapon->add ("Unload All Merged Models (Ctrl-U)", IDC_FILE_UNLOADALLMERGEDMODELS);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL1);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL2);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL3);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL4);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL5);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL6);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL7);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL8);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL9);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL10);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL11);
+	menuUnloadWeapon->add ("(empty)", IDC_FILE_UNLOADMERGEDMODEL12);
+	for ( int i = IDC_FILE_UNLOADMERGEDMODEL1; i <= IDC_FILE_UNLOADMERGEDMODEL12; i++ )
+	{
+		menuUnloadWeapon->setEnabled( i, false );
+	}
+	menuFile->addMenu ("Unload Weapon", menuUnloadWeapon);
 	
 	menuFile->addSeparator ();
 	menuFile->add ("Load Background Texture...", IDC_FILE_LOADBACKGROUNDTEX);
@@ -317,6 +366,7 @@ MDLViewer::MDLViewer ()
 
 	setBounds( g_viewerSettings.xpos, g_viewerSettings.ypos, g_viewerSettings.width, g_viewerSettings.height );
 	setVisible (true);
+	setTimer( 200 );
 
 	CUtlVector< mx::Accel_t > accelerators;
 	mx::Accel_t accel;
@@ -330,12 +380,25 @@ MDLViewer::MDLViewer ()
 	}
 
 	mx::createAccleratorTable( accelerators.Count(), accelerators.Base() );
+
+	g_HlmvIpcServer.EnsureRegisteredAndRunning();
+
+	if ( !g_HlmvIpcServer.IsRunning() )
+	{
+		menuOptions->addSeparator();
+		menuOptions->add ( "Link HLMV", IDC_OPTIONS_LINKHLMV );
+		menuOptions->add ( "Unlink HLMV", IDC_OPTIONS_UNLINKHLMV );
+		menuOptions->setChecked( IDC_OPTIONS_UNLINKHLMV, true );
+		menuOptions->setEnabled( IDC_OPTIONS_UNLINKHLMV, false );
+	}
 }
 
 
 
 MDLViewer::~MDLViewer ()
 {
+	g_HlmvIpcServer.EnsureStoppedAndUnregistered();
+
 	saveRecentFiles ();
 	SaveViewerSettings( g_pStudioModel->GetFileName(), g_pStudioModel );
 	SaveViewerRootSettings( );
@@ -352,13 +415,15 @@ MDLViewer::~MDLViewer ()
 //-----------------------------------------------------------------------------
 void MDLViewer::Refresh( void )
 {
-	g_pStudioModel->ReleaseStudioModel( );
-	g_pMDLCache->Flush( );
+	KeyValuesSystem()->InvalidateCache();
+
+	g_pStudioModel->ReleaseStudioModel();
+	g_pMDLCache->Flush();
 	if ( recentFiles[0][0] != '\0' )
 	{
 		char szFile[MAX_PATH];
-		strcpy( szFile, recentFiles[0] ); 
-		g_pMaterialSystem->ReloadMaterials( );
+		strcpy( szFile, recentFiles[0] );
+		g_pMaterialSystem->ReloadMaterials();
 		d_cpl->loadModel( szFile );
 	}
 }
@@ -422,6 +487,11 @@ void MDLViewer::LoadModelFile( const char *pszFile, int slot )
 		initRecentFiles ();
 
 		setLabel( "%s", filename );
+	}
+	else
+	{	
+		mb->modify (IDC_FILE_UNLOADMERGEDMODEL1 + slot, IDC_FILE_UNLOADMERGEDMODEL1 + slot, pszFile);
+		mb->setEnabled (IDC_FILE_UNLOADMERGEDMODEL1 + slot, true);
 	}
 }
 
@@ -567,8 +637,18 @@ MDLViewer::handleEvent (mxEvent *event)
 			const char *ptr = mxGetOpenFileName (this, 0, "*.mdl");
 			if (ptr)
 			{
-				strcpy( g_viewerSettings.mergeModelFile[0], ptr );
-				LoadModelFile( ptr, 0 );
+				// find the first free slot
+				int iChosenSlot = 0;
+				for ( int i = 0; i < HLMV_MAX_MERGED_MODELS; i++ )
+				{
+					if ( g_viewerSettings.mergeModelFile[i][0] == 0 )
+					{
+						iChosenSlot = i;
+						break;
+					}
+				}
+				strcpy( g_viewerSettings.mergeModelFile[iChosenSlot], ptr );
+				LoadModelFile( ptr, iChosenSlot );
 			}
 		}
 		break;
@@ -578,30 +658,80 @@ MDLViewer::handleEvent (mxEvent *event)
 			const char *pFilename = SteamGetOpenFilename();
 			if ( pFilename )
 			{
-				strcpy( g_viewerSettings.mergeModelFile[0], pFilename );
-				LoadModelFile( pFilename, 0 );
+				// find the first free slot
+				int iChosenSlot = 0;
+				for ( int i = 0; i < HLMV_MAX_MERGED_MODELS; i++ )
+				{
+					if ( g_viewerSettings.mergeModelFile[i][0] == 0 )
+					{
+						iChosenSlot = i;
+						break;
+					}
+				}
+				strcpy( g_viewerSettings.mergeModelFile[iChosenSlot], pFilename );
+				LoadModelFile( pFilename, iChosenSlot );
 			}
 		}
 		break;
 
-		case IDC_FILE_UNLOADMERGEDMODEL:
+
+		case IDC_FILE_UNLOADMERGEDMODEL1:
+		case IDC_FILE_UNLOADMERGEDMODEL2:
+		case IDC_FILE_UNLOADMERGEDMODEL3:
+		case IDC_FILE_UNLOADMERGEDMODEL4:
+		case IDC_FILE_UNLOADMERGEDMODEL5:
+		case IDC_FILE_UNLOADMERGEDMODEL6:
+		case IDC_FILE_UNLOADMERGEDMODEL7:
+		case IDC_FILE_UNLOADMERGEDMODEL8:
+		case IDC_FILE_UNLOADMERGEDMODEL9:
+		case IDC_FILE_UNLOADMERGEDMODEL10:
+		case IDC_FILE_UNLOADMERGEDMODEL11:
+		case IDC_FILE_UNLOADMERGEDMODEL12:
 		{
+			int i = event->action - IDC_FILE_UNLOADMERGEDMODEL1;
 			// FIXME: move to d_cpl
-			if (g_pStudioExtraModel[0])
+			if (g_pStudioExtraModel[i])
 			{
-				strcpy( g_viewerSettings.mergeModelFile[0], "" );
-				g_pStudioExtraModel[0]->FreeModel( false );
-				delete g_pStudioExtraModel[0];
-				g_pStudioExtraModel[0] = NULL;
+				V_strcpy_safe( g_viewerSettings.mergeModelFile[i], "" );
+				g_pStudioExtraModel[i]->FreeModel( false );
+				delete g_pStudioExtraModel[i];
+				g_pStudioExtraModel[i] = NULL;
+
+				mb->modify (IDC_FILE_UNLOADMERGEDMODEL1 + i, IDC_FILE_UNLOADMERGEDMODEL1 + i, "(empty)");
+				mb->setEnabled (IDC_FILE_UNLOADMERGEDMODEL1 + i, false);					
 			}
 		}
 		break;
+
+		case IDC_FILE_UNLOADALLMERGEDMODELS:
+			d_cpl->UnloadAllMergedModels();
+			break;
 
 		case IDC_FILE_REFRESH:
 		{
 			Refresh();
 			break;
 		}
+
+		case IDC_FLUSH_SHADERS:
+		{
+			CCommand args;
+			args.Tokenize( "mat_flushshaders" );
+
+			ConCommandBase *pCommandBase = g_pCVar->FindCommandBase( args[0] );
+			if ( !pCommandBase )
+			{
+				ConWarning( "Unknown command or convar '%s'!\n", args[0] );
+				break;
+			}
+
+			if ( pCommandBase->IsCommand() )
+			{
+				ConCommand *pCommand = static_cast<ConCommand*>( pCommandBase );
+				pCommand->Dispatch( args );
+			}
+		}
+		break;
 
 		case IDC_FILE_LOADBACKGROUNDTEX:
 		case IDC_FILE_LOADGROUNDTEX:
@@ -672,10 +802,25 @@ MDLViewer::handleEvent (mxEvent *event)
 
 		case IDC_OPTIONS_CENTERVIEW:
 			d_cpl->centerView ();
+			if ( g_bHlmvMaster )
+			{
+				SendModelTransformToLinkedHlmv();
+			}
+			break;
+		case IDC_OPTIONS_CENTERVERTS:
+			//d_cpl->centerVerts( );
+			if ( g_bHlmvMaster )
+			{
+				SendModelTransformToLinkedHlmv();
+			}
 			break;
 		case IDC_OPTIONS_VIEWMODEL:
 		{
 			d_cpl->viewmodelView();
+			if ( g_bHlmvMaster )
+			{
+				SendModelTransformToLinkedHlmv();
+			}
 		}
 		break;
 
@@ -693,6 +838,63 @@ MDLViewer::handleEvent (mxEvent *event)
 
 		case IDC_OPTIONS_DUMP:
 			d_cpl->dumpModelInfo ();
+			break;
+
+		case IDC_OPTIONS_SYNCHLMVCAMERA:
+			SendModelTransformToLinkedHlmv();
+
+			break;
+
+		case IDC_OPTIONS_LINKHLMV:
+			if ( !g_bHlmvMaster && !g_HlmvIpcServer.IsRunning() && g_HlmvIpcClient.Connect() )
+			{
+				CUtlBuffer cmd;
+				CUtlBuffer res;
+
+				// Make connection to other hlmv
+				cmd.PutString( "hlmvLink" );
+				cmd.PutChar( '\0' );
+
+				if ( g_HlmvIpcClient.ExecuteCommand( cmd, res ) )
+				{
+					g_bHlmvMaster = true;
+				}
+
+				g_HlmvIpcClient.Disconnect();
+
+				SendModelTransformToLinkedHlmv();
+				SendLightRotToLinkedHlmv();
+
+				menuOptions->setChecked( IDC_OPTIONS_LINKHLMV, true );
+				menuOptions->setEnabled( IDC_OPTIONS_LINKHLMV, false );
+
+				menuOptions->setChecked( IDC_OPTIONS_UNLINKHLMV, false );
+				menuOptions->setEnabled( IDC_OPTIONS_UNLINKHLMV, true );
+			}
+			break;
+
+		case IDC_OPTIONS_UNLINKHLMV:
+			if ( g_bHlmvMaster && g_HlmvIpcClient.Connect() )
+			{
+				CUtlBuffer cmd;
+				CUtlBuffer res;
+
+				// Break connection to linked hlmv
+
+				cmd.PutString( "hlmvUnlink" );
+				cmd.PutChar( '\0' );
+
+				g_HlmvIpcClient.ExecuteCommand( cmd, res );
+				g_bHlmvMaster = false;
+
+				g_HlmvIpcClient.Disconnect();
+
+				menuOptions->setChecked( IDC_OPTIONS_LINKHLMV, false );
+				menuOptions->setEnabled( IDC_OPTIONS_LINKHLMV, true );
+
+				menuOptions->setChecked( IDC_OPTIONS_UNLINKHLMV, true );
+				menuOptions->setEnabled( IDC_OPTIONS_UNLINKHLMV, false );
+			}
 			break;
 
 		case IDC_VIEW_FILEASSOCIATIONS:
@@ -829,11 +1031,213 @@ MDLViewer::handleEvent (mxEvent *event)
 	}
 	break;
 
+	case mxEvent::Timer:
+	{
+		if ( g_HlmvIpcServer.HasCommands() )
+		{
+			// Execute next command at next msg pump, ~ 1/60th s (60Hz) if controlled, 0.1s if not
+			if ( g_bHlmvControlled )
+			{
+				// Clear up to 10 pending commands if controlled
+				for ( int nCmdCount = 0; nCmdCount < 10 && g_HlmvIpcServer.HasCommands(); ++nCmdCount )
+				{
+					handleIpcCommand( g_HlmvIpcServer.GetCommand() );
+					g_HlmvIpcServer.PopCommand();
+				}
+
+				setTimer( 17 );
+			}
+			else
+			{
+				handleIpcCommand( g_HlmvIpcServer.GetCommand() );
+				g_HlmvIpcServer.PopCommand();
+
+				setTimer( 100 );
+			}
+		}
+		else if ( !g_HlmvIpcServer.IsRunning() )
+		{
+			// Keep trying to establish our server slot if another instance quits
+			BOOL bIsRunning = g_HlmvIpcServer.IsRunning();
+			g_HlmvIpcServer.EnsureRegisteredAndRunning();
+			if ( !bIsRunning && g_HlmvIpcServer.IsRunning() )
+			{
+				g_bHlmvMaster = false;
+				menuOptions->setEnabled( IDC_OPTIONS_LINKHLMV, false );
+				menuOptions->setChecked( IDC_OPTIONS_LINKHLMV, false );
+				menuOptions->setEnabled( IDC_OPTIONS_UNLINKHLMV, false );
+				menuOptions->setChecked( IDC_OPTIONS_LINKHLMV, false );
+			}
+
+			// Attempt every 1.0 s
+			setTimer( 1000 );
+		}
+		else
+		{
+			// Idling, poll command queue @ ~60Hz if controlled, 0.5s ( 2Hz ) otherwise
+			if ( g_bHlmvControlled )
+			{
+				setTimer( 17 );
+			}
+			else
+			{
+				setTimer( 500 );
+			}
+		}
+	}
+	break;
 	} // event->event
 
 	return 1;
 }
 
+
+
+void TranslateMayaToHLMVCoordinates( const Vector &vMayaPos, const QAngle &vMayaRot, Vector &vHLMVPos, QAngle &vHLMVAngles )
+{
+	vHLMVPos.Init( vMayaPos.z, vMayaPos.x, vMayaPos.y );
+
+	vHLMVAngles[PITCH] = -vMayaRot[0];
+	vHLMVAngles[YAW] = vMayaRot[1] + 180;
+	vHLMVAngles[ROLL] = -vMayaRot[2];
+}
+
+
+void MDLViewer::handleIpcCommand( char *szCommand )
+{
+	MDLCACHE_CRITICAL_SECTION_( g_pMDLCache );
+
+	if ( !strcmp( "reload", szCommand ) )
+	{
+		Refresh();
+
+		if ( HWND hWnd = (HWND) getHandle() )
+		{
+			if ( ::IsIconic( hWnd ) )
+				::ShowWindow( hWnd, SW_RESTORE );
+
+			::BringWindowToTop( hWnd );
+			::SetForegroundWindow( hWnd );
+			::SetFocus( hWnd );
+		}
+	}
+	else if ( V_strncasecmp( "cameraTo", szCommand, 8 ) == 0 )
+	{
+		// Read the camera position and angles from Maya.
+		Vector vMayaPos;
+		QAngle vMayaRot;
+
+		char szFirstPart[32];
+		sscanf( szCommand, "%s %f %f %f %f %f %f",
+			szFirstPart,
+			&vMayaPos.x, &vMayaPos.y, &vMayaPos.z, 
+			&vMayaRot.x, &vMayaRot.y, &vMayaRot.z );
+
+
+		//
+		// Obviously, this could all be simplified, but it's nice to make it easy to see what it's doing here.
+		//
+
+		
+		// Translate the camera position/angles from Maya space to model space.
+		// In model space, +X=forward, +Y=left, and +Z=up
+		// (i.e. the model faces forward along +X)
+		Vector vCameraPos;
+		QAngle vCameraAngles;
+		TranslateMayaToHLMVCoordinates( vMayaPos, vMayaRot, vCameraPos, vCameraAngles );
+
+
+		// Now, build a matrix from model space to camera space. The way we're defining camera space,
+		// the axes point the same way as in model space (+X=forward, +Y=left, +Z=up).
+		// This is a standard put-stuff-in-camera-space matrix (backtranslate and then backrotate).
+		matrix3x4_t mModelToCameraRot, mModelToCameraTrans, mModelToCameraFull;
+
+		// Backtranslate..
+		SetIdentityMatrix( mModelToCameraTrans );
+		MatrixSetColumn( -vCameraPos, 3, mModelToCameraTrans );
+
+		// Backrotate..
+		AngleMatrix( vCameraAngles, mModelToCameraRot );
+		MatrixTranspose( mModelToCameraRot );
+
+		// Concatenate.
+		MatrixMultiply( mModelToCameraRot, mModelToCameraTrans, mModelToCameraFull );
+
+		
+		// Now we need to convert the camera space from above to HLMV's specific camera space. This just means negating
+		// the X and Y axes because HLMV's camera space is (+X=back, +Y=left, +Z=up).
+		matrix3x4_t mCameraToWorld( 
+			-1, 0, 0, 0,
+			0, -1, 0, 0,
+			0, 0, 1, 0 );
+
+		// Blat all these matrices together.
+		matrix3x4_t mFinal;
+		MatrixMultiply( mCameraToWorld, mModelToCameraFull, mFinal );
+
+		// Tell HLMV our new fancy transform to use, and then we'll see the model from the same place Maya did.
+		g_pStudioModel->SetModelTransform( mFinal );
+
+		// Redraw.
+		d_MatSysWindow->redraw();
+	}
+	else if ( StringHasPrefixCaseSensitive( szCommand, "hlmvModelTransform" ) )
+	{
+		matrix3x4_t m;
+
+		sscanf( szCommand, "%*s %f %f %f %f %f %f %f %f %f %f %f %f",
+			&m.m_flMatVal[0][0], &m.m_flMatVal[0][1], &m.m_flMatVal[0][2], &m.m_flMatVal[0][3],
+			&m.m_flMatVal[1][0], &m.m_flMatVal[1][1], &m.m_flMatVal[1][2], &m.m_flMatVal[1][3],
+			&m.m_flMatVal[2][0], &m.m_flMatVal[2][1], &m.m_flMatVal[2][2], &m.m_flMatVal[2][3] );
+
+		// Tell HLMV our new fancy transform to use, and then we'll see the model from the same place Maya did.
+		g_pStudioModel->SetModelTransform( m );
+
+		// Redraw.
+		d_MatSysWindow->redraw();
+	}
+	else if ( StringHasPrefixCaseSensitive( szCommand, "hlmvLightRot" ) )
+	{
+		sscanf( szCommand, "%*s %f %f %f",
+			&g_viewerSettings.lightrot[0], &g_viewerSettings.lightrot[1], &g_viewerSettings.lightrot[2] );
+
+		// Redraw.
+		d_MatSysWindow->redraw();
+	}
+	else if ( StringHasPrefixCaseSensitive( szCommand, "hlmvForceFrame" ) )
+	{
+		float flFrame = 0.0f;
+		sscanf( szCommand, "%*s %f", &flFrame );
+
+		d_cpl->SetFrameSlider( flFrame );
+		d_cpl->setFrame( flFrame );
+		d_cpl->setSpeedScale( 0 );
+
+		// Redraw.
+		d_MatSysWindow->redraw();
+	}
+	else if ( StringHasPrefixCaseSensitive( szCommand, "hlmvLink" ) )
+	{
+		if ( !g_bHlmvControlled )
+		{
+			g_bHlmvControlled = true;
+
+			CUtlString label( "LINKED: " );
+			label += getLabel();
+			setLabel( label.Get() );
+		}
+	}
+	else if ( StringHasPrefixCaseSensitive( szCommand, "hlmvUnlink" ) )
+	{
+		g_bHlmvControlled = false;
+
+		const char *pszLabel = getLabel();
+		if ( StringHasPrefixCaseSensitive( pszLabel, "LINKED: " ) )
+		{
+			setLabel( pszLabel + 8 );	// Skip past "LINKED: "
+		}
+	}
+}
 
 
 void
@@ -856,6 +1260,54 @@ int MDLViewer::GetCurrentHitboxSet( void )
 {
 	return d_cpl ? d_cpl->GetCurrentHitboxSet() : 0;
 }
+
+
+//-----------------------------------------------------------------------------
+// Sends the model transform to the controlled hlmv instance
+//-----------------------------------------------------------------------------
+void MDLViewer::SendModelTransformToLinkedHlmv()
+{
+	if ( g_bHlmvMaster && g_HlmvIpcClient.Connect() )
+	{
+		matrix3x4_t m;
+		g_pStudioModel->GetModelTransform( m );
+
+		CUtlBuffer cmd;
+		CUtlBuffer res;
+
+		cmd.Printf( "%s %f %f %f %f %f %f %f %f %f %f %f %f",
+			"hlmvModelTransform",
+			m.m_flMatVal[0][0], m.m_flMatVal[0][1], m.m_flMatVal[0][2], m.m_flMatVal[0][3],
+			m.m_flMatVal[1][0], m.m_flMatVal[1][1], m.m_flMatVal[1][2], m.m_flMatVal[1][3],
+			m.m_flMatVal[2][0], m.m_flMatVal[2][1], m.m_flMatVal[2][2], m.m_flMatVal[2][3] );
+
+		g_HlmvIpcClient.ExecuteCommand( cmd, res );
+
+		g_HlmvIpcClient.Disconnect();
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Sends the light rotation to the controlled hlmv instance
+//-----------------------------------------------------------------------------
+void MDLViewer::SendLightRotToLinkedHlmv()
+{
+	if ( g_bHlmvMaster && g_HlmvIpcClient.Connect() )
+	{
+		CUtlBuffer cmdLightRot;
+		CUtlBuffer resLightRot;
+
+		cmdLightRot.Printf( "%s %f %f %f",
+			"hlmvLightRot",
+			g_viewerSettings.lightrot[0], g_viewerSettings.lightrot[1], g_viewerSettings.lightrot[2] );
+
+		g_HlmvIpcClient.ExecuteCommand( cmdLightRot, resLightRot );
+
+		g_HlmvIpcClient.Disconnect();
+	}
+}
+
 
 SpewRetval_t HLMVSpewFunc( SpewType_t spewType, char const *pMsg )
 {
@@ -939,10 +1391,17 @@ bool CHLModelViewerApp::Create()
 	}
 
 	const char *pShaderDLL = CommandLine()->ParmValue("-shaderdll");
+    const char *pArg;
+	if ( CommandLine()->CheckParm( "-shaderapi", &pArg ))
+	{
+		pShaderDLL = pArg;
+	}
+	
 	if(!pShaderDLL)
 	{
 		pShaderDLL = "shaderapidx9.dll";
 	}
+
 	g_pMaterialSystem->SetShaderAPI( pShaderDLL );
 
 	g_Factory = GetFactory();
@@ -996,8 +1455,9 @@ bool CHLModelViewerApp::PreInit( )
 
 	g_pMaterialSystem->SetAdapter( nAdapter, nAdapterFlags );
 
-	if ( !g_pFileSystem->IsSteam() || CommandLine()->FindParm( "-OldDialogs" ) )
-		g_bOldFileDialogs = true;
+	g_bOldFileDialogs = true;
+	if ( CommandLine()->FindParm( "-NoSteamdDialog" ) )
+		g_bOldFileDialogs = false;
 	
 	LoadFileSystemDialogModule();
 
@@ -1107,3 +1567,65 @@ int main (int argc, char *argv[])
 	CSteamApplication steamApplication( &hlmodelviewerApp );
 	return steamApplication.Run();
 }
+//
+// Implementation of IPC server
+//
+
+
+CHlmvIpcServer::~CHlmvIpcServer()
+{
+	for ( int k = 0; k < m_lstCommands.Count(); ++ k )
+	{
+		delete [] m_lstCommands[k];
+	}
+	m_lstCommands.Purge();
+}
+
+bool CHlmvIpcServer::HasCommands()
+{
+	AUTO_LOCK( m_mtx );
+	return m_lstCommands.Count() > 0;
+}
+
+void CHlmvIpcServer::AppendCommand( char *pszCommand )
+{
+	AUTO_LOCK( m_mtx );
+	m_lstCommands.AddToTail( pszCommand );
+}
+
+char * CHlmvIpcServer::GetCommand()
+{
+	AUTO_LOCK( m_mtx );
+	return m_lstCommands.Count() ? m_lstCommands[0] : "";
+}
+
+void CHlmvIpcServer::PopCommand()
+{
+	AUTO_LOCK( m_mtx );
+	if ( m_lstCommands.Count() )
+	{
+		delete [] m_lstCommands[0];
+		m_lstCommands.Remove( 0 );
+	}
+}
+
+BOOL CHlmvIpcServer::ExecuteCommand(CUtlBuffer &cmd, CUtlBuffer &res)
+{
+	char *szCommand = ( char * ) cmd.Base();
+	int nLen = strlen( szCommand );
+	while ( nLen > 0 && V_isspace( szCommand[ nLen - 1 ] ) )
+		-- nLen;
+
+	if ( nLen <= 0 )
+		return FALSE;
+
+	char *pchCopy = new char[ nLen + 1 ];
+	memcpy( pchCopy, szCommand, nLen );
+	pchCopy[ nLen ] = 0;
+
+	AppendCommand( pchCopy );
+
+	res.PutInt( 0 );
+	return TRUE;
+}
+

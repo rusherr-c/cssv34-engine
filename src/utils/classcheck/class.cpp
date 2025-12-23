@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -644,7 +644,7 @@ public:
 	CClassVariable *var;
 };
 
-#include "UtlDict.h"
+#include "utldict.h"
 CUtlDict< MissingType, unsigned short > missing_types;
 
 bool IsMissingType( CClass *cl, CClassVariable *var )

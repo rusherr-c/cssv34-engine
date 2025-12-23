@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,8 +13,8 @@
 #define _CS_SIMPLE_HOSTAGE_H_
 
 #include "nav_mesh.h"
-#include "nav_path.h"
-#include "nav_pathfind.h"
+#include "cs_nav_path.h"
+#include "cs_nav_pathfind.h"
 #include "improv_locomotor.h"
 #include "cs_playeranimstate.h"
 
@@ -44,7 +44,7 @@ public:
 	virtual void PhysicsSimulate( void );
 
 	virtual int OnTakeDamage_Alive( const CTakeDamageInfo &info );
-	virtual void TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr );
+	virtual void TraceAttack( const CTakeDamageInfo &info, const Vector &vecDir, trace_t *ptr, CDmgAccumulator *pAccumulator );
 
 	virtual void Event_Killed( const CTakeDamageInfo &info );
 	virtual void Touch( CBaseEntity *other );				// in contact with "other"
@@ -144,7 +144,7 @@ private:
 
 	bool m_isWaitingForLeader;								// true if we are waiting for our rescuer to move
 
-	CNavPath m_path;										// current path to follow
+	CCSNavPath m_path;										// current path to follow
 	CountdownTimer m_repathTimer;							// throttle pathfinder
 
 	CountdownTimer m_inhibitDoorTimer;
@@ -174,7 +174,9 @@ private:
 class HostagePathCost
 {
 public:
-	float operator() ( CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder )
+
+	// HPE_TODO[pmf]: check that these new parameters are okay to be ignored
+	float operator() ( CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder, const CFuncElevator *elevator, float length )
 	{
 		if (fromArea == NULL)
 		{

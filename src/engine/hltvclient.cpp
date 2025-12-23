@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // hltvclient.cpp: implementation of the CHLTVClient class.
 //
@@ -108,6 +108,11 @@ bool CHLTVClient::ProcessFileCRCCheck( CLC_FileCRCCheck *msg )
 	return true;
 }
 
+bool CHLTVClient::ProcessSaveReplay( CLC_SaveReplay *msg )
+{
+	return true;
+}
+
 bool CHLTVClient::ProcessVoiceData(CLC_VoiceData *msg)
 {
 	// HLTV clients can't speak
@@ -121,6 +126,8 @@ void CHLTVClient::ConnectionClosing(const char *reason)
 
 void CHLTVClient::ConnectionCrashed(const char *reason)
 {
+	DebuggerBreakIfDebugging_StagingOnly();
+
 	Disconnect ( (reason!=NULL)?reason:"Connection lost" );	
 }
 
@@ -135,13 +142,13 @@ void CHLTVClient::PacketEnd()
 	
 }
 
-void CHLTVClient::FileRequested(const char *fileName, unsigned int transferID)
+void CHLTVClient::FileRequested(const char *fileName, unsigned int transferID )
 {
 	DevMsg( "CHLTVClient::FileRequested: %s.\n", fileName );
 	m_NetChannel->DenyFile( fileName, transferID );
 }
 
-void CHLTVClient::FileDenied(const char *fileName, unsigned int transferID)
+void CHLTVClient::FileDenied(const char *fileName, unsigned int transferID )
 {
 	DevMsg( "CHLTVClient::FileDenied: %s.\n", fileName );
 }
@@ -149,6 +156,10 @@ void CHLTVClient::FileDenied(const char *fileName, unsigned int transferID)
 void CHLTVClient::FileReceived( const char *fileName, unsigned int transferID )
 {
 	DevMsg( "CHLTVClient::FileReceived: %s.\n", fileName );
+}
+
+void CHLTVClient::FileSent(const char *fileName, unsigned int transferID )
+{
 }
 
 CClientFrame *CHLTVClient::GetDeltaFrame( int nTick )
@@ -414,7 +425,7 @@ void CHLTVClient::SendSnapshot( CClientFrame * pFrame )
 {
 	VPROF_BUDGET( "CHLTVClient::SendSnapshot", "HLTV" );
 
-	byte		buf[NET_MAX_PAYLOAD];
+	ALIGN4 byte		buf[NET_MAX_PAYLOAD] ALIGN4_POST;
 	bf_write	msg( "CHLTVClient::SendSnapshot", buf, sizeof(buf) );
 
 	// if we send a full snapshot (no delta-compression) before, wait until client

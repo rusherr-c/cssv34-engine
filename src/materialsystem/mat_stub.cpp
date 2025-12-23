@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,7 +24,7 @@
 // ---------------------------------------------------------------------------------------- //
 // IMaterialSystem and IMesh stub classes.
 // ---------------------------------------------------------------------------------------- //
-CUtlVector<unsigned short> g_DummyIndices;
+static unsigned short g_DummyIndices[6];
 
 class CDummyMesh : public IMesh
 {
@@ -58,8 +58,7 @@ public:
 	// FIXME: Make this work! Unsupported methods of IIndexBuffer
 	virtual bool Lock( int nMaxIndexCount, bool bAppend, IndexDesc_t& desc ) 
 	{
-		static unsigned short dummyIndex;
-		desc.m_pIndices = &dummyIndex;
+		desc.m_pIndices = g_DummyIndices;
 		desc.m_nIndexSize = 0;
 		desc.m_nFirstIndex = 0;
 		desc.m_nOffset = 0;
@@ -70,8 +69,7 @@ public:
 
 	virtual void ModifyBegin( bool bReadOnly, int nFirstIndex, int nIndexCount, IndexDesc_t& desc ) 
 	{
-		static unsigned short dummyIndex;
-		desc.m_pIndices = &dummyIndex;
+		desc.m_pIndices = g_DummyIndices;
 		desc.m_nIndexSize = 0;
 		desc.m_nFirstIndex = 0;
 		desc.m_nOffset = 0;
@@ -196,9 +194,7 @@ public:
 
 	virtual void MarkAsDrawn() {}
 
-#if defined( _X360 )
 	virtual unsigned ComputeMemoryUsed() { return 0; }
-#endif
 
 	virtual VertexFormat_t GetVertexFormat() const	
 	{	
@@ -270,7 +266,7 @@ public:
 
 	// If rect is not specified, reconstruct all bits, otherwise just
 	// reconstruct a subrect.
-	virtual void Download( Rect_t *pRect = 0 ) {}
+	virtual void Download( Rect_t *pRect = 0, int nAdditionalCreationFlags = 0 ) {}
 
 	// Uses for stats. . .get the approximate size of the texture in it's current format.
 	virtual int GetApproximateVidMemBytes( void ) const { return 64; }
@@ -303,6 +299,13 @@ public:
 	virtual bool ClearTexture( int r, int g, int b, int a ) { return true; }
 	virtual bool CreateRenderTargetSurface( int width, int height, ImageFormat format, bool bSameAsTexture ) { return true; }
 #endif
+
+	// Save texture to a file.
+	virtual bool SaveToFile( const char *fileName ) { return false; }
+
+	void CopyToStagingTexture( ITexture* pDstTex ) {}
+
+	virtual void SetErrorTexture( bool bIsErrorTexture ) { }
 };
 
 CDummyTexture g_DummyTexture;
@@ -426,12 +429,12 @@ public:
 	virtual bool HasSetDeviceGammaRamp() const		{ return false; }
 	virtual bool SupportsCompressedTextures() const	{ return false; }
 	virtual VertexCompressionType_t SupportsCompressedVertices() const { return VERTEX_COMPRESSION_NONE; }
-	virtual bool SupportsNormalMapCompression() const	{ return false; }
 	virtual bool SupportsVertexAndPixelShaders() const	{ return false; }
 	virtual bool SupportsPixelShaders_1_4() const	{ return false; }
 	virtual bool SupportsPixelShaders_2_0() const	{ return false; }
 	virtual bool SupportsPixelShaders_2_b() const	{ return false; }
 	virtual bool ActuallySupportsPixelShaders_2_b() const	{ return false; }
+	virtual bool SupportsStaticControlFlow() const { return false; }
 	virtual bool SupportsVertexShaders_2_0() const	{ return false; }
 	virtual bool SupportsShaderModel_3_0() const	{ return false; }
 	virtual int  MaximumAnisotropicLevel() const	{ return 1; }
@@ -466,7 +469,7 @@ public:
 	// This here should be the major item looked at when checking for compat
 	// from anywhere other than the material system	shaders
 	virtual int	 GetDXSupportLevel() const			{ return 90; }
-	virtual const char *GetShaderDLLName() const	{ return false; }
+	virtual const char *GetShaderDLLName() const	{ return NULL; }
 
 	virtual bool ReadPixelsFromFrontBuffer() const	{ return false; }
 
@@ -488,11 +491,15 @@ public:
 	virtual int	 GetMaxDXSupportLevel() const		{ return 90; }
 	virtual bool SpecifiesFogColorInLinearSpace() const { return false; }
 	virtual bool SupportsSRGB() const				{ return false; }
+	virtual bool FakeSRGBWrite() const				{ return false; }
+	virtual bool CanDoSRGBReadFromRTs() const		{ return true; }
+	virtual bool SupportsGLMixedSizeTargets() const	{ return false; }
 	virtual bool IsAAEnabled() const				{ return false; }
 	virtual int GetVertexTextureCount() const		{ return 0; }
 	virtual int GetMaxVertexTextureDimension() const { return 0; }
 	virtual int MaxViewports() const { return 1; }
 	virtual void OverrideStreamOffsetSupport( bool bOverrideEnabled, bool bEnableSupport ) {}
+	virtual int GetShadowFilterMode() const { return 0; }
 	virtual int NeedsShaderSRGBConversion() const { return 0; }
 	bool UsesSRGBCorrectBlending() const { return false; }
 	virtual bool HasFastVertexTextures() const { return false; }
@@ -503,10 +510,7 @@ public:
 	virtual void SetHDREnabled( bool bEnable ) {}
 	virtual bool SupportsBorderColor( void ) const { return true; }
 	virtual bool SupportsFetch4( void ) const { return false; }
-
-	virtual int GetShadowFilterMode() const { return 0; }
-	virtual float GetShadowDepthBias() const { return 0; }
-	virtual float GetShadowSlopeScaleDepthBias() const { return 0; }
+	virtual bool CanStretchRectFromTextures() const { return false; }
 };
 CDummyHardwareConfig g_DummyHardwareConfig;
 
@@ -648,6 +652,11 @@ public:
 		return false;
 	}
 	virtual void			CallBindProxy( void* ) {}
+
+	virtual IMaterial		*CheckProxyReplacement( void *proxyData ) 
+	{ 
+		return this; 
+	}
 
 	virtual bool			UsesEnvCubemap( void )
 	{
@@ -792,6 +801,8 @@ public:
 	virtual void			RefreshPreservingMaterialVars() {};
 
 	virtual bool			WasReloadedFromWhitelist() {return false;}
+
+	virtual bool			IsPrecached() const {return true;}
 };
 
 CDummyMaterial g_DummyMaterial;
@@ -975,6 +986,20 @@ public:
 		return &g_DummyMaterial;
 	}
 
+	virtual bool IsMaterialLoaded( char const* pMaterialName )
+	{
+		if ( m_pRealMaterialSystem )
+			return m_pRealMaterialSystem->IsMaterialLoaded( pMaterialName );
+		return true;
+	}
+
+	virtual IMaterial *FindMaterialEx( char const* pMaterialName, const char *pTextureGroupName, int nContext, bool complain = true, const char *pComplainPrefix = NULL )
+	{
+		if ( m_pRealMaterialSystem )
+			return m_pRealMaterialSystem->FindMaterialEx( pMaterialName, pTextureGroupName, nContext, complain, pComplainPrefix );
+		return &g_DummyMaterial;
+	}
+
 	virtual IMaterial *FindProceduralMaterial( const char *pMaterialName, const char *pTextureGroupName, KeyValues *pVMTKeyValues )
 	{
 		if ( m_pRealMaterialSystem )
@@ -982,11 +1007,15 @@ public:
 		return &g_DummyMaterial;
 	}
 
-	virtual ITexture *FindTexture( char const* pTextureName, const char *pTextureGroupName, bool complain = true )
+	virtual ITexture *FindTexture( char const* pTextureName, const char *pTextureGroupName, bool complain = true, int nAdditionalCreationFlags = 0)
 	{
 		if ( m_pRealMaterialSystem )
-			return m_pRealMaterialSystem->FindTexture( pTextureName, pTextureGroupName, complain );
+			return m_pRealMaterialSystem->FindTexture( pTextureName, pTextureGroupName, complain, nAdditionalCreationFlags );
 		return &g_DummyTexture;
+	}
+
+	virtual void SetAsyncTextureLoadCache( FileCacheHandle_t hFileCache )
+	{
 	}
 
 	virtual void BindLocalCubemap( ITexture *pTexture )
@@ -1039,6 +1068,18 @@ public:
 		}
 	}
 
+	virtual void				SuspendTextureStreaming( )
+	{
+		if ( m_pRealMaterialSystem )
+			m_pRealMaterialSystem->SuspendTextureStreaming();
+	}
+
+	virtual void				ResumeTextureStreaming( )
+	{
+		if ( m_pRealMaterialSystem )
+			m_pRealMaterialSystem->ResumeTextureStreaming();
+	}
+
 	// uncache all materials. .  good for forcing reload of materials.
 	virtual void				UncacheAllMaterials( )
 	{
@@ -1061,6 +1102,14 @@ public:
 	
 	// Allows us to override the depth buffer setting of a material
 	virtual void	OverrideDepthEnable( bool bEnable, bool bEnableValue )
+	{
+	}
+
+	virtual void	OverrideAlphaWriteEnable( bool bOverrideEnable, bool bAlphaWriteEnable )
+	{
+	}
+
+	virtual void	OverrideColorWriteEnable( bool bOverrideEnable, bool bColorWriteEnable )
 	{
 	}
 
@@ -1153,6 +1202,10 @@ public:
 	}
 
 	virtual void				ClearBuffersObeyStencil( bool bClearColor, bool bClearDepth )
+	{
+	}
+
+	virtual void				ClearBuffersObeyStencilEx( bool bClearColor, bool bClearAlpha, bool bClearDepth )
 	{
 	}
 
@@ -1741,6 +1794,11 @@ public:
 		return 0;
 	}
 
+	virtual char *GetDisplayDeviceName() const OVERRIDE
+	{
+		return "";
+	}
+
 	// Creates/destroys morph data associated w/ a particular material
 	IMorph *CreateMorph( MorphFormat_t, const char *pDebugName )
 	{
@@ -1865,8 +1923,18 @@ public:
 		pFallbackShader[0] = 0;
 	}
 
+#ifdef DX_TO_GL_ABSTRACTION
+	virtual void DoStartupShaderPreloading( void )
+	{
+	}
+#endif
+
 	// Blit a subrect of the current render target to another texture
 	virtual void CopyRenderTargetToTextureEx( ITexture *pTexture, int nRenderTargetID, Rect_t *pSrcRect, Rect_t *pDstRect = NULL )
+	{
+	}
+
+	virtual void CopyTextureToRenderTargetEx( int nRenderTargetID, ITexture *pTexture, Rect_t *pSrcRect, Rect_t *pDstRect = NULL )
 	{
 	}
 
@@ -2048,7 +2116,9 @@ public:
 	void EndRender() {}
 
 	virtual void							SetThreadMode( MaterialThreadMode_t, int ) {}
-	virtual MaterialThreadMode_t			GetThreadMode(){ return MATERIAL_SINGLE_THREADED; }
+	virtual MaterialThreadMode_t			GetThreadMode( ) { return MATERIAL_SINGLE_THREADED; }
+	virtual bool							IsRenderThreadSafe( ) { return true; }
+	virtual bool							AllowThreading( bool bAllow, int nServiceThread ) { return false; }
 	virtual void							ExecuteQueued() {}
 
 	virtual void BeginBatch( IMesh* pIndices ) {}
@@ -2180,8 +2250,6 @@ public:
 
 	virtual void SetFlexWeights( int nFirstWeight, int nCount, const MorphWeight_t* pWeights ) {}
 
-	virtual bool SupportsNormalMapCompression() { return false; }
-
 	virtual bool SupportsBorderColor() { return false; }
 
 	virtual IMaterial *GetCurrentMaterial() { return NULL; }
@@ -2196,6 +2264,11 @@ public:
 	virtual void EnableNonInteractiveMode( MaterialNonInteractiveMode_t mode ) {}
 	virtual void RefreshFrontBufferNonInteractive() {}
 
+	virtual void *			LockRenderData( int nSizeInBytes ) { return NULL; }
+	virtual void			UnlockRenderData( void *pData ) {}
+	virtual bool			IsRenderData( const void *pData ) const { return false; }
+	virtual void			AddRefRenderData() {}
+	virtual void			ReleaseRenderData() {}
 #if defined( _X360 )
 	virtual void				ListUsedMaterials( void ) {}
 	virtual HXUIFONT			OpenTrueTypeFont( const char *pFontname, int tall, int style )
@@ -2234,6 +2307,61 @@ public:
 	virtual void ReloadFilesInList( IFileList *pFilesToReload )
 	{
 	}
+
+	virtual void				PrintfVA( char *fmt, va_list vargs ) {}
+	virtual void				Printf( const char *fmt, ... ) {}
+	virtual float				Knob( char *knobname, float *setvalue=NULL ) { return 0.0f; }
+
+	virtual void				SetRenderTargetFrameBufferSizeOverrides( int nWidth, int nHeight ) OVERRIDE
+	{
+		// Nope.
+	}
+	virtual void				GetRenderTargetFrameBufferDimensions( int & nWidth, int & nHeight ) OVERRIDE
+	{
+		GetBackBufferDimensions( nWidth, nHeight );
+	}
+
+	virtual ITexture*			CreateTextureFromBits(int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits)
+	{
+		return NULL;	
+	}
+
+	virtual void OverrideRenderTargetAllocation( bool )
+	{
+		// anda
+	
+	}
+
+	virtual ITextureCompositor*	NewTextureCompositor( int w, int h, const char* pCompositeName, int nTeamNum, uint64 randomSeed, KeyValues* stageDesc, uint texCompositeCreateFlags ) OVERRIDE
+	{
+		return NULL;	
+	}
+
+	virtual void AsyncFindTexture( const char* pFilename, const char *pTextureGroupName, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs, bool bComplain = true, int nAdditionalCreationFlags = 0 )
+	{
+
+	}
+
+	virtual void AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs )
+	{
+
+	}
+	
+	virtual ITexture*			CreateNamedTextureFromBitsEx( const char* pName, const char *pTextureGroupName, int w, int h, int mips, ImageFormat fmt, int srcBufferSize, byte* srcBits, int nFlags )
+	{
+		return NULL;
+	}
+
+	virtual bool				AddTextureCompositorTemplate( const char* pName, KeyValues* pTmplDesc, int nTexCompositeTemplateFlags ) OVERRIDE
+	{
+		return false;
+	}
+
+	virtual bool VerifyTextureCompositorTemplates() OVERRIDE
+	{
+		return false;	
+	}
+
 };
 
 

@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -110,8 +110,9 @@ public:
 		memset( &m_FogColor, 0, sizeof(m_FogColor) );
 	}
 
-	void									Init( CMaterialSystem *pMaterialSystem, CMatRenderContextBase *pHardwareContext );
-	void									Term();
+	bool									Init( CMaterialSystem *pMaterialSystem, CMatRenderContextBase *pHardwareContext );
+	void									Shutdown();
+	void									Free();
 
 	void									CompactMemory();
 
@@ -151,10 +152,7 @@ public:
 	DEFINE_QUEUED_CALL_2(					DepthRange, float, float, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_3(					ClearBuffers, bool, bool, bool, IMatRenderContext, m_pHardwareContext );
 
-	void ReadPixels( int, int, int, int, unsigned char *, ImageFormat )
-	{
-		CannotSupport();
-	}
+	void									ReadPixels( int x, int y, int width, int height, unsigned char *data, ImageFormat dstFormat );
 
 	DEFINE_QUEUED_CALL_3(					SetAmbientLight, float, float, float, IMatRenderContext, m_pHardwareContext );
 
@@ -245,6 +243,8 @@ public:
 	DEFINE_QUEUED_CALL_3(					ClearColor3ub, unsigned char, unsigned char, unsigned char, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_4(					ClearColor4ub, unsigned char, unsigned char, unsigned char, unsigned char, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_2(					OverrideDepthEnable, bool, bool, IMatRenderContext, m_pHardwareContext );
+	DEFINE_QUEUED_CALL_2(					OverrideAlphaWriteEnable, bool, bool, IMatRenderContext, m_pHardwareContext );
+	DEFINE_QUEUED_CALL_2(					OverrideColorWriteEnable, bool, bool, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_1(					DrawScreenSpaceQuad, IMaterial *, IMatRenderContext, m_pHardwareContext );
 
 	void									SyncToken( const char *p );
@@ -277,10 +277,7 @@ public:
 	DEFINE_QUEUED_CALL_1(					DestroyMorph, IMorph *, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_1(					BindMorph, IMorph *, IMatRenderContext, m_pHardwareContext );
 
-	void ReadPixelsAndStretch( Rect_t *, Rect_t *, unsigned char *, ImageFormat, int )
-	{
-		CannotSupport();
-	}
+	void									ReadPixelsAndStretch( Rect_t *pSrcRect, Rect_t *pDstRect, unsigned char *pBuffer, ImageFormat dstFormat, int nDstStride );
 
 	void									GetWindowSize( int &width, int &height ) const;
 
@@ -306,6 +303,7 @@ public:
 	DEFINE_QUEUED_CALL_1(					BindLightmapTexture, ITexture *, IMatRenderContext, m_pHardwareContext );
 
 	void									CopyRenderTargetToTextureEx( ITexture *pTexture, int i, Rect_t *pSrc, Rect_t *pDst );
+	void									CopyTextureToRenderTargetEx( int i, ITexture *pTexture, Rect_t *pSrc, Rect_t *pDst );
 
 	DEFINE_QUEUED_CALL_2(					SetFloatRenderingParameter, int, float, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_2(					SetIntRenderingParameter, int, int, IMatRenderContext, m_pHardwareContext );
@@ -401,8 +399,39 @@ public:
 	}
 
 	DEFINE_QUEUED_CALL_2(					ClearBuffersObeyStencil, bool, bool, IMatRenderContext, m_pHardwareContext );
+	DEFINE_QUEUED_CALL_3(					ClearBuffersObeyStencilEx, bool, bool, bool, IMatRenderContext, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_0(					PerformFullScreenStencilOperation, IMatRenderContext, m_pHardwareContext );
 
+	virtual void AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE
+	{
+		OnAsyncCreateTextureFromRenderTarget( pSrcRt, &pDstName, pRecipient );
+
+		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContext::AsyncCreateTextureFromRenderTarget, pSrcRt, pDstName, dstFmt, bGenMips, nAdditionalCreationFlags, pRecipient, pExtraArgs );
+	}
+
+	virtual void							AsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE
+	{
+		OnAsyncMap( pTexToMap, pRecipient, pExtraArgs );
+
+		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContextInternal::AsyncMap, pTexToMap, pRecipient, pExtraArgs );
+	}
+
+	virtual void							AsyncUnmap( ITextureInternal* pTexToUnmap ) OVERRIDE
+	{
+		OnAsyncUnmap( pTexToUnmap );
+
+		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContextInternal::AsyncUnmap, pTexToUnmap );	
+	}
+
+	virtual void AsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE
+	{
+		OnAsyncCopyRenderTargetToStagingTexture( pDst, pSrc, pRecipient );
+
+		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContextInternal::AsyncCopyRenderTargetToStagingTexture, pDst, pSrc, pRecipient, pExtraArgs );
+	}
+
+	DEFINE_QUEUED_CALL_0(					TextureManagerUpdate, IMatRenderContextInternal, m_pHardwareContext );
+	
 	bool GetUserClipTransform( VMatrix &worldToView )
 	{
 		CannotSupport();
@@ -438,6 +467,12 @@ public:
 	DEFINE_QUEUED_CALL_0(					ForceHardwareSync, IMatRenderContextInternal, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_0(					BeginFrame, IMatRenderContextInternal, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_0(					EndFrame, IMatRenderContextInternal, m_pHardwareContext );
+
+	void									SetFrameTime( float frameTime )
+	{ 
+		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContextInternal::SetFrameTime, frameTime );
+		m_FrameTime = frameTime;
+	}
 
 	DEFINE_QUEUED_CALL_0(					BeginMorphAccumulation, IMatRenderContextInternal, m_pHardwareContext );
 	DEFINE_QUEUED_CALL_0(					EndMorphAccumulation, IMatRenderContextInternal, m_pHardwareContext );
@@ -492,7 +527,7 @@ public:
 		return (MorphFormat_t)0;
 	}
 
-	void DrawClearBufferQuad( unsigned char, unsigned char, unsigned char, unsigned char, bool, bool )
+	void DrawClearBufferQuad( unsigned char, unsigned char, unsigned char, unsigned char, bool, bool, bool )
 	{
 		CannotSupport();
 	}
@@ -501,10 +536,6 @@ public:
 	void BindBatch( IMesh* pVertices, IMaterial *pAutoBind = NULL );
 	void DrawBatch(int firstIndex, int numIndices );
 	void EndBatch();
-
-	DEFINE_QUEUED_CALL_AFTER_BASE_1(		ResetToneMappingScale, float, IMatRenderContext, m_pHardwareContext );
-	DEFINE_QUEUED_CALL_AFTER_BASE_0(		TurnOnToneMapping, IMatRenderContext, m_pHardwareContext );
-	DEFINE_QUEUED_CALL_AFTER_BASE_1(		SetGoalToneMappingScale, float, IMatRenderContext, m_pHardwareContext );
 
 	// Color correction related methods..
 	// Client cannot call IColorCorrectionSystem directly because it is not thread-safe
@@ -525,6 +556,7 @@ public:
 	void SetToneMappingScaleLinear( const Vector &scale )
 	{
 		m_queue.QueueCall( m_pHardwareContext, &IMatRenderContext::SetToneMappingScaleLinear, RefToVal( scale ) );
+		m_LastSetToneMapScale = Vector( scale );
 	}
 
 
@@ -555,6 +587,17 @@ public:
 	void FreeIndices( uint16 *pIndices, int nIndices );
 	void FreePrimLists( CPrimList * );
 
+	//--------------------------------------------------------
+	// debug logging - no-op in queued context
+	//--------------------------------------------------------
+	virtual void							Printf( PRINTF_FORMAT_STRING const char *fmt, ... ) {};
+	virtual void							PrintfVA( char *fmt, va_list vargs ){};
+	virtual float							Knob( char *knobname, float *setvalue=NULL ) { return 0.0f; };
+	
+#ifdef DX_TO_GL_ABSTRACTION
+	void									DoStartupShaderPreloading( void ) {};
+#endif
+
 private:
 	void QueueMatrixSync();
 
@@ -578,7 +621,6 @@ private:
 
 	CMemoryStack m_Vertices;
 	CMemoryStack m_Indices;
-	CMemoryStack m_Primitives;
 
 	class CCallQueueExternal : public ICallQueue
 	{

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -51,7 +51,7 @@ void SetXSIScriptSettings( );
 void SetPathSettings( );
 
 const char *GetBaseDirectory( void );
-void VGUIMessageBox( vgui::Panel *pParent, const char *pTitle, const char *pMsg, ... );
+void VGUIMessageBox( vgui::Panel *pParent, const char *pTitle, PRINTF_FORMAT_STRING const char *pMsg, ... );
 
 
 #endif // VPICKER_MAIN_H

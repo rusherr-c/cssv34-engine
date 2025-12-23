@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,7 +31,14 @@ void Con_Shutdown (void);   // Free overlay line buffer.
 void Con_ClearNotify (void);
 
 bool Con_IsVisible();
-const char *GetConsoleLogFilename( );
+
+/*
+Read the console log from disk and return it in 'buf'. Buf should come
+in as an empty TEXT_BUFFER CUtlBuffer.
+Returns true if the log file is successfully read.
+*/
+class CUtlBuffer;
+bool GetConsoleLogFileData( CUtlBuffer& buf );
 
 vgui::Panel* Con_GetConsolePanel();
 

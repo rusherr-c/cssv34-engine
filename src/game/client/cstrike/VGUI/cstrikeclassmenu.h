@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,12 +13,12 @@
 
 #include <classmenu.h>
 #include <vgui_controls/EditablePanel.h>
-#include <FileSystem.h>
+#include <filesystem.h>
 #include <cs_shareddefs.h>
 #include "cbase.h"
 #include "cs_gamerules.h"
-#include "vgui_controls/imagepanel.h"
-#include "BackgroundPanel.h"
+#include "vgui_controls/ImagePanel.h"
+#include "backgroundpanel.h"
 
 using namespace vgui;
 
@@ -67,7 +67,7 @@ public:
 	// End background panel ---------------------------------------------------
 	
 public:
-	CClassMenu_TER::CClassMenu_TER(IViewPort *pViewPort);
+	CClassMenu_TER(IViewPort *pViewPort);
 	virtual Panel* CreateControlByName(const char *controlName);
 	const char *GetName( void );
 	void ShowPanel(bool bShow);
@@ -96,7 +96,7 @@ public:
 	// End background panel ---------------------------------------------------
 	
 public:
-	CClassMenu_CT::CClassMenu_CT(IViewPort *pViewPort);
+	CClassMenu_CT(IViewPort *pViewPort);
 	virtual Panel *CreateControlByName(const char *controlName);
 	const char *GetName( void );
 	void ShowPanel(bool bShow);

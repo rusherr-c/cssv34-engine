@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,6 @@
 
 #include "cbase.h"
 #include "weapon_csbasegun.h"
-
 
 #if defined( CLIENT_DLL )
 
@@ -24,7 +23,7 @@ class CWeaponM4A1 : public CWeaponCSBaseGun
 {
 public:
 	DECLARE_CLASS( CWeaponM4A1, CWeaponCSBaseGun );
-	DECLARE_NETWORKCLASS(); 
+	DECLARE_NETWORKCLASS();
 	DECLARE_PREDICTABLE();
 	
 	CWeaponM4A1();
@@ -38,6 +37,9 @@ public:
 	virtual bool Reload();
 	virtual void WeaponIdle();
 	virtual bool Holster( CBaseCombatWeapon *pSwitchingTo );
+	virtual void Drop( const Vector &vecVelocity );
+
+ 	virtual float GetInaccuracy() const;
 
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_M4A1; }
 
@@ -57,7 +59,6 @@ private:
 
 	CWeaponM4A1( const CWeaponM4A1 & );
 
-	void M4A1Fire( float flSpread );
 	void DoFireEffects();
 
 	CNetworkVar( bool, m_bSilencerOn );
@@ -100,6 +101,7 @@ void CWeaponM4A1::Spawn( )
 	BaseClass::Spawn();
 
 	m_bSilencerOn = false;
+	m_weaponMode = Primary_Mode;
 	m_flDoneSwitchingSilencer = 0.0f;
 	m_bDelayFire = true;
 }
@@ -165,14 +167,28 @@ Activity CWeaponM4A1::GetDeployActivity( void )
 
 bool CWeaponM4A1::Holster( CBaseCombatWeapon *pSwitchingTo )
 {
-	if ( m_flDoneSwitchingSilencer > 0.0f && m_flDoneSwitchingSilencer > gpGlobals->curtime )
+	if ( gpGlobals->curtime < m_flDoneSwitchingSilencer )
 	{
 		// still switching the silencer.  Cancel the switch.
 		m_bSilencerOn = !m_bSilencerOn;
+		m_weaponMode = m_bSilencerOn ? Secondary_Mode : Primary_Mode;
 		SetWeaponModelIndex( GetWorldModel() );
 	}
 
 	return BaseClass::Holster( pSwitchingTo );
+}
+
+void CWeaponM4A1::Drop( const Vector &vecVelocity )
+{
+	if ( gpGlobals->curtime < m_flDoneSwitchingSilencer )
+	{
+		// still switching the silencer.  Cancel the switch.
+		m_bSilencerOn = !m_bSilencerOn;
+		m_weaponMode = m_bSilencerOn ? Secondary_Mode : Primary_Mode;
+		SetWeaponModelIndex( GetWorldModel() );
+	}
+
+	BaseClass::Drop( vecVelocity );
 }
 
 void CWeaponM4A1::SecondaryAttack()
@@ -180,11 +196,13 @@ void CWeaponM4A1::SecondaryAttack()
 	if ( m_bSilencerOn )
 	{
 		m_bSilencerOn = false;
+		m_weaponMode = Primary_Mode;
 		SendWeaponAnim( ACT_VM_DETACH_SILENCER );
 	}
 	else
 	{
 		m_bSilencerOn = true;
+		m_weaponMode = Secondary_Mode;
 		SendWeaponAnim( ACT_VM_ATTACH_SILENCER );
 	}
 	m_flDoneSwitchingSilencer = gpGlobals->curtime + 2;
@@ -196,39 +214,50 @@ void CWeaponM4A1::SecondaryAttack()
 	SetWeaponModelIndex( GetWorldModel() );
 }
 
+float CWeaponM4A1::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+		{
+			return 0.035f + 0.4f * m_flAccuracy;
+		}
+		else if (pPlayer->GetAbsVelocity().Length2D() > 140)
+		{
+			return 0.035f + 0.07f * m_flAccuracy;
+		}
+		else
+		{
+			if ( m_bSilencerOn )
+				return 0.025f * m_flAccuracy;
+			else
+				return 0.02f * m_flAccuracy;
+		}
+	}
+	else
+	{
+		return BaseClass::GetInaccuracy();
+	}
+}
+
+
 void CWeaponM4A1::PrimaryAttack()
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-	{
-		M4A1Fire( 0.035f + 0.4f * m_flAccuracy );
-	}
-	else if (pPlayer->GetAbsVelocity().Length2D() > 140)
-	{
-		M4A1Fire( 0.035f + 0.07f * m_flAccuracy );
-	}
-	else
-	{
-		if ( m_bSilencerOn )
-			M4A1Fire( 0.025f * m_flAccuracy );
-		else
-			M4A1Fire( 0.02f * m_flAccuracy );
-	}
-}
-
-
-void CWeaponM4A1::M4A1Fire( float flSpread )
-{
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, !m_bSilencerOn ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, m_weaponMode ) )
 		return;
 
 	if ( m_bSilencerOn )
 		 SendWeaponAnim( ACT_VM_PRIMARYATTACK_SILENCED );
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
+	pPlayer = GetPlayerOwner();
 
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
 	if ( !pPlayer )
@@ -278,12 +307,10 @@ bool CWeaponM4A1::Reload()
 
 	pPlayer->SetAnimation( PLAYER_RELOAD );
 
-#ifndef CLIENT_DLL
 	if ((iResult) && (pPlayer->GetFOV() != pPlayer->GetDefaultFOV()))
 	{
 		pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV() );
 	}
-#endif
 
 	m_flAccuracy = 0.2;
 	pPlayer->m_iShotsFired = 0;

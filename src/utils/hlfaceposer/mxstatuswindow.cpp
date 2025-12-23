@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -140,7 +140,7 @@ void mxStatusWindow::StatusPrint( COLORREF clr, bool overwrite, const char *text
 	{
 		if ( *in == '\n' || *in == '\r' )
 		{
-			*in++;
+			in++;
 		}
 		else
 		{
@@ -182,7 +182,7 @@ void mxStatusWindow::PositionSliders( int sboffset )
 {
 	int lineheight = ( STATUS_FONT_SIZE + 2 );
 
-	int linesused = min( MAX_TEXT_LINES, m_nCurrentLine );
+	int linesused = min( (int)MAX_TEXT_LINES, m_nCurrentLine );
 	linesused = max( linesused, 1 );
 
 	int trueh = h2() - GetCaptionHeight();

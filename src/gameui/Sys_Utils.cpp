@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,6 +17,8 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+
+#ifdef WIN32
 const unsigned int SYS_NO_ERROR = NO_ERROR;
 const unsigned int SYS_ERROR_INVALID_HANDLE = ERROR_INVALID_HANDLE;
 
@@ -120,4 +122,59 @@ void Sys_DestroyWindow(WHANDLE wnd)
 {
 	//::DestroyWindow((HWND)wnd);
 }
+
+#elif defined( POSIX )
+const unsigned int SYS_NO_ERROR = 0;
+const unsigned int SYS_ERROR_INVALID_HANDLE = 0;
+const unsigned int SYS_WAIT_OBJECT_0 = 0;
+const unsigned int SYS_WAIT_ABANDONED = 0;
+
+
+void Sys_SetLastError(unsigned long error)
+{
+	errno = error;
+}
+
+unsigned long Sys_GetLastError()
+{
+	return errno;
+}
+
+
+WHANDLE Sys_CreateMutex(const char *mutexName)
+{
+	Assert( !"Implement me" );
+	return 0;
+}
+
+void Sys_ReleaseMutex(WHANDLE mutexHandle)
+{
+	Assert( !"Implement me" );
+}
+
+void Sys_PostMessage(WHANDLE wnd, unsigned int msg, unsigned int wParam, unsigned int lParam)
+{
+	Assert( !"Implement me" );
+}
+
+unsigned int Sys_RegisterWindowMessage(const char *msgName)
+{
+	Assert( !"Implement me" );
+	return 0;
+}
+
+unsigned int Sys_WaitForSingleObject(WHANDLE mutexHandle, int milliseconds)
+{
+	return SYS_WAIT_ABANDONED;
+}
+
+void Sys_EnumWindows(void *callbackFunction, int lparam)
+{
+	Assert( !"Implement me" );
+}
+
+
+#else
+#error
+#endif
 

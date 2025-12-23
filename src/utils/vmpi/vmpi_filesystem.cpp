@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -147,7 +147,7 @@ void CVMPIFile_Memory::Flush()
 int CVMPIFile_Memory::Read( void* pOutput, int size ) 
 { 
 	Assert( m_iCurPos >= 0 );
-	int nToRead = min( m_DataLen - m_iCurPos, size );
+	int nToRead = min( (int)(m_DataLen - m_iCurPos), size );
 	
 	if ( m_chMode != 't' )
 	{

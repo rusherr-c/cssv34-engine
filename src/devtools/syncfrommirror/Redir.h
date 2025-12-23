@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -52,7 +52,7 @@ protected:
 public:
 	BOOL Open(LPCTSTR pszCmdLine, LPCTSTR pszCurrentDirectory = NULL);
 	virtual void Close();
-	BOOL Printf(LPCTSTR pszFormat, ...);
+	BOOL Printf(PRINTF_FORMAT_STRING LPCTSTR pszFormat, ...);
 
 	void SetWaitTime(DWORD dwWaitTime) { m_dwWaitTime = dwWaitTime; }
 };

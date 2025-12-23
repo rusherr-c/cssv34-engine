@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -201,8 +201,8 @@ private:
 			SetThreadPriority( m_hRecvThread, THREAD_PRIORITY_LOWEST );
 		}
 		
-		ThreadSetDebugName( dwSendThreadID, "TCPSend" );
-		ThreadSetDebugName( dwRecvThreadID, "TCPRecv" );
+		ThreadSetDebugName( (ThreadId_t)dwSendThreadID, "TCPSend" );
+		ThreadSetDebugName( (ThreadId_t)dwRecvThreadID, "TCPRecv" );
 
 		// Make sure to init the handler before the threads actually run, so it isn't handed data before initializing.
 		m_pHandler->Init( this );

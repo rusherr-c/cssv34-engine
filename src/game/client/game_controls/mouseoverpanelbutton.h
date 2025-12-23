@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -81,10 +81,10 @@ public:
 		static char classPanel[ _MAX_PATH ];
 		Q_snprintf( classPanel, sizeof( classPanel ), "classes/%s.res", className);
 
-		if ( g_pFullFileSystem->FileExists( classPanel, "MOD" ) )
+		if ( g_pFullFileSystem->FileExists( classPanel, IsX360() ? "MOD" : "GAME" ) )
 		{
 		}
-		else if (g_pFullFileSystem->FileExists( "classes/default.res", "MOD" ) )
+		else if (g_pFullFileSystem->FileExists( "classes/default.res", IsX360() ? "MOD" : "GAME" ) )
 		{
 			Q_snprintf ( classPanel, sizeof( classPanel ), "classes/default.res" );
 		}
@@ -111,9 +111,7 @@ public:
 
 		// name, position etc of button is set, now load matching
 		// resource file for associated info panel:
-		auto classpage = GetClassPage(GetName());
-		if (classpage != nullptr)
-			m_pPanel->LoadControlSettings( classpage );
+		m_pPanel->LoadControlSettings( GetClassPage( GetName() ) );
 	}		
 
 	T *GetClassPanel( void ) { return m_pPanel; }

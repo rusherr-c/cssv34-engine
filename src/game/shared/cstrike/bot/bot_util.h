@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -91,7 +91,7 @@ extern void UTIL_ConstructBotNetName(char *name, int nameLength, const BotProfil
  * Echos text to the console, and prints it on the client's screen.  This is NOT tied to the developer cvar.
  * If you are adding debugging output in cstrike, use UTIL_DPrintf() (debug.h) instead.
  */
-extern void CONSOLE_ECHO( char * pszMsg, ... );
+extern void CONSOLE_ECHO( PRINTF_FORMAT_STRING const char * pszMsg, ... );
 
 extern void InitBotTrig( void );
 extern float BotCOS( float angle );

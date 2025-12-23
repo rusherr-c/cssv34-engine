@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,6 +31,8 @@
 #include "render.h"
 #include "screen.h"
 
+#include "appframework/ilaunchermgr.h"
+
 #include "gl_shader.h"
 
 #include "cdll_engine_int.h"
@@ -50,6 +52,7 @@
 #include "sys.h"
 
 //#ifndef SWDS            these are all fine under linux now afaik
+
 #include "vgui_basepanel.h"
 #include "vgui_baseui_interface.h"
 #include "vgui/IVGui.h"

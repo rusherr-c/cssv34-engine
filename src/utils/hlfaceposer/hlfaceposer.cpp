@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #include "filesystem.h"
 #include "mxtk/mx.h"
 #include "mxStatusWindow.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "StudioModel.h"
 #include "ControlPanel.h"
 #include "MDLViewer.h"
@@ -30,6 +30,7 @@
 #include "PhonemeEditor.h"
 #include <vgui/ILocalize.h>
 #include "filesystem_init.h"
+#include "tier2/p4helpers.h"
 
 
 extern vgui::ILocalize *g_pLocalize;
@@ -300,7 +301,15 @@ void FPCopyFile( const char *source, const char *dest, bool bCheckOut )
 	Q_FixSlashes( fullpaths );
 	Q_FixSlashes( fullpathd );
 
-	CopyFile( fullpaths, fullpathd, FALSE );
+	if ( bCheckOut )
+	{
+		CP4AutoEditAddFile checkout( fullpathd );
+		CopyFile( fullpaths, fullpathd, FALSE );
+	}
+	else
+	{
+		CopyFile( fullpaths, fullpathd, FALSE );
+	}
 }
 
 bool FacePoser_HasWindowStyle( mxWindow *w, int bits )

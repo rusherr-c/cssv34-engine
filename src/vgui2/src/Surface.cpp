@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -44,13 +44,11 @@
 #include "bitmap.h"
 #include "VPanel.h"
 
-#include "vgui/htmlwindow.h"
+#include "utlvector.h"
+#include "utlsymbol.h"
+#include "tier1/utldict.h"
 
-#include "UtlVector.h"
-#include "UtlSymbol.h"
-#include "tier1/UtlDict.h"
-
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "SteamBootStrapper.h"
 
 #include "vgui_surfacelib/Win32Font.h"
@@ -164,8 +162,9 @@ public:
 	virtual IVguiMatInfo *DrawGetTextureMatInfoFactory( int id ) { return NULL; }
 	virtual void DrawTexturedRect(int x0, int y0, int x1, int y1);
 	virtual int CreateNewTextureID( bool procedural );
-	virtual bool IsTextureIDValid( int id );
-	virtual bool DeleteTextureByID( int id );
+	virtual bool IsTextureIDValid(int id);
+	virtual void FreeTextureData( Texture *pTexture );
+	virtual bool DeleteTextureByID(int id);
 	virtual void DrawFlushText();
 	virtual IHTML *CreateHTMLWindow(vgui::IHTMLEvents *events, VPANEL context);
 	virtual void PaintHTMLWindow(IHTML *htmlwin);
@@ -202,7 +201,7 @@ public:
 	virtual void SwapBuffers(VPANEL panel);
 	virtual void Invalidate(VPANEL panel);
 	virtual void SetCursor(HCursor cursor);
-	virtual void SetCursorAlwaysVisible( bool visible );
+	virtual void SetCursorAlwaysVisible( bool visible ) {}
 	virtual void ApplyChanges();
 	virtual bool IsWithin(int x, int y);
 	virtual bool HasFocus();
@@ -225,18 +224,14 @@ public:
 
 	// fonts
 	virtual HFont CreateFont();
-	virtual bool SetFontGlyphSet(HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags);
-	virtual const char *GetFontName( HFont font );
-	virtual const char *GetFontFamilyName( HFont font );
-	virtual void GetKernedCharWidth( HFont font, wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &abcA );
+	virtual bool SetFontGlyphSet(HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags, int nRangeMin = 0, int nRangeMax = 0);
 	virtual int GetFontTall(HFont font);
-	virtual int GetFontTallRequested( HFont font );
+	virtual int GetFontTallRequested(HFont font);
 	virtual int GetFontAscent(HFont font, wchar_t wch);
 	virtual void GetCharABCwide(HFont font, int ch, int &a, int &b, int &c);
 	virtual int GetCharacterWidth(HFont font, int ch);
 	virtual void GetTextSize(HFont font, const wchar_t *text, int &wide, int &tall);
-	virtual bool SetFontGlyphSet( HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags, int nRangeMin = 0, int nRangeMax = 0 );
-	virtual bool AddCustomFontFile( const char *fontName, const char *fontFileName );
+	virtual bool AddCustomFontFile(const char *fontName, const char *fontFileName);
 	virtual bool AddBitmapFontFile(const char *fontFileName);
 	virtual void SetBitmapFontName( const char *pName, const char *pFontFilename );
 	virtual const char *GetBitmapFontName( const char *pName );
@@ -244,6 +239,8 @@ public:
 	virtual bool IsFontAdditive(HFont font);
 	virtual void PrecacheFontCharacters(HFont font, const wchar_t *pCharacters);
 	virtual void ClearTemporaryFontCache( void );
+	virtual const char *GetFontName( HFont font );
+	virtual const char *GetFontFamilyName( HFont font );
 
 	virtual bool IsCursorVisible() { return true; }
 	
@@ -252,10 +249,6 @@ public:
 
 	// methods
 	void setFocus(VPANEL panel);
-
-	int GetHTMLWindowCount() { return m_HtmlWindows.Count(); }
-	HtmlWindow *GetHTMLWindow(int i) { return m_HtmlWindows[i]; }
-
 
 	void GetProportionalBase( int &width, int &height ) { width = BASE_WIDTH; height = BASE_HEIGHT; }
 
@@ -267,13 +260,13 @@ public:
 	virtual void SurfaceGetCursorPos(int &x, int &y) {}
 	virtual void SurfaceSetCursorPos(int x, int y){}
 
-	virtual void SetAllowHTMLJavaScript( bool state ) { m_bAllowJavaScript = state; }
+	virtual void SetAllowHTMLJavaScript( bool state );
 		// SRC specific interfaces
 	virtual void DrawTexturedLine( const Vertex_t &a, const Vertex_t &b );
 	virtual void DrawOutlinedCircle(int x, int y, int radius, int segments) ;
 	virtual void DrawTexturedPolyLine( const Vertex_t *p,int n ) ; // (Note: this connects the first and last points).
 	virtual void DrawTexturedSubRect( int x0, int y0, int x1, int y1, float texs0, float text0, float texs1, float text1 );
-	virtual void DrawTexturedPolygon( int n, Vertex_t *pVertices, bool bClipVertices = true );
+	virtual void DrawTexturedPolygon(int n, Vertex_t *pVertices, bool bClipVertices = true);
 	virtual const wchar_t *GetTitle(VPANEL panel);
 	virtual void LockCursor( bool state );
 	virtual bool IsCursorLocked( void ) const;
@@ -285,36 +278,6 @@ public:
 	// alpha multipliers not yet implemented
 	virtual void DrawSetAlphaMultiplier( float alpha /* [0..1] */ ) {}
 	virtual float DrawGetAlphaMultiplier() { return 1.0f; }
-
-	virtual bool ForceScreenSizeOverride( bool bState, int wide, int tall );
-	virtual bool ForceScreenPosOffset( bool bState, int x, int y );
-	virtual void OffsetAbsPos( int &x, int &y );
-
-	virtual void ResetFontCaches();
-
-	virtual int GetTextureNumFrames( int id );
-	virtual void DrawSetTextureFrame( int id, int nFrame, unsigned int *pFrameCache );
-	virtual bool IsScreenSizeOverrideActive( void );
-	virtual bool IsScreenPosOverrideActive( void );
-
-	virtual void DestroyTextureID( int id );
-
-	virtual void DrawUpdateRegionTextureRGBA( int nTextureID, int x, int y, const unsigned char *pchData, int wide, int tall, ImageFormat imageFormat );
-	virtual bool BHTMLWindowNeedsPaint( IHTML *htmlwin );
-
-	virtual const char *GetWebkitHTMLUserAgentString();
-
-	virtual void *Deprecated_AccessChromeHTMLController();
-
-	// the origin of the viewport on the framebuffer (Which might not be 0,0 for stereo)
-	virtual void SetFullscreenViewport( int x, int y, int w, int h ); // this uses NULL for the render target.
-	virtual void GetFullscreenViewport( int & x, int & y, int & w, int & h );
-	virtual void PushFullscreenViewport();
-	virtual void PopFullscreenViewport();
-
-	// handles support for software cursors
-	virtual void SetSoftwareCursor( bool bUseSoftwareCursor );
-	virtual void PaintSoftwareCursor();
 
 	// Here's where the app systems get to learn about each other 
 	virtual bool Connect( CreateInterfaceFn factory );
@@ -358,6 +321,68 @@ public:
 		return NULL;
 	}
 
+	virtual bool ForceScreenSizeOverride( bool bState, int wide, int tall );
+	// LocalToScreen, ParentLocalToScreen fixups for explicit PaintTraverse calls on Panels not at 0, 0 position
+	virtual bool ForceScreenPosOffset( bool bState, int x, int y );
+
+	virtual void OffsetAbsPos( int &x, int &y );
+
+	virtual bool IsScreenSizeOverrideActive( void );
+	virtual bool IsScreenPosOverrideActive( void );
+
+	void GetKernedCharWidth( HFont font, wchar_t ch, wchar_t chBefore, wchar_t chAfter, float &wide, float &flabcA )
+	{
+		Assert( 0 );
+		wide = 0.0f;
+		flabcA = 0.0f;
+	}
+
+	// split screen state changed, etc.
+	void ResetFontCaches()
+	{
+	}
+
+	virtual void DestroyTextureID( int id );
+
+	virtual int GetTextureNumFrames( int id );
+	virtual void DrawSetTextureFrame( int id, int nFrame, unsigned int *pFrameCache );
+
+
+	virtual void DrawUpdateRegionTextureRGBA( int nTextureID, int x, int y, const unsigned char *pchData, int wide, int tall, ImageFormat imageFormat ) 
+	{
+	}
+	virtual bool BHTMLWindowNeedsPaint(IHTML *htmlwin)
+	{
+		return false;
+	}
+
+
+	virtual const char *GetWebkitHTMLUserAgentString();
+
+	virtual void *Deprecated_AccessChromeHTMLController() { return NULL; }
+
+	virtual void SetFullscreenViewport( int x, int y, int w, int h ) OVERRIDE 
+	{
+		m_nFullscreenViewportX = x; 
+		m_nFullscreenViewportY = y; 
+		m_nFullscreenViewportWidth = w; 
+		m_nFullscreenViewportHeight = h; 
+		m_pFullscreenRenderTarget = NULL; 
+	}
+
+	virtual void GetFullscreenViewport( int & x, int & y, int & w, int & h ) OVERRIDE 
+	{ 
+		x = m_nFullscreenViewportX; 
+		y = m_nFullscreenViewportY; 
+		w = m_nFullscreenViewportWidth; 
+		h = m_nFullscreenViewportHeight;  
+	}
+	virtual void PushFullscreenViewport();
+	virtual void PopFullscreenViewport();
+
+	// software cursors aren't available in tools
+	virtual void SetSoftwareCursor( bool bUseSoftwareCursor ) OVERRIDE {}
+	virtual void PaintSoftwareCursor()  OVERRIDE {}
 
 private:
 
@@ -385,8 +410,6 @@ private:
 	Dar<VPANEL> _popupList;			// list of panels that have their own win32 window
 	HICON _currentCursor;
 
-	CUtlVector<HtmlWindow *> m_HtmlWindows;
-
 	OSVERSIONINFO m_WindowsVersion;
 	bool m_bSupportsUnicode;
 	CUtlVector<CUtlSymbol> m_CustomFontFileNames;
@@ -408,7 +431,28 @@ private:
 	int GetNumTextures();
 
 	CUtlRBTree<Texture, int> m_VGuiSurfaceTextures;
+
+	struct ScreenOverride_t
+	{
+		ScreenOverride_t() : m_bActive( false ) 
+		{
+			m_nValue[ 0 ] = m_nValue[ 1 ] = 0;
+		}
+		bool	m_bActive;
+		int		m_nValue[ 2 ];
+	};
+
+	ScreenOverride_t m_ScreenSizeOverride;
+	ScreenOverride_t m_ScreenPosOverride;
+
 	bool m_bAllowJavaScript;
+
+	int m_nFullscreenViewportX;
+	int m_nFullscreenViewportY;
+	int m_nFullscreenViewportWidth;
+	int m_nFullscreenViewportHeight;
+	ITexture *m_pFullscreenRenderTarget; 
+
 };
 
 CWin32Surface g_Surface;
@@ -744,6 +788,10 @@ CWin32Surface::CWin32Surface() : m_VGuiSurfaceTextures(0, 128, TextureLessFunc)
 	}
 
 	m_TextPos[0] = m_TextPos[1] = 0;
+
+	m_nFullscreenViewportX = m_nFullscreenViewportY = 0;
+	m_nFullscreenViewportWidth = m_nFullscreenViewportHeight = 0;
+	m_pFullscreenRenderTarget = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -831,22 +879,20 @@ VPANEL CWin32Surface::GetEmbeddedPanel()
  {
 
  }
-
  void CWin32Surface::DrawOutlinedCircle(int x, int y, int radius, int segments) 
  {
 
  }
-
  void CWin32Surface::DrawTexturedPolyLine( const Vertex_t *p,int n )
  {
  }
-
  void CWin32Surface::DrawTexturedSubRect( int x0, int y0, int x1, int y1, float texs0, float text0, float texs1, float text1 )
  {
  }
-
- void CWin32Surface::DrawTexturedPolygon( int n, Vertex_t *pVertices, bool bClipVertices /*= true*/ )
+ void CWin32Surface::DrawTexturedPolygon(int n, Vertex_t *pVertices, bool bClipVertices /*= true*/)
  {
+	NOTE_UNUSED( bClipVertices );
+
 	POINT *pt;
 	HDC hdc = PLAT(_currentContextPanel)->hdc;
 	
@@ -944,7 +990,7 @@ void CWin32Surface::SetEmbeddedPanel( VPANEL panel )
 
 	// fonts initialization
 	char language[64];
-	if (g_pSystem->GetRegistryString("HKEY_CURRENT_USER\\Software\\Valve\\Steam\\Language", language, sizeof(language)-1))
+	if (g_pSystem->GetRegistryString("HKEY_CURRENT_USER\\Software\\Valve\\Source\\Language", language, sizeof(language)-1))
 	{
 		FontManager().SetLanguage(language);
 	}
@@ -966,90 +1012,6 @@ bool CWin32Surface::DrawGetUnicodeCharRenderInfo( wchar_t ch, CharRenderInfo& in
 void CWin32Surface::DrawRenderCharFromInfo( const CharRenderInfo& info )
 {
 	Assert( 0 );
-}
-
-bool CWin32Surface::ForceScreenSizeOverride( bool bState, int wide, int tall )
-{
-	return false;
-}
-
-bool CWin32Surface::ForceScreenPosOffset( bool bState, int x, int y )
-{
-	return false;
-}
-
-void CWin32Surface::OffsetAbsPos( int & x, int & y )
-{
-}
-
-void CWin32Surface::ResetFontCaches()
-{
-}
-
-int CWin32Surface::GetTextureNumFrames( int id )
-{
-	return 0;
-}
-
-void CWin32Surface::DrawSetTextureFrame( int id, int nFrame, unsigned int * pFrameCache )
-{
-}
-
-bool CWin32Surface::IsScreenSizeOverrideActive( void )
-{
-	return false;
-}
-
-bool CWin32Surface::IsScreenPosOverrideActive( void )
-{
-	return false;
-}
-
-void CWin32Surface::DestroyTextureID( int id )
-{
-}
-
-void CWin32Surface::DrawUpdateRegionTextureRGBA( int nTextureID, int x, int y, const unsigned char * pchData, int wide, int tall, ImageFormat imageFormat )
-{
-}
-
-bool CWin32Surface::BHTMLWindowNeedsPaint( IHTML * htmlwin )
-{
-	return false;
-}
-
-const char * CWin32Surface::GetWebkitHTMLUserAgentString()
-{
-	return nullptr;
-}
-
-void * CWin32Surface::Deprecated_AccessChromeHTMLController()
-{
-	return nullptr;
-}
-
-void CWin32Surface::SetFullscreenViewport( int x, int y, int w, int h )
-{
-}
-
-void CWin32Surface::GetFullscreenViewport( int & x, int & y, int & w, int & h )
-{
-}
-
-void CWin32Surface::PushFullscreenViewport()
-{
-}
-
-void CWin32Surface::PopFullscreenViewport()
-{
-}
-
-void CWin32Surface::SetSoftwareCursor( bool bUseSoftwareCursor )
-{
-}
-
-void CWin32Surface::PaintSoftwareCursor()
-{
 }
 
 
@@ -1161,12 +1123,73 @@ void CWin32Surface::PopMakeCurrent(VPANEL panel)
 //-----------------------------------------------------------------------------
 void CWin32Surface::GetScreenSize(int &wide, int &tall)
 {
+	if ( m_ScreenSizeOverride.m_bActive )
+	{
+		wide = m_ScreenSizeOverride.m_nValue[ 0 ];
+		tall = m_ScreenSizeOverride.m_nValue[ 1 ];
+		return;
+	}
+
 	VPANEL context = _embeddedPanel;
 	if (context)
 	{
 		wide = ::GetDeviceCaps(PLAT(context)->hdc, HORZRES);
 		tall = ::GetDeviceCaps(PLAT(context)->hdc, VERTRES);
 	}
+}
+
+bool CWin32Surface::ForceScreenSizeOverride( bool bState, int wide, int tall )
+{
+	bool bWasSet = m_ScreenSizeOverride.m_bActive;
+	m_ScreenSizeOverride.m_bActive = bState;
+	m_ScreenSizeOverride.m_nValue[ 0 ] = wide;
+	m_ScreenSizeOverride.m_nValue[ 1 ] = tall;
+	return bWasSet;
+}
+
+// LocalToScreen, ParentLocalToScreen fixups for explicit PaintTraverse calls on Panels not at 0, 0 position
+bool CWin32Surface::ForceScreenPosOffset( bool bState, int x, int y )
+{
+	bool bWasSet = m_ScreenPosOverride.m_bActive;
+	m_ScreenPosOverride.m_bActive = bState;
+	m_ScreenPosOverride.m_nValue[ 0 ] = x;
+	m_ScreenPosOverride.m_nValue[ 1 ] = y;
+	return bWasSet;
+}
+
+void CWin32Surface::OffsetAbsPos( int &x, int &y )
+{
+	if ( !m_ScreenPosOverride.m_bActive )
+		return;
+
+	x += m_ScreenPosOverride.m_nValue[ 0 ];
+	y += m_ScreenPosOverride.m_nValue[ 1 ];
+}
+
+bool CWin32Surface::IsScreenSizeOverrideActive( void )
+{
+	return ( m_ScreenSizeOverride.m_bActive );
+}
+
+bool CWin32Surface::IsScreenPosOverrideActive( void )
+{
+	return ( m_ScreenPosOverride.m_bActive );
+}
+
+void CWin32Surface::DestroyTextureID( int id )
+{
+	// not implemented
+}
+
+int CWin32Surface::GetTextureNumFrames( int id )
+{
+	// not implemented
+	return 0;
+}
+
+void CWin32Surface::DrawSetTextureFrame( int id, int nFrame, unsigned int *pFrameCache )
+{
+	// not implemented
 }
 
 
@@ -1307,10 +1330,6 @@ void CWin32Surface::DrawFilledRect(int x0,int y0,int x1,int y1)
 	// trick to draw filled rectangles using current background color
 	RECT rect = { x0, y0, x1, y1};
 	ExtTextOut(PLAT(_currentContextPanel)->hdc, 0, 0, ETO_OPAQUE, &rect, NULL, 0, NULL);
-}
-
-void CWin32Surface::DrawFilledRectFastFade( int x0, int y0, int x1, int y1, int fadeStartPt, int fadeEndPt, unsigned int alpha0, unsigned int alpha1, bool bHorizontal )
-{
 }
 
 void CWin32Surface::DrawFilledRectArray( IntRect *pRects, int numRects )
@@ -1472,10 +1491,58 @@ bool CWin32Surface::IsTextureIDValid(int id)
 	return (GetTextureById(id) != NULL);
 }
 
-bool CWin32Surface::DeleteTextureByID( int id )
+//-----------------------------------------------------------------------------
+// Purpose: clear up alloced resources on a texture
+//-----------------------------------------------------------------------------
+void CWin32Surface::FreeTextureData( vgui::Texture *pTexture )
 {
+	if ( pTexture->_bitmap )
+	{
+		::DeleteObject( pTexture->_bitmap );
+	}
+
+//	if ( pTexture->m_bitmapScaled )
+//	{
+//		::DeleteObject( pTexture->m_bitmapScaled );
+//	}
+
+	if ( pTexture->_maskBitmap )
+	{
+		::DeleteObject( pTexture->_maskBitmap );
+	}
+
+	if ( pTexture->_icon )
+	{
+		::DestroyIcon( pTexture->_icon );
+	}
+
+//	if ( pTexture->rgba )
+//		delete[] pTexture->rgba;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns true if the texture id has a valid texture bound to it
+//-----------------------------------------------------------------------------
+bool CWin32Surface::DeleteTextureByID(int id)
+{
+#if defined( PS3OVERLAYUI_EXPORTS )
+	AUTO_LOCK( m_MutexTextureData );
+#endif
+
+	Texture findTex = { id };
+	int index = m_VGuiSurfaceTextures.Find(findTex);
+	if (m_VGuiSurfaceTextures.IsValidIndex(index))
+	{
+		Texture *texture = &m_VGuiSurfaceTextures[index];
+
+		FreeTextureData( texture );
+
+		m_VGuiSurfaceTextures.RemoveAt(index);
+		return true;
+	}
 	return false;
 }
+
 
 //-----------------------------------------------------------------------------
 // Purpose: does nothing, since we don't need this optimization in win32
@@ -1484,40 +1551,36 @@ void CWin32Surface::DrawFlushText()
 {
 }
 
-IHTML *CWin32Surface::CreateHTMLWindow(vgui::IHTMLEvents *events, VPANEL context)
+
+
+//-----------------------------------------------------------------------------
+// Purpose: create a html helper object
+//-----------------------------------------------------------------------------
+IHTML *CWin32Surface::CreateHTMLWindow(vgui::IHTMLEvents *events, VPANEL context )
 {
 	return NULL;
 }
 
 
+//-----------------------------------------------------------------------------
+// Purpose: delete an html helper object
+//-----------------------------------------------------------------------------
 void CWin32Surface::DeleteHTMLWindow(IHTML *htmlwin)
 {
-	HtmlWindow *IE = dynamic_cast<HtmlWindow *>(htmlwin);
-
-	if(IE)
-	{
-		m_HtmlWindows.FindAndRemove(IE);
-		delete IE;
-	}
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: tell a html window to update its backing texture
+//-----------------------------------------------------------------------------
 void CWin32Surface::PaintHTMLWindow(IHTML *htmlwin)
 {
-/*	HtmlWindow *IE = dynamic_cast<HtmlWindow *>(htmlwin);
+}
 
-	if(IE)
-	{
-		int w,h;
-		IE->GetSize(w,h);
 
-		assert(PLAT(_currentContextPanel)->hdc != NULL);		
-		IE->OnPaint(PLAT(_currentContextPanel)->hdc);
-
-		//BOOL r = BitBlt(_currentContextPanel->Plat()->hdc, 0, 0, w, h, bit, 0, 0, SRCCOPY);	
-		// don't release the bitmap's HDC, its "cached" by the IE control
-		//::ReleaseDC(_currentContextPanel->Plat()->hwnd,bit); 
-	}
-*/
+//-----------------------------------------------------------------------------
+void CWin32Surface::SetAllowHTMLJavaScript( bool state ) 
+{ 
 }
 
 //-----------------------------------------------------------------------------
@@ -1768,13 +1831,8 @@ bool CWin32Surface::LoadBMP(Texture *texture, const char *filename)
 	// try load the tga
 	char buf[1024];
 	_snprintf(buf, sizeof(buf), "%s.bmp", filename);
-	// look in the skins directory first
-	FileHandle_t file = g_pFullFileSystem->Open(buf, "rb", "SKIN");
-	if (!file)
-	{
-		file = g_pFullFileSystem->Open(buf, "rb", NULL);
-	}
 
+	FileHandle_t file = g_pFullFileSystem->Open(buf, "rb", NULL);
 	if (!file)
 		return false;
 
@@ -1860,13 +1918,7 @@ bool CWin32Surface::LoadTGA(Texture *texture, const char *filename)
 	char buf[1024];
 	_snprintf(buf, sizeof(buf), "%s.tga", filename);
 
-	// look in the skins directory first
-	FileHandle_t file = g_pFullFileSystem->Open(buf, "rb", "SKIN");
-	if (!file)
-	{
-		file = g_pFullFileSystem->Open(buf, "rb", NULL);
-	}
-
+	FileHandle_t file = g_pFullFileSystem->Open(buf, "rb", NULL);
 	if (!file)
 	{
 		return LoadBMP( texture, filename );
@@ -2188,6 +2240,8 @@ void CWin32Surface::SetForegroundWindow(VPANEL panel)
 void CWin32Surface::MovePopupToFront(VPANEL panel)
 {
 	_popupList.MoveElementToEnd(panel);
+
+	g_pIVgui->PostMessage(panel, new KeyValues("OnMovedPopupToFront"), NULL);
 }
 
 //-----------------------------------------------------------------------------
@@ -2932,10 +2986,6 @@ void CWin32Surface::SetCursor(HCursor cursor)
 	::SetCursor(_currentCursor);
 }
 
-void CWin32Surface::SetCursorAlwaysVisible( bool visible )
-{
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: Forces the window to be redrawn
 //-----------------------------------------------------------------------------
@@ -2968,15 +3018,6 @@ bool CWin32Surface::HasFocus()
 			return true;
 	}
 
-	// see if one of the html windows has the focus
-	for ( int i = 0; i < m_HtmlWindows.Count(); i++ )
-	{
-		if ( m_HtmlWindows[i]->GetIEHWND() == focus )
-		{
-			return true;
-		}
-	}
-
 	return false;
 }
 
@@ -2994,19 +3035,6 @@ bool CWin32Surface::IsWithin(int x,int y)
 		if (PLAT(GetPopup(i))->hwnd == hwnd)
 		{
 			return true;
-		}
-	}
-
-	// double check any HTML windows as well
-	for ( int i = 0; i < GetHTMLWindowCount(); i++ )
-	{
-		HtmlWindow *ie = GetHTMLWindow(i);
-		if ( ie )
-		{
-			if ( ie->GetIEHWND() == hwnd || ie->GetHWND() == hwnd )
-			{
-				return true;
-			}
 		}
 	}
 
@@ -3156,23 +3184,9 @@ HFont CWin32Surface::CreateFont()
 //-----------------------------------------------------------------------------
 // Purpose: adds glyphs to a font created by CreateFont()
 //-----------------------------------------------------------------------------
-bool CWin32Surface::SetFontGlyphSet(HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags)
+bool CWin32Surface::SetFontGlyphSet(HFont font, const char *windowsFontName, int tall, int weight, int blur, int scanlines, int flags, int nRangeMin, int nRangeMax)
 {
-	return FontManager().SetFontGlyphSet(font, windowsFontName, tall, weight, blur, scanlines, flags);
-}
-
-const char * CWin32Surface::GetFontName( HFont font )
-{
-	return nullptr;
-}
-
-const char * CWin32Surface::GetFontFamilyName( HFont font )
-{
-	return nullptr;
-}
-
-void CWin32Surface::GetKernedCharWidth( HFont font, wchar_t ch, wchar_t chBefore, wchar_t chAfter, float & wide, float & abcA )
-{
+	return FontManager().SetFontGlyphSet(font, windowsFontName, tall, weight, blur, scanlines, flags, nRangeMin, nRangeMax);
 }
 
 //-----------------------------------------------------------------------------
@@ -3183,9 +3197,12 @@ int CWin32Surface::GetFontTall(HFont font)
 	return FontManager().GetFontTall(font);
 }
 
-int CWin32Surface::GetFontTallRequested( HFont font )
+//-----------------------------------------------------------------------------
+// Purpose: returns the requested height of a font
+//-----------------------------------------------------------------------------
+int CWin32Surface::GetFontTallRequested(HFont font)
 {
-	return 0;
+	return FontManager().GetFontTallRequested(font);
 }
 
 //-----------------------------------------------------------------------------
@@ -3230,15 +3247,10 @@ void CWin32Surface::GetTextSize(HFont font, const wchar_t *text, int &wide, int 
 	FontManager().GetTextSize(font, text, wide, tall);
 }
 
-bool CWin32Surface::SetFontGlyphSet( HFont font, const char * windowsFontName, int tall, int weight, int blur, int scanlines, int flags, int nRangeMin, int nRangeMax )
-{
-	return false;
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: adds a custom font file (only supports true type font files (.ttf) for now)
 //-----------------------------------------------------------------------------
-bool CWin32Surface::AddCustomFontFile( const char *fontName, const char *fontFileName )
+bool CWin32Surface::AddCustomFontFile(const char *fontName, const char *fontFileName)
 {
 	char fullPath[ MAX_PATH ];
 	g_pFullFileSystem->GetLocalPath(fontFileName, fullPath, sizeof( fullPath ));
@@ -3279,11 +3291,26 @@ void CWin32Surface::ClearTemporaryFontCache( void )
 	Assert( 0 );
 }
 
+const char *CWin32Surface::GetFontName( HFont font )
+{
+	return FontManager().GetFontName( font );
+}
+
+const char *CWin32Surface::GetFontFamilyName( HFont font )
+{
+	return FontManager().GetFontFamilyName( font );
+}
+
 void CWin32Surface::DrawSetTextScale(float sx, float sy)
 {
 	Assert( 0 );
 }
 void CWin32Surface::SetPanelForInput( VPANEL vpanel )
+{
+	Assert( 0 );
+}
+
+void CWin32Surface::DrawFilledRectFastFade( int x0, int y0, int x1, int y1, int fadeStartPt, int fadeEndPt, unsigned int alpha0, unsigned int alpha1, bool bHorizontal )
 {
 	Assert( 0 );
 }
@@ -3438,29 +3465,13 @@ public:
 		// Nothing
 	}
 
-	virtual bool Evict()
-	{
-		return false; 
-	}
+	virtual bool Evict() { return false; }
 
-	virtual int GetNumFrames()
-	{ 
-		return 0;
-	}
-
-	virtual void SetFrame( int nFrame )
-	{
-
-	}
-
-	virtual HTexture GetID() 
-	{
-		return 0;
-	}
-
-	virtual void SetRotation( int iRotation )
-	{
-	}
+	virtual int GetNumFrames() { return 0; }
+	virtual void SetFrame( int nFrame ) {}
+	
+	virtual HTexture GetID() { return 0; }
+	virtual void SetRotation( int iRotation ) { return; };
 
 private:
 
@@ -3620,6 +3631,29 @@ void CWin32Surface::initStaticData()
 	// register our global Shutdown command
 	staticShutdownMsg = ::RegisterWindowMessage("ShutdownValvePlatform");
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: our basic user agent string when doing http requests from the client for webkit
+//-----------------------------------------------------------------------------
+const char *CWin32Surface::GetWebkitHTMLUserAgentString()
+{
+	return  "Valve Client";
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Handle switching in and out of "render to fullscreen" mode. We don't
+//			actually support this mode in tools.
+//-----------------------------------------------------------------------------
+void CWin32Surface::PushFullscreenViewport()
+{
+	AssertMsg( false, "Fullscreen viewport mode is unimplemented in CWin32Surface" );
+}
+
+void CWin32Surface::PopFullscreenViewport()
+{
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Handles windows messages sent to the notify tray icon

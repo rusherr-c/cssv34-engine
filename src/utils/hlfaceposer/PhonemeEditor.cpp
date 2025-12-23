@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,7 +26,7 @@
 #include "choreoevent.h"
 #include "choreoscene.h"
 #include "ChoreoView.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "UtlBuffer.h"
 #include "AudioWaveOutput.h"
 #include "StudioModel.h"
@@ -40,6 +40,7 @@
 #include "mdlviewer.h"
 #include "filesystem_init.h"
 #include "WaveBrowser.h"
+#include "tier2/p4helpers.h"
 #include "vstdlib/random.h"
 
 extern IUniformRandomStream *random;
@@ -460,7 +461,7 @@ void PhonemeEditor::EditWord( CWordTag *pWord, bool positionDialog /*= false*/ )
 	memset( &params, 0, sizeof( params ) );
 	strcpy( params.m_szDialogTitle, "Edit Word" );
 	strcpy( params.m_szPrompt, "Current Word:" );
-	strcpy( params.m_szInputText, pWord->GetWord() );
+	V_strcpy_safe( params.m_szInputText, pWord->GetWord() );
 
 	params.m_nLeft = -1;
 	params.m_nTop = -1;
@@ -527,7 +528,7 @@ void PhonemeEditor::EditPhoneme( CPhonemeTag *pPhoneme, bool positionDialog /*= 
 	CPhonemeParams params;
 	memset( &params, 0, sizeof( params ) );
 	strcpy( params.m_szDialogTitle, "Phoneme/Viseme Properties" );
-	strcpy( params.m_szName, ConvertPhoneme( pPhoneme->GetPhonemeCode() ) );
+	V_strcpy_safe( params.m_szName, ConvertPhoneme( pPhoneme->GetPhonemeCode() ) );
 
 	params.m_nLeft = -1;
 	params.m_nTop = -1;
@@ -970,6 +971,14 @@ int PhonemeEditor::handleEvent( mxEvent *event )
 				CleanupWordsAndPhonemes( true );
 				redraw();
 				break;
+			case IDC_REALIGNPHONEMES:
+				RealignPhonemesToWords( true );
+				redraw();
+				break;
+			case IDC_REALIGNWORDS:
+				RealignWordsToPhonemes( true );
+				redraw();
+				break;
 			case IDC_TOGGLE_VOICEDUCK:
 				OnToggleVoiceDuck();
 				break;
@@ -1232,15 +1241,19 @@ int PhonemeEditor::handleEvent( mxEvent *event )
 				{
 					if ( pt )
 					{
-						// If not holding shift, deselect all others
-						pt->m_bSelected = true;
-
 						// Can only move when holding down shift key
 						if ( shiftdown )
 						{
+							pt->m_bSelected = true;
 							StartDragging( DRAGTYPE_MOVEPHONEME,
 								(short)event->x, (short)event->y, LoadCursor( NULL, IDC_SIZEALL ) );
 						}
+						else
+						{
+							// toggle the selection
+							pt->m_bSelected = !pt->m_bSelected;
+						}
+
 
 						m_bWordsActive = false;
 
@@ -1249,13 +1262,18 @@ int PhonemeEditor::handleEvent( mxEvent *event )
 					}
 					else if ( wt )
 					{
-						wt->m_bSelected = true;
 
 						// Can only move when holding down shift key
 						if ( shiftdown )
 						{
+							wt->m_bSelected = true;
 							StartDragging( DRAGTYPE_MOVEWORD,
 								(short)event->x, (short)event->y, LoadCursor( NULL, IDC_SIZEALL ) );
+						}
+						else
+						{
+							// toggle the selection
+							wt->m_bSelected = !wt->m_bSelected;
 						}
 
 						m_bWordsActive = true;
@@ -1748,7 +1766,7 @@ void PhonemeEditor::DrawWords( CChoreoWidgetDrawHelper& drawHelper, RECT& rcWork
 
 				int length = drawHelper.CalcTextWidth( fontName, fontsize, FW_NORMAL, "%s", word->GetWord() );
 
-				rcText.right = max( xpos2 - 2, rcText.left + length + 1 );
+				rcText.right = max( (LONG)xpos2 - 2, rcText.left + length + 1 );
 
 				int w = rcText.right - rcText.left;
 				if ( w > length )
@@ -1862,7 +1880,7 @@ void PhonemeEditor::DrawPhonemes( CChoreoWidgetDrawHelper& drawHelper, RECT& rcW
 
 					int length = drawHelper.CalcTextWidth( fontName, fontsize, FW_NORMAL, "%s", ConvertPhoneme( pPhoneme->GetPhonemeCode() ) );
 
-					rcText.right = max( xpos2 - 2, rcText.left + length + 1 );
+					rcText.right = max( (LONG)xpos2 - 2, rcText.left + length + 1 );
 
 					int w = rcText.right - rcText.left;
 					if ( w > length )
@@ -2696,6 +2714,13 @@ void PhonemeEditor::ShowWordMenu( CWordTag *word, int mx, int my )
 		pop->add( va( "Cleanup words/phonemes" ), IDC_CLEANUP );
 	}
 
+	if ( m_Tags.m_Words.Size() > 0 )
+	{
+		pop->addSeparator();
+		pop->add( va( "Realign phonemes to words" ), IDC_REALIGNPHONEMES );
+	}
+
+
 	pop->popup( this, mx, my );
 }
 
@@ -2787,6 +2812,12 @@ void PhonemeEditor::ShowPhonemeMenu( CPhonemeTag *pho, int mx, int my )
 	{
 		pop->addSeparator();
 		pop->add( va( "Cleanup words/phonemes" ), IDC_CLEANUP );
+	}
+
+	if ( m_Tags.m_Words.Size() > 0 )
+	{
+		pop->addSeparator();
+		pop->add( va( "Realign words to phonemes" ), IDC_REALIGNWORDS );
 	}
 
 	pop->popup( this, mx, my );
@@ -3000,6 +3031,7 @@ void PhonemeEditor::FinishWordDrag( int startx, int endx )
 
 	TraverseWords( &PhonemeEditor::ITER_MoveSelectedWords, dt );
 
+	RealignPhonemesToWords( false );
 	CleanupWordsAndPhonemes( false );
 
 	PushRedo();
@@ -3044,6 +3076,7 @@ void PhonemeEditor::FinishWordMove( int startx, int endx )
 		next->m_flStartTime = endtime;
 	}
 
+	RealignPhonemesToWords( false );
 	CleanupWordsAndPhonemes( false );
 
 	PushRedo();
@@ -3094,6 +3127,7 @@ void PhonemeEditor::FinishPhonemeDrag( int startx, int endx )
 
 	TraversePhonemes( &PhonemeEditor::ITER_MoveSelectedPhonemes, dt );
 
+	RealignWordsToPhonemes( false );
 	CleanupWordsAndPhonemes( false );
 
 	PushRedo();
@@ -3144,6 +3178,7 @@ void PhonemeEditor::FinishPhonemeMove( int startx, int endx )
 		next->SetStartTime( endtime );
 	}
 
+	RealignWordsToPhonemes( false );
 	CleanupWordsAndPhonemes( false );
 
 	PushRedo();
@@ -3899,7 +3934,10 @@ void PhonemeEditor::RedoPhonemeExtractionSelected( void )
 	CAudioSource *m_pCroppedWave = sound->LoadSound( szCroppedFile );
 	if ( !m_pCroppedWave )
 	{
-		Con_Printf( "Unable to load cropped wave file %s from samples %i to %i\n" );
+		Con_Printf( "Unable to load cropped wave file %s from samples %i to %i\n",
+			szCroppedFile,
+			m_nSelection[ 0 ],
+			m_nSelection[ 1 ] );
 		return;
 	}
 
@@ -5056,7 +5094,7 @@ void PhonemeEditor::EditWordList( void )
 
 	// Build word string
 	char wordstring[ 1024 ];
-	strcpy( wordstring, m_Tags.GetText() );
+	V_strcpy_safe( wordstring, m_Tags.GetText() );
 
 	CInputParams params;
 	memset( &params, 0, sizeof( params ) );
@@ -5107,15 +5145,23 @@ void PhonemeEditor::CommitChanges( void )
 {
 	SaveLinguisticData();
 
-	// Make it writable
+	// Make it writable - if possible
 	MakeFileWriteable( m_WorkFile.m_szWaveFile );
 
-	// Copy over and overwrite file
-	FPCopyFile( m_WorkFile.m_szWorkingFile, m_WorkFile.m_szWaveFile, true );
+	//Open a message box to warn the user if the file was unable to be made non-read only
+	if ( !IsFileWriteable( m_WorkFile.m_szWaveFile ) )
+	{
+		mxMessageBox( NULL, va( "Unable to save file '%s'. File is read-only or in use.",	
+				m_WorkFile.m_szWaveFile ), g_appTitle, MX_MB_OK );
+	}
+	else
+	{
+		// Copy over and overwrite file
+		FPCopyFile( m_WorkFile.m_szWorkingFile, m_WorkFile.m_szWaveFile, true );
+		Msg( "Changes saved to '%s'\n", m_WorkFile.m_szWaveFile );
+		SetDirty( false, false );
+	}
 
-	SetDirty( false, false );
-
-	Msg( "Changes saved to '%s'\n", m_WorkFile.m_szWaveFile );
 }
 
 //-----------------------------------------------------------------------------
@@ -7365,6 +7411,126 @@ void PhonemeEditor::CleanupWordsAndPhonemes( bool prepareundo )
 
 	// NOTE: Caller must call "redraw()" to get screen to update
 }
+
+
+
+void PhonemeEditor::RealignPhonemesToWords( bool prepareundo )
+{
+	if ( GetMode() != MODE_PHONEMES )
+		return;
+
+	if ( prepareundo )
+	{
+		SetDirty( true );
+		PushUndo();
+	}
+
+	SortWords( false );
+	SortPhonemes( false );
+
+	for ( int i = 0 ; i < m_Tags.m_Words.Size() ; i++ )
+	{
+		CWordTag *word = m_Tags.m_Words[ i ];
+		if ( !word )
+			continue;
+
+		CWordTag *next = NULL;
+		if ( i < m_Tags.m_Words.Size() - 1 )
+		{
+			next = m_Tags.m_Words[ i + 1 ];
+		}
+
+		float word_dt = word->m_flEndTime - word->m_flStartTime;
+
+		CPhonemeTag *FirstPhoneme = word->m_Phonemes[ 0 ];
+		if ( !FirstPhoneme )
+			continue;
+
+		CPhonemeTag *LastPhoneme = word->m_Phonemes[ word->m_Phonemes.Size() - 1 ];
+		if ( !LastPhoneme )
+			continue;
+
+		float phoneme_dt = LastPhoneme->GetEndTime() - FirstPhoneme->GetStartTime();
+
+		float phoneme_shift = FirstPhoneme->GetStartTime();
+
+		for ( int j = 0 ; j < word->m_Phonemes.Size(); j++ )
+		{
+			CPhonemeTag *phoneme = word->m_Phonemes[ j ];
+			if ( !phoneme )
+				continue;
+
+			CPhonemeTag *next = NULL;
+			if ( j < word->m_Phonemes.Size() - 1 )
+			{
+				next = word->m_Phonemes[ j + 1 ];
+			}
+
+			if (j == 0)
+			{
+				float t = (phoneme->GetStartTime() - phoneme_shift ) * (word_dt / phoneme_dt) + word->m_flStartTime;
+				phoneme->SetStartTime( t );
+			}
+
+			float t = (phoneme->GetEndTime() - phoneme_shift ) * (word_dt / phoneme_dt) + word->m_flStartTime;
+			phoneme->SetEndTime( t );
+			if (next)
+			{
+				next->SetStartTime( t );
+			}
+		}
+	}
+
+	if ( prepareundo )
+	{
+		PushRedo();
+	}
+
+	// NOTE: Caller must call "redraw()" to get screen to update
+}
+
+
+void PhonemeEditor::RealignWordsToPhonemes( bool prepareundo )
+{
+	if ( GetMode() != MODE_PHONEMES )
+		return;
+
+	if ( prepareundo )
+	{
+		SetDirty( true );
+		PushUndo();
+	}
+
+	SortWords( false );
+	SortPhonemes( false );
+
+	for ( int i = 0 ; i < m_Tags.m_Words.Size() ; i++ )
+	{
+		CWordTag *word = m_Tags.m_Words[ i ];
+		if ( !word )
+			continue;
+
+		CPhonemeTag *FirstPhoneme = word->m_Phonemes[ 0 ];
+		if ( !FirstPhoneme )
+			continue;
+
+		CPhonemeTag *LastPhoneme = word->m_Phonemes[ word->m_Phonemes.Size() - 1 ];
+		if ( !LastPhoneme )
+			continue;
+
+		word->m_flStartTime = FirstPhoneme->GetStartTime();
+		word->m_flEndTime = LastPhoneme->GetEndTime();
+	}
+
+	if ( prepareundo )
+	{
+		PushRedo();
+	}
+
+	// NOTE: Caller must call "redraw()" to get screen to update
+}
+
+
 
 float PhonemeEditor::ComputeMaxWordShift( bool forward, bool allowcrop )
 {

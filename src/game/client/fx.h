@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -60,6 +60,7 @@ void FX_MicroExplosion( Vector &position, Vector &normal );
 void FX_Explosion( Vector& origin, Vector& normal, char materialType );
 void FX_ConcussiveExplosion( Vector& origin, Vector& normal ); 
 void FX_DustImpact( const Vector &origin, trace_t *tr, int iScale );
+void FX_DustImpact( const Vector &origin, trace_t *tr, float flScale );
 void FX_MuzzleEffect( const Vector &origin, const QAngle &angles, float scale, ClientEntityHandle_t hEntity, unsigned char *pFlashColor = NULL, bool bOneFrame = false );
 void FX_MuzzleEffectAttached( float scale, ClientEntityHandle_t hEntity, int attachmentIndex, unsigned char *pFlashColor = NULL, bool bOneFrame = false  );
 void FX_StriderMuzzleEffect( const Vector &origin, const QAngle &angles, float scale, ClientEntityHandle_t hEntity, unsigned char *pFlashColor = NULL );
@@ -83,7 +84,7 @@ public:
 	Vector			m_vPos;
 	QAngle			m_vAngles;
 	int				m_nEntIndex;
-	char			*m_pszSpriteName;
+	const char		*m_pszSpriteName;
 	float			m_flBeamWidth;
 	int				m_nBeams;
 	Vector			m_vColor;

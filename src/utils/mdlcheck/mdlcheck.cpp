@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,6 +10,7 @@
 #include "mdlcheck_util.h"
 #include "tier0/dbg.h"
 #include "utldict.h"
+#include "tier1/utlstring.h"
 
 bool uselogfile = false;
 bool verbose = false;
@@ -127,6 +128,19 @@ void BuildFileList( CUtlVector< CUtlSymbol >& files, char const *rootdir, char c
 	BuildFileList_R( files, rootdir, extension );
 }
 
+//-----------------------------------------------------------------------------
+// This is here because scriplib.cpp is included in this project but cmdlib.cpp
+// is not, but scriplib.cpp uses some stuff from cmdlib.cpp, same with
+// LoadFile and ExpandPath above.  The only thing that currently uses this
+// is $include in scriptlib, if this function returns 0, $include will
+// behave the way it did before this change
+//-----------------------------------------------------------------------------
+int CmdLib_ExpandWithBasePaths( CUtlVector< CUtlString > &expandedPathList, const char *pszPath )
+{
+	return 0;
+}
+
+
 bool GetModelNameFromSourceFile( char const *filename, char *modelname, int maxlen )
 {
 	modelname[0]=0;
@@ -169,7 +183,7 @@ bool GetModelNameFromSourceFile( char const *filename, char *modelname, int maxl
 
 	if ( !valid )
 	{
-		vprint( 0, ".qc file %s missing $modelname directive!!!\n", filename );
+		vprint_queued( 0, ".qc file %s missing $modelname directive!!!\n", filename );
 	}
 	return valid;
 }
@@ -184,7 +198,7 @@ bool AddModelNameFromSource( CUtlDict< ModelFile, int >& models, char const *fil
 		strcpy( shortname, &filename[ offset ] );
 		strcpy( shortname2, &models[ idx ].qcfile[ offset ] );
 
-		vprint( 0, "multiple .qc's build %s\n  %s\n  %s\n",
+		vprint_queued( 0, "multiple .qc's build %s\n  %s\n  %s\n",
 			modelname,
 			shortname, 
 			shortname2 );
@@ -208,13 +222,13 @@ bool AddModelNameFromSource( CUtlDict< ModelFile, int >& models, char const *fil
 //-----------------------------------------------------------------------------
 void ProcessSourceDirectory( char const *basedir )
 {
-	vprint( 0, "building .qc list\n" );
+	// vprint( 0, "building .qc list\n" );
 
 	CUtlVector< CUtlSymbol > files;
 
 	BuildFileList( files, basedir, ".qc" );
 
-	vprint( 0, "found %i .qc files\n\n", files.Count() );
+	// vprint( 0, "found %i .qc files\n\n", files.Count() );
 
 	int offset = strlen( basedir ) + 1;
 
@@ -227,6 +241,8 @@ void ProcessSourceDirectory( char const *basedir )
 		CUtlSymbol& sym = files[ i ];
 		g_Analysis.files.Insert( g_Analysis.symbols.String( sym ), qcf );
 	}
+
+	vprint_queued( 0, "%s", "\n\n" );
 
 	// Now iterate .qc files, looking into each to find the output model name
 	c = g_Analysis.files.Count();
@@ -249,7 +265,11 @@ void ProcessSourceDirectory( char const *basedir )
 	}
 
 	int ecount = c - valid;
-	vprint( 0, "\n summary:  found %i/%i (%.2f percent) .qc errors\n\n", ecount, c, 100.0 * ecount / max( c, 1 ) );
+	if (ecount != 0)
+	{
+		// vprint( 0, "\n summary:  found %i/%i (%.2f percent) .qc errors\n\n", ecount, c, 100.0 * ecount / max( c, 1 ) );
+		vprint( 0, "\n summary:  found %i .qc errors\n\n", ecount );
+	}
 }
 
 #include "studio.h"
@@ -271,7 +291,7 @@ bool ValidateModelFile( char const *modelname, int offset )
 	fp = fopen( modelname, "rb" );
 	if ( !fp )
 	{
-		vprint( 0, "Unable to open .mdl file %s\n", modelname );
+		vprint_queued( 0, "Unable to open .mdl file %s\n", modelname );
 		return false;
 	}
 
@@ -286,7 +306,7 @@ bool ValidateModelFile( char const *modelname, int offset )
 
 	if ( pHdr->id != IDSTUDIOHEADER )
 	{
-		vprint( 0, "Bogus studiomdl header for %s, expecting 'IDST' four cc code\n", shortname );
+		vprint_queued( 0, "Bogus studiomdl header for %s, expecting 'IDST' four cc code\n", shortname );
 		return false;
 	}
 
@@ -297,7 +317,7 @@ bool ValidateModelFile( char const *modelname, int offset )
 	// previous version is compatible
 	if ( pHdr->version < 44 || pHdr->version > STUDIO_VERSION )
 	{
-		vprint( 0, "Outdated model %s (ver %i != %i)\n", shortname, pHdr->version, STUDIO_VERSION );
+		vprint_queued( 0, "Outdated model %s (ver %i != %i)\n", shortname, pHdr->version, STUDIO_VERSION );
 		valid = false;
 	}
 
@@ -320,7 +340,7 @@ bool ValidateModelFile( char const *modelname, int offset )
 	int idx = g_Analysis.models.Find( shortname );
 	if ( idx ==  g_Analysis.models.InvalidIndex() )
 	{
-		vprint( 0, "Couldn't find a .qc which builds %s\n", shortname );
+		vprint_queued( 0, "Couldn't find a .qc which builds %s\n", shortname );
 		valid = false;
 	}
 	else
@@ -336,17 +356,19 @@ bool ValidateModelFile( char const *modelname, int offset )
 
 void ProcessModelsDirectory( char const *basedir )
 {
-	vprint( 0, "building .mdl list\n" );
+	// vprint( 0, "building .mdl list\n" );
 
 	CUtlVector< CUtlSymbol > models;
 
 	BuildFileList( models, basedir, ".mdl" );
 
-	vprint( 0, "found %i .mdl files\n\n", models.Count() );
+	// vprint( 0, "found %i .mdl files\n\n", models.Count() );
 
 	int offset = strlen( basedir ) + 1;
 
 	// Now iterate model files and check version tag and whether a .qc exists which builds the .mdl
+
+	vprint_queued( 0, "%s", "\n\n" );
 
 	// Add files to QC Files dictionary
 	int c = models.Count();
@@ -371,14 +393,18 @@ void ProcessModelsDirectory( char const *basedir )
 	}
 
 	int ecount = c - valid;
-	vprint( 0, "\n summary:  found %i/%i (%.2f percent) .mdl errors\n", ecount, c, 100.0 * ecount / max( c, 1 ) );
-
+	if (ecount != 0)
+	{
+		// vprint( 0, "\n summary:  found %i/%i (%.2f percent) .mdl errors\n", ecount, c, 100.0 * ecount / max( c, 1 ) );
+		vprint( 0, "\n summary:  found %i .mdl errors\n", ecount );
+	}
 }
 
 
 
 void CheckForUnbuiltModels( )
 {
+	vprint_queued( 0, "%s", "\n\n" );
 
 	int c = g_Analysis.models.Count();
 	int valid = 0;
@@ -386,15 +412,15 @@ void CheckForUnbuiltModels( )
 	{
 		if (g_Analysis.models[i].version == 0)
 		{
-			vprint( 0, "Can't find %s,\n\tbuilt by %s\n", g_Analysis.models.GetElementName( i ), g_Analysis.models[i].qcfile );
+			vprint_queued( 0, "Can't find %s,\n\tbuilt by %s\n", g_Analysis.models.GetElementName( i ), g_Analysis.models[i].qcfile );
 		}
 		else if (g_Analysis.models[i].needsrecompile)
 		{
-			vprint( 0, "%s out of date,\n\tbuilt by %s\n", g_Analysis.models.GetElementName( i ), g_Analysis.models[i].qcfile );
+			vprint_queued( 0, "%s out of date,\n\tbuilt by %s\n", g_Analysis.models.GetElementName( i ), g_Analysis.models[i].qcfile );
 		}
 		else if (g_Analysis.models[i].toobig)
 		{
-			vprint( 0, "%s needs $animblocksize command (%d of animdata),\n\tbuilt by %s\n", g_Analysis.models.GetElementName( i ), g_Analysis.models[i].toobig, g_Analysis.models[i].qcfile );
+			vprint_queued( 0, "%s needs $animblocksize command (%d of animdata),\n\tbuilt by %s\n", g_Analysis.models.GetElementName( i ), g_Analysis.models[i].toobig, g_Analysis.models[i].qcfile );
 		}
 		else
 		{
@@ -403,7 +429,11 @@ void CheckForUnbuiltModels( )
 	}
 
 	int ecount = c - valid;
-	vprint( 0, "\n summary:  found %i/%i (%.2f percent) missing .mdl's\n", ecount, c, 100.0 * ecount / max( c, 1 ) );
+	if (ecount != 0)
+	{
+		// vprint( 0, "\n summary:  found %i/%i (%.2f percent) missing .mdl's\n", ecount, c, 100.0 * ecount / max( c, 1 ) );
+		vprint( 0, "\n summary:  found %i missing .mdl's\n", ecount );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -451,20 +481,15 @@ int main( int argc, char* argv[] )
 		}
 	}
 
+	vprint( 0, "Valve Software - mdlcheck.exe (%s)\n", __DATE__ );
+	vprint( 0, "--- Source Model Consistency Checker ---\n" );
+
 	if ( argc < 3 || ( i != argc ) )
 	{
-		vprint( 0, "Valve Software - mdlcheck.exe (%s)\n", __DATE__ );
-		vprint( 0, "--- Source Model Consistency Checker ---\n" );
-
 		printusage();
 	}
 
 	CheckLogFile();
-
-	vprint( 0, "Valve Software - mdlcheck.exe (%s)\n", __DATE__ );
-	vprint( 0, "--- Source Model Consistency Checker ---\n" );
-
-	vprint( 0, "    Looking for messed up .qc and .mdl files...\n" );
 
 	char modelsources[ 256 ];
 	strcpy( modelsources, argv[ i - 2 ] );
@@ -483,6 +508,8 @@ int main( int argc, char* argv[] )
 	ProcessSourceDirectory( modelsources );
 	ProcessModelsDirectory( modelsdir );
 	CheckForUnbuiltModels( );
+
+	dump_print_queue( );
 
 	return 0;
 }

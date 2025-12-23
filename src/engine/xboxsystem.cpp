@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Interface to Xbox 360 system functions. Helps deal with the async system and Live
 //			functions by either providing a handle for the caller to check results or handling
@@ -108,7 +108,7 @@ static void ReleaseAsyncResult( AsyncResult_t *pAsyncResult )
 	if ( pAsyncResult == g_pAsyncResultHead )
 	{
 		g_pAsyncResultHead = pAsyncResult->pNext;
-		delete pAsyncResult->pInputData;
+		free( pAsyncResult->pInputData );
 		delete pAsyncResult;
 		return;
 	}
@@ -119,7 +119,7 @@ static void ReleaseAsyncResult( AsyncResult_t *pAsyncResult )
 		if ( pNode->pNext == pAsyncResult )
 		{
 			pNode->pNext = pAsyncResult->pNext;
-			delete pAsyncResult->pInputData;
+			free( pAsyncResult->pInputData );
 			delete pAsyncResult;
 			return;
 		}

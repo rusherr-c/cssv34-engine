@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =====//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Describes the way to compile a MDL file (eventual replacement for qc)
 //
@@ -12,6 +12,8 @@
 #endif
 
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "datamodel/dmehandle.h"
 #include "vstdlib/iprocessutils.h"
 

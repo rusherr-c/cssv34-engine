@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -117,6 +117,14 @@ public:
 	// Creates a new decal vertex to be associated with a vertex
 	CachedPosNorm_t* CreateWorldVertex( int vertex );
 
+	template< class T >
+	void ComputeFlexedVertex_StreamOffset( studiohdr_t *pStudioHdr, mstudioflex_t *pflex, T *pvanim, int vertCount, float w1, float w2, float w3, float w4 );
+
+#ifdef PLATFORM_WINDOWS
+	void ComputeFlexedVertex_StreamOffset_Optimized( studiohdr_t *pStudioHdr, mstudioflex_t *pflex, mstudiovertanim_t *pvanim, int vertCount, float w1, float w2, float w3, float w4);
+	void ComputeFlexedVertexWrinkle_StreamOffset_Optimized( studiohdr_t *pStudioHdr, mstudioflex_t *pflex, mstudiovertanim_wrinkle_t *pvanim, int vertCount, float w1, float w2, float w3, float w4);
+#endif // PLATFORM_WINDOWS
+
 private:
 	// Used to create the flex render data. maps 
 	struct CacheIndex_t
@@ -175,6 +183,8 @@ private:
 	CacheIndex_t*	m_pFirstFlexIndex;
 	CacheIndex_t*	m_pFirstThinFlexIndex;
 	CacheIndex_t*	m_pFirstWorldIndex;
+
+	friend class CStudioRender;
 };
 
 
@@ -243,6 +253,9 @@ inline void CCachedRenderData::SetBodyModelMesh( int body, int model, int mesh)
 	m_Model = model;
 	m_Mesh = mesh;
 
+	Assert((m_Model >= 0) && (m_Body >= 0));
+	m_CacheDict[m_Body][m_Model].EnsureCount(m_Mesh+1);
+
 	// At this point, we should have all 3 defined.
 	CacheDict_t& dict = m_CacheDict[m_Body][m_Model][m_Mesh];
 
@@ -260,5 +273,63 @@ inline void CCachedRenderData::SetBodyModelMesh( int body, int model, int mesh)
 	}
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//
+//  ** Only execute this function if device supports stream offset **
+//
+// Input  : pmesh - pointer to a studio mesh
+//          lod - integer lod (0 is most detailed)
+// Output : none
+//-----------------------------------------------------------------------------
+template< class T > 
+void CCachedRenderData::ComputeFlexedVertex_StreamOffset( studiohdr_t *pStudioHdr, mstudioflex_t *pflex, 
+	T *pvanim, int vertCount, float w1, float w2, float w3, float w4 )
+{
+	float w12 = w1 - w2;
+	float w34 = w3 - w4;
+	float flVertAnimFixedPointScale = pStudioHdr->VertAnimFixedPointScale();
+
+	CachedPosNorm_t *pFlexedVertex = NULL;
+	for (int j = 0; j < pflex->numverts; j++)
+	{
+		int n = pvanim[j].index;
+
+		// only flex the indices that are (still) part of this mesh at this lod
+		if ( n >= vertCount )
+			continue;
+
+		float s = pvanim[j].speed;
+		float b = pvanim[j].side;
+
+		Vector4DAligned vPosition, vNormal;
+		pvanim[j].GetDeltaFixed4DAligned( &vPosition, flVertAnimFixedPointScale );
+		pvanim[j].GetNDeltaFixed4DAligned( &vNormal, flVertAnimFixedPointScale );
+
+		if ( !IsThinVertexFlexed(n) )
+		{
+			// Add a new flexed vert to the flexed vertex list
+			pFlexedVertex = CreateThinFlexVertex(n);
+
+			Assert( pFlexedVertex != NULL);
+
+			pFlexedVertex->m_Position.InitZero();
+			pFlexedVertex->m_Normal.InitZero();
+		}
+		else
+		{
+			pFlexedVertex = GetThinFlexVertex(n);
+		}
+
+		s *= 1.0f / 255.0f;
+		b *= 1.0f / 255.0f;
+
+		float wa = w2 + w12 * s;
+		float wb = w4 + w34 * s;
+		float w = wa + ( wb - wa ) * b;
+		Vector4DWeightMAD( w, vPosition, pFlexedVertex->m_Position, vNormal, pFlexedVertex->m_Normal );
+	}
+}							 
 
 #endif // FLEXRENDERDATA_H

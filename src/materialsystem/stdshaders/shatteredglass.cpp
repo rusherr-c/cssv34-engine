@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Lightmap only shader
 //
@@ -8,9 +8,9 @@
 
 #include "BaseVSShader.h"
 
-#include "shatteredglass_ps20.inc"
-#include "shatteredglass_ps20b.inc"
-#include "shatteredglass_vs20.inc"
+#include "ShatteredGlass_ps20.inc"
+#include "ShatteredGlass_ps20b.inc"
+#include "ShatteredGlass_vs20.inc"
 
 BEGIN_VS_SHADER( ShatteredGlass,
 			  "Help for ShatteredGlass" )
@@ -85,7 +85,7 @@ BEGIN_VS_SHADER( ShatteredGlass,
 	{
 		if (params[BASETEXTURE]->IsDefined())
 		{
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 
 			if ( !params[BASETEXTURE]->GetTextureValue()->IsTranslucent() )
 			{
@@ -96,7 +96,7 @@ BEGIN_VS_SHADER( ShatteredGlass,
 
 		if ( params[DETAIL]->IsDefined() )
 		{					 
-			LoadTexture( DETAIL );
+			LoadTexture( DETAIL, TEXTUREFLAGS_SRGB );
 		}
 
 		// Don't alpha test if the alpha channel is used for other purposes
@@ -108,7 +108,7 @@ BEGIN_VS_SHADER( ShatteredGlass,
 			LoadCubeMap( ENVMAP );
 			if ( params[ENVMAPMASK]->IsDefined() )
 			{
-				LoadTexture( ENVMAPMASK );
+				LoadTexture( ENVMAPMASK, g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE ? TEXTUREFLAGS_SRGB : 0 );
 			}
 		}
 	}

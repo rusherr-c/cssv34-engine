@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,7 @@
 #include <vgui_controls/ListPanel.h>
 
 #include "RemoteServer.h"
-#include "UtlBuffer.h"
+#include "tier1/utlbuffer.h"
 
 using namespace vgui;
 
@@ -201,7 +201,7 @@ void CMapCycleEditDialog::OnCommand(const char *command)
 		// update the list
 		m_pMapCycleList->ApplyItemChanges(itemID);
 		m_pMapCycleList->ApplyItemChanges(prevItemID);
-		PostMessage(m_pMapCycleList, new KeyValues("KeyCodeTyped", "code", KEY_UP));
+		PostMessage(m_pMapCycleList, new KeyValues("KeyCodePressed", "code", KEY_UP));
 	}
 	else if (!stricmp(command, "ArrowDown"))
 	{
@@ -225,7 +225,7 @@ void CMapCycleEditDialog::OnCommand(const char *command)
 		// update the list
 		m_pMapCycleList->ApplyItemChanges(itemID);
 		m_pMapCycleList->ApplyItemChanges(nextItemID);
-		PostMessage(m_pMapCycleList, new KeyValues("KeyCodeTyped", "code", KEY_DOWN));
+		PostMessage(m_pMapCycleList, new KeyValues("KeyCodePressed", "code", KEY_DOWN));
 	}
 	else if (!stricmp(command, "Cancel"))
 	{

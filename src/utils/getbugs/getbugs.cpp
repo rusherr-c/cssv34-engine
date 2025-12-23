@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,7 +8,7 @@
 #include <windows.h>
 #include "tier0/dbg.h"
 #include "utldict.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "KeyValues.h"
 #include "cmdlib.h"
 #include "interface.h"
@@ -568,7 +568,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )
@@ -914,7 +914,7 @@ void GetBugInfo( CBugReporter& bug, char const *host, char const *database, char
 							{
 								Q_snprintf( q, sizeof( q ), "update bugreports set Processed=1 where BugId=%i;", processed[ i ] );
 
-								int retcode = mysql->Execute( q );
+								retcode = mysql->Execute( q );
 								if ( retcode != 0 )
 								{
 									Msg( "Query failed '%s'\n", q );

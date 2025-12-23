@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,7 +16,7 @@
 
 #include "bugreporter/bugreporter.h"
 #include "filesystem_tools.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 
 IFileSystem *g_filesystem = NULL;
 
@@ -170,7 +170,7 @@ public:
 	// These are stubbed here, but are used by the public version...
 	virtual void		SetCSERAddress( const struct netadr_s& adr ) {}
 	virtual void		SetExeName( char const *exename ) {}
-	virtual void		SetGameDirectory( char const *gamedir ) {}
+	virtual void		SetGameDirectory( char const *pchGamedir ) {}
 	virtual void		SetRAM( int ram ) {}
 	virtual void		SetCPU( int cpu ) {}
 	virtual void		SetProcessor( char const *processor ) {}

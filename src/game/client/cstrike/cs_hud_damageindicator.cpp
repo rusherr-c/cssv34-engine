@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,13 +13,14 @@
 #include <KeyValues.h>
 #include <vgui/ISurface.h>
 #include <vgui_controls/Panel.h>
-#include "vguimatsurface/IMatSystemSurface.h"
-#include "materialsystem/IMaterial.h"
-#include "materialsystem/IMesh.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
+#include "materialsystem/imaterial.h"
+#include "materialsystem/imesh.h"
 #include "materialsystem/imaterialvar.h"
-#include "ieffects.h"
+#include "IEffects.h"
 #include "hudelement.h"
-
+// NVNT damage
+#include "haptics/haptic_utils.h"
 using namespace vgui;
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -137,7 +138,7 @@ void CHudDamageIndicator::DrawDamageIndicatorFront( float flFade )
 		int	y = ( ScreenHeight() / 2 ) - icon_up->Height() * 3;
 		icon_up->DrawSelf( x, y, m_clrIndicator );
 
-		m_flAttackFront = max( 0.0, m_flAttackFront - flFade );
+		m_flAttackFront = MAX( 0.0, m_flAttackFront - flFade );
 	}
 	else
 	{
@@ -163,7 +164,7 @@ void CHudDamageIndicator::DrawDamageIndicatorRear( float flFade )
 		int	y = ( ScreenHeight() / 2 ) + icon_down->Height() * 2;
 		icon_down->DrawSelf( x, y, m_clrIndicator );
 
-		m_flAttackRear = max( 0.0, m_flAttackRear - flFade );
+		m_flAttackRear = MAX( 0.0, m_flAttackRear - flFade );
 	}
 	else
 	{
@@ -190,7 +191,7 @@ void CHudDamageIndicator::DrawDamageIndicatorLeft( float flFade )
 		int	y = ( ScreenHeight() / 2 ) - icon_left->Height() / 2;
 		icon_left->DrawSelf( x, y, m_clrIndicator );
 
-		m_flAttackLeft = max( 0.0, m_flAttackLeft - flFade );
+		m_flAttackLeft = MAX( 0.0, m_flAttackLeft - flFade );
 	}
 	else
 	{
@@ -217,7 +218,7 @@ void CHudDamageIndicator::DrawDamageIndicatorRight( float flFade )
 		int	y = ( ScreenHeight() / 2 ) - icon_right->Height() / 2;
 		icon_right->DrawSelf( x, y, m_clrIndicator );
 
-		m_flAttackRight = max( 0.0, m_flAttackRight - flFade );
+		m_flAttackRight = MAX( 0.0, m_flAttackRight - flFade );
 	}
 	else
 	{
@@ -241,6 +242,8 @@ void CHudDamageIndicator::Paint()
 		DrawDamageIndicatorRight( flFade );
 	}	
 }
+// NVNT static to pass damage
+static float hap_damage_amount = 0;
 
 //-----------------------------------------------------------------------------
 // Purpose: Message handler for Damage message
@@ -252,11 +255,23 @@ void CHudDamageIndicator::MsgFunc_Damage( bf_read &msg )
 	Vector vecFrom;
 	msg.ReadBitVec3Coord( vecFrom );
 
+	// NVNT pass damage to static holder
+	hap_damage_amount = damageTaken;
+
 	if ( damageTaken > 0 )
 	{
 		m_flFadeCompleteTime = gpGlobals->curtime + 1.0;
 		CalcDamageDirection( vecFrom );
 	}
+//=============================================================================
+// HPE_BEGIN:
+// [menglish] Added reads for the added location based parameters to this message
+//=============================================================================	 
+	msg.ReadLong();
+	msg.ReadBitVec3Coord( vecFrom );	 
+//=============================================================================
+// HPE_END
+//=============================================================================
 }
 
 void CHudDamageIndicator::CalcDamageDirection( const Vector &vecFrom )
@@ -293,34 +308,43 @@ void CHudDamageIndicator::CalcDamageDirection( const Vector &vecFrom )
 
 	Vector forward;
 	Vector right;
-	AngleVectors( MainViewAngles(), &forward, &right, NULL );
+	Vector up;
+	AngleVectors( MainViewAngles(), &forward, &right, &up );
+
 
 	float flFront	= DotProduct( vecDelta, forward );
 	float flSide	= DotProduct( vecDelta, right );
+	float flUp      = DotProduct( vecDelta, up);
 
 	if ( flFront > 0 )
 	{
 		if ( flFront > 0.3 )
-			m_flAttackFront = max( m_flAttackFront, flFront );
+			m_flAttackFront = MAX( m_flAttackFront, flFront );
 	}
 	else
 	{
 		float f = fabs( flFront );
 		if ( f > 0.3 )
-			m_flAttackRear = max( m_flAttackRear, f );
+			m_flAttackRear = MAX( m_flAttackRear, f );
 	}
 
 	if ( flSide > 0 )
 	{
 		if ( flSide > 0.3 )
-			m_flAttackRight = max( m_flAttackRight, flSide );
+			m_flAttackRight = MAX( m_flAttackRight, flSide );
 	}
 	else
 	{
 		float f = fabs( flSide );
 		if ( f > 0.3 )
-			m_flAttackLeft = max( m_flAttackLeft, f );
+			m_flAttackLeft = MAX( m_flAttackLeft, f );
 	}
+
+	// NVNT pass damage. (use hap_damage amount to apply)
+	// do rotation
+	Vector hapDir(-flSide,-flUp,flFront);
+	if ( haptics )
+		haptics->ApplyDamageEffect(hap_damage_amount, 0, hapDir);
 }
 
 

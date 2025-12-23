@@ -1,4 +1,4 @@
-//======= Copyright © 1996-2006, Valve Corporation, All rights reserved. ======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Mesh Manipulation Utilities
 //
@@ -56,7 +56,19 @@ public:
 
 	static bool PurgeUnusedDeltas( CDmeMesh *pMesh );
 
-	static bool CreateWrinkleDeltaFromBaseState( CDmeVertexDeltaData *pDelta, float flScale = 1.0f, CDmeMesh *pMesh = NULL, CDmeVertexData *pBind = NULL, CDmeVertexData *pCurrent = NULL );
+	enum WrinkleOp
+	{
+		kReplace,
+		kAdd
+	};
+
+	static bool CreateWrinkleDeltaFromBaseState( CDmeVertexDeltaData *pDelta, float flScale = 1.0f, WrinkleOp wrinkleOp = kReplace, CDmeMesh *pMesh = NULL, CDmeVertexData *pBind = NULL, CDmeVertexData *pCurrent = NULL );
+
+	static int FindMergeSocket(
+		const CUtlVector< CUtlVector< CDmMeshComp::CEdge * > > &srcBorderEdgesList,
+		CDmeMesh *pDstMesh );
+
+	static bool Merge( CDmMeshComp &srcComp, const CUtlVector< CDmMeshComp::CEdge * > &edgeList, CDmeMesh *pDstMesh );
 
 protected:
 	static const int *BuildDataMirrorMap( CDmeVertexData *pBase, int axis, CDmeVertexData::StandardFields_t standardField, CUtlVector< int > &dataMirrorMap );
@@ -68,12 +80,6 @@ protected:
 	static void MirrorVertices( CDmeVertexData *pBase, FieldIndex_t fieldIndex, int nOldVertexCount, int nMirrorCount, const CUtlVector< int > &baseIndices, const CUtlVector< int > &mirrorMap );
 
 	static bool MirrorDelta( CDmeVertexDeltaData *pDelta, int axis, const CUtlVector< int > &posMirrorMap, const CUtlVector< int > &normalMirrorMap, const CUtlVector< int > &uvMirrorMap );
-
-	static bool Merge( CDmMeshComp &srcComp, const CUtlVector< CDmMeshComp::CEdge * > &edgeList, CDmeMesh *pDstMesh );
-
-	static int FindMergeSocket(
-		const CUtlVector< CUtlVector< CDmMeshComp::CEdge * > > &srcBorderEdgesList,
-		CDmeMesh *pDstMesh );
 
 	static bool PurgeUnusedData( CDmeMesh *pMesh );
 

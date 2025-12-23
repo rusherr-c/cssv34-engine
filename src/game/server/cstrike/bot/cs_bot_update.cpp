@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -84,18 +84,18 @@ void CCSBot::Upkeep( void )
 
 				if (IsUsingMachinegun())
 				{
-					// spray the big machinegun at the enemy's feet
-					aimAtPart = FEET;
+					// spray the big machinegun at the enemy's gut
+					aimAtPart = GUT;
 				}
 				else if (IsUsing( WEAPON_AWP ) || IsUsingShotgun())
 				{
 					// these weapons are best aimed at the chest
 					aimAtPart = GUT;
 				}
-				else if (GetProfile()->GetSkill() > 0.5f && IsActiveWeaponRecoilHigh() && !IsUsingPistol() && !IsUsingSniperRifle())
+				else if (GetProfile()->GetSkill() > 0.5f && IsActiveWeaponRecoilHigh() )
 				{
-					// sprayin' and prayin' - aim at the feet and let the recoil do the work
-					aimAtPart = FEET;
+					// sprayin' and prayin' - aim at the gut since we're not going to be accurate
+					aimAtPart = GUT;
 				}
 				else if (GetProfile()->GetSkill() < sharpshooter)
 				{
@@ -107,7 +107,6 @@ void CCSBot::Upkeep( void )
 					// high skill - aim for the head
 					aimAtPart = HEAD;
 				}
-
 
 				if (IsEnemyPartVisible( aimAtPart ))
 				{
@@ -165,6 +164,10 @@ void CCSBot::Upkeep( void )
 
 			QAngle idealAngle;
 			VectorAngles( to, idealAngle );
+
+			// adjust aim angle for recoil, based on bot skill
+			const QAngle &punchAngles = GetPunchAngle();
+			idealAngle -= punchAngles * GetProfile()->GetSkill();
 
 			SetLookAngles( idealAngle.y, idealAngle.x );
 		}
@@ -313,7 +316,7 @@ void CCSBot::Update( void )
 	// where are we
 	if (!m_currentArea || !m_currentArea->Contains( myOrigin ))
 	{
-		m_currentArea = TheNavMesh->GetNavArea( myOrigin );
+		m_currentArea = (CCSNavArea *)TheNavMesh->GetNavArea( myOrigin );
 	}
 
 	// track the last known area we were in
@@ -894,19 +897,19 @@ void CCSBot::DebugDisplay( void ) const
 	// show if blind
 	if (IsBlind())
 	{
-		NDebugOverlay::ScreenText( 0.5f, 0.38f, msg.sprintf( "<<< BLIND >>>", safeTime ), 255, 255, 255, 255, duration );
+		NDebugOverlay::ScreenText( 0.5f, 0.38f, msg.sprintf( "<<< BLIND >>>" ), 255, 255, 255, 255, duration );
 	}
 
 	// show if alert
 	if (IsAlert())
 	{
-		NDebugOverlay::ScreenText( 0.5f, 0.38f, msg.sprintf( "ALERT", safeTime ), 255, 0, 0, 255, duration );
+		NDebugOverlay::ScreenText( 0.5f, 0.38f, msg.sprintf( "ALERT" ), 255, 0, 0, 255, duration );
 	}
 
 	// show if panicked
 	if (IsPanicking())
 	{
-		NDebugOverlay::ScreenText( 0.5f, 0.36f, msg.sprintf( "PANIC", safeTime ), 255, 255, 0, 255, duration );
+		NDebugOverlay::ScreenText( 0.5f, 0.36f, msg.sprintf( "PANIC" ), 255, 255, 0, 255, duration );
 	}
 
 	// show behavior variables
@@ -1016,9 +1019,9 @@ void CCSBot::DebugDisplay( void ) const
 			const SpotOrder *order;
 			Vector along;
 
-			FOR_EACH_LL( m_spotEncounter->spotList, it )
+			FOR_EACH_VEC( m_spotEncounter->spots, it )
 			{
-				order = &m_spotEncounter->spotList[ it ];
+				order = &m_spotEncounter->spots[ it ];
 
 				// ignore spots the enemy could not have possibly reached yet
 				if (order->spot->GetArea())

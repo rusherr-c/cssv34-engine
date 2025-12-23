@@ -1,18 +1,18 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
-//=============================================================================//
+//===========================================================================//
 
 #include "dme_controls/AttributeMDLPickerPanel.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "vgui_controls/Button.h"
 #include "vgui_controls/FileOpenDialog.h"
 #include "dme_controls/AttributeTextEntry.h"
-#include "dme_controls/MDLPicker.h"
-#include "tier1/keyvalues.h"
+#include "matsys_controls/MDLPicker.h"
+#include "tier1/KeyValues.h"
 
 
 using namespace vgui;

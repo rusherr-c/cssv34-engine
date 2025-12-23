@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #endif
 
 #include "tier1/utlvector.h"
-#include "dme_controls/SimplePotteryWheelPanel.h"
+#include "matsys_controls/PotteryWheelPanel.h"
 #include "datamodel/dmehandle.h"
 
 
@@ -39,9 +39,9 @@ namespace vgui
 //-----------------------------------------------------------------------------
 // Material Viewer Panel
 //-----------------------------------------------------------------------------
-class CDmeDagRenderPanel : public CSimplePotteryWheelPanel
+class CDmeDagRenderPanel : public CPotteryWheelPanel
 {
-	DECLARE_CLASS_SIMPLE( CDmeDagRenderPanel, CSimplePotteryWheelPanel );
+	DECLARE_CLASS_SIMPLE( CDmeDagRenderPanel, CPotteryWheelPanel );
 
 public:
 	// constructor, destructor
@@ -93,8 +93,6 @@ private:
 	MESSAGE_FUNC( OnGrayShade, "GrayShade" );
 	MESSAGE_FUNC( OnFrame, "Frame" );
 
-	void DrawGrid();
-
 	// Draw joint names
 	void DrawJointNames( CDmeDag *pRoot, CDmeDag *pDag, const matrix3x4_t& parentToWorld );
 
@@ -105,7 +103,6 @@ private:
 	void UpdateMenu();
 	CTextureReference m_DefaultEnvCubemap;
 	CTextureReference m_DefaultHDREnvCubemap;
-	CMaterialReference m_Wireframe;
 	vgui::HFont m_hFont;
 
 	bool m_bDrawJointNames : 1;
@@ -118,7 +115,7 @@ private:
 	CDmeHandle< CDmeChannelsClip > m_hCurrentVertexAnimation;
 	CUtlVector< IDmeOperator* > m_operators;
 	float m_flStartTime;
-
+	CDmeHandle< CDmeDag > m_hDag;
 
 	CDmeDrawSettings *m_pDrawSettings;
 	CDmeHandle< CDmeDrawSettings, true > m_hDrawSettings;

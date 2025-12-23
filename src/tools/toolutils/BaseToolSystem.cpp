@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -28,10 +28,11 @@
 #include "datamodel/dmelementfactoryhelper.h"
 #include "filesystem.h"
 #include "vgui_controls/savedocumentquery.h"
+#include "vgui_controls/perforcefilelistframe.h"
 #include "toolutils/miniviewport.h"
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/imaterial.h"
-#include "materialsystem/IMesh.h"
+#include "materialsystem/imesh.h"
 #include "toolutils/BaseStatusBar.h"
 #include "movieobjects/movieobjects.h"
 #include "vgui_controls/KeyBoardEditorDialog.h"

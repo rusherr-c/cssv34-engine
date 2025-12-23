@@ -1,11 +1,13 @@
-// STATIC: "CONVERT_TO_SRGB"	"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()]
-// STATIC: "VERTEXCOLOR"		"0..1"
-// STATIC: "CONSTANTCOLOR"		"0..1"
-// STATIC: "HDRTYPE"			"0..2"
-// STATIC: "SRGB"               "0..1"
+// STATIC: "CONVERT_TO_SRGB"		"0..1"	[ps20b][= g_pHardwareConfig->NeedsShaderSRGBConversion()] [PC]
+// STATIC: "CONVERT_TO_SRGB"		"0..0"	[= 0] [XBOX]
+// STATIC: "VERTEXCOLOR"			"0..1"
+// STATIC: "CONSTANTCOLOR"			"0..1"
+// STATIC: "HDRTYPE"				"0..2"
+// STATIC: "SRGB"					"0..1"
+// STATIC: "SRGB_OUTPUT_ADAPTER"	"0..1"	[ps20b]
 
-// DYNAMIC: "HDRENABLED"		"0..1"
-// DYNAMIC: "PIXELFOGTYPE"		"0..1"
+// DYNAMIC: "HDRENABLED"			"0..1"
+// DYNAMIC: "PIXELFOGTYPE"			"0..1"
 
 #include "common_ps_fxc.h"
 #include "shader_constant_register_map.h"
@@ -28,7 +30,7 @@ struct PS_INPUT
 
 float4 main( PS_INPUT i ) : COLOR
 {
-	float4 sample = tex2D( TexSampler, i.baseTexCoord );
+	float4 result, sample = tex2D( TexSampler, i.baseTexCoord );
 
 #if VERTEXCOLOR
 	sample *= i.color;
@@ -44,9 +46,16 @@ float4 main( PS_INPUT i ) : COLOR
 
 	float fogFactor = CalcPixelFogFactor( PIXELFOGTYPE, g_FogParams, g_EyePos_SpecExponent.z, i.worldPos_projPosZ.z, i.worldPos_projPosZ.w );
 #if SRGB
-	return FinalOutput( sample, fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_LINEAR );
+	result = FinalOutput( sample, fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_LINEAR );
 #else
-	return FinalOutput( sample, fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_GAMMA );
+	result = FinalOutput( sample, fogFactor, PIXELFOGTYPE, TONEMAP_SCALE_GAMMA );
 #endif
+
+	// On Posix, we're being forced through a linear-to-gamma curve but don't want it, so we do the opposite here first
+#if SRGB_OUTPUT_ADAPTER
+	result = GammaToLinear( result );
+#endif
+
+	return result;
 }
 

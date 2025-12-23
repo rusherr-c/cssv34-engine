@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2006, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -91,8 +91,8 @@ void CImportSFMV4::BuildList( CDmElement *pElement, CUtlRBTree< CDmElement *, in
 	{
 		if ( pAttribute->GetType() == AT_ELEMENT )
 		{
-			CDmElement *pElement = pAttribute->GetValueElement<CDmElement>( );
-			BuildList( pElement, list );
+			CDmElement *pElementAt = pAttribute->GetValueElement<CDmElement>( );
+			BuildList( pElementAt, list );
 			continue;
 		}
 

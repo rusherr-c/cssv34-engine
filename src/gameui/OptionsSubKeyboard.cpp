@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 
 #include "OptionsSubKeyboard.h"
 #include "EngineInterface.h"
-#include "VControlsListPanel.h"
+#include "vcontrolslistpanel.h"
 
 #include <vgui_controls/Button.h>
 #include <vgui_controls/Label.h>
@@ -24,9 +24,9 @@
 #include <vgui/ISystem.h>
 #include <vgui/IInput.h>
 
-#include "FileSystem.h"
-#include "tier1/UtlBuffer.h"
-#include "igameuifuncs.h"
+#include "filesystem.h"
+#include "tier1/utlbuffer.h"
+#include "IGameUIFuncs.h"
 #include <vstdlib/IKeyValuesSystem.h>
 #include "tier2/tier2.h"
 #include "inputsystem/iinputsystem.h"
@@ -404,6 +404,14 @@ void COptionsSubKeyboard::FillInCurrentBindings( void )
 		bJoystick = var.GetBool();
 	}
 
+	// NVNT see if we have a falcon connected.
+	bool bFalcon = false;
+	ConVarRef falconVar("hap_HasDevice");
+	if ( var.IsValid() )
+	{
+		bFalcon = var.GetBool();
+	}
+
 	for ( int i = 0; i < BUTTON_CODE_LAST; i++ )
 	{
 		// Look up binding
@@ -426,6 +434,9 @@ void COptionsSubKeyboard::FillInCurrentBindings( void )
 
 				// If we're using a joystick, joystick bindings override keyboard ones
 				bool bShouldOverride = bJoystick && IsJoystickCode((ButtonCode_t)i) && !IsJoystickCode(currentBC);
+				// NVNT If we're not using a joystick, falcon bindings override keyboard ones
+				if( !bShouldOverride && bFalcon && IsNovintCode((ButtonCode_t)i) && !IsNovintCode(currentBC) )
+					bShouldOverride = true;
 
 				if ( !bShouldOverride )
 					continue;
@@ -554,14 +565,9 @@ void COptionsSubKeyboard::ApplyAllBindings( void )
 //-----------------------------------------------------------------------------
 void COptionsSubKeyboard::FillInDefaultBindings( void )
 {
-	FileHandle_t fh = g_pFullFileSystem->Open( "cfg/config_default.cfg", "rb" );
-	if (fh == FILESYSTEM_INVALID_HANDLE)
+	CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
+	if ( !g_pFullFileSystem->ReadFile( "cfg/config_default.cfg", NULL, buf ) )
 		return;
-
-	int size = g_pFullFileSystem->Size(fh);
-	CUtlBuffer buf( 0, size, CUtlBuffer::TEXT_BUFFER );
-	g_pFullFileSystem->Read( buf.Base(), size, fh );
-	g_pFullFileSystem->Close(fh);
 
 	// Clear out all current bindings
 	ClearBindItems();

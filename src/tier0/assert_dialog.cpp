@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,12 +12,25 @@
 #include "xbox/xbox_vxconsole.h"
 #elif defined( _WIN32 )
 #include <windows.h>
-#elif _LINUX
-char *GetCommandLine();
+#elif defined( POSIX )
+#include <stdlib.h>
 #endif
 #include "resource.h"
 #include "tier0/valve_on.h"
 #include "tier0/threadtools.h"
+
+#if defined( POSIX )
+#include <dlfcn.h>
+#endif
+
+#if defined( LINUX ) || defined( USE_SDL )
+
+// We lazily load the SDL shared object, and only reference functions if it's
+// available, so this can be included on the dedicated server too.
+#include "SDL.h"
+
+typedef int ( SDLCALL FUNC_SDL_ShowMessageBox )( const SDL_MessageBoxData *messageboxdata, int *buttonid );
+#endif
 
 class CDialogInitInfo
 {
@@ -54,9 +67,13 @@ static bool g_bAssertsEnabled = true;
 
 static CAssertDisable *g_pAssertDisables = NULL;
 
+#if ( defined( _WIN32 ) && !defined( _X360 ) )
 static int g_iLastLineRange = 5;
 static int g_nLastIgnoreNumTimes = 1;
+#endif
+#if defined( _X360 )
 static int g_VXConsoleAssertReturnValue = -1;
+#endif
 
 // Set to true if they want to break in the debugger.
 static bool g_bBreak = false;
@@ -69,6 +86,8 @@ static CDialogInitInfo g_Info;
 // -------------------------------------------------------------------------------- //
 
 #if defined(_WIN32) && !defined(STATIC_TIER0)
+extern "C" BOOL APIENTRY MemDbgDllMain( HMODULE hDll, DWORD dwReason, PVOID pvReserved );
+
 BOOL WINAPI DllMain(
   HINSTANCE hinstDLL,  // handle to the DLL module
   DWORD fdwReason,     // reason for calling function
@@ -76,13 +95,18 @@ BOOL WINAPI DllMain(
 )
 {
 	g_hTier0Instance = hinstDLL;
+#ifdef DEBUG
+	MemDbgDllMain( hinstDLL, fdwReason, lpvReserved );
+#endif
 	return true;
 }
 #endif
 
 static bool IsDebugBreakEnabled()
 {
-	static bool bResult = ( _tcsstr( Plat_GetCommandLine(), _T("-debugbreak") ) != NULL );
+	static bool bResult = ( _tcsstr( Plat_GetCommandLine(), _T("-debugbreak") )    != NULL ) || \
+	                      ( _tcsstr( Plat_GetCommandLine(), _T("-raiseonassert") ) != NULL ) || \
+	                      getenv( "RAISE_ON_ASSERT" );
 	return bResult;
 }
 
@@ -167,22 +191,14 @@ CAssertDisable* IgnoreAssertsNearby( int nRange )
 	return pDisable;
 }
 
-#ifdef _WIN32
-#if defined(WIN64)
+
+#if ( defined( _WIN32 ) && !defined( _X360 ) )
 INT_PTR CALLBACK AssertDialogProc(
   HWND hDlg,  // handle to dialog box
   UINT uMsg,     // message
   WPARAM wParam, // first message parameter
   LPARAM lParam  // second message parameter
 )
-#else
-int CALLBACK AssertDialogProc(
-	HWND hDlg,  // handle to dialog box
-	UINT uMsg,     // message
-	WPARAM wParam, // first message parameter
-	LPARAM lParam  // second message parameter
-)
-#endif
 {
 	switch( uMsg )
 	{
@@ -324,12 +340,36 @@ static HWND FindLikelyParentWindow()
 	EnumWindows( ParentWindowEnumProc, GetCurrentProcessId() );
 	return g_hBestParentWindow;
 }
-#endif
+#endif // ( defined( _WIN32 ) && !defined( _X360 ) )
 
 // -------------------------------------------------------------------------------- //
 // Interface functions.
 // -------------------------------------------------------------------------------- //
 
+// provides access to the global that turns asserts on and off
+DBG_INTERFACE bool AreAllAssertsDisabled()
+{
+	return !g_bAssertsEnabled;
+}
+
+DBG_INTERFACE void SetAllAssertsDisabled( bool bAssertsDisabled )
+{
+	g_bAssertsEnabled = !bAssertsDisabled;
+}
+
+#if defined( LINUX ) || defined( USE_SDL )
+SDL_Window *g_SDLWindow = NULL;
+
+DBG_INTERFACE void SetAssertDialogParent( struct SDL_Window *window )
+{
+	g_SDLWindow = window;
+}
+
+DBG_INTERFACE struct SDL_Window * GetAssertDialogParent()
+{
+	return g_SDLWindow;
+}
+#endif
 
 DBG_INTERFACE bool ShouldUseNewAssertDialog()
 {
@@ -346,6 +386,33 @@ DBG_INTERFACE bool ShouldUseNewAssertDialog()
 #endif // DBGFLAG_ASSERTDLG
 }
 
+#if defined( POSIX )
+
+#include <execinfo.h>
+
+static void SpewBacktrace()
+{
+	void *buffer[ 16 ];
+	int nptrs = backtrace( buffer, ARRAYSIZE( buffer ) );
+	if ( nptrs )
+	{
+		char **strings = backtrace_symbols(buffer, nptrs);
+		if ( strings )
+		{
+			for ( int i = 0; i < nptrs; i++)
+			{
+				const char *module = strrchr( strings[ i ], '/' );
+				module = module ? ( module + 1 ) : strings[ i ];
+
+				printf("  %s\n", module );
+			}
+
+			free( strings );
+		}
+	}
+}
+
+#endif
 
 DBG_INTERFACE bool DoNewAssertDialog( const tchar *pFilename, int line, const tchar *pExpression )
 {
@@ -353,11 +420,6 @@ DBG_INTERFACE bool DoNewAssertDialog( const tchar *pFilename, int line, const tc
 
 	if ( AreAssertsDisabled() )
 		return false;
-
-	// If they have the old mode enabled (always break immediately), then just break right into
-	// the debugger like we used to do.
-	if ( IsDebugBreakEnabled() )
-		return true;
 
 	// Have ALL Asserts been disabled?
 	if ( !g_bAssertsEnabled )
@@ -367,7 +429,33 @@ DBG_INTERFACE bool DoNewAssertDialog( const tchar *pFilename, int line, const tc
 	if ( !AreAssertsEnabledInFileLine( pFilename, line ) )
 		return false;
 
-	// Now create the dialog.
+	// Assert not suppressed. Spew it, and optionally a backtrace.
+#if defined( POSIX )
+	if( isatty( STDERR_FILENO ) )
+	{
+		#define COLOR_YELLOW 	"\033[1;33m"
+		#define COLOR_GREEN 	"\033[1;32m"
+		#define COLOR_RED 		"\033[1;31m"
+		#define COLOR_END		"\033[0m"
+		fprintf(stderr, COLOR_YELLOW "ASSERT:" COLOR_END " " COLOR_RED "%s" COLOR_GREEN ":%i:" COLOR_END " " COLOR_RED "%s" COLOR_END "\n",
+		        pFilename, line, pExpression);
+		if ( getenv( "POSIX_ASSERT_BACKTRACE" ) )
+		{
+			SpewBacktrace();
+		}
+	}
+	else
+#endif
+	{
+		fprintf(stderr, "ASSERT: %s:%i: %s\n", pFilename, line, pExpression);
+	}
+
+	// If they have the old mode enabled (always break immediately), then just break right into
+	// the debugger like we used to do.
+	if ( IsDebugBreakEnabled() )
+		return true;
+
+	// Now create the dialog. Just return true for old-style debug break upon failure.
 	g_Info.m_pFilename = pFilename;
 	g_Info.m_iLine = line;
 	g_Info.m_pExpression = pExpression;
@@ -446,15 +534,83 @@ DBG_INTERFACE bool DoNewAssertDialog( const tchar *pFilename, int line, const tc
 		DialogBox( g_hTier0Instance, MAKEINTRESOURCE( IDD_ASSERT_DIALOG ), hParentWindow, AssertDialogProc );
 	}
 
-#elif _LINUX
+#elif defined( POSIX )
+	static FUNC_SDL_ShowMessageBox *pfnSDLShowMessageBox = NULL;
+	if( !pfnSDLShowMessageBox )
+	{
+#ifdef OSX
+		void *ret = dlopen( "libSDL2-2.0.0.dylib", RTLD_LAZY );
+#else
+		void *ret = dlopen( "libSDL2-2.0.so.0", RTLD_LAZY );
+#endif
+		if ( ret )
+			{ pfnSDLShowMessageBox = ( FUNC_SDL_ShowMessageBox * )dlsym( ret, "SDL_ShowMessageBox" ); }
+	}
 
-	fprintf(stderr, "%s %i %s", pFilename, line, pExpression);
+	if( pfnSDLShowMessageBox )
+	{
+		int buttonid;
+		char text[ 4096 ];
+		SDL_MessageBoxData messageboxdata = { 0 };
+		const char *DefaultAction = Plat_IsInDebugSession() ? "Break" : "Corefile";
+		SDL_MessageBoxButtonData buttondata[] =
+		{
+			{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,	IDC_BREAK,			DefaultAction			},
+			{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,	IDC_IGNORE_THIS,	"Ignore"				},
+			{ 0,										IDC_IGNORE_FILE,	"Ignore This File"		},
+			{ 0,										IDC_IGNORE_ALWAYS,	"Always Ignore"			},
+			{ 0,										IDC_IGNORE_ALL,		"Ignore All Asserts"	},
+		};
 
+		_snprintf( text, sizeof( text ), "File: %s\nLine: %i\nExpr: %s\n", pFilename, line, pExpression );
+		text[ sizeof( text ) - 1 ] = 0;
+
+		messageboxdata.window = g_SDLWindow;
+		messageboxdata.title = "Assertion Failed";
+		messageboxdata.message = text;
+		messageboxdata.numbuttons = ARRAYSIZE( buttondata );
+		messageboxdata.buttons = buttondata;
+
+		int Ret = ( *pfnSDLShowMessageBox )( &messageboxdata, &buttonid );
+		if( Ret == -1 )
+		{
+			buttonid = IDC_BREAK;
+		}
+
+		switch( buttonid )
+		{
+		default:
+		case IDC_BREAK:
+			// Break on this Assert
+			g_bBreak = true;
+			break;
+		case IDC_IGNORE_THIS:
+			// Ignore this Assert once
+			break;
+		case IDC_IGNORE_FILE:
+			IgnoreAssertsInCurrentFile();
+			break;
+		case IDC_IGNORE_ALWAYS:
+			// Ignore this Assert from now on
+			IgnoreAssertsNearby( 0 );
+			break;
+		case IDC_IGNORE_ALL:
+			// Ignore all Asserts from now on
+			g_bAssertsEnabled = false;
+			break;
+		}
+	}
+	else
+	{
+		// Couldn't SDL it up
+		g_bBreak = true;
+	}
+
+#else
+	// No dialog mode on this platform
+	g_bBreak = true;
 #endif
 
 	return g_bBreak;
 }
-
-
-
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  Displays a leaderboard
 //
@@ -123,8 +123,8 @@ void CLeaderboardDialog::PerformLayout( void )
 	{
 		iActive = 0;
 	}
-	_itow_s( iActive, wzActiveItem, ARRAYSIZE( wzActiveItem ), 10 );
-	_itow_s( m_iMaxRank, wzTotal, ARRAYSIZE( wzTotal ), 10 );
+	V_snwprintf( wzActiveItem, ARRAYSIZE( wzActiveItem ), L"%d", iActive );
+	V_snwprintf( wzTotal, ARRAYSIZE( wzTotal ), L"%d", m_iMaxRank );
 	g_pVGuiLocalize->ConstructString( wszNumbering, sizeof( wszNumbering ), wzNumberingFmt, 2, wzActiveItem, wzTotal );
 	m_pNumbering->SetText( wszNumbering );
 	m_pNumbering->SetWide( GetWide() );
@@ -483,6 +483,7 @@ void CLeaderboardDialog::OnKeyCodePressed( vgui::KeyCode code )
 	switch( code )
 	{
 	case KEY_XBUTTON_A:
+	case STEAMCONTROLLER_A:
 #ifdef _X360
 		{
 			int idx = m_Menu.GetActiveItemIndex();
@@ -496,16 +497,19 @@ void CLeaderboardDialog::OnKeyCodePressed( vgui::KeyCode code )
 		break;
 
 	case KEY_XBUTTON_Y:
+	case STEAMCONTROLLER_Y:
 		break;
 
 	case KEY_XSTICK1_DOWN:
 	case KEY_XBUTTON_DOWN:
+	case STEAMCONTROLLER_DPAD_DOWN:
 		m_KeyRepeat.KeyDown( code );
 		UpdateLeaderboard( m_iActiveRank + 1 );
 		break;
 
 	case KEY_XSTICK1_UP:
 	case KEY_XBUTTON_UP:
+	case STEAMCONTROLLER_DPAD_UP:
 		m_KeyRepeat.KeyDown( code );
 		UpdateLeaderboard( m_iActiveRank - 1 );
 		break;
@@ -534,8 +538,10 @@ void CLeaderboardDialog::OnKeyCodePressed( vgui::KeyCode code )
 	{
 	case KEY_XSTICK1_LEFT:
 	case KEY_XBUTTON_LEFT:
+	case STEAMCONTROLLER_DPAD_LEFT:
 	case KEY_XSTICK1_RIGHT:
 	case KEY_XBUTTON_RIGHT:
+	case STEAMCONTROLLER_DPAD_RIGHT:
 		InvalidateLayout();
 		break;
 	}

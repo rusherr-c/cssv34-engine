@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // r_studio.cpp: routines for setting up to draw 3DStudio models 
 //
@@ -87,7 +87,7 @@ IMaterial* CStudioRender::R_StudioSetupSkinAndLighting( IMatRenderContext *pRend
 	}
 	else
 	{
-		if ( !m_pRC->m_pForcedMaterial && ( m_pRC->m_nForcedMaterialType != OVERRIDE_DEPTH_WRITE ) )
+		if ( !m_pRC->m_pForcedMaterial && ( m_pRC->m_nForcedMaterialType != OVERRIDE_DEPTH_WRITE && m_pRC->m_nForcedMaterialType != OVERRIDE_SSAO_DEPTH_WRITE ) )
 		{
 			pMaterial = ppMaterials[index];
 			if ( !pMaterial )
@@ -115,19 +115,22 @@ IMaterial* CStudioRender::R_StudioSetupSkinAndLighting( IMatRenderContext *pRend
 					pRenderContext->Bind( pOriginalMaterial, pClientRenderable );
 					if ( pOriginalMaterial->IsTranslucent() || pOriginalMaterial->IsAlphaTested() )
 					{
-						pOriginalMaterialVar->SetMaterialValue( pOriginalMaterial );
+						if ( pOriginalMaterialVar )
+							pOriginalMaterialVar->SetMaterialValue( pOriginalMaterial );
 					}
 					else
 					{
-						pOriginalMaterialVar->SetMaterialValue( NULL );
+						if ( pOriginalMaterialVar )
+							pOriginalMaterialVar->SetMaterialValue( NULL );
 					}
 				}
 				else
 				{
-					pOriginalMaterialVar->SetMaterialValue( NULL );
+					if ( pOriginalMaterialVar )
+						pOriginalMaterialVar->SetMaterialValue( NULL );
 				}
 			}
-			else if( m_pRC->m_nForcedMaterialType == OVERRIDE_DEPTH_WRITE )
+			else if ( m_pRC->m_nForcedMaterialType == OVERRIDE_DEPTH_WRITE || m_pRC->m_nForcedMaterialType == OVERRIDE_SSAO_DEPTH_WRITE )
 			{
 				// Disable any alpha modulation on the original material that was left over from when it was last rendered
 				ppMaterials[index]->AlphaModulate( 1.0f );
@@ -144,7 +147,14 @@ IMaterial* CStudioRender::R_StudioSetupSkinAndLighting( IMatRenderContext *pRend
 				// Select proper override material
 				int nAlphaTest = (int) ( ppMaterials[index]->IsAlphaTested() && pOriginalTextureVar->IsTexture() ); // alpha tested base texture
 				int nNoCull = (int) ppMaterials[index]->IsTwoSided();
-				pMaterial = m_pDepthWrite[nAlphaTest][nNoCull];
+				if ( m_pRC->m_nForcedMaterialType == OVERRIDE_SSAO_DEPTH_WRITE )
+				{
+					pMaterial = m_pSSAODepthWrite[nAlphaTest][nNoCull];
+				}
+				else
+				{
+					pMaterial = m_pDepthWrite[nAlphaTest][nNoCull];
+				}
 
 				// If we're alpha tested, we should set up the texture variables from the original material
 				if ( nAlphaTest != 0 )
@@ -185,7 +195,7 @@ IMaterial* CStudioRender::R_StudioSetupSkinAndLighting( IMatRenderContext *pRend
 		// Set this bool to check after the bind below
 		bCheckForConVarDrawTranslucentSubModels = true;
 
-		if ( m_pRC->m_nForcedMaterialType != OVERRIDE_DEPTH_WRITE )
+		if ( m_pRC->m_nForcedMaterialType != OVERRIDE_DEPTH_WRITE && m_pRC->m_nForcedMaterialType != OVERRIDE_SSAO_DEPTH_WRITE)
 		{
 			// Try to set the alpha based on the blend
 			pMaterial->AlphaModulate( m_pRC->m_AlphaMod );
@@ -207,6 +217,20 @@ IMaterial* CStudioRender::R_StudioSetupSkinAndLighting( IMatRenderContext *pRend
 		}
 	}
 
+	// TODO: It's possible we don't want to use the color texels--for example because of a convar. 
+	// We should check that here in addition to whether or not we have the data available.
+	static unsigned int lightmapVarCache = 0;
+	IMaterialVar *pLightmapVar = pMaterial->FindVarFast( "$lightmap", &lightmapVarCache );
+	if ( pLightmapVar )
+	{
+		ITexture* newTex = pColorMeshes ? pColorMeshes->m_pLightmap : NULL;
+
+		if (newTex)
+			pLightmapVar->SetTextureValue(newTex);
+		else 
+			pLightmapVar->SetUndefined();
+	}
+	
 	pRenderContext->Bind( pMaterial, pClientRenderable );
 
 	if ( bCheckForConVarDrawTranslucentSubModels )
@@ -253,6 +277,11 @@ int R_StudioSetupModel( int bodypart, int entity_body, mstudiomodel_t **ppSubMod
 
 	pbodypart = pStudioHdr->pBodypart( bodypart );
 
+	if ( pbodypart->base == 0 )
+	{
+		Warning( "Model has missing body part: %s\n", pStudioHdr->pszName() );
+		Assert( 0 );
+	}
 	index = entity_body / pbodypart->base;
 	index = index % pbodypart->nummodels;
 

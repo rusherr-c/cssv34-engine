@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -226,7 +226,6 @@ typedef CCubeMap< LightShadowZBufferSample_t, SHADOW_ZBUF_RES> lightzbuffer_t;
 #define MODELFLAG_STUDIOHDR_AMBIENT_BOOST		0x0800	// persisted from studiohdr
 #define MODELFLAG_STUDIOHDR_DO_NOT_CAST_SHADOWS	0x1000	// persisted from studiohdr
 
-
 struct worldbrushdata_t
 {
 	int			numsubmodels;
@@ -360,10 +359,11 @@ struct spritedata_t
 struct model_t
 {
 	FileNameHandle_t	fnHandle;
-	char				szName[MAX_QPATH];
+	CUtlString			strName;
 
 	int					nLoadFlags;		// mark loaded/not loaded
 	int					nServerCount;	// marked at load
+	IMaterial			**ppMaterials;	// null-terminated runtime material cache; ((intptr_t*)(ppMaterials))[-1] == nMaterials
 
 	modtype_t			type;
 	int					flags;			// MODELFLAG_???

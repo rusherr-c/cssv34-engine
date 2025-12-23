@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,7 +24,7 @@ void Pickup_ForcePlayerToDropThisObject( CBaseEntity *pTarget )
 
 	if ( pPhysics->GetGameFlags() & FVPHYSICS_PLAYER_HELD )
 	{
-		CBasePlayer *pPlayer = UTIL_GetNearestPlayer(pTarget->GetAbsOrigin());
+		CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
 		pPlayer->ForceDropOfCarriedPhysObjects( pTarget );
 	}
 }
@@ -125,7 +125,7 @@ Vector Pickup_DefaultPhysGunLaunchVelocity( const Vector &vecForward, float flMa
 	float mass = flMass;
 	if ( mass > 100 )
 	{
-		mass = min( mass, 1000 );
+		mass = MIN( mass, 1000 );
 		float flForceMin = physcannon_minforce.GetFloat();
 		flForce = SimpleSplineRemapValClamped( mass, 100, 600, flForceMax, flForceMin );
 	}

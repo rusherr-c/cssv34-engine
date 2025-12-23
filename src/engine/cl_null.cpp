@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: replaces the cl_*.cpp files with stubs
 //
@@ -11,6 +11,7 @@
 #include "enginestats.h"
 #include "bspfile.h" // dworldlight_t
 #include "audio/public/soundservice.h"
+#include "tier0/systeminformation.h"
 
 ISoundServices *g_pSoundServices = NULL;
 Vector		listener_origin;
@@ -58,8 +59,8 @@ void Con_ColorPrintf( const Color& clr, const char *fmt, ... )
 	{
 		return;
 	}
-
-	Msg( "%s", msg );
+	return;
+//	printf( "%s", msg );
 }
 
 void Con_NPrintf( int pos, const char *fmt, ... )
@@ -70,7 +71,8 @@ void Con_NPrintf( int pos, const char *fmt, ... )
 	Q_vsnprintf(text, sizeof( text ), fmt, argptr);
 	va_end (argptr);
 
-	Msg( "%s", text );
+	return;
+//	printf( "%s", text );
 }
 
 void SCR_UpdateScreen (void)
@@ -143,11 +145,15 @@ void CClientState::ConnectionCrashed( const char * reason ) {}
 bool CClientState::ProcessConnectionlessPacket( netpacket_t *packet ){ return false; }
 void CClientState::PacketStart(int incoming_sequence, int outgoing_acknowledged) {}
 void CClientState::PacketEnd( void ) {}
-void CClientState::FileRequested(const char *fileName, unsigned int transferID ) {}
-void CClientState::Disconnect( bool showmainmenu  ) {}
+void CClientState::FileReceived( const char *fileName, unsigned int transferID ) {}
+void CClientState::FileRequested( const char *fileName, unsigned int transferID ) {}
+void CClientState::FileDenied(const char *fileName, unsigned int transferID ) {}
+void CClientState::FileSent( const char *fileName, unsigned int transferID ) {}
+void CClientState::Disconnect( const char *pszReason, bool showmainmenu  ) {}
 void CClientState::FullConnect( netadr_t &adr ) {}
 bool CClientState::SetSignonState ( int state, int count ) { return false;}
 void CClientState::SendClientInfo( void ) {}
+void CClientState::SendServerCmdKeyValues( KeyValues *pKeyValues ) {}
 void CClientState::InstallStringTableCallback( char const *tableName ) {}
 bool CClientState::InstallEngineStringTableCallback( char const *tableName ) { return false;}
 void CClientState::ReadEnterPVS( CEntityReadInfo &u ) {}
@@ -166,6 +172,7 @@ bool CClientState::ProcessFixAngle( SVC_FixAngle *msg ) { return true; }
 bool CClientState::ProcessVoiceData( SVC_VoiceData *msg ) { return true; }
 bool CClientState::ProcessVoiceInit( SVC_VoiceInit *msg ) { return true; }
 bool CClientState::ProcessSetPause( SVC_SetPause *msg ) { return true; }
+bool CClientState::ProcessSetPauseTimed( SVC_SetPauseTimed *msg ) { return true; }
 bool CClientState::ProcessClassInfo( SVC_ClassInfo *msg ) { return true; }
 bool CClientState::ProcessStringCmd( NET_StringCmd *msg ) { return true; }
 bool CClientState::ProcessServerInfo( SVC_ServerInfo *msg ) { return true; }
@@ -175,12 +182,12 @@ bool CClientState::ProcessPacketEntities( SVC_PacketEntities *msg ) { return tru
 bool CClientState::ProcessSounds( SVC_Sounds *msg )	 { return true; }
 bool CClientState::ProcessPrefetch( SVC_Prefetch *msg ) {return true;}
 float CClientState::GetTime() const { return 0.0f;}
-void CClientState::FileDenied(const char *fileName, unsigned int transferID){}
-void CClientState::FileReceived( const char * fileName, unsigned int transferID) {}
 void CClientState::RunFrame() {}
-void CClientState::ConsistencyCheck( bool bChanged ) {}
 bool CClientState::HookClientStringTable( char const *tableName ) { return false; }
 
 CClientState	cl;
+
+char g_minidumpinfo[ 4096 ] = {0};
+PAGED_POOL_INFO_t g_pagedpoolinfo = { 0 };
 
 #endif

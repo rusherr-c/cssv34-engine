@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,7 +21,8 @@
 #include "cs_gamestate.h"
 #include "cs_player.h"
 #include "weapon_csbase.h"
-#include "nav_pathfind.h"
+#include "cs_nav_pathfind.h"
+#include "cs_nav_area.h"
 
 class CBaseDoor;
 class CBasePropDoor;
@@ -963,8 +964,8 @@ private:
 	void MoveAwayFromPosition( const Vector &pos );					///< move away from position, independant of view angle
 	void StrafeAwayFromPosition( const Vector &pos );				///< strafe (sidestep) away from position, independant of view angle
 	void StuckCheck( void );										///< check if we have become stuck
-	CNavArea *m_currentArea;										///< the nav area we are standing on
-	CNavArea *m_lastKnownArea;										///< the last area we were in
+	CCSNavArea *m_currentArea;										///< the nav area we are standing on
+	CCSNavArea *m_lastKnownArea;										///< the last area we were in
 	EHANDLE m_avoid;												///< higher priority player we need to make way for
 	float m_avoidTimestamp;
 	bool m_isStopping;												///< true if we're trying to stop because we entered a 'stop' nav area
@@ -1192,7 +1193,7 @@ private:
 
 	IntervalTimer m_attentionInterval;								///< time between attention checks
 
-	CCSPlayer *m_attacker;											///< last enemy that hurt us (may not be same as m_enemy)
+	mutable CHandle< CCSPlayer > m_attacker;						///< last enemy that hurt us (may not be same as m_enemy)
 	float m_attackedTimestamp;										///< when we were hurt by the m_attacker
 
 	int m_lastVictimID;												///< the entindex of the last victim we killed, or zero
@@ -1490,7 +1491,7 @@ inline CCSPlayer *CCSBot::GetBotEnemy( void ) const
 
 inline int CCSBot::GetNearbyEnemyCount( void ) const
 { 
-	return min( GetEnemiesRemaining(), m_nearbyEnemyCount );
+	return MIN( GetEnemiesRemaining(), m_nearbyEnemyCount );
 }
 
 inline unsigned int CCSBot::GetEnemyPlace( void ) const
@@ -1510,7 +1511,7 @@ inline CCSPlayer *CCSBot::GetBomber( void ) const
 
 inline int CCSBot::GetNearbyFriendCount( void ) const
 {
-	return min( GetFriendsRemaining(), m_nearbyFriendCount );
+	return MIN( GetFriendsRemaining(), m_nearbyFriendCount );
 }
 
 inline CCSPlayer *CCSBot::GetClosestVisibleFriend( void ) const
@@ -1826,17 +1827,7 @@ inline bool IsSniperRifle( CWeaponCSBase *weapon )
 	if (weapon == NULL)
 		return false;
 
-	switch( weapon->GetWeaponID() )
-	{
-		case WEAPON_AWP:
-		case WEAPON_G3SG1:
-		case WEAPON_SCOUT:
-		case WEAPON_SG550:
-			return true;
-
-		default:
-			return false;
-	}
+	return weapon->IsKindOf(WEAPONTYPE_SNIPER_RIFLE);
 }
 
 
@@ -1853,7 +1844,8 @@ public:
 		m_route = route;
 	}
 
-	float operator() ( CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder )
+	// HPE_TODO[pmf]: check that these new parameters are okay to be ignored
+	float operator() ( CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder, const CFuncElevator *elevator, float length )
 	{
 		float baseDangerFactor = 100.0f;	// 100
 
@@ -1908,7 +1900,7 @@ public:
 			if (!area->IsUnderwater() && area->IsConnected( fromArea, NUM_DIRECTIONS ) == false)
 			{
 				// this is a "jump down" (one way drop) transition - estimate damage we will take to traverse it
-				float fallDistance = -fromArea->ComputeHeightChange( area );
+				float fallDistance = -fromArea->ComputeGroundHeightChange( area );
 
 				// if it's a drop-down ladder, estimate height from the bottom of the ladder to the lower area
 				if ( ladder && ladder->m_bottom.z < fromArea->GetCenter().z && ladder->m_bottom.z > area->GetCenter().z )

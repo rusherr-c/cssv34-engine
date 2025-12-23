@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -100,11 +100,11 @@ bool CNavPath::ComputePathPositions( void )
 		else if (to->how == GO_LADDER_UP)		// to get to next area, must go up a ladder
 		{
 			// find our ladder
-			const NavLadderConnectList *list = from->area->GetLadderList( CNavLadder::LADDER_UP );
+			const NavLadderConnectList *list = from->area->GetLadderList( CSNavLadder::LADDER_UP );
 			int it;
 			for( it = list->Head(); it != list->InvalidIndex(); it = list->Next(it))
 			{
-				CNavLadder *ladder = (*list)[ it ].ladder;
+				CSNavLadder *ladder = (*list)[ it ].ladder;
 
 				// can't use "behind" area when ascending...
 				if (ladder->m_topForwardArea == to->area ||
@@ -126,11 +126,11 @@ bool CNavPath::ComputePathPositions( void )
 		else if (to->how == GO_LADDER_DOWN)		// to get to next area, must go down a ladder
 		{
 			// find our ladder
-			const NavLadderConnectList *list = from->area->GetLadderList( CNavLadder::LADDER_DOWN );
+			const NavLadderConnectList *list = from->area->GetLadderList( CSNavLadder::LADDER_DOWN );
 			int it;
 			for( it = list->Head(); it != list->InvalidIndex(); it = list->Next(it))
 			{
-				CNavLadder *ladder = (*list)[ it ].ladder;
+				CSNavLadder *ladder = (*list)[ it ].ladder;
 
 				if (ladder->m_bottomArea == to->area)
 				{

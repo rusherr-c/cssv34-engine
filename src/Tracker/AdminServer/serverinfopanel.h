@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,9 +12,9 @@
 #endif
 
 #include "VarListPropertyPage.h"
-#include "UtlBuffer.h"
-#include "UtlVector.h"
-#include "UtlSymbol.h"
+#include "tier1/utlbuffer.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlsymbol.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: Dialog for displaying information about a game server

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -52,15 +52,20 @@
 #define IDC_FILE_UNLOADMERGEDMODEL			1019
 #define IDC_FILE_LOADMODEL_STEAM			1020
 #define IDC_FILE_LOADMERGEDMODEL_STEAM		1021
+#define IDC_FLUSH_SHADERS					1022
 
 #define IDC_OPTIONS_COLORBACKGROUND			1101
 #define IDC_OPTIONS_COLORGROUND				1102
 #define IDC_OPTIONS_COLORLIGHT				1103
 #define IDC_OPTIONS_COLORAMBIENT			1104
 #define IDC_OPTIONS_CENTERVIEW				1105
-#define IDC_OPTIONS_MAKESCREENSHOT			1106
-#define IDC_OPTIONS_DUMP					1107
-#define IDC_OPTIONS_VIEWMODEL				1108
+#define IDC_OPTIONS_CENTERVERTS				1106
+#define IDC_OPTIONS_MAKESCREENSHOT			1107
+#define IDC_OPTIONS_DUMP					1108
+#define IDC_OPTIONS_VIEWMODEL				1109
+#define IDC_OPTIONS_SYNCHLMVCAMERA			1110
+#define IDC_OPTIONS_LINKHLMV				1111
+#define IDC_OPTIONS_UNLINKHLMV				1112
 
 #define IDC_VIEW_FILEASSOCIATIONS			1201
 #define IDC_VIEW_ACTIVITIES					1202
@@ -81,6 +86,20 @@
 #define IDC_ACCEL_TANGENTS					1409
 #define IDC_ACCEL_SHADOW					1410
 
+#define IDC_FILE_UNLOADMERGEDMODEL1			1414
+#define IDC_FILE_UNLOADMERGEDMODEL2			1415
+#define IDC_FILE_UNLOADMERGEDMODEL3			1416
+#define IDC_FILE_UNLOADMERGEDMODEL4			1417
+#define IDC_FILE_UNLOADMERGEDMODEL5			1418
+#define IDC_FILE_UNLOADMERGEDMODEL6			1419
+#define IDC_FILE_UNLOADMERGEDMODEL7			1420
+#define IDC_FILE_UNLOADMERGEDMODEL8			1421
+#define IDC_FILE_UNLOADMERGEDMODEL9			1422
+#define IDC_FILE_UNLOADMERGEDMODEL10		1423
+#define IDC_FILE_UNLOADMERGEDMODEL11		1424
+#define IDC_FILE_UNLOADMERGEDMODEL12		1425
+
+#define IDC_FILE_UNLOADALLMERGEDMODELS		1430
 
 class mxMenuBar;
 class MatSysWindow;
@@ -97,6 +116,7 @@ class MDLViewer : public mxWindow
 	mxMenuBar *mb;
 	MatSysWindow *d_MatSysWindow;
 	ControlPanel *d_cpl;
+	mxMenu *menuOptions;
 	mxMenu *menuView;
 
 	void loadRecentFiles ();
@@ -110,7 +130,13 @@ public:
 
 	// MANIPULATORS
 	virtual int handleEvent (mxEvent *event);
+
+	void SendModelTransformToLinkedHlmv();
+	void SendLightRotToLinkedHlmv();
+
 	void redraw ();
+
+	void handleIpcCommand( char *szCommand );
 
 	void Refresh( void );
 	void LoadModelFile( const char *pszFile, int slot = -1 );

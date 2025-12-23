@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,6 +24,7 @@ IMPLEMENT_ELEMENT_FACTORY( DmeDag, CDmeDag );
 // Purpose: 
 //-----------------------------------------------------------------------------
 CUtlStack<CDmeDag::TransformInfo_t> CDmeDag::s_TransformStack;
+bool CDmeDag::s_bDrawUsingEngineCoordinates = false;
 
 
 //-----------------------------------------------------------------------------
@@ -31,7 +32,7 @@ CUtlStack<CDmeDag::TransformInfo_t> CDmeDag::s_TransformStack;
 //-----------------------------------------------------------------------------
 void CDmeDag::OnConstruction()
 {
-	m_Transform.InitAndCreate( this, "transform" );
+	m_Transform.InitAndCreate( this, "transform", GetName() );
 	m_Shape.Init( this, "shape" );
 	m_Visible.InitAndSet( this, "visible", true, FATTRIB_HAS_CALLBACK );
 	m_Children.Init( this, "children" );
@@ -189,12 +190,43 @@ void CDmeDag::PopDagTransform()
 	s_TransformStack.Pop();
 }
 
+
+//-----------------------------------------------------------------------------
+// Transform from DME to engine coordinates
+//-----------------------------------------------------------------------------
+void CDmeDag::DmeToEngineMatrix( matrix3x4_t& dmeToEngine )
+{
+	VMatrix rotation, rotationZ;
+	MatrixBuildRotationAboutAxis( rotation, Vector( 1, 0, 0 ), 90 );
+	MatrixBuildRotationAboutAxis( rotationZ, Vector( 0, 1, 0 ), 90 );
+	ConcatTransforms( rotation.As3x4(), rotationZ.As3x4(), dmeToEngine );
+}
+
+//-----------------------------------------------------------------------------
+// Transform from engine to DME coordinates
+//-----------------------------------------------------------------------------
+void CDmeDag::EngineToDmeMatrix( matrix3x4_t& engineToDme )
+{
+	VMatrix rotation, rotationZ;
+	MatrixBuildRotationAboutAxis( rotation, Vector( 1, 0, 0 ), -90 );
+	MatrixBuildRotationAboutAxis( rotationZ, Vector( 0, 1, 0 ), -90 );
+	ConcatTransforms( rotationZ.As3x4(), rotation.As3x4(), engineToDme );
+}
+
+
 void CDmeDag::GetShapeToWorldTransform( matrix3x4_t &mat )
 {
 	int nCount = s_TransformStack.Count();
 	if ( nCount == 0 )
 	{
-		SetIdentityMatrix( mat );
+		if ( !s_bDrawUsingEngineCoordinates )
+		{
+			SetIdentityMatrix( mat );
+		}
+		else
+		{
+			DmeToEngineMatrix( mat );
+		}
 		return;
 	}
 
@@ -216,7 +248,14 @@ void CDmeDag::GetShapeToWorldTransform( matrix3x4_t &mat )
 	// Set up the initial transform
 	if ( i == 0 )
 	{
-		SetIdentityMatrix( mat );
+		if ( !s_bDrawUsingEngineCoordinates )
+		{
+			SetIdentityMatrix( mat );
+		}
+		else
+		{
+			DmeToEngineMatrix( mat );
+		}
 	}
 	else
 	{
@@ -292,6 +331,15 @@ void CDmeDag::GetParentWorldMatrix( matrix3x4_t &m )
 	{
 		SetIdentityMatrix( m );
 	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Recursively render the Dag hierarchy
+//-----------------------------------------------------------------------------
+void CDmeDag::DrawUsingEngineCoordinates( bool bEnable )
+{
+	s_bDrawUsingEngineCoordinates = bEnable;
 }
 
 

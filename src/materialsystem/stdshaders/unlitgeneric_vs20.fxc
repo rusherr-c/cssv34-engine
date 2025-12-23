@@ -1,3 +1,4 @@
+// STATIC: "VERTEXCOLOR"			"0..1"
 // DYNAMIC: "COMPRESSED_VERTS"		"0..1"
 // DYNAMIC: "DOWATERFOG"			"0..1"
 // DYNAMIC: "SKINNING"				"0..1"
@@ -10,9 +11,7 @@ static const bool g_bSkinning		= SKINNING ? true : false;
 const float4 cBaseTextureTransform[2]	: register( SHADER_SPECIFIC_CONST_0 );
 const float4 cMaskTextureTransform[2]	: register( SHADER_SPECIFIC_CONST_2 );
 const float4 cDetailTextureTransform[2] : register( SHADER_SPECIFIC_CONST_4 );
-
-// Static control flow
-const bool g_bVertexColor				: register( SHADER_SPECIFIC_BOOL_CONST_0 );
+const float4 g_vVertexColor				: register( SHADER_SPECIFIC_CONST_6 );
 
 struct VS_INPUT
 {
@@ -21,7 +20,9 @@ struct VS_INPUT
 	float4 vBoneIndices	: BLENDINDICES;
 	float4 vNormal		: NORMAL;
 
+#if VERTEXCOLOR
 	float4 vColor		: COLOR0;
+#endif	
 
 	float4 vTexCoord0	: TEXCOORD0;
 };
@@ -57,13 +58,15 @@ VS_OUTPUT main( const VS_INPUT v )
 	//------------------------------------------------------------------------------
 	SkinPosition( g_bSkinning, v.vPos, v.vBoneWeights, v.vBoneIndices, worldPos );
 
-	o.vProjPos = mul( float4( worldPos, 1 ), cViewProj );
-	o.worldPos_projPosZ = float4( worldPos.xyz, o.vProjPos.z );
+	float4 vProjPos = mul( float4( worldPos, 1 ), cViewProj );
+	o.vProjPos = vProjPos;
+	vProjPos = dot( float4( worldPos, 1 ), cViewProjZ );
+	o.worldPos_projPosZ = float4( worldPos.xyz, vProjPos.z );
 
 	//------------------------------------------------------------------------------
 	// Fog
 	//------------------------------------------------------------------------------
-	o.fogFactorW = CalcFog( worldPos, o.vProjPos, g_FogType );
+	o.fogFactorW = CalcFog( worldPos, vProjPos, g_FogType );
 #if !defined( _X360 )
 	o.fog = o.fogFactorW;
 #endif
@@ -75,11 +78,11 @@ VS_OUTPUT main( const VS_INPUT v )
 	o.vTexCoord3 = mul( v.vTexCoord0, (float2x4)cDetailTextureTransform );
 
 	o.vColor = cModulationColor;
-
-	if( g_bVertexColor )
-	{
-		o.vColor *= v.vColor;
-	}
+	
+#if VERTEXCOLOR	
+	// 0 or 1 for g_vVertexColor.x, eliminating a bool
+	o.vColor = lerp( o.vColor, o.vColor * v.vColor, g_vVertexColor.x );
+#endif	
 
 	return o;
 }

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -137,8 +137,10 @@ public:
 
 public:
 	// These methods return a box defined in the space of the entity
-	virtual const Vector&	OBBMins( ) const;
-	virtual const Vector&	OBBMaxs( ) const;
+	virtual const Vector&	OBBMinsPreScaled() const { return OBBMins(); }
+	virtual const Vector&	OBBMaxsPreScaled() const { return OBBMaxs(); }
+	virtual const Vector&	OBBMins() const;
+	virtual const Vector&	OBBMaxs() const;
 
 	// custom collision test
 	virtual bool			TestCollision( const Ray_t &ray, unsigned int fContentsMask, trace_t& tr );
@@ -230,6 +232,7 @@ public:
 	virtual int LookupAttachment( const char *pAttachmentName ) { return -1; }
 	virtual	bool GetAttachment( int number, Vector &origin, QAngle &angles );
 	virtual bool GetAttachment( int number, matrix3x4_t &matrix );
+	virtual bool IgnoresZBuffer( void ) const { return false; }
 
 	// Rendering clip plane, should be 4 floats, return value of NULL indicates a disabled render clip plane
 	virtual float *GetRenderClipPlane( void ) { return NULL; }
@@ -355,6 +358,8 @@ public:
 	virtual void TraceRayAgainstStaticProp( const Ray_t& ray, int staticPropIndex, trace_t& tr );
 	virtual void AddDecalToStaticProp( Vector const& rayStart, Vector const& rayEnd,
 		int staticPropIndex, int decalIndex, bool doTrace, trace_t& tr );
+	virtual void AddColorDecalToStaticProp( Vector const& rayStart, Vector const& rayEnd,
+		int staticPropIndex, int decalIndex, bool doTrace, trace_t& tr, bool bUseColor, Color cColor );
 	virtual void AddShadowToStaticProp( unsigned short shadowHandle, IClientRenderable* pRenderable );
 	virtual void RemoveAllShadowsFromStaticProp( IClientRenderable* pRenderable );
 	virtual void GetStaticPropMaterialColorAndLighting( trace_t* pTrace,
@@ -403,6 +408,7 @@ private:
 	struct StaticPropDict_t
 	{
 		model_t* m_pModel;
+		MDLHandle_t m_hMDL;
 	};
 
 	// Static props that fade use this data to fade
@@ -529,8 +535,8 @@ bool CStaticProp::Init( int index, StaticPropLump_t &lump, model_t *pModel )
 	m_Flags = ( lump.m_Flags & (STATIC_PROP_SCREEN_SPACE_FADE | STATIC_PROP_FLAG_FADES | STATIC_PROP_NO_PER_VERTEX_LIGHTING) );
 
 	int nCurrentDXLevel = g_pMaterialSystemHardwareConfig->GetDXSupportLevel();
-	bool bNoDraw = ( lump.m_nMinGPULevel && lump.m_nMinGPULevel >	nCurrentDXLevel );
-	bNoDraw = bNoDraw || ( lump.m_nMaxGPULevel && lump.m_nMaxGPULevel < nCurrentDXLevel );
+	bool bNoDraw = ( lump.m_nMinDXLevel && lump.m_nMinDXLevel >	nCurrentDXLevel );
+	bNoDraw = bNoDraw || ( lump.m_nMaxDXLevel && lump.m_nMaxDXLevel < nCurrentDXLevel );
 	if ( bNoDraw )
 	{
 		m_Flags |= STATIC_PROP_NO_DRAW;
@@ -555,6 +561,13 @@ bool CStaticProp::Init( int index, StaticPropLump_t &lump, model_t *pModel )
 		modelinfo->GetIlluminationPoint( m_pModel, this, m_Origin, m_Angles, &m_LightingOrigin );
 	}
 	g_MakingDevShots = CommandLine()->FindParm( "-makedevshots" ) ? true : false;
+
+	// If we do Mod_SetMaterialVarFlag() while running with the dedicated server, we crash.
+	//  RJ said he'd save my butt and look into this. (Hip hip horray! We love RJ!)
+	if ( !sv.IsDedicated() && m_pModel )
+	{
+		Mod_SetMaterialVarFlag( pModel, MATERIAL_VAR_IGNORE_ALPHA_MODULATION, true );
+	}
 
 	return true;
 }
@@ -920,7 +933,7 @@ void CStaticProp::DisplayStaticPropInfo( int nInfoType )
 	switch( nInfoType )
 	{
 	case 1:
-		Q_snprintf( buf, sizeof( buf ), modelloader->GetName( m_pModel ) );
+		Q_snprintf( buf, sizeof( buf ), "%s", modelloader->GetName( m_pModel ) );
 		break;
 
 	case 2:
@@ -1225,6 +1238,7 @@ CStaticPropMgr::CStaticPropMgr()
 
 CStaticPropMgr::~CStaticPropMgr()
 {
+	Assert( !m_bLevelInitialized );
 }
 
 //-----------------------------------------------------------------------------
@@ -1264,6 +1278,8 @@ void CStaticPropMgr::UnserializeModelDict( CUtlBuffer& buf )
 
 		dict.m_pModel = (model_t *)modelloader->GetModelForName(
 			lump.m_Name, IModelLoader::FMODELLOADER_STATICPROP );
+		dict.m_hMDL = modelinfo->GetCacheHandle( dict.m_pModel );
+		g_pMDLCache->LockStudioHdr( dict.m_hMDL );
 	}
 }
 
@@ -1276,6 +1292,26 @@ void CStaticPropMgr::UnserializeLeafList( CUtlBuffer& buf )
 		m_StaticPropLeaves.AddMultipleToTail( nCount );
 		buf.Get( m_StaticPropLeaves.Base(), nCount * sizeof(StaticPropLeafLump_t) );
 	}
+}
+
+template <typename SerializedLumpType>
+void UnserializeLump( StaticPropLump_t* _output, CUtlBuffer& buf )
+{
+	Assert(_output != NULL);
+	
+	SerializedLumpType srcLump;
+	buf.Get( &srcLump, sizeof(SerializedLumpType) );
+
+	(*_output) = srcLump;
+}
+
+// Specialization for current version.
+template <>
+void UnserializeLump<StaticPropLump_t>(StaticPropLump_t* _output, CUtlBuffer& buf)
+{
+	Assert(_output != NULL);
+
+	buf.Get(_output, sizeof(StaticPropLump_t));
 }
 
 void CStaticPropMgr::UnserializeModels( CUtlBuffer& buf )
@@ -1298,55 +1334,15 @@ void CStaticPropMgr::UnserializeModels( CUtlBuffer& buf )
 		StaticPropLump_t lump;
 		switch ( nLumpVersion )
 		{
-		case 4:
-			buf.Get( &lump, sizeof( StaticPropLumpV4_t ) );
-			lump.m_flForcedFadeScale = 1.0f;
-			lump.m_nMinGPULevel = lump.m_nMaxGPULevel = 0;
-			lump.m_nMinCPULevel = lump.m_nMaxCPULevel = 0;
-			lump.m_DiffuseModulation.r = 0;
-			lump.m_DiffuseModulation.g = 0;
-			lump.m_DiffuseModulation.b = 0;
-			lump.m_bDisableX360 = false;
-			break;
+			case 4: UnserializeLump<StaticPropLumpV4_t>(&lump, buf); break;
+			case 5: UnserializeLump<StaticPropLumpV5_t>(&lump, buf); break;
+			case 6: UnserializeLump<StaticPropLumpV6_t>(&lump, buf); break;
+			case 7: // Falls down to version 10. We promoted TF to version 10 to deal with SFM. 
+			case 10: UnserializeLump<StaticPropLump_t>(&lump, buf); break;
 
-		case 5:
-			buf.Get( &lump, sizeof( StaticPropLumpV5_t ) );
-			lump.m_nMinGPULevel = lump.m_nMaxGPULevel = 0;
-			lump.m_nMinCPULevel = lump.m_nMaxCPULevel = 0;
-			lump.m_DiffuseModulation.r = 0;
-			lump.m_DiffuseModulation.g = 0;
-			lump.m_DiffuseModulation.b = 0;
-			lump.m_bDisableX360 = false;
-			break;
-
-		case 6:
-			buf.Get( &lump, sizeof( StaticPropLumpV6_t ) );
-			lump.m_nMinGPULevel = lump.m_nMinCPULevel;
-			lump.m_nMaxGPULevel = lump.m_nMaxCPULevel;
-			lump.m_nMinCPULevel = lump.m_nMaxCPULevel = 0;
-			lump.m_DiffuseModulation.r = 0;
-			lump.m_DiffuseModulation.g = 0;
-			lump.m_DiffuseModulation.b = 0;
-			lump.m_bDisableX360 = false;
-			break;
-
-		case 7:
-			buf.Get( &lump, sizeof( StaticPropLumpV7_t ) );
-			V_memcpy( &lump.m_DiffuseModulation, &lump.m_nMinGPULevel, sizeof( color32 ) );
-			lump.m_nMinGPULevel = lump.m_nMinCPULevel;
-			lump.m_nMaxGPULevel = lump.m_nMaxCPULevel;
-			lump.m_nMinCPULevel = lump.m_nMaxCPULevel = 0;
-			lump.m_bDisableX360 = false;
-			break;
-
-		case 8:
-			buf.Get( &lump, sizeof( StaticPropLumpV8_t ) );
-			lump.m_bDisableX360 = false;
-			break;
-
-		case 9:
-			buf.Get( &lump, sizeof( StaticPropLump_t ) );
-			break;
+				break;
+			default:
+				Assert("Unexpected version while deserializing lumps.");
 		}
 
 		m_StaticProps[i].Init( i, lump, m_StaticPropDict[lump.m_PropType].m_pModel );
@@ -1414,8 +1410,8 @@ void CStaticPropMgr::OutputLevelStats( void )
 			int model;
 			for( model = 0; model < pBodyPart->nummodels; model++ )
 			{
-				mstudiomodel_t *pModel = pBodyPart->pModel( model );
-				totalVerts += pModel->numvertices;
+				mstudiomodel_t *pStudioModel = pBodyPart->pModel( model );
+				totalVerts += pStudioModel->numvertices;
 			}
 		}
 	}
@@ -1484,6 +1480,11 @@ void CStaticPropMgr::LevelShutdown()
 
 	m_bLevelInitialized = false;
 
+	FOR_EACH_VEC( m_StaticPropDict, i )
+	{
+		g_pMDLCache->UnlockStudioHdr( m_StaticPropDict[i].m_hMDL );
+	}
+
 	m_StaticProps.Purge();
 	m_StaticPropDict.Purge();
 	m_StaticPropFade.Purge();
@@ -1539,7 +1540,6 @@ void CStaticPropMgr::LevelInitClient()
 	{
 		g_pFileSystem->EndMapAccess();
 	}
-
 #endif
 }
 
@@ -1912,6 +1912,7 @@ void CStaticPropMgr::DrawStaticProps_Slow( IClientRenderable **pProps, int count
 
 void CStaticPropMgr::DrawStaticProps_Fast( IClientRenderable **pProps, int count, bool bShadowDepth )
 {
+#ifndef SWDS
 	float color[3];
 	color[0] = color[1] = color[2] = 1.0f;
 	g_pStudioRender->SetColorModulation(color);
@@ -1949,6 +1950,7 @@ void CStaticPropMgr::DrawStaticProps_Fast( IClientRenderable **pProps, int count
 	// Restore the matrices if we're skinning
 	pRenderContext->MatrixMode( MATERIAL_MODEL );
 	pRenderContext->PopMatrix();
+#endif
 }
 
 
@@ -2081,12 +2083,23 @@ void CStaticPropMgr::ComputePropOpacity( CStaticProp &prop )
 #ifndef SWDS
 	if (modelinfoclient->ModelHasMaterialProxy( prop.GetModel() ))
 	{
-		modelinfoclient->RecomputeTranslucency( prop.GetModel(), prop.GetSkin(), prop.GetBody(), prop.GetClientRenderable() );
+		modelinfoclient->RecomputeTranslucency( prop.GetModel(), prop.GetSkin(), prop.GetBody(), prop.GetClientRenderable(), (float)(prop.GetFxBlend()) / 255.0f );
+	}
+#endif
+
+#ifdef LINUX
+	bool bVisionOverride = false;
+#else
+	static ConVarRef localplayer_visionflags( "localplayer_visionflags" );
+	bool bVisionOverride = ( localplayer_visionflags.IsValid() && ( localplayer_visionflags.GetInt() & ( 0x01 ) ) ); // Pyro-vision Goggles
+	if ( !g_pMaterialSystemHardwareConfig->SupportsPixelShaders_2_0() )
+	{
+		bVisionOverride = false;
 	}
 #endif
 
 	// If we're taking devshots, don't fade anything
-	if ( g_MakingDevShots || m_flLastViewFactor < 0 )
+	if ( g_MakingDevShots || m_flLastViewFactor < 0 || bVisionOverride )
 	{
 		prop.SetAlpha( 255 );
 		ChangeRenderGroup( prop );
@@ -2209,6 +2222,14 @@ void CStaticPropMgr::TraceRayAgainstStaticProp( const Ray_t& ray, int staticProp
 void CStaticPropMgr::AddDecalToStaticProp( Vector const& rayStart, Vector const& rayEnd,
 										  int staticPropIndex, int decalIndex, bool doTrace, trace_t& tr )
 {
+	Color tempColor( 255, 255, 255 );
+	AddColorDecalToStaticProp( rayStart, rayEnd, staticPropIndex, decalIndex, doTrace, tr, false, tempColor );
+}
+
+//-----------------------------------------------------------------------------
+void CStaticPropMgr::AddColorDecalToStaticProp( Vector const& rayStart, Vector const& rayEnd,
+	int staticPropIndex, int decalIndex, bool doTrace, trace_t& tr, bool bUseColor, Color cColor )
+{
 #ifndef SWDS
 	// Invalid static prop? Blow it off! 
 	if (staticPropIndex >= m_StaticProps.Size())
@@ -2251,11 +2272,17 @@ void CStaticPropMgr::AddDecalToStaticProp( Vector const& rayStart, Vector const&
 	// FIXME: Pass in decal up?
 	// FIXME: What to do about the body parameter?
 	Vector up(0, 0, 1);
-	modelrender->AddDecal( prop.GetModelInstance(), ray, up, decalIndex, 0, noPokethru );
+	if ( bUseColor )
+	{
+		modelrender->AddColoredDecal( prop.GetModelInstance(), ray, up, decalIndex, 0, cColor, noPokethru );
+	}
+	else
+	{
+		modelrender->AddDecal( prop.GetModelInstance(), ray, up, decalIndex, 0, noPokethru );
+	}
+	
 #endif
 }
-
-
 //-----------------------------------------------------------------------------
 // Adds/removes shadows from static props
 //-----------------------------------------------------------------------------

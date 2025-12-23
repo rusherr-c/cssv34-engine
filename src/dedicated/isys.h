@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,8 +36,8 @@ public:
 	virtual void		DestroyConsoleWindow( void ) = 0;
 
 	virtual void		ConsoleOutput ( char *string ) = 0;
-	virtual char		*ConsoleInput (void) = 0;
-	virtual void		Printf(char *fmt, ...) = 0;
+	virtual char		*ConsoleInput ( int index, char *buf, int buflen ) = 0;
+	virtual void		Printf( PRINTF_FORMAT_STRING const char *fmt, ...) FMTFUNCTION( 2, 3 ) = 0;
 };
 
 extern ISys *sys;

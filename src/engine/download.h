@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,5 +26,6 @@ bool	CL_FileDenied( const char *filename, unsigned int requestID );
 int		CL_GetDownloadQueueSize(void);
 int		CL_CanUseHTTPDownload(void);
 void	CL_MarkMapAsUsingHTTPDownload(void);
+bool	CL_IsGamePathValidAndSafeForDownload( const char *pGamePath );
 
 #endif // DOWNLOAD_H

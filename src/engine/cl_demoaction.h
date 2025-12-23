@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -155,7 +155,7 @@ public:
 	static bool				HasEditorFactory( DEMOACTION actionType );
 
 	// Serialization helper ( handles indenting )
-	static void				BufPrintf( int depth, CUtlBuffer& buf, char const *fmt, ... );
+	static void				BufPrintf( int depth, CUtlBuffer& buf, PRINTF_FORMAT_STRING char const *fmt, ... );
 
 private:
 

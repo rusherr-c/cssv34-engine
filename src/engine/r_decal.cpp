@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,16 +17,26 @@
 #include "tier1/callqueue.h"
 #include "tier1/memstack.h"
 #include "mempool.h"
+#include "vstdlib/random.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-#define DECAL_CACHEENTRY		256		// MUST BE POWER OF 2 or code below needs to change!
 #define DECAL_DISTANCE			4
 
 // Empirically determined constants for minimizing overalpping decals
-#define MAX_OVERLAP_DECALS		4
-#define DECAL_OVERLAP_DIST		8
+ConVar r_decal_overlap_count("r_decal_overlap_count", "3");
+ConVar r_decal_overlap_area("r_decal_overlap_area", "0.4");
+
+// if a new decal covers more than this many old decals, retire until this count remains
+ConVar r_decal_cover_count("r_decal_cover_count", "4" );
+
+static unsigned int s_DecalScaleVarCache = 0;
+static unsigned int s_DecalScaleVariationVarCache = 0;
+static unsigned int s_DecalFadeVarCache = 0;
+static unsigned int s_DecalFadeTimeVarCache = 0;
+static unsigned int s_DecalSecondPassVarCache = 0;
+
 
 // This structure contains the information used to create new decals
 struct decalinfo_t
@@ -40,55 +50,107 @@ struct decalinfo_t
 	int			m_Flags;
 	int			m_Entity;			// Entity the decal is applied to.
 	float		m_scale;
+	float		m_flFadeDuration;
+	float		m_flFadeStartTime;
 	int			m_decalWidth;
 	int			m_decalHeight;
 	color32		m_Color;
 	Vector		m_Basis[3];
 	void		*m_pUserData;
+	const Vector *m_pNormal;
 	CUtlVector<SurfaceHandle_t>	m_aApplySurfs;
 };
 
 typedef struct
 {
-	short decalIndex;
-	unsigned short frameIndex;
 	CDecalVert	decalVert[4];
 } decalcache_t;
 
 // UNDONE: Compress this???  256K here?
-CClassMemoryPool<decal_t> g_DecalAllocator( 128 ); // 128 decals per block.
+static CClassMemoryPool<decal_t> g_DecalAllocator( 128 ); // 128 decals per block.
 static int				g_nDynamicDecals = 0;
 static int				g_nStaticDecals = 0;
 static int				g_iLastReplacedDynamic = -1;
 
 CUtlVector<decal_t*>		s_aDecalPool;
 
-decalcache_t	gDecalCache[DECAL_CACHEENTRY];
-decalcache_t	g_TempCache;
+const int DECALCACHE_ENTRY_COUNT = 1024;
+const int INVALID_CACHE_ENTRY = 0xFFFF;
 
+class ALIGN16 CDecalVertCache
+{
+	enum decalindex_ordinal
+	{
+		DECAL_INDEX = 0,	// set this and use this to free the whole decal's list on compact
+		NEXT_VERT_BLOCK_INDEX = 1,
+		IS_FREE_INDEX = 2,
+		FRAME_COUNT_INDEX = 3,
+	};
+public:
+	void Init();
+	CDecalVert *GetCachedVerts( decal_t *pDecal );
+	void FreeCachedVerts( decal_t *pDecal );
+	void StoreVertsInCache( decal_t *pDecal, CDecalVert *pList );
+
+private:
+	inline int GetIndex( decalcache_t *pBlock, decalindex_ordinal index )
+	{
+		return pBlock->decalVert[index].m_decalIndex;
+	}
+	inline void SetIndex( decalcache_t *pBlock, decalindex_ordinal index, int value )
+	{
+		pBlock->decalVert[index].m_decalIndex = value;
+	}
+
+	inline void SetNext( int iCur, int iNext )
+	{
+		SetIndex(m_cache + iCur, NEXT_VERT_BLOCK_INDEX, iNext);
+	}
+	inline void SetFree( int iBlock, bool bFree )
+	{
+		SetIndex( m_cache + iBlock, IS_FREE_INDEX, bFree );
+	}
+	inline bool IsFree(int iBlock)
+	{
+		return GetIndex(m_cache+iBlock, IS_FREE_INDEX) != 0;
+	}
+
+	decalcache_t *NextBlock( decalcache_t *pCache );
+	void FreeBlock(int cacheIndex);
+	// search for blocks not used this frame and free them
+	// this way we don't manage an LRU but get similar behavior
+	void FindFreeBlocks( int blockCount );
+	int AllocBlock();
+	int AllocBlocks( int blockCount );
+
+	ALIGN16 decalcache_t	m_cache[DECALCACHE_ENTRY_COUNT] ALIGN16_POST;
+	int m_freeBlockCount;
+	int m_firstFree;
+	int m_frameBlocks;
+	int m_lastFrameCount;
+	int m_freeTestIndex;
+} ALIGN16_POST;
+
+static CDecalVertCache ALIGN16 g_DecalVertCache;
 static decal_t	*s_pDecalDestroyList = NULL;
 
-#define MAX_DECALS_DX9		2048
-#define MAX_DECALS_DX8		1536
-#define MAX_DECALS_DX7		1024
 int	g_nMaxDecals = 0;
 
 //
 // ConVars that control distance-based decal scaling
 //
-ConVar r_dscale_nearscale( "r_dscale_nearscale", "1", FCVAR_CHEAT );
-ConVar r_dscale_neardist( "r_dscale_neardist", "100", FCVAR_CHEAT );
-ConVar r_dscale_farscale( "r_dscale_farscale", "4", FCVAR_CHEAT );
-ConVar r_dscale_fardist( "r_dscale_fardist", "2000", FCVAR_CHEAT );
-ConVar r_dscale_basefov( "r_dscale_basefov", "90", FCVAR_CHEAT );
+static ConVar r_dscale_nearscale( "r_dscale_nearscale", "1", FCVAR_CHEAT );
+static ConVar r_dscale_neardist( "r_dscale_neardist", "100", FCVAR_CHEAT );
+static ConVar r_dscale_farscale( "r_dscale_farscale", "4", FCVAR_CHEAT );
+static ConVar r_dscale_fardist( "r_dscale_fardist", "2000", FCVAR_CHEAT );
+static ConVar r_dscale_basefov( "r_dscale_basefov", "90", FCVAR_CHEAT );
 
-ConVar r_decal_cullsize( "r_decal_cullsize", "5", 0, "Decals under this size in pixels are culled" );
 ConVar r_spray_lifetime( "r_spray_lifetime", "2", 0, "Number of rounds player sprays are visible" );
 ConVar r_queued_decals( "r_queued_decals", "0", 0, "Offloads a bit of decal rendering setup work to the material system queue when enabled." );
 
 
 // This makes sure all the decals got freed before the engine is shutdown.
-class CDecalChecker
+static class CDecalChecker
 {
 public:
 	~CDecalChecker()
@@ -100,13 +162,15 @@ public:
 // used for decal LOD
 VMatrix g_BrushToWorldMatrix;
 
-CUtlVector<SurfaceHandle_t>	s_DecalSurfaces[ MAX_MAT_SORT_GROUPS + 1 ];
+static CUtlVector<SurfaceHandle_t>	s_DecalSurfaces[ MAX_MAT_SORT_GROUPS + 1 ];
 static ConVar r_drawdecals( "r_drawdecals", "1", FCVAR_CHEAT, "Render decals." );
 static ConVar r_drawbatchdecals( "r_drawbatchdecals", "1", 0, "Render decals batched." );
 
+#ifndef SWDS
 static void R_DecalCreate( decalinfo_t* pDecalInfo, SurfaceHandle_t surfID, float x, float y, bool bForceForDisplacement );
-void R_DecalShoot( int textureIndex, int entity, const model_t *model, const Vector &position, const float *saxis, int flags, const color32 &rgbaColor );
 static bool R_DecalUnProject( decal_t *pdecal, decallist_t *entry);
+#endif
+void R_DecalShoot( int textureIndex, int entity, const model_t *model, const Vector &position, const float *saxis, int flags, const color32 &rgbaColor, const Vector *pNormal );
 void R_DecalSortInit( void );
 
 static void r_printdecalinfo_f()
@@ -126,10 +190,185 @@ static void r_printdecalinfo_f()
 	}
 
 	Assert( nDynamic == g_nDynamicDecals );
-	Msg( "%d decals: %d permanent, %d dynamic\nmp_decals: %d\n", nPermanent+nDynamic, nPermanent, nDynamic, mp_decals.GetInt() );
+	Msg( "%d decals: %d permanent, %d dynamic\nr_decals: %d\n", nPermanent+nDynamic, nPermanent, nDynamic, r_decals.GetInt() );
 }
 
 static ConCommand r_printdecalinfo( "r_printdecalinfo", r_printdecalinfo_f );
+
+
+void CDecalVertCache::StoreVertsInCache( decal_t *pDecal, CDecalVert *pList )
+{
+	int vertCount = pDecal->clippedVertCount;
+	int blockCount = (vertCount+3)>>2;
+	FindFreeBlocks(blockCount);
+	if ( blockCount > m_freeBlockCount )
+		return;
+	int cacheHandle = AllocBlocks(blockCount);
+	pDecal->cacheHandle = cacheHandle;
+	decalcache_t *pCache = &m_cache[cacheHandle];
+	while ( blockCount )
+	{
+		Assert(GetIndex(pCache, DECAL_INDEX) == -1 );
+		// don't memcpy here it overwrites the indices we're storing in the m_decalIndex data
+		for ( int i = 0; i < 4; i++ )
+		{
+			pCache->decalVert[i].m_vPos = pList[i].m_vPos;
+			pCache->decalVert[i].m_ctCoords = pList[i].m_ctCoords;
+			pCache->decalVert[i].m_cLMCoords = pList[i].m_cLMCoords;
+		}
+
+		pList += 4;
+		blockCount--;
+		SetIndex( pCache, DECAL_INDEX, pDecal->m_iDecalPool );
+		SetIndex( pCache, FRAME_COUNT_INDEX, r_framecount );
+		pCache = NextBlock(pCache);
+	}
+}
+
+void CDecalVertCache::FreeCachedVerts( decal_t *pDecal )
+{
+	// walk the list 
+	int nextIndex = INVALID_CACHE_ENTRY;
+	for ( int cacheHandle = pDecal->cacheHandle; cacheHandle != INVALID_CACHE_ENTRY; cacheHandle = nextIndex )
+	{
+		decalcache_t *pCache = m_cache + cacheHandle;
+		nextIndex = GetIndex(pCache, NEXT_VERT_BLOCK_INDEX);
+		Assert(GetIndex(pCache,DECAL_INDEX)==pDecal->m_iDecalPool);
+		FreeBlock(cacheHandle);
+	}
+	pDecal->cacheHandle = INVALID_CACHE_ENTRY;
+	pDecal->clippedVertCount = 0;
+}
+
+CDecalVert *CDecalVertCache::GetCachedVerts( decal_t *pDecal )
+{
+	int cacheHandle = pDecal->cacheHandle;
+	// track blocks used this frame to avoid thrashing
+	if ( r_framecount != m_lastFrameCount )
+	{
+		m_frameBlocks = 0;
+		m_lastFrameCount = r_framecount;
+	}
+
+	if ( cacheHandle == INVALID_CACHE_ENTRY )
+		return NULL;
+	decalcache_t *pCache = &m_cache[cacheHandle];
+	for ( int i = cacheHandle; i != INVALID_CACHE_ENTRY; i = GetIndex(&m_cache[i], NEXT_VERT_BLOCK_INDEX) )
+	{
+		SetIndex( pCache, FRAME_COUNT_INDEX, r_framecount );
+		Assert( GetIndex(pCache, DECAL_INDEX) == pDecal->m_iDecalPool);
+	}
+
+	int vertCount = pDecal->clippedVertCount;
+	int blockCount = (vertCount+3)>>2;
+	m_frameBlocks += blockCount;
+
+	// Make linked vert lists contiguous by copying to the clip buffer
+	if ( blockCount > 1 )
+	{
+		int indexOut = 0;
+		while ( blockCount )
+		{
+			V_memcpy( &g_DecalClipVerts[indexOut], pCache, sizeof(*pCache) );
+			indexOut += 4;
+			blockCount --;
+			pCache = NextBlock(pCache);
+		}
+		return g_DecalClipVerts;
+	}
+	// only one block, no need to copy
+	return pCache->decalVert;
+}
+
+void CDecalVertCache::Init()
+{
+	m_firstFree = 0;
+	m_freeTestIndex = 0;
+	for ( int i = 0; i < DECALCACHE_ENTRY_COUNT; i++ )
+	{
+		SetNext( i, i+1 );
+		SetIndex( &m_cache[i], DECAL_INDEX, -1 );
+		SetFree( i, true );
+	}
+	SetNext( DECALCACHE_ENTRY_COUNT-1, INVALID_CACHE_ENTRY );
+	m_freeBlockCount = DECALCACHE_ENTRY_COUNT;
+}
+
+decalcache_t *CDecalVertCache::NextBlock( decalcache_t *pCache )
+{
+	int nextIndex = GetIndex(pCache, NEXT_VERT_BLOCK_INDEX);
+	if ( nextIndex == INVALID_CACHE_ENTRY )
+		return NULL;
+	return m_cache + nextIndex;
+}
+void CDecalVertCache::FreeBlock(int cacheIndex)
+{
+	SetFree( cacheIndex, true );
+	SetNext( cacheIndex, m_firstFree );
+	SetIndex( &m_cache[cacheIndex], DECAL_INDEX, -1 );
+
+	m_firstFree = cacheIndex;
+	m_freeBlockCount++;
+}
+
+// search for blocks not used this frame and free them
+// this way we don't manage an LRU but get similar behavior
+void CDecalVertCache::FindFreeBlocks( int blockCount )
+{
+	if ( blockCount <= m_freeBlockCount )
+		return;
+	int possibleFree = DECALCACHE_ENTRY_COUNT - m_frameBlocks;
+	if ( blockCount > possibleFree )
+		return;
+
+	// limit the search for performance to 16 entries
+	int lastTest = (m_freeTestIndex + 16) & (DECALCACHE_ENTRY_COUNT-1);
+
+	for ( ; m_freeTestIndex != lastTest; m_freeTestIndex = (m_freeTestIndex+1)&(DECALCACHE_ENTRY_COUNT-1) )
+	{
+		if ( !IsFree(m_freeTestIndex) )
+		{
+			int lastFrame = GetIndex(&m_cache[m_freeTestIndex], FRAME_COUNT_INDEX);
+			if ( (r_framecount - lastFrame) > 1 )
+			{
+				int iDecal = GetIndex(&m_cache[m_freeTestIndex], DECAL_INDEX);
+				FreeCachedVerts(s_aDecalPool[iDecal]);
+			}
+		}
+		if ( m_freeBlockCount >= blockCount )
+			break;
+	}
+}
+
+int CDecalVertCache::AllocBlock()
+{
+	if ( !m_freeBlockCount )
+		return INVALID_CACHE_ENTRY;
+	Assert(IsFree(m_firstFree));
+	int nextFree = GetIndex(m_cache+m_firstFree, NEXT_VERT_BLOCK_INDEX );
+	int cacheIndex = m_firstFree;
+	SetFree( cacheIndex, false );
+	m_firstFree = nextFree;
+	m_freeBlockCount--;
+	return cacheIndex;
+}
+int CDecalVertCache::AllocBlocks( int blockCount )
+{
+	if ( blockCount > m_freeBlockCount )
+		return INVALID_CACHE_ENTRY;
+	int firstBlock = AllocBlock();
+	Assert(firstBlock!=INVALID_CACHE_ENTRY);
+	int blockHandle = firstBlock;
+	for ( int i = 1; i < blockCount; i++ )
+	{
+		int nextBlock = AllocBlock();
+		Assert(nextBlock!=INVALID_CACHE_ENTRY);
+		SetIndex( m_cache + blockHandle, NEXT_VERT_BLOCK_INDEX, nextBlock );
+		blockHandle = nextBlock;
+	}
+	SetIndex( m_cache + blockHandle, NEXT_VERT_BLOCK_INDEX, INVALID_CACHE_ENTRY );
+	return firstBlock;
+}
 
 
 //-----------------------------------------------------------------------------
@@ -163,7 +402,7 @@ static VertexFormat_t GetUncompressedFormat( const IMaterial * pMaterial )
 //-----------------------------------------------------------------------------
 // Draws a decal polygon
 //-----------------------------------------------------------------------------
-void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t surfID, int vertCount, decal_t *pdecal )
+void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t surfID, int vertCount, decal_t *pdecal, float flFade )
 {
 #ifndef SWDS
 	int vertexFormat = 0;
@@ -189,6 +428,10 @@ void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t 
 	meshBuilder.Begin( pMesh, MATERIAL_POLYGON, vertCount );
 
 	byte color[4] = {pdecal->color.r,pdecal->color.g,pdecal->color.b,pdecal->color.a};
+	if ( flFade != 1.0f )
+	{
+		color[3] = (byte)( color[3] * flFade );
+	}
 
 	// Deal with fading out... (should this be done in the shader?)
 	// Note that we do it with per-vertex color even though the translucency
@@ -209,7 +452,7 @@ void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t 
 		}
 
 		fadeval = clamp( fadeval, 0.0f, 1.0f );
-		color[3] = (byte) (255 * fadeval);
+		color[3] = (byte) (color[3] * fadeval);
 	}
 
 
@@ -226,7 +469,8 @@ void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t 
 		}
 	}
 
-	float flOffset = ComputeDecalLightmapOffset( surfID );
+	float flOffset = pdecal->lightmapOffset;
+
 	for( int i = 0; i < vertCount; i++, v++ )
 	{
 		meshBuilder.Position3f( VectorExpand( v->m_vPos ) );
@@ -237,18 +481,7 @@ void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t 
 		meshBuilder.Color4ubv( color );
 
 		// Check to see if we are in a material page.
-		if ( pMaterial->InMaterialPage() )
-		{
-			float offset[2], scale[2];
-			pMaterial->GetMaterialOffset( offset );
-			pMaterial->GetMaterialScale( scale );
-			meshBuilder.TexCoordSubRect2f( 0, v->m_ctCoords.x, v->m_ctCoords.y, offset[0], offset[1], scale[0], scale[1] );
-		}
-		else
-		{
-			meshBuilder.TexCoord2f( 0, Vector2DExpand( v->m_ctCoords ) );
-		}
-
+		meshBuilder.TexCoord2f( 0, Vector2DExpand( v->m_ctCoords ) );
 		meshBuilder.TexCoord2f( 1, Vector2DExpand( v->m_cLMCoords ) );
 		meshBuilder.TexCoord1f( 2, flOffset );
 		if ( vertexFormat & VERTEX_TANGENT_SPACE )
@@ -264,10 +497,10 @@ void Shader_DecalDrawPoly( CDecalVert *v, IMaterial *pMaterial, SurfaceHandle_t 
 #endif
 }
 
+
 //-----------------------------------------------------------------------------
 // Gets the decal material and radius based on the decal index
 //-----------------------------------------------------------------------------
-
 void R_DecalGetMaterialAndSize( int decalIndex, IMaterial*& pDecalMaterial, float& w, float& h )
 {
 	pDecalMaterial = Draw_DecalMaterial( decalIndex );
@@ -313,30 +546,11 @@ static WorldDecalHandle_t DecalToHandle( decal_t *pDecal )
 	return static_cast<WorldDecalHandle_t> (decalIndex);
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Initialize the max decal count given the dx level.
-//-----------------------------------------------------------------------------
-void InitMaxDecals( void )
-{
-	g_nMaxDecals = MAX_DECALS_DX7;
-	if ( g_pMaterialSystemHardwareConfig )
-	{
-		if ( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 90 )
-		{
-			g_nMaxDecals = MAX_DECALS_DX9;
-		}
-		else if ( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 80 )
-		{
-			g_nMaxDecals = MAX_DECALS_DX8;
-		}
-	}
-}
-
 // Init the decal pool
 void R_DecalInit( void )
 {
-	InitMaxDecals();
-
+	g_nMaxDecals = Q_atoi( r_decals.GetDefault() );
+	g_nMaxDecals = MAX(64, g_nMaxDecals);
 	Assert( g_DecalAllocator.Count() == 0 );
 	g_nDynamicDecals = 0;
 	g_nStaticDecals = 0;
@@ -364,8 +578,7 @@ void R_DecalInit( void )
 		s_aDecalPool[iDecal] = NULL;
 	}
 
-	for ( i = 0; i < DECAL_CACHEENTRY; i++ )
-		gDecalCache[i].decalIndex = -1;
+	g_DecalVertCache.Init();
 
 	R_DecalSortInit();
 }
@@ -408,6 +621,7 @@ void R_DecalTerm( worldbrushdata_t *pBrushData, bool term_permanent_decals )
 
 void R_DecalTermAll()
 {
+	s_pDecalDestroyList = NULL;
 	for ( int i = 0; i<s_aDecalPool.Count(); i++ )
 	{
 		R_DecalUnlink( s_aDecalPool[i], host_state.worldbrush );
@@ -421,33 +635,10 @@ static int R_DecalIndex( decal_t *pdecal )
 }
 
 
-static int R_DecalCacheIndex( int index )
-{
-	return index & (DECAL_CACHEENTRY-1);
-}
-
-
-static decalcache_t *R_DecalCacheSlot( int decalIndex )
-{
-	int				cacheIndex;
-
-	cacheIndex = R_DecalCacheIndex( decalIndex );	// Find the cache slot
-
-	return gDecalCache + cacheIndex;
-}
-
-
 // Release the cache entry for this decal
 static void R_DecalCacheClear( decal_t *pdecal )
 {
-	int				index;
-	decalcache_t	*pCache;
-
-	index = R_DecalIndex( pdecal );
-	pCache = R_DecalCacheSlot( index );		// Find the cache slot
-
-	if ( pCache->decalIndex == index )		// If this is the decal that's cached here, clear it.
-		pCache->decalIndex = -1;
+	g_DecalVertCache.FreeCachedVerts( pdecal );
 }
 
 
@@ -552,7 +743,7 @@ void SpewDecals()
 
 	if ( spewdecals )
 	{
-		sspewdecals = false;
+		spewdecals = false;
 
 		int i = 0;
 		for ( i = 0 ; i  < g_nMaxDecals; ++i )
@@ -654,6 +845,8 @@ static decal_t *R_DecalAlloc( int flags )
 	pDecal->pDestroyList = NULL;
 	pDecal->m_iDecalPool = iSlot;
 	pDecal->surfID = SURFACE_HANDLE_INVALID;
+	pDecal->cacheHandle = INVALID_CACHE_ENTRY;
+	pDecal->clippedVertCount = 0;
 
 	if ( !bPermanent )
 	{
@@ -667,6 +860,7 @@ static decal_t *R_DecalAlloc( int flags )
 	return pDecal;
 }
 
+/*
 // The world coordinate system is right handed with Z up.
 // 
 //      ^ Z
@@ -675,11 +869,18 @@ static decal_t *R_DecalAlloc( int flags )
 //      | 
 //X<----|
 //       \
-//		  \
+//        \
 //         \ Y
+*/
 
 void R_DecalSurface( SurfaceHandle_t surfID, decalinfo_t *decalinfo, bool bForceForDisplacement )
 {
+	if ( decalinfo->m_pNormal )
+	{
+		if ( DotProduct( MSurf_Plane( surfID ).normal, *(decalinfo->m_pNormal) ) < 0.0f )
+			return;
+	}
+
 	// Get the texture associated with this surface
 	mtexinfo_t* tex = MSurf_TexInfo( surfID );
 
@@ -741,7 +942,6 @@ void R_DecalSurface( SurfaceHandle_t surfID, decalinfo_t *decalinfo, bool bForce
 //-----------------------------------------------------------------------------
 // iterate over all surfaces on a node, looking for surfaces to decal
 //-----------------------------------------------------------------------------
-
 static void R_DecalNodeSurfaces( mnode_t* node, decalinfo_t *decalinfo )
 {
 	// iterate over all surfaces in the node
@@ -918,9 +1118,7 @@ int DecalListCreate( decallist_t *pList )
 			decal_t *decal = s_aDecalPool[i];
 
 			// Decal is in use and is not a custom decal
-			if ( !decal ||
-				!IS_SURF_VALID( decal->surfID ) ||
-				 (decal->flags & ( FDECAL_CUSTOM | FDECAL_DONTSAVE ) ) )	
+			if ( !decal || !IS_SURF_VALID( decal->surfID ) || (decal->flags & ( FDECAL_CUSTOM | FDECAL_DONTSAVE ) ) )	
 				 continue;
 
 			decal_t		*pdecals;
@@ -972,9 +1170,12 @@ static bool R_DecalUnProject( decal_t *pdecal, decallist_t *entry )
 
 // Shoots a decal onto the surface of the BSP.  position is the center of the decal in world coords
 static void R_DecalShoot_( IMaterial *pMaterial, int entity, const model_t *model, 
-						  const Vector &position, const Vector *saxis, int flags, const color32 &rgbaColor, void *userdata = 0 )
+						  const Vector &position, const Vector *saxis, int flags, const color32 &rgbaColor, const Vector *pNormal, void *userdata = 0 )
 {
 	decalinfo_t decalInfo;
+	decalInfo.m_flFadeDuration = 0;
+	decalInfo.m_flFadeStartTime = 0;
+
 	VectorCopy( position, decalInfo.m_Position );	// Pass position in global
 
 	if ( !model || model->type != mod_brush || !pMaterial )
@@ -994,10 +1195,6 @@ static void R_DecalShoot_( IMaterial *pMaterial, int entity, const model_t *mode
 	decalInfo.m_pMaterial = pMaterial;
 	decalInfo.m_pUserData = userdata;
 
-	// Don't optimize custom decals
-	if ( !(flags & FDECAL_CUSTOM) )
-		flags |= FDECAL_CLIPTEST;
-	
 	decalInfo.m_Flags = flags;
 	decalInfo.m_Entity = entity;
 	decalInfo.m_Size = pMaterial->GetMappingWidth() >> 1;
@@ -1023,7 +1220,7 @@ static void R_DecalShoot_( IMaterial *pMaterial, int entity, const model_t *mode
 	decalInfo.m_decalWidth = pMaterial->GetMappingWidth() / decalInfo.m_scale;
 	decalInfo.m_decalHeight = pMaterial->GetMappingHeight() / decalInfo.m_scale;
 	decalInfo.m_Color = rgbaColor;
-
+	decalInfo.m_pNormal = pNormal;
 	decalInfo.m_aApplySurfs.Purge();
 
 	// Clear the displacement tags because we use them in R_DecalNode.
@@ -1035,10 +1232,10 @@ static void R_DecalShoot_( IMaterial *pMaterial, int entity, const model_t *mode
 
 // Shoots a decal onto the surface of the BSP.  position is the center of the decal in world coords
 // This is called from cl_parse.cpp, cl_tent.cpp
-void R_DecalShoot( int textureIndex, int entity, const model_t *model, const Vector &position, const Vector *saxis, int flags, const color32 &rgbaColor )
+void R_DecalShoot( int textureIndex, int entity, const model_t *model, const Vector &position, const Vector *saxis, int flags, const color32 &rgbaColor, const Vector *pNormal )
 {	
 	IMaterial* pMaterial = Draw_DecalMaterial( textureIndex );
-	R_DecalShoot_( pMaterial, entity, model, position, saxis, flags, rgbaColor );
+	R_DecalShoot_( pMaterial, entity, model, position, saxis, flags, rgbaColor, pNormal );
 }
 
 //-----------------------------------------------------------------------------
@@ -1075,9 +1272,7 @@ void R_PlayerDecalShoot( IMaterial *material, void *userdata, int entity, const 
 	{
 		decal_t * decal = s_aDecalPool[i];
 
-		if( decal &&
-			decal->flags & FDECAL_PLAYERSPRAY &&
-			decal->userdata == userdata )
+		if( decal && (decal->flags & FDECAL_PLAYERSPRAY) && (decal->userdata == userdata) )
 		{
 			decalVec.AddToTail( decal );
 		}
@@ -1092,76 +1287,68 @@ void R_PlayerDecalShoot( IMaterial *material, void *userdata, int entity, const 
 	// set this to be a player spray so it is timed out appropriately.
 	flags |= FDECAL_PLAYERSPRAY;
 
-	R_DecalShoot_( material, entity, model, position, saxis, flags, rgbaColor, userdata );
+	R_DecalShoot_( material, entity, model, position, saxis, flags, rgbaColor, NULL, userdata );
 }
+
+struct decalcontext_t 
+{
+	Vector vModelOrg;
+	Vector sAxis;
+	float sOffset;
+	Vector tAxis;
+	float tOffset;
+	float sScale;
+	float tScale;
+	IMatRenderContext *pRenderContext;
+	SurfaceHandle_t pSurf;
+
+	decalcontext_t( IMatRenderContext *pContext, const Vector &vModelorg )
+	{
+		pRenderContext = pContext;
+		vModelOrg = vModelorg;
+		pSurf = NULL;
+
+	}
+
+	void InitSurface( SurfaceHandle_t surfID )
+	{
+		if ( pSurf == surfID )
+			return;
+		pSurf = surfID;
+		mtexinfo_t* pTexInfo = MSurf_TexInfo( surfID );
+
+		int lightmapPageWidth, lightmapPageHeight;
+		materials->GetLightmapPageSize( SortInfoToLightmapPage(MSurf_MaterialSortID( surfID )),&lightmapPageWidth, &lightmapPageHeight );
+
+		sScale = 1.0f / float(lightmapPageWidth);
+		tScale = 1.0f / float(lightmapPageHeight);
+		msurfacelighting_t *pSurfacelighting = SurfaceLighting(surfID);
+		sOffset = pTexInfo->lightmapVecsLuxelsPerWorldUnits[0][3] - pSurfacelighting->m_LightmapMins[0] +
+			pSurfacelighting->m_OffsetIntoLightmapPage[0] + 0.5f;
+		tOffset = pTexInfo->lightmapVecsLuxelsPerWorldUnits[1][3] - pSurfacelighting->m_LightmapMins[1] +
+			pSurfacelighting->m_OffsetIntoLightmapPage[1] + 0.5f;
+		sAxis = pTexInfo->lightmapVecsLuxelsPerWorldUnits[0].AsVector3D();
+		tAxis = pTexInfo->lightmapVecsLuxelsPerWorldUnits[1].AsVector3D();
+
+	}
+	inline float ComputeS( const Vector &pos ) const
+	{
+		return sScale * (DotProduct(pos, sAxis) + sOffset);
+	}
+	inline float ComputeT( const Vector &pos ) const
+	{
+		return tScale * (DotProduct(pos, tAxis) + tOffset);
+	}
+};
 
 // Generate lighting coordinates at each vertex for decal vertices v[] on surface psurf
-static void R_DecalVertsLight( CDecalVert* v, SurfaceHandle_t surfID, int vertCount )
+static void R_DecalVertsLight( CDecalVert* v, const decalcontext_t &context, SurfaceHandle_t surfID, int vertCount )
 {
-	int j;
-	float s, t;
-
-	int lightmapPageWidth, lightmapPageHeight;
-
-	materials->GetLightmapPageSize( SortInfoToLightmapPage(MSurf_MaterialSortID( surfID )),
-		&lightmapPageWidth, &lightmapPageHeight );
-	
-	for ( j = 0; j < vertCount; j++, v++ )
+	for ( int j = 0; j < vertCount; j++, v++ )
 	{
-		s = DotProduct( v->m_vPos, MSurf_TexInfo( surfID )->lightmapVecsLuxelsPerWorldUnits[0].AsVector3D() ) + 
-			MSurf_TexInfo( surfID )->lightmapVecsLuxelsPerWorldUnits[0][3];
-		s -= MSurf_LightmapMins( surfID )[0];
-		s += MSurf_OffsetIntoLightmapPage( surfID )[0];
-		s += 0.5f;
-		s *= ( 1.0f / lightmapPageWidth );
-
-		t = DotProduct( v->m_vPos, MSurf_TexInfo( surfID )->lightmapVecsLuxelsPerWorldUnits[1].AsVector3D() ) + 
-			MSurf_TexInfo( surfID )->lightmapVecsLuxelsPerWorldUnits[1][3];
-		t -= MSurf_LightmapMins( surfID )[1];
-		t += MSurf_OffsetIntoLightmapPage( surfID )[1];
-		t += 0.5f;
-		t *= ( 1.0f / lightmapPageHeight );
-
-		v->m_cLMCoords.x = s;
-		v->m_cLMCoords.y = t;
+		v->m_cLMCoords.x = context.ComputeS(v->m_vPos);
+		v->m_cLMCoords.y = context.ComputeT(v->m_vPos);
 	}
-}
-
-
-//ConVar decal_cachetest( "decal_cachetest", "1" );
-static CDecalVert* R_DecalVertsNoclip( decal_t *pdecal, SurfaceHandle_t surfID, IMaterial *pMaterial )
-{
-	decalcache_t	*pCache;
-	int				decalIndex;
-	int				outCount;
-
-	decalIndex = R_DecalIndex( pdecal );
-	pCache = R_DecalCacheSlot( decalIndex );
-	
-	// Is the decal cached?
-	if ( pCache->decalIndex == decalIndex )
-	{
-		return &pCache->decalVert[0];
-	}
-#if 0
-	unsigned short frameIndex = (r_framecount & 0xFFFF);
-	if ( decal_cachetest.GetBool() && pCache->frameIndex == frameIndex )
-	{
-		// don't thrash - overwrite the temp cache instead
-		pCache = &g_TempCache;
-	}
-	pCache->frameIndex = frameIndex;
-#endif
-	pCache->decalIndex = decalIndex;
-
-	CDecalVert *vlist = &pCache->decalVert[0];
-
-	// Use the old code for now, and just cache them
-	vlist = R_DecalVertsClip( vlist, pdecal, surfID, pMaterial, &outCount );
-
-	R_DecalVertsLight( vlist, surfID, 4 );
-
-	return vlist;
 }
 
 
@@ -1178,24 +1365,28 @@ static CDecalVert* R_DecalVertsNoclip( decal_t *pdecal, SurfaceHandle_t surfID, 
 // decal basis is constant per plane, perhaps we should store it (unscaled) in the shared plane struct
 // BRJ: Note, decal basis is not constant when decals need to specify an s direction
 // but that certainly isn't the majority case
-static decal_t *R_DecalIntersect( decalinfo_t* decalinfo, SurfaceHandle_t surfID, int *pcount )
+static decal_t *R_DecalFindOverlappingDecals( decalinfo_t* decalinfo, SurfaceHandle_t surfID )
 {
 	decal_t		*plast = NULL;
 
 	// (Same as R_SetupDecalClip).
 	IMaterial	*pMaterial = decalinfo->m_pMaterial;
 
-	*pcount = 0;
+	int count = 0;
 	
 	// Precalculate the extents of decalinfo's decal in world space.
 	int mapSize[2] = {pMaterial->GetMappingWidth(), pMaterial->GetMappingHeight()};
 	Vector decalExtents[2];
-	decalExtents[0] = decalinfo->m_Basis[0] * (mapSize[0] / decalinfo->m_scale) * 0.5f;
+	// this is half the width in world space of the decal. 
+	float minProjectedWidth = (mapSize[0] / decalinfo->m_scale) * 0.5;
+	decalExtents[0] = decalinfo->m_Basis[0] * minProjectedWidth;
 	decalExtents[1] = decalinfo->m_Basis[1] * (mapSize[1] / decalinfo->m_scale) * 0.5f;
 
-
-	float lastArea = 2;
+	float areaThreshold = r_decal_overlap_area.GetFloat();
+	float lastArea = 0;
+	bool bFullMatch = false;
 	decal_t *pDecal = MSurf_DecalPointer( surfID );
+	CUtlVectorFixedGrowable<decal_t *,32> coveredList;
 	while ( pDecal ) 
 	{
 		pMaterial = pDecal->material;
@@ -1225,18 +1416,39 @@ static decal_t *R_DecalIntersect( decalinfo_t* decalinfo, SurfaceHandle_t surfID
 			Vector2D vUnionMin( fpmax( vDecalMin.x, 0.0f ), fpmax( vDecalMin.y, 0.0f ) );
 			Vector2D vUnionMax( fpmin( vDecalMax.x, 1.0f ), fpmin( vDecalMax.y, 1.0f ) );
 
-			if( vUnionMin.x < 1 && vUnionMin.y < 1 && vUnionMax.x > 0 && vUnionMax.y > 0 )
+			// if the decal is less than half the width of the one we're applying, don't test for overlap
+			// test for complete coverage
+			float projectWidthTestedDecal = pDecal->material->GetMappingWidth() / pDecal->scale;
+
+			float sizex = vUnionMax.x - vUnionMin.x;
+			float sizey = vUnionMax.y - vUnionMin.y;
+			if( sizex >= 0 && sizey >= 0)
 			{
 				// Figure out how much of this intersects the (0,0) - (1,1) bbox.			
-				float flArea = (vUnionMax.x - vUnionMin.x) * (vUnionMax.y - vUnionMin.y);
+				float flArea = sizex * sizey;
 
-				if( flArea > 0.6 )
+				if ( projectWidthTestedDecal < minProjectedWidth )
 				{
-					*pcount += 1;
-					if ( !plast || flArea <= lastArea ) 
+					if ( flArea > 0.999f )
 					{
-						plast = pDecal;
-						lastArea =  flArea;
+						coveredList.AddToTail(pDecal);
+					}
+				}
+				else
+				{
+					if( flArea > areaThreshold )
+					{
+						// once you pass the threshold, scale the area by the decal size to select the largest 
+						// decal above the threshold
+						float flAreaScaled = flArea * projectWidthTestedDecal;
+						count++;
+						if ( !plast || flAreaScaled > lastArea ) 
+						{
+							plast = pDecal;
+							lastArea =  flAreaScaled;
+							// go ahead and remove even if you're not at the max overlap count yet because this is a very similar decal
+							bFullMatch = ( flArea >= 0.9f ) ? true : false;
+						}
 					}
 				}
 			}
@@ -1245,6 +1457,22 @@ static decal_t *R_DecalIntersect( decalinfo_t* decalinfo, SurfaceHandle_t surfID
 		pDecal = pDecal->pnext;
 	}
 	
+	if ( plast )
+	{
+		if ( count < r_decal_overlap_count.GetInt() && !bFullMatch )
+		{
+			plast = NULL;
+		}
+	}
+	if ( coveredList.Count() > r_decal_cover_count.GetInt() )
+	{
+		int last = coveredList.Count() - r_decal_cover_count.GetInt();
+		for ( int i = 0; i < last; i++ )
+		{
+			R_DecalUnlink( coveredList[i], host_state.worldbrush );
+		}
+	}
+
 	return plast;
 }
 
@@ -1271,8 +1499,8 @@ static void R_AddDecalToSurface(
 
 	// Tag surface
 	pdecal->surfID = surfID;
-	pdecal->m_Size = decalinfo->m_Size;
-
+	pdecal->flSize = decalinfo->m_Size;
+	pdecal->lightmapOffset = ComputeDecalLightmapOffset( surfID );
 	// Let the dispinfo reclip the decal if need be.
 	if( SurfaceHasDispInfo( surfID ) )
 	{
@@ -1328,6 +1556,8 @@ void DecalSurfacesInit( bool bBrushModel )
 	{
 		// Only clear the pool once per frame.
 		g_aDecalSortPool.RemoveAll();
+		// Retire decals on opaque brushmodel surfaces
+		R_DecalFlushDestroyList();
 		++g_nDecalSortCheckCount;
 	}
 	else
@@ -1452,15 +1682,9 @@ void R_DecalReSortMaterials( void ) //X
 // Allocate and initialize a decal from the pool, on surface with offsets x, y
 // UNDONE: offsets are not really meaningful in new decal coordinate system
 // the clipping code will recalc the offsets
-static void R_DecalCreate( 
-	decalinfo_t* decalinfo, 
-	SurfaceHandle_t surfID, 
-	float x, 
-	float y, 
-	bool bForceForDisplacement )
+static void R_DecalCreate( decalinfo_t* decalinfo, SurfaceHandle_t surfID, float x, float y, bool bForceForDisplacement )
 {
 	decal_t			*pdecal;
-	int				count, vertCount;
 
 	if( !IS_SURF_VALID( surfID ) )
 	{
@@ -1468,8 +1692,8 @@ static void R_DecalCreate(
 		return;
 	}
 	
-	decal_t *pold = R_DecalIntersect( decalinfo, surfID, &count );
-	if ( count >= MAX_OVERLAP_DECALS ) 
+	decal_t *pold = R_DecalFindOverlappingDecals( decalinfo, surfID );
+	if ( pold ) 
 	{
 		R_DecalUnlink( pold, host_state.worldbrush );
 		pold = NULL;
@@ -1493,22 +1717,12 @@ static void R_DecalCreate(
 	pdecal->entityIndex = decalinfo->m_Entity;
 
 	// Get dynamic information from the material (fade start, fade time)
-	bool found;
-	IMaterialVar* decalVar = decalinfo->m_pMaterial->FindVar( "$decalFadeDuration", &found, false );
-	if ( found  )
+	if ( decalinfo->m_flFadeDuration > 0.0f )
 	{
 		pdecal->flags |= FDECAL_DYNAMIC;
-		pdecal->fadeDuration = decalVar->GetFloatValue();
-		decalVar = decalinfo->m_pMaterial->FindVar( "$decalFadeTime", &found, false );
-		pdecal->fadeStartTime = found ? decalVar->GetFloatValue() : 0.0f;
+		pdecal->fadeDuration = decalinfo->m_flFadeDuration;
+		pdecal->fadeStartTime = decalinfo->m_flFadeStartTime;
 		pdecal->fadeStartTime += cl.GetTime();
-	}
-
-	// Check for Dynamic Scale, and cache values
-	decalVar = decalinfo->m_pMaterial->FindVar( "$decalDynamicScale", &found, false );
-	if ( found )
-	{
-		pdecal->flags |= FDECAL_DISTANCESCALE;
 	}
 
 	// check for a player spray
@@ -1521,18 +1735,12 @@ static void R_DecalCreate(
 		pdecal->scale = 1.0f;
 	}
 
-	// Is this a second-pass decal?
-	decalVar = decalinfo->m_pMaterial->FindVar( "$decalSecondPass", &found, false );
-	if ( found  )
-		pdecal->flags |= FDECAL_SECONDPASS;
-
 	if( !bForceForDisplacement )
 	{
 		// Check to see if the decal actually intersects the surface
 		// if not, then remove the decal
-		R_DecalVertsClip( NULL, pdecal, surfID, 
-			decalinfo->m_pMaterial, &vertCount );
-		if ( !vertCount )
+		R_DecalVertsClip( NULL, pdecal, surfID, decalinfo->m_pMaterial );
+		if ( !pdecal->clippedVertCount )
 		{
 			R_DecalUnlink( pdecal, host_state.worldbrush );
 			return;
@@ -1560,45 +1768,21 @@ bool DecalUpdate( decal_t* pDecal )
 	return false;
 }
 
+#define NEXT_MULTIPLE_OF_4(P)  ( ((P) + ((4)-1)) & (~((4)-1)) )
+
 // Build the vertex list for a decal on a surface and clip it to the surface.
 // This is a template so it can work on world surfaces and dynamic displacement 
 // triangles the same way.
-
-CDecalVert* R_DecalSetupVerts( IMatRenderContext *pRenderContext, decal_t *pDecal, SurfaceHandle_t surfID, IMaterial *pMaterial, int &outCount, const Vector &vModelOrg )
+CDecalVert* R_DecalSetupVerts( decalcontext_t &context, decal_t *pDecal, SurfaceHandle_t surfID, IMaterial *pMaterial )
 {
-	Vector dir = pDecal->position - vModelOrg;
-	VectorNormalize(dir);
-
-	// Clamp the max solid angle effect to something near 90 (~87 degrees here)
-	// Because some large things tend to blink out here if you don't
-	float dot = 0.05f - DotProduct( dir, MSurf_Plane(surfID).normal );
-	if ( dot > 1.0f )
-	{
-		dot = 1.0f;
-	}
-	else if ( dot <= 0.0f )
-	{
-		outCount = 0;
-		return NULL;
-	}
-
-	Vector worldSpacePosition = ( pDecal->entityIndex != 0 ) ? g_BrushToWorldMatrix.VMul4x3(pDecal->position) : pDecal->position;
-	float pixels = pRenderContext->ComputePixelWidthOfSphere( worldSpacePosition, pDecal->m_Size );
-	if ( pixels*dot < r_decal_cullsize.GetFloat() )
-	{
-		outCount = 0;
-		return NULL;
-	}
-
-	float scaleFactor = 1.0f;
-
 	//
 	// Do not scale playersprays
 	//
-	if( !(pDecal->flags & FDECAL_PLAYERSPRAY) )
+	if( pDecal->flags & FDECAL_DISTANCESCALE )
 	{
-		if( pDecal->flags & FDECAL_DISTANCESCALE )
+		if( !(pDecal->flags & FDECAL_PLAYERSPRAY) )
 		{
+			float scaleFactor = 1.0f;
 			float nearScale, farScale, nearDist, farDist;
 
 			nearScale = r_dscale_nearscale.GetFloat();
@@ -1608,7 +1792,18 @@ CDecalVert* R_DecalSetupVerts( IMatRenderContext *pRenderContext, decal_t *pDeca
 
 			Vector playerOrigin = CurrentViewOrigin();
 
-			float dist = (playerOrigin - worldSpacePosition).Length();
+			float dist = 0;
+			
+			if ( pDecal->entityIndex == 0 )
+			{
+				dist = (playerOrigin - pDecal->position).Length();
+			}
+			else
+			{
+				Vector worldSpaceCenter;
+				Vector3DMultiplyPosition(g_BrushToWorldMatrix, pDecal->position, worldSpaceCenter );
+				dist = (playerOrigin - worldSpaceCenter).Length();
+			}
 			float fov = g_EngineRenderer->GetFov();
 
 			//
@@ -1653,30 +1848,49 @@ CDecalVert* R_DecalSetupVerts( IMatRenderContext *pRenderContext, decal_t *pDeca
 			// to account for this.
 			//
 			scaleFactor = 1.0f / scaleFactor;
+			float originalScale = pDecal->scale;
+			float scaledScale = pDecal->scale * scaleFactor;
+			pDecal->scale = scaledScale;
+
+			context.InitSurface( pDecal->surfID );
+
+			CDecalVert *v = R_DecalVertsClip( NULL, pDecal, surfID, pMaterial );
+			if ( v )
+			{
+				R_DecalVertsLight( v, context, surfID, pDecal->clippedVertCount );
+			}
+			pDecal->scale = originalScale;
+			return v;
 		}
 	}
 
-	float originalScale = pDecal->scale;
-	float scaledScale = pDecal->scale * scaleFactor;
-	pDecal->scale = scaledScale;
-
-	CDecalVert *v;
-	// Distance-scaled decals can't go through the noclip path or they can end up scaled incorrectly
-	if ( ( pDecal->flags & FDECAL_NOCLIP ) && !( pDecal->flags & FDECAL_DISTANCESCALE ) )
+	// find in cache?
+	CDecalVert *v = g_DecalVertCache.GetCachedVerts(pDecal);
+	if ( !v )
 	{
-		v = R_DecalVertsNoclip( pDecal, surfID, pMaterial );
-		outCount = 4;
-	}
-	else
-	{
-		v = R_DecalVertsClip( NULL, pDecal, surfID, pMaterial, &outCount );
-		if ( outCount )
+		// not in cache, clip & light
+		context.InitSurface( pDecal->surfID );
+		v = R_DecalVertsClip( NULL, pDecal, surfID, pMaterial );
+		if ( pDecal->clippedVertCount )
 		{
-			R_DecalVertsLight( v, surfID, outCount );
+
+#if _DEBUG
+			// squash vector copy asserts in debug
+			int nextVert = NEXT_MULTIPLE_OF_4(pDecal->clippedVertCount);
+			if ( (nextVert - pDecal->clippedVertCount) < 4 )
+			{
+				for ( int i = pDecal->clippedVertCount; i < nextVert; i++ )
+				{
+					v[i].m_cLMCoords.Init();
+					v[i].m_ctCoords.Init();
+					v[i].m_vPos.Init();
+				}
+			}
+#endif
+			R_DecalVertsLight( v, context, surfID, pDecal->clippedVertCount );
+			g_DecalVertCache.StoreVertsInCache( pDecal, v );
 		}
 	}
-	pDecal->scale = originalScale;
-	
 	return v;
 }
 
@@ -1685,7 +1899,7 @@ CDecalVert* R_DecalSetupVerts( IMatRenderContext *pRenderContext, decal_t *pDeca
 // Renders a single decal, *could retire the decal!!*
 //-----------------------------------------------------------------------------
 
-void DecalUpdateAndDrawSingle( IMatRenderContext *pRenderContext, SurfaceHandle_t surfID, decal_t* pDecal, const Vector &vModelOrg )
+void DecalUpdateAndDrawSingle( decalcontext_t &context, SurfaceHandle_t surfID, decal_t* pDecal )
 {
 	if( !pDecal->material )
 		return;
@@ -1702,11 +1916,10 @@ void DecalUpdateAndDrawSingle( IMatRenderContext *pRenderContext, SurfaceHandle_
 	}
 	else
 	{
-		int outCount;
-		CDecalVert *v = R_DecalSetupVerts( pRenderContext, pDecal, surfID, pDecal->material, outCount, vModelOrg );
+		CDecalVert *v = R_DecalSetupVerts( context, pDecal, surfID, pDecal->material );
 
-		if ( outCount )
-			Shader_DecalDrawPoly( v, pDecal->material, surfID, outCount, pDecal );
+		if ( v )
+			Shader_DecalDrawPoly( v, pDecal->material, surfID, pDecal->clippedVertCount, pDecal, 1.0f );
 	}
 
 	if( retire )
@@ -1723,9 +1936,8 @@ void DecalUpdateAndDrawSingle( IMatRenderContext *pRenderContext, SurfaceHandle_
 void DrawDecalsOnSingleSurface_NonQueued( IMatRenderContext *pRenderContext, SurfaceHandle_t surfID, const Vector &vModelOrg)
 {
 	decal_t* plist = MSurf_DecalPointer( surfID );
-
-#if 1
-	// FIXME!  Make this not truck through the decal list twice.
+	decalcontext_t context(pRenderContext, vModelOrg);
+	context.InitSurface(surfID);
 	while ( plist ) 
 	{
 		// Store off the next pointer, DecalUpdateAndDrawSingle could unlink
@@ -1733,11 +1945,10 @@ void DrawDecalsOnSingleSurface_NonQueued( IMatRenderContext *pRenderContext, Sur
 
 		if (!(plist->flags & FDECAL_SECONDPASS))
 		{
-			DecalUpdateAndDrawSingle( pRenderContext, surfID, plist, vModelOrg );
+			DecalUpdateAndDrawSingle( context, surfID, plist );
 		}
 		plist = pnext;
 	}
-	plist = MSurf_DecalPointer( surfID );
 	while ( plist ) 
 	{
 		// Store off the next pointer, DecalUpdateAndDrawSingle could unlink
@@ -1745,54 +1956,10 @@ void DrawDecalsOnSingleSurface_NonQueued( IMatRenderContext *pRenderContext, Sur
 
 		if ((plist->flags & FDECAL_SECONDPASS))
 		{
-			DecalUpdateAndDrawSingle( pRenderContext, surfID, plist, vModelOrg );
+			DecalUpdateAndDrawSingle( context, surfID, plist );
 		}
 		plist = pnext;
 	}
-#else
-	// FIXME!!:  This code screws up since DecalUpdateAndDrawSingle can 
-	// unlink items from the decal list.
-	// The version below is used instead, which trucks through memory twice. . . 
-	// not optimal.
-	decal_t* pPrev = 0;
-	decal_t* pSecondPass = 0;
-	while ( plist ) 
-	{
-		// Store off the next pointer, DecalUpdateAndDrawSingle could unlink
-		decal_t* pnext = plist->pnext;
-
-		if ((plist->flags & FDECAL_SECONDPASS) != 0)
-		{
-			if (pPrev)
-				pPrev->pnext = pnext;
-			else
-				psurf->pdecals = pnext;
-			plist->pnext = pSecondPass;
-			pSecondPass = plist;
-		}
-		else
-		{
-			DecalUpdateAndDrawSingle( pRenderContext, psurf, plist );
-			pPrev = plist;
-		}
-		plist = pnext;
-	}
-
-	// Re-link second pass...
-	if (pPrev)
-		pPrev->pnext = pSecondPass;
-	else
-		psurf->pdecals = pSecondPass;
-
-	plist = pSecondPass;
-	while ( plist )
-	{
-		// Store off the next pointer, DecalUpdateAndDrawSingle could unlink
-		decal_t* pnext = plist->pnext;
-		DecalUpdateAndDrawSingle( pRenderContext, psurf, plist );
-		plist = pnext;
-	}
-#endif
 }
 
 void DrawDecalsOnSingleSurface_QueueHelper( SurfaceHandle_t surfID, Vector vModelOrg )
@@ -1851,8 +2018,11 @@ void R_DrawDecalsAllImmediate_GatherDecals( IMatRenderContext *pRenderContext, i
 	}
 }
 
-void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDecals, int iDecalCount, const Vector &vModelOrg )
+void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDecals, int iDecalCount, const Vector &vModelOrg, float flFade )
 {
+	SurfaceHandle_t lastSurf = NULL;
+	decalcontext_t context( pRenderContext, vModelOrg );
+	bool bWireframe = ShouldDrawInWireFrameMode() || (r_drawdecals.GetInt() == 2);
 	for( int i = 0; i != iDecalCount; ++i )
 	{
 		decal_t * pDecal = ppDecals[i];
@@ -1870,14 +2040,18 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 			}
 		}
 
-		int nCount;
-		CDecalVert *pVerts = R_DecalSetupVerts( pRenderContext, pDecal, pDecal->surfID, pDecal->material, nCount, vModelOrg );
-		if ( nCount == 0 )
+		if ( pDecal->surfID != lastSurf )
+		{
+			lastSurf = pDecal->surfID;
+		}
+		CDecalVert *pVerts = R_DecalSetupVerts( context, pDecal, pDecal->surfID, pDecal->material );
+		if ( !pVerts )
 			continue;
+		int nCount = pDecal->clippedVertCount;
 
 		// Bind texture.
 		VertexFormat_t vertexFormat = 0;
-		if( ShouldDrawInWireFrameMode () )
+		if( bWireframe )
 		{
 			pRenderContext->Bind( g_materialDecalWireframe );
 		}
@@ -1895,6 +2069,10 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 
 		// Set base color.
 		byte color[4] = { pDecal->color.r, pDecal->color.g, pDecal->color.b, pDecal->color.a };
+		if ( flFade != 1.0f )
+		{
+			color[3] = (byte)( color[3] * flFade );
+		}
 
 		// Dynamic decals - fading.
 		if ( pDecal->flags & FDECAL_DYNAMIC )
@@ -1913,7 +2091,7 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 
 			flFadeValue = clamp( flFadeValue, 0.0f, 1.0f );
 
-			color[3] = ( byte )( 255 * flFadeValue );
+			color[3] = ( byte )( color[3] * flFadeValue );
 		}
 
 		// Compute normal and tangent space if necessary.
@@ -1930,7 +2108,7 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 		}
 
 		// Setup verts.
-		float flOffset = ComputeDecalLightmapOffset( pDecal->surfID );
+		float flOffset = pDecal->lightmapOffset;
 		for ( int iVert = 0; iVert < nCount; ++iVert, ++pVerts )
 		{
 			meshBuilder.Position3fv( pVerts->m_vPos.Base() );
@@ -1939,17 +2117,7 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 				meshBuilder.Normal3fv( vecNormal.Base() );
 			}
 			meshBuilder.Color4ubv( color );
-			if ( pDecal->material->InMaterialPage() )
-			{
-				float offset[2], scale[2];
-				pDecal->material->GetMaterialOffset( offset );
-				pDecal->material->GetMaterialScale( scale );
-				meshBuilder.TexCoordSubRect2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y, offset[0], offset[1], scale[0], scale[1] );
-			}
-			else
-			{
-				meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
-			}
+			meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
 			meshBuilder.TexCoord2f( 1, pVerts->m_cLMCoords.x,  pVerts->m_cLMCoords.y );
 			meshBuilder.TexCoord1f( 2, flOffset );
 			if ( vertexFormat & VERTEX_TANGENT_SPACE )
@@ -1958,17 +2126,12 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 				meshBuilder.TangentT3fv( vecTangentT.Base() ); 
 			}
 
-			meshBuilder.AdvanceVertex();
+			meshBuilder.AdvanceVertexF<VTX_HAVEPOS|VTX_HAVENORMAL|VTX_HAVECOLOR,3>();
 		}
 
 		// Setup indices.
-		int nTriCount = ( nCount - 2 );
-		for ( int iTri = 0; iTri < nTriCount; ++iTri )
-		{
-			meshBuilder.FastIndex( 0 );
-			meshBuilder.FastIndex( iTri + 1 );
-			meshBuilder.FastIndex( iTri + 2 );
-		}
+		CIndexBuilder &indexBuilder = meshBuilder;
+		indexBuilder.FastPolygon( 0, nCount - 2 );
 
 		meshBuilder.End();
 		pMesh->Draw();
@@ -1978,9 +2141,12 @@ void R_DrawDecalsAllImmediate_Gathered( IMatRenderContext *pRenderContext, decal
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
-void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, int iTreeType, const Vector &vModelOrg, int nCheckCount )
+void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, int iTreeType, const Vector &vModelOrg, int nCheckCount, float flFade )
 {
+	SurfaceHandle_t lastSurf = NULL;
+	decalcontext_t context(pRenderContext, vModelOrg);
 	int nSortTreeCount = g_aDecalSortTrees.Count();
+	bool bWireframe = ShouldDrawInWireFrameMode() || (r_drawdecals.GetInt() == 2);
 	for ( int iSortTree = 0; iSortTree < nSortTreeCount; ++iSortTree )
 	{
 		int nBucketCount = g_aDecalSortTrees[iSortTree].m_aDecalSortBuckets[iGroup][iTreeType].Count();
@@ -2012,13 +2178,18 @@ void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, in
 					}
 				}
 
-				CDecalVert *pVerts = R_DecalSetupVerts( pRenderContext, pDecal, pDecal->surfID, pDecal->material, nCount, vModelOrg );
-				if ( nCount == 0 )
+				if ( pDecal->surfID != lastSurf )
+				{
+					lastSurf = pDecal->surfID;
+				}
+				CDecalVert *pVerts = R_DecalSetupVerts( context, pDecal, pDecal->surfID, pDecal->material );
+				if ( !pVerts )
 					continue;
+				nCount = pDecal->clippedVertCount;
 
 				// Bind texture.
 				VertexFormat_t vertexFormat = 0;
-				if( ShouldDrawInWireFrameMode () )
+				if( bWireframe )
 				{
 					pRenderContext->Bind( g_materialDecalWireframe );
 				}
@@ -2036,6 +2207,10 @@ void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, in
 
 				// Set base color.
 				byte color[4] = { pDecal->color.r, pDecal->color.g, pDecal->color.b, pDecal->color.a };
+				if ( flFade != 1.0f )
+				{
+					color[3] = (byte)( color[3] * flFade );
+				}
 				
 				// Dynamic decals - fading.
 				if ( pDecal->flags & FDECAL_DYNAMIC )
@@ -2054,7 +2229,7 @@ void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, in
 					
 					flFadeValue = clamp( flFadeValue, 0.0f, 1.0f );
 					
-					color[3] = ( byte )( 255 * flFadeValue );
+					color[3] = ( byte )( color[3] * flFadeValue );
 				}
 				
 				// Compute normal and tangent space if necessary.
@@ -2071,7 +2246,7 @@ void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, in
 				}
 				
 				// Setup verts.
-				float flOffset = ComputeDecalLightmapOffset( pDecal->surfID );
+				float flOffset = pDecal->lightmapOffset;
 				for ( int iVert = 0; iVert < nCount; ++iVert, ++pVerts )
 				{
 					meshBuilder.Position3fv( pVerts->m_vPos.Base() );
@@ -2080,17 +2255,7 @@ void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, in
 						meshBuilder.Normal3fv( vecNormal.Base() );
 					}
 					meshBuilder.Color4ubv( color );
-					if ( pDecal->material->InMaterialPage() )
-					{
-						float offset[2], scale[2];
-						pDecal->material->GetMaterialOffset( offset );
-						pDecal->material->GetMaterialScale( scale );
-						meshBuilder.TexCoordSubRect2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y, offset[0], offset[1], scale[0], scale[1] );
-					}
-					else
-					{
-						meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
-					}
+					meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
 					meshBuilder.TexCoord2f( 1, pVerts->m_cLMCoords.x,  pVerts->m_cLMCoords.y );
 					meshBuilder.TexCoord1f( 2, flOffset );
 					if ( vertexFormat & VERTEX_TANGENT_SPACE )
@@ -2099,17 +2264,13 @@ void R_DrawDecalsAllImmediate( IMatRenderContext *pRenderContext, int iGroup, in
 						meshBuilder.TangentT3fv( vecTangentT.Base() ); 
 					}
 					
-					meshBuilder.AdvanceVertex();
+					meshBuilder.AdvanceVertexF<VTX_HAVEPOS|VTX_HAVENORMAL|VTX_HAVECOLOR,3>();
 				}
 
 				// Setup indices.
 				int nTriCount = ( nCount - 2 );
-				for ( int iTri = 0; iTri < nTriCount; ++iTri )
-				{
-					meshBuilder.FastIndex( 0 );
-					meshBuilder.FastIndex( iTri + 1 );
-					meshBuilder.FastIndex( iTri + 2 );
-				}
+				CIndexBuilder &indexBuilder = meshBuilder;
+				indexBuilder.FastPolygon( 0, nTriCount );
 
 				meshBuilder.End();
 				pMesh->Draw();
@@ -2200,7 +2361,16 @@ void R_DrawDecalsAll_GatherDecals( IMatRenderContext *pRenderContext, int iGroup
 	}	
 }
 
-void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDecals, int iDecalCount, const Vector &vModelOrg )
+void R_DecalsGetMaxMesh( IMatRenderContext *pRenderContext, int &nDecalSortMaxVerts, int &nDecalSortMaxIndices )
+{
+	nDecalSortMaxVerts = g_nMaxDecals * 5;
+	nDecalSortMaxIndices = nDecalSortMaxVerts * 3;
+	int nMaxIndices = pRenderContext->GetMaxIndicesToRender();
+	nDecalSortMaxIndices = MIN(nDecalSortMaxIndices, nMaxIndices);
+	nDecalSortMaxVerts = MIN(nDecalSortMaxVerts, 8192); // just a guess, you should be able to do 8K dynamic verts in any material and this is no big loss on batching
+}
+
+void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDecals, int iDecalCount, const Vector &vModelOrg, float flFade )
 {
 	DecalMeshList_t		meshList;
 	CMeshBuilder		meshBuilder;
@@ -2210,8 +2380,9 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 
 	int nCount;
 
-	int nDecalSortMaxVerts = g_nMaxDecals * 5;
-	int nDecalSortMaxIndices = nDecalSortMaxVerts * 3;
+	int nDecalSortMaxVerts;
+	int nDecalSortMaxIndices;
+	R_DecalsGetMaxMesh( pRenderContext, nDecalSortMaxVerts, nDecalSortMaxIndices );
 
 	bool bMeshInit = true;
 	bool bBatchInit = true;
@@ -2219,6 +2390,9 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 	DecalBatchList_t *pBatch = NULL;
 	VertexFormat_t vertexFormat = 0;
 	decal_t *pDecalHead = NULL;
+	SurfaceHandle_t lastSurf = NULL;
+	decalcontext_t context(pRenderContext, vModelOrg);
+	bool bWireframe = ShouldDrawInWireFrameMode() || (r_drawdecals.GetInt() == 2);
 
 	for( int i = 0; i != iDecalCount; ++i )
 	{
@@ -2270,9 +2444,14 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 			}
 		}
 
-		CDecalVert *pVerts = R_DecalSetupVerts( pRenderContext, pDecal, pDecal->surfID, pDecal->material, nCount, vModelOrg );
-		if ( nCount == 0 )
+		if ( pDecal->surfID != lastSurf )
+		{
+			lastSurf = pDecal->surfID;
+		}
+		CDecalVert *pVerts = R_DecalSetupVerts( context, pDecal, pDecal->surfID, pDecal->material );
+		if ( !pVerts )
 			continue;
+		nCount = pDecal->clippedVertCount;
 
 		// Overflow - new mesh, batch.
 		if ( ( ( nVertCount + nCount ) > nDecalSortMaxVerts ) || ( nIndexCount + ( nCount - 2 ) > nDecalSortMaxIndices ) )
@@ -2301,7 +2480,7 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 			meshList.m_aBatches.RemoveAll();
 
 			// Create a mesh for this vertex format (vertex format per SortTree).
-			if ( ShouldDrawInWireFrameMode() )
+			if ( bWireframe )
 			{
 				meshList.m_pMesh = pRenderContext->GetDynamicMesh( false, NULL, NULL, g_materialDecalWireframe );
 			}
@@ -2324,7 +2503,7 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 			// Todo: we also could flush it right here and continue.
 			if ( meshList.m_aBatches.Size() + 1 > meshList.m_aBatches.NumAllocated() )
 			{
-				Warning( "R_DrawDecalsAll: overflowing m_aBatches. Reduce # of decals in the scene.\n", nDecalSortMaxVerts * meshList.m_aBatches.NumAllocated() );
+				Warning( "R_DrawDecalsAll: overflowing m_aBatches. Reduce %d decals in the scene.\n", nDecalSortMaxVerts * meshList.m_aBatches.NumAllocated() );
 				meshBuilder.End();
 				R_DrawDecalMeshList( meshList );
 				return;
@@ -2334,7 +2513,7 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 			pBatch = &meshList.m_aBatches[iBatchList];
 			pBatch->m_iStartIndex = nIndexCount;
 
-			if ( ShouldDrawInWireFrameMode() )
+			if ( bWireframe )
 			{
 				pBatch->m_pMaterial = g_materialDecalWireframe;
 			}
@@ -2351,6 +2530,10 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 
 		// Set base color.
 		byte color[4] = { pDecal->color.r, pDecal->color.g, pDecal->color.b, pDecal->color.a };
+		if ( flFade != 1.0f )
+		{
+			color[3] = (byte)( color[3] * flFade );
+		}
 
 		// Dynamic decals - fading.
 		if ( pDecal->flags & FDECAL_DYNAMIC )
@@ -2369,7 +2552,7 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 
 			flFadeValue = clamp( flFadeValue, 0.0f, 1.0f );
 
-			color[3] = ( byte )( 255 * flFadeValue );
+			color[3] = ( byte )( color[3] * flFadeValue );
 		}
 
 		// Compute normal and tangent space if necessary.
@@ -2386,7 +2569,8 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 		}
 
 		// Setup verts.
-		float flOffset = ComputeDecalLightmapOffset( pDecal->surfID );
+		float flOffset = pDecal->lightmapOffset;
+
 		for ( int iVert = 0; iVert < nCount; ++iVert, ++pVerts )
 		{
 			meshBuilder.Position3fv( pVerts->m_vPos.Base() );
@@ -2395,17 +2579,7 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 				meshBuilder.Normal3fv( vecNormal.Base() );
 			}
 			meshBuilder.Color4ubv( color );
-			if ( pDecal->material->InMaterialPage() )
-			{
-				float offset[2], scale[2];
-				pDecal->material->GetMaterialOffset( offset );
-				pDecal->material->GetMaterialScale( scale );
-				meshBuilder.TexCoordSubRect2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y, offset[0], offset[1], scale[0], scale[1] );
-			}
-			else
-			{
-				meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
-			}
+			meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
 			meshBuilder.TexCoord2f( 1, pVerts->m_cLMCoords.x, pVerts->m_cLMCoords.y );
 			meshBuilder.TexCoord1f( 2, flOffset );
 			if ( vertexFormat & VERTEX_TANGENT_SPACE )
@@ -2419,12 +2593,8 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 
 		// Setup indices.
 		int nTriCount = ( nCount - 2 );
-		for ( int iTri = 0; iTri < nTriCount; ++iTri )
-		{
-			meshBuilder.FastIndex( nVertCount );
-			meshBuilder.FastIndex( nVertCount + iTri + 1 );
-			meshBuilder.FastIndex( nVertCount + iTri + 2 );
-		}
+		CIndexBuilder &indexBuilder = meshBuilder;
+		indexBuilder.FastPolygon( nVertCount, nTriCount );
 
 		// Update counters.
 		nVertCount += nCount;
@@ -2444,18 +2614,26 @@ void R_DrawDecalsAll_Gathered( IMatRenderContext *pRenderContext, decal_t **ppDe
 }
 
 
-void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeType, const Vector &vModelOrg, int nCheckCount )
+void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeType, const Vector &vModelOrg, int nCheckCount, float flFade )
 {
 	DecalMeshList_t		meshList;
 	CMeshBuilder		meshBuilder;
+	SurfaceHandle_t lastSurf = NULL;
+	decalcontext_t context(pRenderContext, vModelOrg);
+	Vector vecNormal( 0.0f, 0.0f, 1.0f ), vecTangentS( 1.0f, 0.0f, 0.0f ), vecTangentT( 0.0f, 1.0f, 0.0f );
 
 	int nVertCount = 0;
 	int nIndexCount = 0;
 
-	int nDecalSortMaxVerts = g_nMaxDecals * 5;
-	int nDecalSortMaxIndices = nDecalSortMaxVerts * 3;
+	int nDecalSortMaxVerts;
+	int nDecalSortMaxIndices;
+	R_DecalsGetMaxMesh( pRenderContext, nDecalSortMaxVerts, nDecalSortMaxIndices );
+
+	bool bWireframe = ShouldDrawInWireFrameMode() || (r_drawdecals.GetInt() == 2);
+	float localClientTime = cl.GetTime();
 
 	int nSortTreeCount = g_aDecalSortTrees.Count();
+
 	for ( int iSortTree = 0; iSortTree < nSortTreeCount; ++iSortTree )
 	{		
 		// Reset the mesh list.
@@ -2494,7 +2672,7 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 				decal_t *pDecal = g_aDecalSortPool.Element( iElement );
 				iElement = g_aDecalSortPool.Next( iElement );
 
-				if ( !pDecal )
+				if ( !pDecal || !pDecal->surfID )
 					continue;
 
 				// Add the decal to the list of decals to be destroyed if need be.
@@ -2508,9 +2686,27 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 					}
 				}
 
-				CDecalVert *pVerts = R_DecalSetupVerts( pRenderContext, pDecal, pDecal->surfID, pDecal->material, nCount, vModelOrg );
-				if ( nCount == 0 )
+				float flOffset = 0;
+				if ( pDecal->surfID != lastSurf )
+				{
+					lastSurf = pDecal->surfID;
+					flOffset = pDecal->lightmapOffset;
+					// Compute normal and tangent space if necessary.
+					if ( vertexFormat & ( VERTEX_NORMAL | VERTEX_TANGENT_SPACE ) )
+					{
+						vecNormal = MSurf_Plane( pDecal->surfID ).normal;
+						if ( vertexFormat & VERTEX_TANGENT_SPACE )
+						{
+							Vector tVect;
+							bool bNegate = TangentSpaceSurfaceSetup( pDecal->surfID, tVect );
+							TangentSpaceComputeBasis( vecTangentS, vecTangentT, vecNormal, tVect, bNegate );
+						}
+					}
+				}
+				CDecalVert *pVerts = R_DecalSetupVerts( context, pDecal, pDecal->surfID, pDecal->material );
+				if ( !pVerts )
 					continue;
+				nCount = pDecal->clippedVertCount;
 				
 				// Overflow - new mesh, batch.
 				if ( ( ( nVertCount + nCount ) > nDecalSortMaxVerts ) || ( nIndexCount + ( nCount - 2 ) > nDecalSortMaxIndices ) )
@@ -2539,7 +2735,7 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 					meshList.m_aBatches.RemoveAll();
 
 					// Create a mesh for this vertex format (vertex format per SortTree).
-					if ( ShouldDrawInWireFrameMode() )
+					if ( bWireframe )
 					{
 						meshList.m_pMesh = pRenderContext->GetDynamicMesh( false, NULL, NULL, g_materialDecalWireframe );
 					}
@@ -2554,7 +2750,6 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 					
 					bMeshInit = false;
 				}
-				
 				// Create the batch.
 				if ( bBatchInit )
 				{
@@ -2562,7 +2757,7 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 					// Todo: we also could flush it right here and continue.
 					if ( meshList.m_aBatches.Size() + 1 > meshList.m_aBatches.NumAllocated() )
 					{
-						Warning( "R_DrawDecalsAll: overflowing m_aBatches. Reduce # of decals in the scene.\n", nDecalSortMaxVerts * meshList.m_aBatches.NumAllocated() );
+						Warning( "R_DrawDecalsAll: overflowing m_aBatches. Reduce %d decals in the scene.\n", nDecalSortMaxVerts * meshList.m_aBatches.NumAllocated() );
 						meshBuilder.End();
 						R_DrawDecalMeshList( meshList );
 						return;
@@ -2572,7 +2767,7 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 					pBatch = &meshList.m_aBatches[iBatchList];
 					pBatch->m_iStartIndex = nIndexCount;
 					
-					if ( ShouldDrawInWireFrameMode() )
+					if ( bWireframe )
 					{
 						pBatch->m_pMaterial = g_materialDecalWireframe;
 					}
@@ -2589,6 +2784,10 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 				
 				// Set base color.
 				byte color[4] = { pDecal->color.r, pDecal->color.g, pDecal->color.b, pDecal->color.a };
+				if ( flFade != 1.0f )
+				{
+					color[3] = (byte)( color[3] * flFade );
+				}
 				
 				// Dynamic decals - fading.
 				if ( pDecal->flags & FDECAL_DYNAMIC )
@@ -2598,33 +2797,19 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 					// Negative fadeDuration value means to fade in
 					if ( pDecal->fadeDuration < 0 )
 					{
-						flFadeValue = -( cl.GetTime() - pDecal->fadeStartTime ) / pDecal->fadeDuration;
+						flFadeValue = -( localClientTime - pDecal->fadeStartTime ) / pDecal->fadeDuration;
 					}
 					else
 					{
-						flFadeValue = 1.0 - ( cl.GetTime() - pDecal->fadeStartTime ) / pDecal->fadeDuration;
+						flFadeValue = 1.0 - ( localClientTime - pDecal->fadeStartTime ) / pDecal->fadeDuration;
 					}
 					
 					flFadeValue = clamp( flFadeValue, 0.0f, 1.0f );
 					
-					color[3] = ( byte )( 255 * flFadeValue );
+					color[3] = ( byte )( color[3] * flFadeValue );
 				}
-				
-				// Compute normal and tangent space if necessary.
-				Vector vecNormal( 0.0f, 0.0f, 1.0f ), vecTangentS( 1.0f, 0.0f, 0.0f ), vecTangentT( 0.0f, 1.0f, 0.0f );
-				if ( vertexFormat & ( VERTEX_NORMAL | VERTEX_TANGENT_SPACE ) )
-				{
-					vecNormal = MSurf_Plane( pDecal->surfID ).normal;
-					if ( vertexFormat & VERTEX_TANGENT_SPACE )
-					{
-						Vector tVect;
-						bool bNegate = TangentSpaceSurfaceSetup( pDecal->surfID, tVect );
-						TangentSpaceComputeBasis( vecTangentS, vecTangentT, vecNormal, tVect, bNegate );
-					}
-				}
-				
+
 				// Setup verts.
-				float flOffset = ComputeDecalLightmapOffset( pDecal->surfID );
 				for ( int iVert = 0; iVert < nCount; ++iVert, ++pVerts )
 				{
 					meshBuilder.Position3fv( pVerts->m_vPos.Base() );
@@ -2633,17 +2818,7 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 						meshBuilder.Normal3fv( vecNormal.Base() );
 					}
 					meshBuilder.Color4ubv( color );
-					if ( pDecal->material->InMaterialPage() )
-					{
-						float offset[2], scale[2];
-						pDecal->material->GetMaterialOffset( offset );
-						pDecal->material->GetMaterialScale( scale );
-						meshBuilder.TexCoordSubRect2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y, offset[0], offset[1], scale[0], scale[1] );
-					}
-					else
-					{
-						meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
-					}
+					meshBuilder.TexCoord2f( 0, pVerts->m_ctCoords.x, pVerts->m_ctCoords.y  );
 					meshBuilder.TexCoord2f( 1, pVerts->m_cLMCoords.x, pVerts->m_cLMCoords.y );
 					meshBuilder.TexCoord1f( 2, flOffset );
 					if ( vertexFormat & VERTEX_TANGENT_SPACE )
@@ -2652,17 +2827,13 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 						meshBuilder.TangentT3fv( vecTangentT.Base() ); 
 					}
 					
-					meshBuilder.AdvanceVertex();
+					meshBuilder.AdvanceVertexF<VTX_HAVEALL, 3>();
 				}
 				
 				// Setup indices.
-				int nTriCount = ( nCount - 2 );
-				for ( int iTri = 0; iTri < nTriCount; ++iTri )
-				{
-					meshBuilder.FastIndex( nVertCount );
-					meshBuilder.FastIndex( nVertCount + iTri + 1 );
-					meshBuilder.FastIndex( nVertCount + iTri + 2 );
-				}
+				int nTriCount = nCount - 2;
+				CIndexBuilder &indexBuilder = meshBuilder;
+				indexBuilder.FastPolygon( nVertCount, nTriCount );
 				
 				// Update counters.
 				nVertCount += nCount;
@@ -2686,118 +2857,55 @@ void R_DrawDecalsAll( IMatRenderContext *pRenderContext, int iGroup, int iTreeTy
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-void DecalSurfaceDraw_NonQueued( IMatRenderContext *pRenderContext, int renderGroup, const Vector &vModelOrg, int nCheckCount )
+void DecalSurfaceDraw_NonQueued( IMatRenderContext *pRenderContext, int renderGroup, const Vector &vModelOrg, int nCheckCount, float flFade )
 {
 	if ( r_drawbatchdecals.GetBool() )
 	{
 		// Draw world decals.
-		R_DrawDecalsAll( pRenderContext, renderGroup, PERMANENT_LIGHTMAP, vModelOrg, nCheckCount );
+		R_DrawDecalsAll( pRenderContext, renderGroup, PERMANENT_LIGHTMAP, vModelOrg, nCheckCount, flFade );
 		
 		// Draw lightmapped non-world decals.
-		R_DrawDecalsAll( pRenderContext, renderGroup, LIGHTMAP, vModelOrg, nCheckCount );
+		R_DrawDecalsAll( pRenderContext, renderGroup, LIGHTMAP, vModelOrg, nCheckCount, flFade );
 		
 		// Draw non-lit(mod2x) decals.
-		R_DrawDecalsAll( pRenderContext, renderGroup, NONLIGHTMAP, vModelOrg, nCheckCount );
+		R_DrawDecalsAll( pRenderContext, renderGroup, NONLIGHTMAP, vModelOrg, nCheckCount, flFade );
 	}
 	else
 	{
 		// Draw world decals.
-		R_DrawDecalsAllImmediate( pRenderContext, renderGroup, PERMANENT_LIGHTMAP, vModelOrg, nCheckCount );
+		R_DrawDecalsAllImmediate( pRenderContext, renderGroup, PERMANENT_LIGHTMAP, vModelOrg, nCheckCount, flFade );
 		
 		// Draw lightmapped non-world decals.
-		R_DrawDecalsAllImmediate( pRenderContext, renderGroup, LIGHTMAP, vModelOrg, nCheckCount );
+		R_DrawDecalsAllImmediate( pRenderContext, renderGroup, LIGHTMAP, vModelOrg, nCheckCount, flFade );
 
 		// Draw non-lit(mod2x) decals.
-		R_DrawDecalsAllImmediate( pRenderContext, renderGroup, NONLIGHTMAP, vModelOrg, nCheckCount );
+		R_DrawDecalsAllImmediate( pRenderContext, renderGroup, NONLIGHTMAP, vModelOrg, nCheckCount, flFade );
 	}
 }
 
-void DecalSurfaceDraw_QueueHelper( bool bBatched, int renderGroup, Vector vModelOrg, int nCheckCount, decal_t **ppDecals, int iPermanentLightmap, int iLightmap, int iNonLightmap )
+void DecalSurfaceDraw_QueueHelper( bool bBatched, int renderGroup, Vector vModelOrg, int nCheckCount, decal_t **ppDecals, int iPermanentLightmap, int iLightmap, int iNonLightmap, float flFade )
 {
 	CMatRenderContextPtr pRenderContext( materials );
 
 	if( bBatched )
 	{
-		R_DrawDecalsAll_Gathered( pRenderContext, ppDecals, iPermanentLightmap, vModelOrg );
+		R_DrawDecalsAll_Gathered( pRenderContext, ppDecals, iPermanentLightmap, vModelOrg, flFade );
 		ppDecals += iPermanentLightmap;
-		R_DrawDecalsAll_Gathered( pRenderContext, ppDecals, iLightmap, vModelOrg );
+		R_DrawDecalsAll_Gathered( pRenderContext, ppDecals, iLightmap, vModelOrg, flFade );
 		ppDecals += iLightmap;
-		R_DrawDecalsAll_Gathered( pRenderContext, ppDecals, iNonLightmap, vModelOrg );
+		R_DrawDecalsAll_Gathered( pRenderContext, ppDecals, iNonLightmap, vModelOrg, flFade );
 	}
 	else
 	{
-		R_DrawDecalsAllImmediate_Gathered( pRenderContext, ppDecals, iPermanentLightmap, vModelOrg );
+		R_DrawDecalsAllImmediate_Gathered( pRenderContext, ppDecals, iPermanentLightmap, vModelOrg, flFade );
 		ppDecals += iPermanentLightmap;
-		R_DrawDecalsAllImmediate_Gathered( pRenderContext, ppDecals, iLightmap, vModelOrg );
+		R_DrawDecalsAllImmediate_Gathered( pRenderContext, ppDecals, iLightmap, vModelOrg, flFade );
 		ppDecals += iLightmap;
-		R_DrawDecalsAllImmediate_Gathered( pRenderContext, ppDecals, iNonLightmap, vModelOrg );
+		R_DrawDecalsAllImmediate_Gathered( pRenderContext, ppDecals, iNonLightmap, vModelOrg, flFade );
 	}
 }
 
-class CQueuedDecalMemoryManager
-{
-public:
-	CQueuedDecalMemoryManager( void )
-	{
-		m_nCurrentStack = 0;
-		MEM_ALLOC_CREDIT();
-		m_QueuedDecalMemory[0].Init( 65536, 0, 16384 );
-		m_QueuedDecalMemory[1].Init( 65536, 0, 16384 );
-	}
-	~CQueuedDecalMemoryManager( void )
-	{
-		m_QueuedDecalMemory[0].FreeAll( true );
-		m_QueuedDecalMemory[1].FreeAll( true );
-		for( int i = 0; i != 2; ++i )
-		{
-			for( int j = m_DeleteOnSwitch[i].Count(); --j >= 0; )
-			{
-				delete []m_DeleteOnSwitch[i].Element(j);
-			}
-
-			m_DeleteOnSwitch[i].RemoveAll();
-		}		
-	}
-
-	void SwitchStack( void )
-	{
-		m_nCurrentStack = 1 - m_nCurrentStack;
-		m_QueuedDecalMemory[m_nCurrentStack].FreeAll( false );
-
-		for( int i = m_DeleteOnSwitch[m_nCurrentStack].Count(); --i >= 0; )
-		{
-			delete []m_DeleteOnSwitch[m_nCurrentStack].Element(i);
-		}
-		m_DeleteOnSwitch[m_nCurrentStack].RemoveAll();
-	}
-
-	inline void *Alloc( size_t bytes )
-	{
-		MEM_ALLOC_CREDIT();
-		void *pReturn = m_QueuedDecalMemory[m_nCurrentStack].Alloc( bytes, false );
-		if( pReturn == NULL )
-		{
-			int iMaxSize = m_QueuedDecalMemory[m_nCurrentStack].GetMaxSize();
-			Warning( "Overflowed decal queued rendering memory stack. Needed %d, have %d/%d\n", bytes, iMaxSize - m_QueuedDecalMemory[m_nCurrentStack].GetUsed(), iMaxSize );
-			pReturn = new uint8 * [bytes];
-			m_DeleteOnSwitch[m_nCurrentStack].AddToTail( pReturn );
-		}
-		return pReturn;
-	}
-
-	CMemoryStack	m_QueuedDecalMemory[2];
-	int				m_nCurrentStack;
-	CUtlVector<void *>	m_DeleteOnSwitch[2]; //when we overflow the stack, we do new/delete
-};
-static CQueuedDecalMemoryManager s_QDMM;
-
-
-void DecalBeginFrame( void )
-{
-	s_QDMM.SwitchStack();
-}
-
-void DecalSurfaceDraw( IMatRenderContext *pRenderContext, int renderGroup )
+void DecalSurfaceDraw( IMatRenderContext *pRenderContext, int renderGroup, float flFade )
 {
 	//	VPROF_BUDGET( "Decals", "Decals" );
 	VPROF( "DecalsDraw" );
@@ -2843,9 +2951,10 @@ void DecalSurfaceDraw( IMatRenderContext *pRenderContext, int renderGroup )
 
 		if( DrawDecals.Count() )
 		{
-			decal_t **ppDecals = (decal_t **)s_QDMM.Alloc( DrawDecals.Count() * sizeof( decal_t * ) );
-			memcpy( ppDecals, DrawDecals.Base(), DrawDecals.Count() * sizeof( decal_t * ) );
-			pCallQueue->QueueCall( DecalSurfaceDraw_QueueHelper, bBatched, renderGroup, modelorg, nCheckCount, ppDecals, iPermanentLightmap, iLightmap, iNonLightmap );
+			size_t memSize = DrawDecals.Count() * sizeof( decal_t * );
+			CMatRenderData< byte > rd(pRenderContext, memSize);
+			memcpy( rd.Base(), DrawDecals.Base(), DrawDecals.Count() * sizeof( decal_t * ) );
+			pCallQueue->QueueCall( DecalSurfaceDraw_QueueHelper, bBatched, renderGroup, modelorg, nCheckCount, (decal_t **)rd.Base(), iPermanentLightmap, iLightmap, iNonLightmap, flFade  );
 			
 			DrawDecals.RemoveAll();
 		}
@@ -2853,7 +2962,7 @@ void DecalSurfaceDraw( IMatRenderContext *pRenderContext, int renderGroup )
 	else
 	{
 		//non-queued mode
-		DecalSurfaceDraw_NonQueued( pRenderContext, renderGroup, modelorg, nCheckCount );
+		DecalSurfaceDraw_NonQueued( pRenderContext, renderGroup, modelorg, nCheckCount, flFade );
 	}
 }
 

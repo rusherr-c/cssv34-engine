@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: P.E.T. (Particle Editing Tool); main UI smarts class
 //
@@ -205,13 +205,5 @@ private:
 };
 
 extern CPetTool *g_pPetTool;
-
-//-----------------------------------------------------------------------------
-// returns the document
-//-----------------------------------------------------------------------------
-inline CPetDoc *CPetTool::GetDocument()
-{
-	return m_pDoc;
-}
 
 #endif // PETTOOL_H

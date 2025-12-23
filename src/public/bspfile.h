@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Defines and structures for the BSP file format.
 //
@@ -22,7 +22,7 @@
 
 // MINBSPVERSION is the minimum acceptable version.  The engine will load MINBSPVERSION through BSPVERSION
 #define MINBSPVERSION 19
-#define BSPVERSION 21
+#define BSPVERSION 20
 
 
 // This needs to match the value in gl_lightmap.h
@@ -371,19 +371,14 @@ enum
 
 #include "zip_uncompressed.h"
 
-struct l4d2_lump_t
-{
-	int	version;
-	int		fileofs, filelen;
-	char	fourCC[4];
-};
-
 struct lump_t
 {
 	DECLARE_BYTESWAP_DATADESC();
 	int		fileofs, filelen;
 	int		version;		// default to zero
-	char	fourCC[4];		// default to ( char )0, ( char )0, ( char )0, ( char )0
+	// this field was char fourCC[4] previously, but was unused, favoring the LUMP IDs above instead. It has been
+	// repurposed for compression.  0 implies the lump is not compressed.
+	int		uncompressedSize; // default to zero
 };
 
 
@@ -391,7 +386,7 @@ struct dheader_t
 {
 	DECLARE_BYTESWAP_DATADESC();
 	int			ident;
-	int			version;	
+	int			version;
 	lump_t		lumps[HEADER_LUMPS];
 	int			mapRevision;				// the map's revision (iteration, version) number (added BSPVERSION 6)
 };
@@ -426,7 +421,7 @@ struct dgamelumpheader_t
 // This is expected to be a four-CC code ('lump')
 typedef int GameLumpId_t;
 
-// 360 only: game lump is compressed, filelen reflects original size
+// game lump is compressed, filelen reflects original size
 // use next entry fileofs to determine actual disk lump compressed size
 // compression stage ensures a terminal null dictionary entry
 #define GAMELUMPFLAG_COMPRESSED	0x0001
@@ -631,6 +626,7 @@ public:
 #define DISPTRI_TAG_BUILDABLE		(1<<2)
 #define DISPTRI_FLAG_SURFPROP1		(1<<3)
 #define DISPTRI_FLAG_SURFPROP2		(1<<4)
+#define DISPTRI_TAG_REMOVE			(1<<5)
 
 class CDispTri
 {
@@ -975,7 +971,6 @@ struct dworldlight_t
 	Vector		origin;
 	Vector		intensity;
 	Vector		normal;			// for surfaces and spotlights
-	Vector		shadow_cast_offset;
 	int			cluster;
 	emittype_t	type;
     int			style;
@@ -1036,7 +1031,6 @@ public:
 
 inline void doverlay_t::SetFaceCount( unsigned short count )
 {
-	Assert( count >= 0 && (count & OVERLAY_RENDER_ORDER_MASK) == 0 );
 	m_nFaceCountAndRenderOrder &= OVERLAY_RENDER_ORDER_MASK;
 	m_nFaceCountAndRenderOrder |= (count & ~OVERLAY_RENDER_ORDER_MASK);
 }
@@ -1048,7 +1042,6 @@ inline unsigned short doverlay_t::GetFaceCount() const
 
 inline void doverlay_t::SetRenderOrder( unsigned short order )
 {
-	Assert( order >= 0 && order < OVERLAY_NUM_RENDER_ORDERS );
 	m_nFaceCountAndRenderOrder &= ~OVERLAY_RENDER_ORDER_MASK;
 	m_nFaceCountAndRenderOrder |= (order << (16 - OVERLAY_RENDER_ORDER_NUM_BITS));	// leave 2 bits for render order.
 }
@@ -1100,7 +1093,6 @@ public:
 
 inline void dwateroverlay_t::SetFaceCount( unsigned short count )
 {
-	Assert( count >= 0 && (count & WATEROVERLAY_RENDER_ORDER_MASK) == 0 );
 	m_nFaceCountAndRenderOrder &= WATEROVERLAY_RENDER_ORDER_MASK;
 	m_nFaceCountAndRenderOrder |= (count & ~WATEROVERLAY_RENDER_ORDER_MASK);
 }
@@ -1112,7 +1104,6 @@ inline unsigned short dwateroverlay_t::GetFaceCount() const
 
 inline void dwateroverlay_t::SetRenderOrder( unsigned short order )
 {
-	Assert( order >= 0 && order < WATEROVERLAY_NUM_RENDER_ORDERS );
 	m_nFaceCountAndRenderOrder &= ~WATEROVERLAY_RENDER_ORDER_MASK;
 	m_nFaceCountAndRenderOrder |= ( order << ( 16 - WATEROVERLAY_RENDER_ORDER_NUM_BITS ) );	// leave 2 bits for render order.
 }

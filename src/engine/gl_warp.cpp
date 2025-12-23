@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -104,7 +104,7 @@ bool R_LoadNamedSkys( const char *skyname )
 	char		name[ MAX_OSPATH ];
 	IMaterial	*skies[ 6 ];
 	bool		success = true;
-	char		*skyboxsuffix[ 6 ] = { "rt", "bk", "lf", "ft", "up", "dn" };
+	const char	*skyboxsuffix[ 6 ] = { "rt", "bk", "lf", "ft", "up", "dn" };
 
 	bool bUseDx8Skyboxes = ( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() < 90 );
 	for ( int i = 0; i < 6; i++ )
@@ -264,6 +264,7 @@ void MakeSkyVec( float s, float t, int axis, float zFar, Vector& position, Vecto
 void R_DrawSkyBox( float zFar, int nDrawFlags /*= 0x3F*/  )
 {
 	VPROF("R_DrawSkyBox");
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s %x", __FUNCTION__, nDrawFlags );
 
 	int		i;
 	Vector	normal;
@@ -327,8 +328,13 @@ void R_DrawSkyBox( float zFar, int nDrawFlags /*= 0x3F*/  )
 			MakeSkyVec( 1.0f, -1.0f, i, zFar, positionArray[3], texCoordArray[3] );
 
 			IMesh* pMesh = pRenderContext->GetDynamicMesh();
+
 			CMeshBuilder meshBuilder;
-			meshBuilder.Begin( pMesh, MATERIAL_QUADS, 1 );
+			meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, 4, 6 );
+
+			// meshbuilder Begin can fail if dynamic mesh is not available (eg, alt-tabbed away)
+			if ( meshBuilder.BaseVertexData() == NULL )
+				continue;
 
 			for (int j = 0; j < 4; ++j)
 			{
@@ -336,6 +342,8 @@ void R_DrawSkyBox( float zFar, int nDrawFlags /*= 0x3F*/  )
 				meshBuilder.TexCoord2fv( 0, texCoordArray[j].Base() );
 				meshBuilder.AdvanceVertex();
 			}
+			CIndexBuilder &indexBuilder = meshBuilder;
+			indexBuilder.FastQuad( 0 );
 		
 			meshBuilder.End();
 			pMesh->Draw();

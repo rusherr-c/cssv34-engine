@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,8 +6,8 @@
 //=============================================================================//
 
 #include "cbase.h"
-#include "CStrikeTeamMenu.h"
-#include "BackgroundPanel.h"
+#include "cstriketeammenu.h"
+#include "backgroundpanel.h"
 #include <convar.h>
 #include "hud.h" // for gEngfuncs
 #include "c_cs_player.h"
@@ -114,10 +114,11 @@ void CCSTeamMenu::SetVisible(bool state)
 
 	if ( state )
 	{
-		Panel *pAutoButton = FindChildByName( "autobutton" );
+		Button *pAutoButton = dynamic_cast< Button* >( FindChildByName( "autobutton" ) );
 		if ( pAutoButton )
 		{
 			pAutoButton->RequestFocus();
+			pAutoButton->SetArmed( true );
 		}
 	}
 }
@@ -138,6 +139,23 @@ void CCSTeamMenu::OnCommand( const char *command )
 
 	gViewPortInterface->ShowBackGround( false );
 	OnClose();
+}
+
+
+void CCSTeamMenu::OnKeyCodePressed( vgui::KeyCode code )
+{
+	if ( code == KEY_ENTER )
+	{
+		Button *pAutoButton = dynamic_cast< Button* >( FindChildByName( "autobutton" ) );
+		if ( pAutoButton )
+		{
+			pAutoButton->DoClick();
+		}
+	}
+	else
+	{
+		BaseClass::OnKeyCodePressed( code );
+	}
 }
 
 //-----------------------------------------------------------------------------

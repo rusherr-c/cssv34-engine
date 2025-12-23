@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -536,6 +536,8 @@ void CVoxelHash::Init( CVoxelTree *pPartition, const Vector &worldmin, const Vec
 	Assert( ( m_nVoxelDelta[1] >= 0 ) && ( m_nVoxelDelta[1] <= ( 1 << 10 ) ) );
 	Assert( ( m_nVoxelDelta[2] >= 0 ) && ( m_nVoxelDelta[2] <= ( 1 << 9 ) ) );
 
+	m_aVoxelHash.RemoveAll();
+
 	// Setup the entity list pool.
 	int nGrowSize = SPHASH_ENTITYLIST_BLOCK >> nLevel;
 	if ( nGrowSize < 16 )
@@ -578,9 +580,9 @@ void CVoxelHash::InsertIntoTree( SpatialPartitionHandle_t hPartition, const Vect
 	voxelMin = VoxelIndexFromPoint( vecMin );
 	voxelMax = VoxelIndexFromPoint( vecMax );
 	Assert( (m_nLevel == 4) ||
-			(voxelMax.bitsVoxel.x - voxelMin.bitsVoxel.x <= 1) && 
+			( (voxelMax.bitsVoxel.x - voxelMin.bitsVoxel.x <= 1) && 
 			(voxelMax.bitsVoxel.y - voxelMin.bitsVoxel.y <= 1) && 
-			(voxelMax.bitsVoxel.z - voxelMin.bitsVoxel.z <= 1) );
+			(voxelMax.bitsVoxel.z - voxelMin.bitsVoxel.z <= 1) ) );
 
 	// Add the object to all the voxels it intersects.
 	Voxel_t voxel;
@@ -794,9 +796,6 @@ public:
 
 private:
 	CPartitionVisits *m_pVisits;
-	mutable CUtlHashFast<int> m_Hash;
-	bool m_bUseHash;
-	bool m_bIncreaseNestLevel;
 	int m_iTree;
 };
 
@@ -1892,7 +1891,7 @@ void CVoxelTree::ElementMoved( SpatialPartitionHandle_t hPartition, const Vector
 // Purpose:
 //-----------------------------------------------------------------------------
 void CVoxelTree::EnumerateElementsInBox( SpatialPartitionListMask_t listMask, 
-										const Vector& mins, const Vector& maxs, 
+										const Vector& vecMins, const Vector& vecMaxs, 
 										bool coarseTest, IPartitionEnumerator* pIterator )
 {
 	VPROF( "BoxTest/SphereTest" );
@@ -1903,6 +1902,14 @@ void CVoxelTree::EnumerateElementsInBox( SpatialPartitionListMask_t listMask,
 	// Early-out.
 	if ( listMask == 0 )
 		return;
+
+	// Clamp bounds to extant space
+	Vector mins, maxs;
+	VectorMax( vecMins, s_PartitionMin, mins );
+	VectorMin( mins, s_PartitionMax, mins );
+
+	VectorMax( vecMaxs, s_PartitionMin, maxs );
+	VectorMin( maxs, s_PartitionMax, maxs );
 
 	// Callbacks.
 	CPartitionVisits *pPrevVisits = BeginVisit();
@@ -2871,7 +2878,7 @@ void CVoxelTree::ReportStats( const char *pFileName )
 
 void CSpatialPartition::ReportStats( const char *pFileName )
 {
-	Msg( "Handle Count %d (%d bytes, %d total)\n", m_aHandles.Count(), m_aHandles.Count() * ( sizeof(EntityInfo_t) + 2 * sizeof(SpatialPartitionHandle_t) ) );
+	Msg( "Handle Count %d (%llu bytes)\n", m_aHandles.Count(), (uint64)( m_aHandles.Count() * ( sizeof(EntityInfo_t) + 2 * sizeof(SpatialPartitionHandle_t) ) ) );
 	for ( int i = 0; i < NUM_TREES; i++ )
 	{
 		m_VoxelTrees[i].ReportStats( pFileName );

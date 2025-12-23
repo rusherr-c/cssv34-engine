@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -59,8 +59,8 @@ struct PanelEntry_t
 
 	virtual int AddItem( KeyValues *data, int parentItemIndex, ColumnPanels_t& columnPanels );
 	virtual void ModifyItem( KeyValues *data, int itemIndex );
-	virtual void SetItemColors( int id, Color& fg, Color& bg );
-	virtual void SetItemColumnColors( int id, int col, Color& fg, Color& bg );
+	virtual void SetItemColors( int id, const Color& fg, const Color& bg );
+	virtual void SetItemColumnColors( int id, int col, const Color& fg, const Color& bg );
 
 	virtual void PerformLayout();
 

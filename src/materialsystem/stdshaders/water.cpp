@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,19 +6,20 @@
 //=============================================================================//
 
 #include "BaseVSShader.h"
-#include "mathlib/VMatrix.h"
+#include "mathlib/vmatrix.h"
 #include "common_hlsl_cpp_consts.h" // hack hack hack!
 #include "convar.h"
 
-#include "watercheap_vs20.inc"
-#include "watercheap_ps20.inc"
-#include "watercheap_ps20b.inc"
-#include "water_vs20.inc"
-#include "water_ps20.inc"
+#include "WaterCheap_vs20.inc"
+#include "WaterCheap_ps20.inc"
+#include "WaterCheap_ps20b.inc"
+#include "Water_vs20.inc"
+#include "Water_ps20.inc"
 #include "water_ps20b.inc"
-//#include "water_ps30.inc"
 
-static ConVar r_waterforceexpensive( "r_waterforceexpensive", "0" );
+#ifndef _X360
+static ConVar r_waterforceexpensive( "r_waterforceexpensive", "0", FCVAR_ARCHIVE );
+#endif
 
 DEFINE_FALLBACK_SHADER( Water, Water_DX9_HDR )
 
@@ -102,7 +103,11 @@ BEGIN_VS_SHADER( Water_DX90,
 		// By default, we're force expensive on dx9.  NO WE DON'T!!!!
 		if( !params[FORCEEXPENSIVE]->IsDefined() )
 		{
+#ifdef _X360
+			params[FORCEEXPENSIVE]->SetIntValue( 0 );
+#else
 			params[FORCEEXPENSIVE]->SetIntValue( 1 );
+#endif
 		}
 		if( params[FORCEEXPENSIVE]->GetIntValue() && params[FORCECHEAP]->GetIntValue() )
 		{
@@ -137,15 +142,15 @@ BEGIN_VS_SHADER( Water_DX90,
 
 		if( params[REFRACTTEXTURE]->IsDefined() )
 		{
-			LoadTexture( REFRACTTEXTURE );
+			LoadTexture( REFRACTTEXTURE, TEXTUREFLAGS_SRGB );
 		}
 		if( params[REFLECTTEXTURE]->IsDefined() )
 		{
-			LoadTexture( REFLECTTEXTURE );
+			LoadTexture( REFLECTTEXTURE, TEXTUREFLAGS_SRGB );
 		}
 		if ( params[ENVMAP]->IsDefined() )
 		{
-			LoadCubeMap( ENVMAP );
+			LoadCubeMap( ENVMAP, TEXTUREFLAGS_SRGB );
 		}
 		if ( params[NORMALMAP]->IsDefined() )
 		{
@@ -153,7 +158,7 @@ BEGIN_VS_SHADER( Water_DX90,
 		}
 		if( params[BASETEXTURE]->IsDefined() )
 		{
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		}
 	}
 
@@ -220,17 +225,6 @@ BEGIN_VS_SHADER( Water_DX90,
 			Vector4D Scroll1;
 			params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
 
-			NormalDecodeMode_t nNormalDecodeMode = NORMAL_DECODE_NONE;
-			if ( params[NORMALMAP]->IsTexture() && g_pHardwareConfig->SupportsNormalMapCompression() )
-			{
-				ITexture *pNormalMap = params[NORMALMAP]->GetTextureValue();
-				if ( pNormalMap )
-				{
-					// Clamp this to 0 or 1 since that's how we've authored the water shader (i.e. no separate alpha map/channel)
-					nNormalDecodeMode = pNormalMap->GetNormalDecodeMode() == NORMAL_DECODE_NONE ? NORMAL_DECODE_NONE : NORMAL_DECODE_ATI2N;
-				}
-			}
-
 			DECLARE_STATIC_VERTEX_SHADER( water_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
 			SET_STATIC_VERTEX_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
@@ -238,19 +232,8 @@ BEGIN_VS_SHADER( Water_DX90,
 
 			// "REFLECT" "0..1"
 			// "REFRACT" "0..1"
-			/*if ( g_pHardwareConfig->SupportsShaderModel_3_0() )
-			{
-				DECLARE_STATIC_PIXEL_SHADER( water_ps30 );
-				SET_STATIC_PIXEL_SHADER_COMBO( REFLECT,  bReflection );
-				SET_STATIC_PIXEL_SHADER_COMBO( REFRACT,  bRefraction );
-				SET_STATIC_PIXEL_SHADER_COMBO( ABOVEWATER,  params[ABOVEWATER]->GetIntValue() );
-				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
-				SET_STATIC_PIXEL_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
-				SET_STATIC_PIXEL_SHADER_COMBO( BLURRY_REFRACT, params[BLURREFRACT]->GetIntValue() );
-				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
-				SET_STATIC_PIXEL_SHADER( water_ps30 );
-			}
-			else */if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{
 				DECLARE_STATIC_PIXEL_SHADER( water_ps20b );
 				SET_STATIC_PIXEL_SHADER_COMBO( REFLECT,  bReflection );
@@ -259,7 +242,7 @@ BEGIN_VS_SHADER( Water_DX90,
 				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
 				SET_STATIC_PIXEL_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
 				SET_STATIC_PIXEL_SHADER_COMBO( BLURRY_REFRACT, params[BLURREFRACT]->GetIntValue() );
-				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) NORMAL_DECODE_NONE );
 				SET_STATIC_PIXEL_SHADER( water_ps20b );
 			}
 			else
@@ -270,7 +253,7 @@ BEGIN_VS_SHADER( Water_DX90,
 				SET_STATIC_PIXEL_SHADER_COMBO( ABOVEWATER,  params[ABOVEWATER]->GetIntValue() );
 				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
 				SET_STATIC_PIXEL_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
-				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) NORMAL_DECODE_NONE );
 				SET_STATIC_PIXEL_SHADER( water_ps20 );
 			}
 
@@ -425,17 +408,6 @@ BEGIN_VS_SHADER( Water_DX90,
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
 			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
-			NormalDecodeMode_t nNormalDecodeMode = NORMAL_DECODE_NONE;
-			if ( params[NORMALMAP]->IsTexture() && g_pHardwareConfig->SupportsNormalMapCompression() )
-			{
-				ITexture *pNormalMap = params[NORMALMAP]->GetTextureValue();
-				if ( pNormalMap )
-				{
-					// Clamp this to 0 or 1 since that's how we've authored the water shader (i.e. no separate alpha map/channel)
-					nNormalDecodeMode = pNormalMap->GetNormalDecodeMode() == NORMAL_DECODE_NONE ? NORMAL_DECODE_NONE : NORMAL_DECODE_ATI2N;
-				}
-			}
-
 			DECLARE_STATIC_VERTEX_SHADER( watercheap_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( BLEND,  bBlend && bRefraction );
 			SET_STATIC_VERTEX_SHADER( watercheap_vs20 );
@@ -450,7 +422,7 @@ BEGIN_VS_SHADER( Water_DX90,
 				Vector4D Scroll1;
 				params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
 				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
-				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) NORMAL_DECODE_NONE );
 				SET_STATIC_PIXEL_SHADER( watercheap_ps20b );
 			}
 			else
@@ -463,7 +435,7 @@ BEGIN_VS_SHADER( Water_DX90,
 				Vector4D Scroll1;
 				params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
 				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
-				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) NORMAL_DECODE_NONE );
 				SET_STATIC_PIXEL_SHADER( watercheap_ps20 );
 			}
 
@@ -494,9 +466,9 @@ BEGIN_VS_SHADER( Water_DX90,
 			float cheapWaterEndDistance = params[CHEAPWATERENDDISTANCE]->GetFloatValue();
 			float cheapWaterParams[4] = 
 			{
-				cheapWaterStartDistance * VSHADER_VECT_SCALE,
-				cheapWaterEndDistance * VSHADER_VECT_SCALE,
-				PSHADER_VECT_SCALE / ( cheapWaterEndDistance - cheapWaterStartDistance ),
+				(float)(cheapWaterStartDistance * VSHADER_VECT_SCALE),
+				(float)(cheapWaterEndDistance * VSHADER_VECT_SCALE),
+				(float)(PSHADER_VECT_SCALE / ( cheapWaterEndDistance - cheapWaterStartDistance )),
 				cheapWaterStartDistance / ( cheapWaterEndDistance - cheapWaterStartDistance ),
 			};
 			pShaderAPI->SetPixelShaderConstant( 1, cheapWaterParams );
@@ -552,7 +524,11 @@ BEGIN_VS_SHADER( Water_DX90,
 	{
 		// TODO: fit the cheap water stuff into the water shader so that we don't have to do
 		// 2 passes.
+#ifdef _X360
+		bool bForceExpensive = false;
+#else
 		bool bForceExpensive = r_waterforceexpensive.GetBool();
+#endif
 		bool bForceCheap = (params[FORCECHEAP]->GetIntValue() != 0) || UsingEditor( params );
 		if ( bForceCheap )
 		{
@@ -565,7 +541,11 @@ BEGIN_VS_SHADER( Water_DX90,
 		Assert( !( bForceCheap && bForceExpensive ) );
 
 		bool bRefraction = params[REFRACTTEXTURE]->IsTexture();
+#ifdef _X360
+		bool bReflection = params[REFLECTTEXTURE]->IsTexture();
+#else
 		bool bReflection = bForceExpensive && params[REFLECTTEXTURE]->IsTexture();
+#endif
 		bool bDrewSomething = false;
 		if ( !bForceCheap && ( bReflection || bRefraction ) )
 		{
@@ -575,7 +555,11 @@ BEGIN_VS_SHADER( Water_DX90,
 
 		// Use $decal to see if we are a decal or not. . if we are, then don't bother
 		// drawing the cheap version for now since we don't have access to env_cubemap
+#ifdef _X360
+		if( params[ENVMAP]->IsTexture() && !IS_FLAG_SET( MATERIAL_VAR_DECAL ) && !bForceExpensive )
+#else
 		if( !bReflection && params[ENVMAP]->IsTexture() && !IS_FLAG_SET( MATERIAL_VAR_DECAL ) )
+#endif
 		{
 			bDrewSomething = true;
 			DrawCheapWater( params, pShaderShadow, pShaderAPI, !bForceCheap, bRefraction );

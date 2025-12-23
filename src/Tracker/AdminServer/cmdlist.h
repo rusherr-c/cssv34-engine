@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,7 +15,7 @@
 #include "netadr.h"
 #include "maps.h"
 #include "rcon.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "Iresponse.h"
 
 class CSocket;

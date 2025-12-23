@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,8 +15,8 @@
 #include "serverpage.h"
 #include "DialogAddServer.h"
 #include "FavoriteGames.h"
-#include "FileSystem.h"
-#include "UtlBuffer.h"
+#include "filesystem.h"
+#include "tier1/utlbuffer.h"
 
 #include <VGUI_Controls.h>
 #include <VGUI_KeyValues.h>

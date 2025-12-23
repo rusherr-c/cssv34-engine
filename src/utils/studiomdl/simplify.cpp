@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // studiomdl.c: generates a studio .mdl file from a .qc script
 // models/<scriptname>.mdl.
@@ -27,6 +27,8 @@
 #include "bone_setup.h"
 #include "tier1/strtools.h"
 #include "mathlib/vmatrix.h"
+#include "mdlobjects/dmeboneflexdriver.h"
+
 
 class CBoneRenderBounds
 {
@@ -3800,6 +3802,163 @@ static void UpdateBonerefRecursive( s_source_t *psource, int nBoneIndex, int nFl
 
 
 //-----------------------------------------------------------------------------
+// Purpose: Returns the axis of the bone after remapping.  Axis 0:X, 1:Y, 2:Z
+//          If the bone has a parent, axis is returned as is, if bone does not
+//          have a parent then the $upaxis determines how the axes are mapped.
+//			Only $upaxis Y is supported (see comment in Cmd_UpAxis).
+//-----------------------------------------------------------------------------
+int GetRemappedBoneAxis( int nBoneIndex, int nAxis )
+{
+	if ( nBoneIndex < 0 || nBoneIndex >= g_numbones )
+		return nAxis;
+
+	if ( g_bonetable[nBoneIndex].parent >= 0 )
+		return nAxis;
+
+	// Y Up
+	if ( g_defaultrotation.x == static_cast< float >( M_PI / 2.0f ) && g_defaultrotation.y == 0.0f && g_defaultrotation.z == static_cast< float >( M_PI / 2.0f ) )
+	{
+		static const int nAxisMap[3] = { 1, 2, 0 };
+		return nAxisMap[ nAxis ];
+	}
+
+	// Default Z Up
+	return nAxis;
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Map the flex driver bones to the global bone table
+//          Also cleans up any that do not match to a global bone
+//-----------------------------------------------------------------------------
+void MapFlexDriveBonesToGlobalBoneTable()
+{
+	CDmeBoneFlexDriverList *pDmeBoneFlexDriverList = GetElement< CDmeBoneFlexDriverList >( g_hDmeBoneFlexDriverList );
+	if ( !pDmeBoneFlexDriverList )
+		return;
+
+	// Loop backwards so we can remove elements as we go
+	for ( int i = pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Count() - 1; i >= 0; --i )
+	{
+		CDmeBoneFlexDriver *pDmeBoneFlexDriver = pDmeBoneFlexDriverList->m_eBoneFlexDriverList[i];
+		if ( !pDmeBoneFlexDriver )
+		{
+			pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Remove( i );
+			continue;
+		}
+
+		for ( int j = 0; j < g_numbones; ++j )
+		{
+			if ( !Q_stricmp( g_bonetable[j].name, pDmeBoneFlexDriver->m_sBoneName.Get() ) )
+			{
+				if ( g_bonetable[j].flags & BONE_ALWAYS_PROCEDURAL )
+				{
+					MdlWarning( "DmeBoneFlexDriver Bone: %s is marked procedural, Ignoring flex drivers\n", pDmeBoneFlexDriver->m_sBoneName.Get() );
+					pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Remove( i );
+					pDmeBoneFlexDriver = NULL;
+				}
+
+				pDmeBoneFlexDriver->SetValue( "__boneIndex", j );
+				// Map the axis for Y up stuff
+				for ( int k = 0; k < pDmeBoneFlexDriver->m_eControlList.Count(); ++k )
+				{
+					pDmeBoneFlexDriver->m_eControlList[k]->m_nBoneComponent = GetRemappedBoneAxis( j, pDmeBoneFlexDriver->m_eControlList[k]->m_nBoneComponent );
+				}
+				break;
+			}
+		}
+
+		// Was removed because it was referencing a procedural bone
+		if ( !pDmeBoneFlexDriver )
+			continue;
+
+		CDmAttribute *pBoneIndexAttr = pDmeBoneFlexDriver->GetAttribute( "__boneIndex" );
+		if ( pBoneIndexAttr )
+		{
+			pBoneIndexAttr->AddFlag( FATTRIB_DONTSAVE );
+		}
+		else
+		{
+			MdlWarning( "DmeBoneFlexDriver Bone: %s - No Bone Found With That Name, Ignoring\n", pDmeBoneFlexDriver->m_sBoneName.Get() );
+			pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Remove( i );
+		}
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Tag bones in the specified source that are used as a bone flex driver
+//          Also cleans up any empty bone flex driver elements
+//			Also tags the DmeBoneFlexDriverControl with 
+//-----------------------------------------------------------------------------
+void TagFlexDriverBones( s_source_t *pSource )
+{
+	CDmeBoneFlexDriverList *pDmeBoneFlexDriverList = GetElement< CDmeBoneFlexDriverList >( g_hDmeBoneFlexDriverList );
+	if ( !pDmeBoneFlexDriverList )
+		return;
+
+	// Loop backwards so we can remove elements as we go
+	for ( int i = pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Count() - 1; i >= 0; --i )
+	{
+		CDmeBoneFlexDriver *pDmeBoneFlexDriver = pDmeBoneFlexDriverList->m_eBoneFlexDriverList[i];
+		if ( !pDmeBoneFlexDriver )
+		{
+			pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Remove( i );
+			continue;
+		}
+
+		for ( int j = pDmeBoneFlexDriver->m_eControlList.Count() - 1; j >= 0; --j )
+		{
+			CDmeBoneFlexDriverControl *pDmeBoneFlexDriverControl = pDmeBoneFlexDriver->m_eControlList[j];
+			if ( !pDmeBoneFlexDriverControl )
+			{
+				pDmeBoneFlexDriver->m_eControlList.Remove( j );
+				continue;
+			}
+
+			if ( pDmeBoneFlexDriverControl->m_nBoneComponent < STUDIO_BONE_FLEX_TX || pDmeBoneFlexDriverControl->m_nBoneComponent > STUDIO_BONE_FLEX_TZ )
+			{
+				MdlWarning( "DmeBoneFlexDriver Bone: %s - Flex Controller: %s, Bone Component Out Of Range: %d [0-2], Ignoring\n", pDmeBoneFlexDriver->m_sBoneName.Get(), pDmeBoneFlexDriverControl->m_sFlexControllerName.Get(), pDmeBoneFlexDriverControl->m_nBoneComponent.Get() );
+				pDmeBoneFlexDriver->m_eControlList.Remove( j );
+				continue;
+			}
+
+			for ( int k = 0; k < g_numflexcontrollers; ++k )
+			{
+				if ( !Q_stricmp( g_flexcontroller[k].name, pDmeBoneFlexDriverControl->m_sFlexControllerName.Get() ) )
+				{
+					pDmeBoneFlexDriverControl->SetValue( "__flexControlIndex", k );
+					break;
+				}
+			}
+
+			if ( !pDmeBoneFlexDriverControl->HasAttribute( "__flexControlIndex" ) )
+			{
+				MdlWarning( "DmeBoneFlexDriver Bone: %s - No Flex Controller Named: %s, Ignoring\n", pDmeBoneFlexDriver->m_sBoneName.Get(), pDmeBoneFlexDriverControl->m_sFlexControllerName.Get() );
+				pDmeBoneFlexDriver->m_eControlList.Remove( j );
+			}
+		}
+
+		if ( pDmeBoneFlexDriver->m_eControlList.Count() <= 0 )
+		{
+			MdlWarning( "DmeBoneFlexDriver Bone: %s - No Flex Controllers Defined, Ignoring\n", pDmeBoneFlexDriver->m_sBoneName.Get() );
+			pDmeBoneFlexDriverList->m_eBoneFlexDriverList.Remove( i );
+			continue;
+		}
+
+		for ( int j = 0; j < pSource->numbones; ++j )
+		{
+			if ( !Q_stricmp( pSource->localBone[j].name, pDmeBoneFlexDriver->m_sBoneName.Get() ) )
+			{
+				// Mark used by all LODs
+				pSource->boneflags[j] |= BONE_USED_BY_VERTEX_MASK;
+			}
+		}
+	}
+}
+
+
+//-----------------------------------------------------------------------------
 // Purpose: set "boneref" for all the source bones used by vertices, attachments, eyeballs, etc.
 //-----------------------------------------------------------------------------
 void TagUsedBones( )
@@ -3903,6 +4062,9 @@ void TagUsedBones( )
 			}
 		}
 
+		// Tag bones used as bone flex drivers, these need to be client side only
+		TagFlexDriverBones( psource );
+
 		// NOTE: This must come last; after all flags have been set!
 		// tag bonerefs as being used the union of the boneflags all their children
 		for (k = 0; k < psource->numbones; k++)
@@ -4005,7 +4167,7 @@ int BuildGlobalBonetable( )
 		if (k == -1)
 		{
 			k = g_numbones;
-			strcpyn( g_bonetable[k].name, g_importbone[i].name );
+			V_strcpy_safe( g_bonetable[k].name, g_importbone[i].name );
 			if ( strlen( g_importbone[i].parent ) == 0 )
 			{
 				g_bonetable[k].parent = -1;
@@ -4068,7 +4230,7 @@ int BuildGlobalBonetable( )
 			{
 				// create new bone
 				k = g_numbones;
-				strcpyn( g_bonetable[k].name, psource->localBone[j].name );
+				V_strcpy_safe( g_bonetable[k].name, psource->localBone[j].name );
 				if ((n = psource->localBone[j].parent) != -1)
 					g_bonetable[k].parent		= findGlobalBone( psource->localBone[n].name );
 				else
@@ -5089,6 +5251,9 @@ void RemapBones( )
 	{
 		MdlError( "Exiting due to errors\n" );
 	}
+
+	// Map the bone names to global bone indices for all BoneFlexDrivers
+	MapFlexDriveBonesToGlobalBoneTable();
 }
 
 

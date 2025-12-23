@@ -12,7 +12,6 @@
 #endif
 
 #include "ServerBrowser/blacklisted_server_manager.h"
-#include <time.h>
 
 //-----------------------------------------------------------------------------
 // Purpose: Blacklisted servers list
@@ -62,7 +61,7 @@ private:
 	vgui::DHANDLE< vgui::FileOpenDialog >	m_hImportDialog;
 
 	CBlacklistedServerManager m_blackList;
-	time_t m_blackListTimestamp;
+	long m_blackListTimestamp;
 };
 
 

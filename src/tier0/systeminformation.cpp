@@ -1,4 +1,4 @@
-//====== Copyright c 1996-2007, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -132,7 +132,6 @@ CSysCallCacheEntry::CSysCallCacheEntry() :
 	m_bInitialized( false ),
 	m_bFreeModule( false )
 {
-	NULL;
 }
 
 CSysCallCacheEntry::~CSysCallCacheEntry()
@@ -270,7 +269,7 @@ SYSTEM_CALL_RESULT_t Plat_GetPagedPoolInfo( PAGED_POOL_INFO_t *pPPI )
 	}
 
 	// Invoke proc
-	PrivateType( SYSTEM_PERFORMANCE_INFORMATION ) spi;
+	PrivateType( SYSTEM_PERFORMANCE_INFORMATION ) spi = {};
 	ULONG ulLength = sizeof( spi );
 	PrivateType( NTSTATUS ) lResult =
 		( qsi.GetFunction< PrivateType( NtQuerySystemInformation ) >() )

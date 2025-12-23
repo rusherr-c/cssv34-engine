@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@
 
 #include "utlvector.h"
 #include "userid.h"
-#include "filter.h"
+#include "vfilter.h" // Renamed to avoid conflict with Microsoft's filter.h
 
 void Filter_Init( void );
 void Filter_Shutdown( void );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,9 @@
 #include "changeframelist.h"
 #include "sv_main.h"
 #include "hltvserver.h"
+#if defined( REPLAY_ENABLED )
+#include "replayserver.h"
+#endif
 #include "dt_instrumentation_server.h"
 #include "LocalNetworkBackdoor.h"
 #include "tier0/vprof.h"
@@ -54,8 +57,6 @@ static inline bool SV_EnsurePrivateData(edict_t *pEdict)
 	}
 }
 
-static CThreadFastMutex s_mInstanceBaselineMutex;
-
 // This function makes sure that this entity class has an instance baseline.
 // If it doesn't have one yet, it makes a new one.
 void SV_EnsureInstanceBaseline( ServerClass *pServerClass, int iEdict, const void *pData, int nBytes )
@@ -67,24 +68,38 @@ void SV_EnsureInstanceBaseline( ServerClass *pServerClass, int iEdict, const voi
 
 	ServerClass *pClass = pEnt->GetNetworkable()->GetServerClass();
 
+	// See if we already have a baseline for this class.
 	if ( pClass->m_InstanceBaselineIndex == INVALID_STRING_INDEX )
 	{
-		char idString[32];
-		Q_snprintf( idString, sizeof( idString ), "%d", pClass->m_ClassID );
+		AUTO_LOCK( g_svInstanceBaselineMutex );
 
+		// We need this second check in case multiple instances of the same class have grabbed the lock.
+		if ( pClass->m_InstanceBaselineIndex == INVALID_STRING_INDEX )
 		{
-			AUTO_LOCK_FM( s_mInstanceBaselineMutex );
+			char idString[32];
+			Q_snprintf( idString, sizeof( idString ), "%d", pClass->m_ClassID );
 
 			// Ok, make a new instance baseline so they can reference it.
-			pClass->m_InstanceBaselineIndex = sv.GetInstanceBaselineTable()->AddString( 
+			int temp = sv.GetInstanceBaselineTable()->AddString( 
 				true,
 				idString,	// Note we're sending a string with the ID number, not the class name.
 				nBytes,
 				pData );
-		}
 
-		Assert( pClass->m_InstanceBaselineIndex != INVALID_STRING_INDEX );
+			// Insert a compiler and/or CPU memory barrier to ensure that all side-effects have
+			// been published before the index is published. Otherwise the string index may
+			// be visible before its initialization has finished. This potential problem is caused
+			// by the use of double-checked locking -- the problem is that the code outside of the
+			// lock is looking at the variable that is protected by the lock. See this article for details:
+			// http://en.wikipedia.org/wiki/Double-checked_locking
+			// Write-release barrier
+			ThreadMemoryBarrier();
+			pClass->m_InstanceBaselineIndex = temp;
+			Assert( pClass->m_InstanceBaselineIndex != INVALID_STRING_INDEX );
+		}
 	}
+	// Read-acquire barrier
+	ThreadMemoryBarrier();
 }
 
 //-----------------------------------------------------------------------------
@@ -98,6 +113,7 @@ static inline void SV_PackEntity(
 	CFrameSnapshot *pSnapshot )
 {
 	Assert( edictIdx < pSnapshot->m_nNumEntities );
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "PackEntities_Normal%s", __FUNCTION__ );
 
 	int iSerialNum = pSnapshot->m_pEntities[ edictIdx ].m_nSerialNumber;
 
@@ -119,7 +135,7 @@ static inline void SV_PackEntity(
 	}
 	
 	// First encode the entity's data.
-	char packedData[MAX_PACKEDENTITY_DATA];
+	ALIGN4 char packedData[MAX_PACKEDENTITY_DATA] ALIGN4_POST;
 	bf_write writeBuf( "SV_PackEntity->writeBuf", packedData, sizeof( packedData ) );
 
 	SendTable *pSendTable = pServerClass->m_pTable;
@@ -213,9 +229,13 @@ static inline void SV_PackEntity(
 		}
 
 #ifndef _XBOX	
+#if defined( REPLAY_ENABLED )
+		if ( (hltv && hltv->IsActive()) || (replay && replay->IsActive()) )
+#else
 		if ( hltv && hltv->IsActive() )
+#endif
 		{
-			// in HLTV mode every PackedEntity keeps it's own ChangeFrameList
+			// in HLTV or Replay mode every PackedEntity keeps it's own ChangeFrameList
 			// we just copy the ChangeFrameList from prev frame and update it
 			pChangeFrame = pPrevFrame->GetChangeFrameList();
 			pChangeFrame = pChangeFrame->Copy(); // allocs and copies ChangeFrameList
@@ -270,7 +290,7 @@ void SV_FillHLTVData( CFrameSnapshot *pSnapshot, edict_t *edict, int iValidEdict
 		}
 		else
 		{
-			// otherwise save PVS head node for larger entitys
+			// otherwise save PVS head node for larger entities
 			pHLTVData->m_nNodeCluster = pvsInfo->m_nHeadNode | (1<<31);
 		}
 
@@ -282,6 +302,34 @@ void SV_FillHLTVData( CFrameSnapshot *pSnapshot, edict_t *edict, int iValidEdict
 #endif
 }
 
+// in Replay mode we ALWAYS have to store position and PVS info, even if entity didnt change
+void SV_FillReplayData( CFrameSnapshot *pSnapshot, edict_t *edict, int iValidEdict )
+{
+#if !defined( _XBOX )
+	if ( pSnapshot->m_pReplayEntityData && edict )
+	{
+		CReplayEntityData *pReplayData = &pSnapshot->m_pReplayEntityData[iValidEdict];
+
+		PVSInfo_t *pvsInfo = edict->GetNetworkable()->GetPVSInfo();
+
+		if ( pvsInfo->m_nClusterCount == 1 )
+		{
+			// store cluster, if entity spawns only over one cluster
+			pReplayData->m_nNodeCluster = pvsInfo->m_pClusters[0];
+		}
+		else
+		{
+			// otherwise save PVS head node for larger entities
+			pReplayData->m_nNodeCluster = pvsInfo->m_nHeadNode | (1<<31);
+		}
+
+		// remember origin
+		pReplayData->origin[0] = pvsInfo->m_vCenter[0];
+		pReplayData->origin[1] = pvsInfo->m_vCenter[1];
+		pReplayData->origin[2] = pvsInfo->m_vCenter[2];
+	}
+#endif
+}
 
 // Returns the SendTable that should be used with the specified edict.
 SendTable* GetEntSendTable(edict_t *pEdict)
@@ -357,7 +405,8 @@ void PackEntities_Normal(
 	CGameClient **clients,
 	CFrameSnapshot *snapshot )
 {
-	Assert( snapshot->m_nValidEntities <= MAX_EDICTS );
+	Assert( snapshot->m_nValidEntities >= 0 && snapshot->m_nValidEntities <= MAX_EDICTS );
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s %d", __FUNCTION__, snapshot->m_nValidEntities );
 
 	CUtlVectorFixed< PackWork_t, MAX_EDICTS > workItems;
 
@@ -370,10 +419,13 @@ void PackEntities_Normal(
 		Assert( index < snapshot->m_nNumEntities );
 
 		edict_t* edict = &sv.edicts[ index ];
-				
+
 		// if HLTV is running save PVS info for each entity
 		SV_FillHLTVData( snapshot, edict, iValidEdict );
 		
+		// if Replay is running save PVS info for each entity
+		SV_FillReplayData( snapshot, edict, iValidEdict );
+
 		// Check to see if the entity changed this frame...
 		//ServerDTI_RegisterNetworkStateChange( pSendTable, ent->m_bStateChanged );
 
@@ -399,7 +451,7 @@ void PackEntities_Normal(
 	// Process work
 	if ( sv_parallel_packentities.GetBool() )
 	{
-		ParallelProcess( "", workItems.Base(), workItems.Count(), &PackWork_t::Process );
+		ParallelProcess( "PackWork_t::Process", workItems.Base(), workItems.Count(), &PackWork_t::Process );
 	}
 	else
 	{
@@ -424,6 +476,8 @@ void SV_ComputeClientPacks(
 	CGameClient **clients,
 	CFrameSnapshot *snapshot )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	MDLCACHE_CRITICAL_SECTION_(g_pMDLCache);
 	// Do some setup for each client
 	{
@@ -585,10 +639,17 @@ void CGameServer::AssignClassIds()
 	serverclasses = nClasses;
 	serverclassbits = Q_log2( serverclasses ) + 1;
 
+	bool bSpew = CommandLine()->FindParm( "-netspike" ) != 0;
+
 	int curID = 0;
 	for ( ServerClass *pClass=pClasses; pClass; pClass=pClass->m_pNext )
 	{
 		pClass->m_ClassID = curID++;
+
+		if ( bSpew )
+		{
+			Msg( "%d == '%s'\n", pClass->m_ClassID, pClass->GetName() );
+		}
 	}
 }
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,6 +12,7 @@
 #endif
 
 #include <vgui_controls/Frame.h>
+#include "steam/steamclientpublic.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: List of players, their ingame-name and their friends-name
@@ -33,9 +34,20 @@ private:
 	void ToggleMuteStateOfSelectedUser();
 	void RefreshPlayerProperties();
 
+	void OnKeyCodePressed( vgui::KeyCode code )
+	{
+		if ( code == KEY_XBUTTON_B )
+		{
+			Close();
+		}
+		else
+		{
+			BaseClass::OnKeyCodePressed(code);
+		}
+	}
+
 	vgui::ListPanel *m_pPlayerList;
 	vgui::Button *m_pMuteButton;
 };
-
 
 #endif // PLAYERLISTDIALOG_H

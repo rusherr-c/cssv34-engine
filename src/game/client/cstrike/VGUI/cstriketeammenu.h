@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -33,7 +33,8 @@ private:
 	enum { NUM_TEAMS = 3 };
 
 	// VGUI2 override
-	void OnCommand( const char *command);
+	virtual void OnCommand( const char *command);
+	virtual void OnKeyCodePressed( vgui::KeyCode code );
 	// helper functions
 	void SetVisibleButton(const char *textEntryName, bool state);
 

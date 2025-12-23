@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -95,8 +95,8 @@ BEGIN_VS_SHADER_FLAGS( floatcombine, "Help for floatcombine", SHADER_NOT_EDITABL
 			ITexture *base_texture=params[BASETEXTURE]->GetTextureValue();
 			ITexture *bloom_texture=params[BLOOMTEXTURE]->GetTextureValue();
 
-			float v0[4]={1.0/base_texture->GetActualWidth(),1.0/base_texture->GetActualHeight(),
-						 1.0/bloom_texture->GetActualWidth(),1.0/bloom_texture->GetActualHeight()};
+			float v0[4]={ (float)(1.0/base_texture->GetActualWidth()), (float)(1.0/base_texture->GetActualHeight()),
+				      (float)(1.0/bloom_texture->GetActualWidth()), (float)(1.0/bloom_texture->GetActualHeight()) };
 			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, v0, 1 );
 
 			DECLARE_DYNAMIC_VERTEX_SHADER( screenspaceeffect_vs20 );

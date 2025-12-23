@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -54,10 +54,11 @@
 #include "ViewerSettings.h"
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/imaterialproxyfactory.h"
-#include "FileSystem.h"
-#include "materialsystem/IMesh.h"
+#include "filesystem.h"
+#include <keyvalues.h>
+#include "materialsystem/imesh.h"
 #include "materialsystem/IMaterialSystemHardwareConfig.h"
-#include "materialsystem/ITexture.h"
+#include "materialsystem/itexture.h"
 #include "materialsystem/MaterialSystem_Config.h"
 #include "tier0/dbg.h"
 #include "istudiorender.h"
@@ -68,6 +69,8 @@
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "soundsystem/isoundsystem.h"
 #include "soundchars.h"
+#include <optimize.h>
+#include "valve_ipc_win32.h"
 
 extern char g_appTitle[];
 extern bool g_bInError;
@@ -75,6 +78,9 @@ extern int g_dxlevel;
 
 extern ISoundEmitterSystemBase *g_pSoundEmitterBase;
 extern ISoundSystem *g_pSoundSystem;
+
+extern CValveIpcClientUtl g_HlmvIpcClient;
+extern bool g_bHlmvMaster;
 
 
 void UpdateSounds()
@@ -153,6 +159,8 @@ Vector g_vright( 50, 50, 0 );		// needs to be set to viewer's right in order for
 IMaterial *g_materialBackground = NULL;
 IMaterial *g_materialWireframe = NULL;
 IMaterial *g_materialWireframeVertexColor = NULL;
+IMaterial *g_materialWireframeVertexColorNoCull = NULL;
+IMaterial *g_materialDebugCopyBaseTexture = NULL;
 IMaterial *g_materialFlatshaded = NULL;
 IMaterial *g_materialSmoothshaded = NULL;
 IMaterial *g_materialBones = NULL;
@@ -198,15 +206,78 @@ MatSysWindow::MatSysWindow (mxWindow *parent, int x, int y, int w, int h, const 
 	pRenderContext->BindLocalCubemap( m_pCubemapTexture );
 
 	g_materialBackground	= g_pMaterialSystem->FindMaterial("hlmv/background", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialBackground )
+	{
+		g_materialBackground->AddRef();
+	}
 	g_materialWireframe		= g_pMaterialSystem->FindMaterial("debug/debugmrmwireframe", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialWireframe )
+	{
+		g_materialWireframe->AddRef();
+	}
 	g_materialWireframeVertexColor = g_pMaterialSystem->FindMaterial("debug/debugwireframevertexcolor", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialWireframeVertexColor )
+	{
+		g_materialWireframeVertexColor->AddRef();
+	}
+	// test: create this from code - you need a vmt to make $nocull 1 happen, can't do it from the render context
+	{
+		KeyValues *pVMTKeyValues = new KeyValues( "Wireframe" );
+		pVMTKeyValues->SetInt("$ignorez", 1);
+		pVMTKeyValues->SetInt("$nocull", 1);
+		pVMTKeyValues->SetInt("$vertexcolor", 1);
+		pVMTKeyValues->SetInt("$decal", 1);
+		g_materialWireframeVertexColorNoCull = g_pMaterialSystem->CreateMaterial( "debug/wireframenocull", pVMTKeyValues );
+		if ( g_materialWireframeVertexColorNoCull )
+		{
+			g_materialWireframeVertexColorNoCull->AddRef();
+		}
+	}
+	{
+		KeyValues *pVMTKeyValues = new KeyValues( "UnlitGeneric" );
+		pVMTKeyValues->SetString("$basetexture", "vgui/white" );
+		g_materialDebugCopyBaseTexture = g_pMaterialSystem->CreateMaterial( "debug/copybasetexture", pVMTKeyValues );
+		if ( g_materialDebugCopyBaseTexture )
+		{
+			g_materialDebugCopyBaseTexture->AddRef();
+		}
+	}
+
 	g_materialFlatshaded	= g_pMaterialSystem->FindMaterial("debug/debugdrawflatpolygons", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialFlatshaded )
+	{
+		g_materialFlatshaded->AddRef();
+	}
 	g_materialSmoothshaded	= g_pMaterialSystem->FindMaterial("debug/debugmrmfullbright2", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialSmoothshaded )
+	{
+		g_materialSmoothshaded->AddRef();
+	}
 	g_materialBones			= g_pMaterialSystem->FindMaterial("debug/debugskeleton", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialBones )
+	{
+		g_materialBones->AddRef();
+	}
 	g_materialLines			= g_pMaterialSystem->FindMaterial("debug/debugwireframevertexcolor", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialLines )
+	{
+		g_materialLines->AddRef();
+	}
 	g_materialFloor			= g_pMaterialSystem->FindMaterial("hlmv/floor", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialFloor )
+	{
+		g_materialFloor->AddRef();
+	}
 	g_materialVertexColor   = g_pMaterialSystem->FindMaterial("debug/debugvertexcolor", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialVertexColor )
+	{
+		g_materialVertexColor->AddRef();
+	}
 	g_materialShadow		= g_pMaterialSystem->FindMaterial("hlmv/shadow", TEXTURE_GROUP_OTHER, true);
+	if ( g_materialShadow )
+	{
+		g_materialShadow->AddRef();
+	}
 	if (!parent)
 		setVisible (true);
 	else
@@ -256,6 +327,30 @@ MatSysWindow::handleEvent (mxEvent *event)
 	//		dt = 0.001;
 
 			g_pStudioModel->AdvanceFrame ( dt * g_viewerSettings.speedScale );
+			if ( g_viewerSettings.animateWeapons )
+			{
+				const char *pszMainSequenceName = g_pStudioModel->GetSequenceName( g_pStudioModel->GetSequence() );
+				if ( pszMainSequenceName )
+				{
+					for ( int i = 0; i < HLMV_MAX_MERGED_MODELS; i++ )
+					{
+						if ( !g_pStudioExtraModel[ i ] )
+							continue;
+
+						// match weapon sequence and frame to marine
+						int iSequence = g_pStudioExtraModel[ i ]->LookupSequence( pszMainSequenceName );
+						if ( iSequence == -1 )
+						{
+							g_pStudioExtraModel[ i ]->SetFrame( 0 );
+						}
+						else
+						{
+							g_pStudioExtraModel[ i ]->SetSequence( iSequence );
+							g_pStudioExtraModel[ i ]->SetFrame( g_pStudioModel->GetCycle() * g_pStudioExtraModel[ i ]->GetMaxFrame() );
+						}
+					}
+				}
+			}
 			g_ControlPanel->updateFrameSlider( );
 			g_ControlPanel->updateGroundSpeed( );
 		}
@@ -308,17 +403,19 @@ MatSysWindow::handleEvent (mxEvent *event)
 
 	case mxEvent::MouseDrag:
 	{
-		if (event->buttons & mxEvent::MouseLeftButton)
+		bool bSendModelTransform = true;
+
+		if ( event->buttons & mxEvent::MouseLeftButton )
 		{
-			if (event->modifiers & mxEvent::KeyShift)
+			if ( event->modifiers & mxEvent::KeyShift )
 			{
-				g_pStudioModel->m_origin[1] = oldty - (float) (event->x - oldx);
-				g_pStudioModel->m_origin[2] = oldtz + (float) (event->y - oldy);
+				g_pStudioModel->m_origin[1] = oldty - (float)( event->x - oldx );
+				g_pStudioModel->m_origin[2] = oldtz + (float)( event->y - oldy );
 			}
-			else if (event->modifiers & mxEvent::KeyCtrl)
+			else if ( event->modifiers & mxEvent::KeyCtrl )
 			{
-				float ry = (float) (event->y - oldy);
-				float rx = (float) (event->x - oldx);
+				float ry = (float)( event->y - oldy );
+				float rx = (float)( event->x - oldx );
 				oldx = event->x;
 				oldy = event->y;
 
@@ -332,13 +429,15 @@ MatSysWindow::handleEvent (mxEvent *event)
 
 				// g_viewerSettings.lightrot[0] = oldlrx + (float) (event->y - oldy);
 				// g_viewerSettings.lightrot[1] = oldlry + (float) (event->x - oldx);
+
+				bSendModelTransform = false;
 			}
 			else
 			{
-				if (!g_viewerSettings.rotating)
+				if ( !g_viewerSettings.rotating )
 				{
-					float ry = (float) (event->y - oldy);
-					float rx = (float) (event->x - oldx);
+					float ry = (float)( event->y - oldy );
+					float rx = (float)( event->x - oldx );
 					oldx = event->x;
 					oldy = event->y;
 
@@ -359,8 +458,8 @@ MatSysWindow::handleEvent (mxEvent *event)
 				}
 				else
 				{
-					float ang1 = (180 / 3.1415) * atan2( oldx - w()/2.0, oldy - h()/2.0 );
-					float ang2 = (180 / 3.1415) * atan2( event->x - w()/2.0, event->y - h()/2.0 );
+					float ang1 = ( 180 / 3.1415 ) * atan2( oldx - w() / 2.0, oldy - h() / 2.0 );
+					float ang2 = ( 180 / 3.1415 ) * atan2( event->x - w() / 2.0, event->y - h() / 2.0 );
 					oldx = event->x;
 					oldy = event->y;
 
@@ -374,11 +473,24 @@ MatSysWindow::handleEvent (mxEvent *event)
 				}
 			}
 		}
-		else if (event->buttons & mxEvent::MouseRightButton)
+		else if ( event->buttons & mxEvent::MouseRightButton )
 		{
-			g_pStudioModel->m_origin[0] = oldtx + (float) (event->y - oldy);
+			g_pStudioModel->m_origin[0] = oldtx + (float)( event->y - oldy );
 		}
-		redraw ();
+
+		if ( g_bHlmvMaster )
+		{
+			if ( bSendModelTransform )
+			{
+				g_MDLViewer->SendModelTransformToLinkedHlmv();
+			}
+			else
+			{
+				g_MDLViewer->SendLightRotToLinkedHlmv();
+			}
+		}
+
+		redraw();
 
 		return 1;
 	}
@@ -902,13 +1014,45 @@ MatSysWindow::draw ()
 	g_ControlPanel->setLODMetric( metric );
 
 	g_ControlPanel->setPolycount( polycount );
+
+	int nVertCount = 0;
+	int nIndexCount = 0;
+	int nTriCount = 0;
+
+	CStudioHdr *pStudioHdr = g_pStudioModel->GetStudioHdr();
+	if ( pStudioHdr != NULL )
+	{
+		studiohwdata_t *pHardwareData = g_pStudioModel->GetHardwareData();
+		if ( pHardwareData != NULL )
+		{
+			studioloddata_t *pLODData = &pHardwareData->m_pLODs[ pHardwareData->m_RootLOD ];
+			for ( int meshID = 0; meshID < pHardwareData->m_NumStudioMeshes; meshID++ )
+			{
+				studiomeshdata_t *pMesh = &pLODData->m_pMeshData[meshID];
+				for ( int groupID = 0; groupID < pMesh->m_NumGroup; groupID++ )
+				{
+					studiomeshgroup_t	*pMeshGroup = &pMesh->m_pMeshGroup[ groupID ];
+
+					for( int j = 0; j < pMeshGroup->m_NumStrips; j++ )
+					{
+						nIndexCount += pMeshGroup->m_pStripData[ j ].numIndices;
+						nVertCount += pMeshGroup->m_pStripData[ j ].numVerts;
+						nTriCount += ( pMeshGroup->m_pStripData[ j ].numIndices / 3 );
+					}
+				}
+			}
+		}
+	}
+
+	g_ControlPanel->setModelInfo( nVertCount, nIndexCount, nTriCount );
+
 	g_ControlPanel->setTransparent( g_pStudioModel->m_bIsTransparent );
 
 	g_ControlPanel->updatePoseParameters( );
 	
 	// draw what ever else is loaded
 	int i;
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < HLMV_MAX_MERGED_MODELS; i++)
 	{
 		if (g_pStudioExtraModel[i] != NULL)
 		{

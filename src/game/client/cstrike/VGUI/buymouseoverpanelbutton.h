@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #endif
 
 #include <KeyValues.h>
-#include <FileSystem.h>
+#include <filesystem.h>
 #include "mouseoverpanelbutton.h"
 #include "hud.h"
 #include "c_cs_player.h"
@@ -186,7 +186,7 @@ public:
 			{
 				const int BufLen = 2048;
 				wchar_t wbuf[BufLen] = L"";
-				wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketPreviousPrice");
+				const wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketPreviousPrice");
 
 				if ( !formatStr )
 					formatStr = L"%s1";
@@ -208,7 +208,7 @@ public:
 			{
 				const int BufLen = 2048;
 				wchar_t wbuf[BufLen] = L"";
-				wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketCurrentPrice");
+				const wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketCurrentPrice");
 
 				if ( !formatStr )
 					formatStr = L"%s1";
@@ -230,7 +230,7 @@ public:
 			{
 				const int BufLen = 2048;
 				wchar_t wbuf[BufLen] = L"";
-				wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketDeltaPrice");
+				const wchar_t *formatStr = g_pVGuiLocalize->Find("#Cstrike_MarketDeltaPrice");
 
 				if ( !formatStr )
 					formatStr = L"%s1";

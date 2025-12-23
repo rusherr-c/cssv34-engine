@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -564,7 +564,7 @@ void DispInfo_BuildPrimLists( int nSortGroup, SurfaceHandle_t *pList, int listCo
 
 ConVar disp_dynamic( "disp_dynamic", "0" );
 
-void DispInfo_DrawPrimLists( bool bShadowDepth )
+void DispInfo_DrawPrimLists( ERenderDepthMode DepthMode )
 {
 #ifndef SWDS
 	VPROF("DispInfo_DrawPrimLists");
@@ -581,12 +581,20 @@ void DispInfo_DrawPrimLists( bool bShadowDepth )
 		if( pGroup->m_nVisible == 0 )
 			continue;
 
-		if ( bShadowDepth )
+		if ( DepthMode != DEPTH_MODE_NORMAL )
 		{
 			// Select proper override material
 			int nAlphaTest = (int) pGroup->m_pMaterial->IsAlphaTested();
 			int nNoCull = (int) pGroup->m_pMaterial->IsTwoSided();
-			IMaterial *pDepthWriteMaterial = g_pMaterialDepthWrite[nAlphaTest][nNoCull];
+			IMaterial *pDepthWriteMaterial;
+			if ( DepthMode == DEPTH_MODE_SHADOW )
+			{
+				pDepthWriteMaterial = g_pMaterialDepthWrite[nAlphaTest][nNoCull];
+			}
+			else
+			{
+				pDepthWriteMaterial = g_pMaterialSSAODepthWrite[nAlphaTest][nNoCull];
+			}
 
 			if ( nAlphaTest == 1 )
 			{
@@ -627,7 +635,7 @@ void DispInfo_DrawPrimLists( bool bShadowDepth )
 			pRenderContext->Bind( pGroup->m_pMaterial );
 		}
 
-		if( nFullbright != 1 && !bShadowDepth )
+		if( nFullbright != 1 && DepthMode == DEPTH_MODE_NORMAL )
 		{
 			pRenderContext->BindLightmapPage( pGroup->m_LightmapPageID );
 		}
@@ -817,8 +825,10 @@ void DispInfo_DrawDecalsGroup( int iGroup, int iTreeType )
 	int nVertCount = 0;
 	int nIndexCount = 0;
 
-	int nDecalSortMaxVerts = g_nMaxDecals * 5;
-	int nDecalSortMaxIndices = nDecalSortMaxVerts * 3;
+	
+	int nDecalSortMaxVerts;
+	int nDecalSortMaxIndices;
+	R_DecalsGetMaxMesh( pRenderContext, nDecalSortMaxVerts, nDecalSortMaxIndices );
 
 	bool bMatWireframe = ShouldDrawInWireFrameMode();
 
@@ -868,11 +878,6 @@ void DispInfo_DrawDecalsGroup( int iGroup, int iTreeType )
 					DevMsg( "DispInfo_DrawDecalsGroup: material is NULL decal %i.\n", pDecal->m_DispDecal );
 					continue;
 				}
-				bool bIsMaterialInPage = pMaterial->InMaterialPage();
-
-				float matOffset[2], matScale[2];
-				pMaterial->GetMaterialOffset( matOffset );
-				pMaterial->GetMaterialScale( matScale );
 
 				DispDecalFragmentHandle_t hFrag = decal.m_FirstFragment;
 				while ( hFrag != DISP_DECAL_FRAGMENT_HANDLE_INVALID )
@@ -948,7 +953,7 @@ void DispInfo_DrawDecalsGroup( int iGroup, int iTreeType )
 					Assert ( pBatch );
 	
 					// Setup verts.
-					float flOffset = ComputeDecalLightmapOffset( fragment.m_pDecal->surfID );
+					float flOffset = fragment.m_pDecal->lightmapOffset;
 					for ( int iVert = 0; iVert < fragment.m_nVerts; ++iVert )
 					{
 						const CDecalVert &vert = fragment.m_pVerts[iVert];
@@ -957,16 +962,8 @@ void DispInfo_DrawDecalsGroup( int iGroup, int iTreeType )
 						// FIXME!!  Really want the normal from the displacement, not from the base surface.
 						Vector &normal = MSurf_Plane( fragment.m_pDecal->surfID ).normal;
 						meshBuilder.Normal3fv( normal.Base() );
-						meshBuilder.Color4ub( 255, 255, 255, 255 );
-						if ( bIsMaterialInPage )
-						{
-							meshBuilder.TexCoordSubRect2f( 0, vert.m_ctCoords.x, vert.m_ctCoords.y, 
-								                           matOffset[0], matOffset[1], matScale[0], matScale[1] );
-						}
-						else
-						{
-							meshBuilder.TexCoord2f( 0, vert.m_ctCoords.x, vert.m_ctCoords.y );
-						}
+						meshBuilder.Color4ub( fragment.m_pDecal->color.r, fragment.m_pDecal->color.g, fragment.m_pDecal->color.b, fragment.m_pDecal->color.a );
+						meshBuilder.TexCoord2f( 0, vert.m_ctCoords.x, vert.m_ctCoords.y );
 						meshBuilder.TexCoord2f( 1, vert.m_cLMCoords.x, vert.m_cLMCoords.y );
 						meshBuilder.TexCoord1f( 2, flOffset );
 						meshBuilder.AdvanceVertex();
@@ -974,12 +971,8 @@ void DispInfo_DrawDecalsGroup( int iGroup, int iTreeType )
 
 					// Setup indices.
 					int nTriCount = ( nCount - 2 );
-					for ( int iTri = 0; iTri < nTriCount; ++iTri )
-					{
-						meshBuilder.FastIndex( nVertCount );
-						meshBuilder.FastIndex( nVertCount + iTri + 1 );
-						meshBuilder.FastIndex( nVertCount + iTri + 2 );
-					}
+					CIndexBuilder &indexBuilder = meshBuilder;
+					indexBuilder.FastPolygon( nVertCount, nTriCount );
 					
 					// Update counters.
 					nVertCount += nCount;
@@ -1414,7 +1407,7 @@ static void DispInfo_DrawDebugInformation( SurfaceHandle_t *pList, int listCount
 //-----------------------------------------------------------------------------
 // Renders all displacements in sorted order 
 //-----------------------------------------------------------------------------
-void DispInfo_RenderList( int nSortGroup, SurfaceHandle_t *pList, int listCount, bool bOrtho, unsigned long flags, bool bShadowDepth )
+void DispInfo_RenderList( int nSortGroup, SurfaceHandle_t *pList, int listCount, bool bOrtho, unsigned long flags, ERenderDepthMode DepthMode )
 {
 #ifndef SWDS
 	if( !r_DrawDisp.GetInt() || !listCount )
@@ -1426,13 +1419,13 @@ void DispInfo_RenderList( int nSortGroup, SurfaceHandle_t *pList, int listCount,
 	CDispInfo *visibleDisps[MAX_MAP_DISPINFO];
 	int nVisibleDisps;
 
-	DispInfo_BuildPrimLists( nSortGroup, pList, listCount, bShadowDepth, visibleDisps, nVisibleDisps );
+	DispInfo_BuildPrimLists( nSortGroup, pList, listCount, ( DepthMode != DEPTH_MODE_NORMAL ), visibleDisps, nVisibleDisps );
 
 	// Draw..
-	DispInfo_DrawPrimLists( bShadowDepth );
+	DispInfo_DrawPrimLists( DepthMode );
 
 	// Skip the rest if this is a shadow depth map pass
-	if ( bShadowDepth )
+	if ( ( DepthMode != DEPTH_MODE_NORMAL ) )
 		return;
 
 	// Add all displacements to the shadow render list

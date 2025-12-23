@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,12 +16,10 @@
 // Includes
 //--------------------------------------------------------------------------------------------------------------
 
-#ifdef _WIN32
-
 // fopen is needed for the bzip code
 #undef fopen
 
-#if !defined( _X360 )
+#if defined( WIN32 ) && !defined( _X360 )
 #include "winlite.h"
 #include <WinInet.h>
 #endif
@@ -29,9 +27,11 @@
 #include <assert.h>
 
 #include "download.h"
+#include "tier0/platform.h"
 #include "download_internal.h"
 
 #include "client.h"
+#include "net_chan.h"
 
 #include <KeyValues.h>
 #include "filesystem.h"
@@ -39,12 +39,15 @@
 #include "server.h"
 #include "vgui_baseui_interface.h"
 #include "tier0/vcrmode.h"
+#include "cdll_engine_int.h"
 
-#include "../thirdparty/bzip2/bzlib.h"
+#include "../utils/bzip2/bzlib.h"
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
 #endif
+
+#include "engine/idownloadsystem.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -56,14 +59,9 @@ Color DownloadColor			(   0, 200, 100, 255 );
 Color DownloadErrorColor	( 200, 100, 100, 255 );
 Color DownloadCompleteColor	( 100, 200, 100, 255 );
 
-//--------------------------------------------------------------------------------------------------------------
-static char * CloneString( const char *original )
-{
-	char *newString = new char[ Q_strlen( original ) + 1 ];
-	Q_strcpy( newString, original );
+ConVar download_debug( "download_debug", "0", FCVAR_DONTRECORD );	// For debug printouts
 
-	return newString;
-}
+const char k_szDownloadPathID[] = "download";
 
 //--------------------------------------------------------------------------------------------------------------
 // Class Definitions
@@ -79,15 +77,15 @@ public:
 	~DownloadCache();
 	void Init();
 
-	void GetCachedData( RequestContext *rc );			///< Loads cached data, if any
-	void PersistToDisk( const RequestContext *rc );		///< Writes out a completed download to disk
-	void PersistToCache( const RequestContext *rc );	///< Writes out a partial download (lost connection, user abort, etc) to cache
+	void GetCachedData( RequestContext_t *rc );			///< Loads cached data, if any
+	void PersistToDisk( const RequestContext_t *rc );		///< Writes out a completed download to disk
+	void PersistToCache( const RequestContext_t *rc );	///< Writes out a partial download (lost connection, user abort, etc) to cache
 
 private:
 	KeyValues *m_cache;
 
-	void GetCacheFilename( const RequestContext *rc, char cachePath[_MAX_PATH] );
-	void GenerateCacheFilename( const RequestContext *rc, char cachePath[_MAX_PATH] );
+	void GetCacheFilename( const RequestContext_t *rc, char cachePath[_MAX_PATH] );
+	void GenerateCacheFilename( const RequestContext_t *rc, char cachePath[_MAX_PATH] );
 
 	void BuildKeyNames( const char *gamePath );			///< Convenience function to build the keys to index into m_cache
 	char m_cachefileKey[BufferSize + 64];
@@ -116,7 +114,7 @@ void DownloadCache::BuildKeyNames( const char *gamePath )
 		return;
 	}
 
-	char *tmpGamePath = CloneString( gamePath );
+	char *tmpGamePath = V_strdup( gamePath );
 	char *tmp = tmpGamePath;
 	while ( *tmp )
 	{
@@ -146,7 +144,7 @@ void DownloadCache::Init()
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadCache::GetCachedData( RequestContext *rc )
+void DownloadCache::GetCachedData( RequestContext_t *rc )
 {
 	if ( !m_cache )
 		return;
@@ -192,7 +190,7 @@ static bool DecompressBZipToDisk( const char *outFilename, const char *srcFilena
 	}
 
 	// Create the subdirs
-	char * tmpDir = CloneString( outFilename );
+	char * tmpDir = V_strdup( outFilename );
 	COM_CreatePath( tmpDir );
 	delete[] tmpDir;
 
@@ -230,6 +228,17 @@ static bool DecompressBZipToDisk( const char *outFilename, const char *srcFilena
 	const int OutBufSize = 65536;
 	char    buf[ OutBufSize ];
 	BZFILE *bzfp = BZ2_bzopen( fullSrcPath, "rb" );
+	int totalBytes = 0;
+
+	bool bMapFile = false;
+	char szOutFilenameBase[MAX_PATH];
+	Q_FileBase( outFilename, szOutFilenameBase, sizeof( szOutFilenameBase ) );
+	const char *pszMapName = cl.m_szLevelBaseName;
+	if ( pszMapName && pszMapName[0] )
+	{
+		bMapFile = ( Q_stricmp( szOutFilenameBase, pszMapName ) == 0 );
+	}
+
 	while ( 1 )
 	{
 		int bytesRead = BZ2_bzread( bzfp, buf, OutBufSize );
@@ -244,6 +253,18 @@ static bool DecompressBZipToDisk( const char *outFilename, const char *srcFilena
 			if ( bytesWritten != bytesRead )
 			{
 				break; // error out
+			}
+			else
+			{
+				totalBytes += bytesWritten;
+				if ( !bMapFile ) 
+				{
+					if ( totalBytes > MAX_FILE_SIZE )
+					{
+						ConDColorMsg( DownloadErrorColor, "DecompressBZipToDisk: '%s' too big (max %i bytes).\n", srcFilename, MAX_FILE_SIZE );
+						break; // error out
+					}
+				}
 			}
 		}
 		else
@@ -264,38 +285,38 @@ static bool DecompressBZipToDisk( const char *outFilename, const char *srcFilena
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadCache::PersistToDisk( const RequestContext *rc )
+void DownloadCache::PersistToDisk( const RequestContext_t *rc )
 {
 	if ( !m_cache )
 		return;
 
 	if ( rc && rc->data && rc->nBytesTotal )
 	{
-		char gamePath[MAX_PATH];
+		char absPath[MAX_PATH];
 		if ( rc->bIsBZ2 )
 		{
-			Q_StripExtension( rc->gamePath, gamePath, sizeof( gamePath ) );
+			Q_StripExtension( rc->absLocalPath, absPath, sizeof( absPath ) );
 		}
 		else
 		{
-			Q_strncpy( gamePath, rc->gamePath, sizeof( gamePath ) );
+			Q_strncpy( absPath, rc->absLocalPath, sizeof( absPath ) );
 		}
 
-		if ( !g_pFileSystem->FileExists( gamePath ) )
+		if ( !g_pFileSystem->FileExists( absPath ) )
 		{
 			// Create the subdirs
-			char * tmpDir = CloneString( gamePath );
+			char * tmpDir = V_strdup( absPath );
 			COM_CreatePath( tmpDir );
 			delete[] tmpDir;
 
 			bool success = false;
 			if ( rc->bIsBZ2 )
 			{
-				success = DecompressBZipToDisk( gamePath, rc->gamePath, reinterpret_cast< char * >(rc->data), rc->nBytesTotal );
+				success = DecompressBZipToDisk( absPath, rc->absLocalPath, reinterpret_cast< char * >(rc->data), rc->nBytesTotal );
 			}
 			else
 			{
-				FileHandle_t fp = g_pFileSystem->Open( gamePath, "wb" );
+				FileHandle_t fp = g_pFileSystem->Open( absPath, "wb" );
 				if ( fp )
 				{
 					g_pFileSystem->Write( rc->data, rc->nBytesTotal, fp );
@@ -333,7 +354,7 @@ void DownloadCache::PersistToDisk( const RequestContext *rc )
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadCache::PersistToCache( const RequestContext *rc )
+void DownloadCache::PersistToCache( const RequestContext_t *rc )
 {
 	if ( !m_cache || !rc || !rc->data || !rc->nBytesTotal || !rc->nBytesCurrent )
 		return;
@@ -352,7 +373,7 @@ void DownloadCache::PersistToCache( const RequestContext *rc )
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadCache::GetCacheFilename( const RequestContext *rc, char cachePath[_MAX_PATH] )
+void DownloadCache::GetCacheFilename( const RequestContext_t *rc, char cachePath[_MAX_PATH] )
 {
 	BuildKeyNames( rc->gamePath );
 	const char *path = m_cache->GetString( m_cachefileKey, NULL );
@@ -366,7 +387,7 @@ void DownloadCache::GetCacheFilename( const RequestContext *rc, char cachePath[_
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadCache::GenerateCacheFilename( const RequestContext *rc, char cachePath[_MAX_PATH] )
+void DownloadCache::GenerateCacheFilename( const RequestContext_t *rc, char cachePath[_MAX_PATH] )
 {
 	GetCacheFilename( rc, cachePath );
 	BuildKeyNames( rc->gamePath );
@@ -403,17 +424,17 @@ void DownloadCache::GenerateCacheFilename( const RequestContext *rc, char cacheP
 //--------------------------------------------------------------------------------------------------------------
 // Purpose: Implements download manager class
 //--------------------------------------------------------------------------------------------------------------
-class DownloadManager
+class CDownloadManager
 {
 public:
-	DownloadManager();
-	~DownloadManager();
+	CDownloadManager();
+	~CDownloadManager();
 
-	void Queue( const char *baseURL, const char *gamePath );
+	void Queue( const char *baseURL, const char *urlPath, const char *gamePath );
 	void Stop() { Reset(); }
 	int GetQueueSize() { return m_queuedRequests.Count(); }
 
-	bool Update();	///< Monitors download thread, starts new downloads, and updates progress bar
+	virtual bool Update();	///< Monitors download thread, starts new downloads, and updates progress bar
 
 	bool FileReceived( const char *filename, unsigned int requestID );
 	bool FileDenied( const char *filename, unsigned int requestID );
@@ -422,17 +443,31 @@ public:
 	void MarkMapAsDownloadedFromServer( const char *serverMapName );
 
 private:
+	void QueueInternal( const char *pBaseURL, const char *pURLPath, const char *pGamePath, bool bAsHttp, bool bCompressed );
+
+protected:
+	virtual void UpdateProgressBar();
+
+	virtual RequestContext_t *NewRequestContext();///< Call this to allocate a RequestContext_t - calls setup functions for derived classes
+	virtual bool ShouldAttemptCompressedFileDownload()		{ return true; }
+	virtual void SetupURLPath( RequestContext_t *pRequestContext, const char *pURLPath );
+	virtual void SetupServerURL( RequestContext_t *pRequestContext );
+
+	// Event handlers
+	virtual void OnHttpConnecting( RequestContext_t *pRequestContext ) {}
+	virtual void OnHttpFetch( RequestContext_t *pRequestContext ) {}
+	virtual void OnHttpDone( RequestContext_t *pRequestContext ) {}
+	virtual void OnHttpError( RequestContext_t *pRequestContext ) {}
+
 	void Reset();						///< Cancels any active download, as well as any queued ones
 
 	void PruneCompletedRequests();		///< Check download requests that have been completed to see if their threads have exited
 	void CheckActiveDownload();			///< Checks download status, and updates progress bar
 	void StartNewDownload();			///< Starts a new download if there are queued requests
 
-	void UpdateProgressBar();
-
-	typedef CUtlVector< RequestContext * > RequestVector;
+	typedef CUtlVector< RequestContext_t * > RequestVector;
 	RequestVector m_queuedRequests;		///< these are requests waiting to be spawned
-	RequestContext *m_activeRequest;	///< this is the active request being downloaded in another thread
+	RequestContext_t *m_activeRequest;	///< this is the active request being downloaded in another thread
 	RequestVector m_completedRequests;	///< these are waiting for the thread to exit
 
 	int m_lastPercent;					///< last percent value the progress bar was updated with (to avoid spamming it)
@@ -445,10 +480,10 @@ private:
 };
 
 //--------------------------------------------------------------------------------------------------------------
-static DownloadManager TheDownloadManager;
+static CDownloadManager s_DownloadManager;
 
 //--------------------------------------------------------------------------------------------------------------
-DownloadManager::DownloadManager()
+CDownloadManager::CDownloadManager()
 {
 	m_activeRequest = NULL;
 	m_lastPercent = 0;
@@ -456,7 +491,7 @@ DownloadManager::DownloadManager()
 }
 
 //--------------------------------------------------------------------------------------------------------------
-DownloadManager::~DownloadManager()
+CDownloadManager::~CDownloadManager()
 {
 	Reset();
 
@@ -468,7 +503,23 @@ DownloadManager::~DownloadManager()
 }
 
 //--------------------------------------------------------------------------------------------------------------
-bool DownloadManager::HasMapBeenDownloadedFromServer( const char *serverMapName )
+RequestContext_t *CDownloadManager::NewRequestContext()
+{
+	return new RequestContext_t;
+}
+
+//--------------------------------------------------------------------------------------------------------------
+void CDownloadManager::SetupURLPath( RequestContext_t *pRequestContext, const char *pURLPath )
+{
+	V_strcpy( pRequestContext->urlPath, pRequestContext->gamePath );
+}
+//--------------------------------------------------------------------------------------------------------------
+void CDownloadManager::SetupServerURL( RequestContext_t *pRequestContext )
+{
+	Q_strncpy( pRequestContext->serverURL, cl.m_NetChannel->GetRemoteAddress().ToString(), BufferSize );
+}
+//--------------------------------------------------------------------------------------------------------------
+bool CDownloadManager::HasMapBeenDownloadedFromServer( const char *serverMapName )
 {
 	if ( !serverMapName )
 		return false;
@@ -484,7 +535,7 @@ bool DownloadManager::HasMapBeenDownloadedFromServer( const char *serverMapName 
 	return false;
 }
 
-bool DownloadManager::FileDenied( const char *filename, unsigned int requestID )
+bool CDownloadManager::FileDenied( const char *filename, unsigned int requestID )
 {
 	if ( !m_activeRequest )
 		return false;
@@ -495,7 +546,11 @@ bool DownloadManager::FileDenied( const char *filename, unsigned int requestID )
 	if ( m_activeRequest->bAsHTTP )
 		return false;
 
-	ConDColorMsg( DownloadErrorColor, "Error downloading %s\n", m_activeRequest->gamePath );
+	if ( download_debug.GetBool() )
+	{
+		ConDColorMsg( DownloadErrorColor, "Error downloading %s\n", m_activeRequest->absLocalPath );
+	}
+
 	UpdateProgressBar();
 
 	// try to download the next file
@@ -505,7 +560,7 @@ bool DownloadManager::FileDenied( const char *filename, unsigned int requestID )
 	return true;
 }
 
-bool DownloadManager::FileReceived( const char *filename, unsigned int requestID )
+bool CDownloadManager::FileReceived( const char *filename, unsigned int requestID )
 {
 	if ( !m_activeRequest )
 		return false;
@@ -516,7 +571,11 @@ bool DownloadManager::FileReceived( const char *filename, unsigned int requestID
 	if ( m_activeRequest->bAsHTTP )
 		return false;
 
-	ConDColorMsg( DownloadCompleteColor, "Download finished!\n" );
+	if ( download_debug.GetBool() )
+	{
+		ConDColorMsg( DownloadCompleteColor, "Download finished!\n" );
+	}
+
 	UpdateProgressBar();
 
 	m_completedRequests.AddToTail( m_activeRequest );
@@ -526,7 +585,7 @@ bool DownloadManager::FileReceived( const char *filename, unsigned int requestID
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadManager::MarkMapAsDownloadedFromServer( const char *serverMapName )
+void CDownloadManager::MarkMapAsDownloadedFromServer( const char *serverMapName )
 {
 	if ( !serverMapName )
 		return;
@@ -534,20 +593,104 @@ void DownloadManager::MarkMapAsDownloadedFromServer( const char *serverMapName )
 	if ( HasMapBeenDownloadedFromServer( serverMapName ) )
 		return;
 
-	m_downloadedMaps.AddToTail( CloneString( serverMapName ) );
+	m_downloadedMaps.AddToTail( V_strdup( serverMapName ) );
 
 
 	return;
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadManager::Queue( const char *baseURL, const char *gamePath )
+void CDownloadManager::QueueInternal( const char *pBaseURL, const char *pURLPath, const char *pGamePath,
+									 bool bAsHttp, bool bCompressed )
 {
-	bool bAsHTTP = false;
-	if ( !gamePath )
+	// NOTE: Assumes valid game path (i.e. IsGamePathValidAndSafe() has been called already)
+
+	++m_totalRequests;
+
+	// Initialize the download cache if necessary
+	if ( !TheDownloadCache )
 	{
-		return;
+		TheDownloadCache = new DownloadCache;
+		TheDownloadCache->Init();
 	}
+
+	// Create a new context and add queue it
+	RequestContext_t *rc = NewRequestContext();
+	m_queuedRequests.AddToTail( rc );
+
+	rc->bIsBZ2 = bCompressed;
+	rc->bAsHTTP = bAsHttp;
+	rc->status = HTTP_CONNECTING;
+
+	// Setup base path.  We put it in the "download" search path, if they have set one
+	char szBasePath[ MAX_PATH ];
+	if ( g_pFileSystem->GetSearchPath( k_szDownloadPathID, false, szBasePath, sizeof(szBasePath) ) > 0 )
+	{
+		char *split = V_strstr( szBasePath, ";" );
+		if ( split != NULL )
+		{
+			Warning( "Multiple download search paths?  Check gameinfo.txt" );
+			*split = '\0';
+		}
+	}
+
+	// Otherwise, put it in the game dir
+	if ( szBasePath[0] == '\0' )
+		V_strcpy_safe( szBasePath, com_gamedir );
+
+	// Setup game path
+	V_strcpy_safe( rc->gamePath, pGamePath );
+	if ( bCompressed )
+	{
+		V_strcat_safe( rc->gamePath, ".bz2" );
+	}
+	Q_FixSlashes( rc->gamePath, '/' ); // only matters for debug prints, which are full URLS, so we want forward slashes
+
+	// NOTE: Loose files on disk must always be lowercase!  At least on Linux they HAVE to be,
+	// but we do the same thing on Windows to keep things consistent.
+	char szGamePathLower[MAX_PATH];
+	V_strcpy_safe( szGamePathLower, rc->gamePath );
+	V_strlower( szGamePathLower );
+
+	// Now set the full absolute path.  Why does the file system not provide a convenient method to
+	// do stuff like this?
+	V_strcpy_safe( rc->absLocalPath, szBasePath );
+	V_AppendSlash( rc->absLocalPath, sizeof(rc->absLocalPath) );
+	V_strcat_safe( rc->absLocalPath, szGamePathLower );
+	V_FixSlashes( rc->absLocalPath );
+
+	// Setup base URL if necessary
+	if ( bAsHttp )
+	{
+		V_strcpy_safe( rc->baseURL, pBaseURL );
+		V_StripTrailingSlash( rc->baseURL );
+		V_strcat_safe( rc->baseURL, "/" );
+	}
+
+	// Call virtual methods for setting up additional context info
+	SetupURLPath( rc, pURLPath );
+	SetupServerURL( rc );
+
+	if ( download_debug.GetBool() )
+	{
+		ConDColorMsg( DownloadColor, "Queueing %s%s.\n", rc->baseURL, pGamePath );
+	}
+
+	// Invoke the callback if appropriate
+	if ( bAsHttp )
+	{
+		OnHttpConnecting( rc ); 
+	}
+}
+
+void CDownloadManager::Queue( const char *baseURL, const char *urlPath, const char *gamePath )
+{
+	if ( !CL_IsGamePathValidAndSafeForDownload( gamePath ) )
+		return;
+
+	// Don't download existing files
+	if ( g_pFileSystem->FileExists( gamePath ) )
+		return;
 
 #ifndef _DEBUG
 	if ( sv.IsActive() )
@@ -557,158 +700,38 @@ void DownloadManager::Queue( const char *baseURL, const char *gamePath )
 	}
 #endif
 
-	// only http downloads
-	if ( baseURL && (!Q_strnicmp( baseURL, "http://", 7 ) || !Q_strnicmp( baseURL, "https://", 8 )) )
+	// HTTP or NetChan?
+	bool bAsHTTP = baseURL && ( !Q_strnicmp( baseURL, "http://", 7 ) || !Q_strnicmp( baseURL, "https://", 8 ) );
+
+	// Queue up an HTTP download of the bzipped asset, in case it exists.
+	// When a bzipped download finishes, we'll uncompress the file to it's
+	// original destination, and the queued download of the uncompressed
+	// file will abort.
+	if ( bAsHTTP && ShouldAttemptCompressedFileDownload() && !g_pFileSystem->FileExists( va( "%s.bz2", gamePath ) ) )
 	{
-		bAsHTTP = true;
+		QueueInternal( baseURL, urlPath, gamePath, true, true );
 	}
 
-	if ( g_pFileSystem->FileExists( gamePath ) )
+	// Queue up the straight, uncompressed version
+	QueueInternal( baseURL, urlPath, gamePath, bAsHTTP, false );
+
+	if ( download_debug.GetBool() )
 	{
-		return; // don't download existing files
+		ConDColorMsg( DownloadColor, "Queueing %s%s.\n", baseURL, gamePath );
 	}
-
-	if ( Q_strstr( gamePath, "//" ) )
-	{
-		return;
-	}
-
-	if ( Q_strstr( gamePath, "\\\\" ) )
-	{
-		return;
-	}
-
-	if ( Q_strstr( gamePath, ":" ) )
-	{
-		return;
-	}
-
-	if ( Q_strstr( gamePath, "lua/" ) )
-		return; // don't download into lua/ folder
-
-	if ( Q_strstr( gamePath, "gamemodes/" ) ) 
-		return; // don't download into gamemodes/ folder 
-
-	if ( Q_strstr( gamePath, "addons/" ) ) 
-		return; // don't download into addons/ folder 
-
-
-	// Disallow .. in paths, but allow multiple periods otherwise.  This way we can download blah.dx80.vtx etc.
-	const char *backup = strstr( gamePath, ".." );
-	const char *extension = strrchr( gamePath, '.' );
-
-	if ( backup || !extension )
-		return;
-
-	int baseLen = strlen( extension );
-	if ( baseLen > 4 || baseLen < 3 )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".cfg" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".lst" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".exe" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".vbs" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".com" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".bat" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".dll" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".ini" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".log" ) )
-		return;
-
-	if ( !Q_strcasecmp( extension, ".lua" ) )
-		return;
-
-	if ( bAsHTTP && !g_pFileSystem->FileExists( va( "%s.bz2", gamePath ) ) )
-	{
-		// Queue up an HTTP download of the bzipped asset, in case it exists.
-		// When a bzipped download finishes, we'll uncompress the file to it's
-		// original destination, and the queued download of the uncompressed
-		// file will abort.
-
-		++m_totalRequests;
-		if ( !TheDownloadCache )
-		{
-			TheDownloadCache = new DownloadCache;
-			TheDownloadCache->Init();
-		}
-
-		RequestContext *rc = new RequestContext;
-		m_queuedRequests.AddToTail( rc );
-
-		memset( rc, 0, sizeof(RequestContext) );
-
-		rc->status = HTTP_CONNECTING;
-
-		Q_strncpy( rc->basePath, com_gamedir, BufferSize );
-		Q_strncpy( rc->gamePath, gamePath, BufferSize );
-		Q_strncat( rc->gamePath, ".bz2", BufferSize, COPY_ALL_CHARACTERS );
-		Q_FixSlashes( rc->gamePath, '/' ); // only matters for debug prints, which are full URLS, so we want forward slashes
-		Q_strncpy( rc->serverURL, cl.m_NetChannel->GetRemoteAddress().ToString(), BufferSize );
-
-		rc->bIsBZ2 = true;
-		rc->bAsHTTP = true;
-		Q_strncpy( rc->baseURL, baseURL, BufferSize );
-		Q_strncat( rc->baseURL, "/", BufferSize, COPY_ALL_CHARACTERS );
-
-		//ConDColorMsg( DownloadColor, "Queueing %s%s.\n", rc->baseURL, gamePath );
-	}
-
-	++m_totalRequests;
-	if ( !TheDownloadCache )
-	{
-		TheDownloadCache = new DownloadCache;
-		TheDownloadCache->Init();
-	}
-
-	RequestContext *rc = new RequestContext;
-	m_queuedRequests.AddToTail( rc );
-
-	memset( rc, 0, sizeof(RequestContext) );
-
-	rc->status = HTTP_CONNECTING;
-
-	Q_strncpy( rc->basePath, com_gamedir, BufferSize );
-	Q_strncpy( rc->gamePath, gamePath, BufferSize );
-	Q_FixSlashes( rc->gamePath, '/' ); // only matters for debug prints, which are full URLS, so we want forward slashes
-	Q_strncpy( rc->serverURL, cl.m_NetChannel->GetRemoteAddress().ToString(), BufferSize );
-
-	if ( bAsHTTP )
-	{
-		rc->bAsHTTP = true;
-		Q_strncpy( rc->baseURL, baseURL, BufferSize );
-		Q_strncat( rc->baseURL, "/", BufferSize, COPY_ALL_CHARACTERS );
-	}
-	else
-	{
-		rc->bAsHTTP = false;
-	}
-
-	//ConDColorMsg( DownloadColor, "Queueing %s%s.\n", rc->baseURL, gamePath );
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadManager::Reset()
+void CDownloadManager::Reset()
 {
 	// ask the active request to bail
 	if ( m_activeRequest )
 	{
-		ConDColorMsg( DownloadColor, "Aborting download of %s\n", m_activeRequest->gamePath );
+		if ( download_debug.GetBool() )
+		{
+			ConDColorMsg( DownloadColor, "Aborting download of %s\n", m_activeRequest->gamePath );
+		}
+
 		if ( m_activeRequest->nBytesTotal && m_activeRequest->nBytesCurrent )
 		{
 			// Persist partial data to cache
@@ -723,7 +746,11 @@ void DownloadManager::Reset()
 	// clear out any queued requests
 	for ( int i=0; i<m_queuedRequests.Count(); ++i )
 	{
-		ConDColorMsg( DownloadColor, "Discarding queued download of %s\n", m_queuedRequests[i]->gamePath );
+		if ( download_debug.GetBool() )
+		{
+			ConDColorMsg( DownloadColor, "Discarding queued download of %s\n", m_queuedRequests[i]->gamePath );
+		}
+
 		delete m_queuedRequests[i];
 	}
 	m_queuedRequests.RemoveAll();
@@ -740,7 +767,7 @@ void DownloadManager::Reset()
 
 //--------------------------------------------------------------------------------------------------------------
 // Check download requests that have been completed to see if their threads have exited
-void DownloadManager::PruneCompletedRequests()
+void CDownloadManager::PruneCompletedRequests()
 {
 	for ( int i=m_completedRequests.Count()-1; i>=0; --i )
 	{
@@ -758,7 +785,7 @@ void DownloadManager::PruneCompletedRequests()
 
 //--------------------------------------------------------------------------------------------------------------
 // Checks download status, and updates progress bar
-void DownloadManager::CheckActiveDownload()
+void CDownloadManager::CheckActiveDownload()
 {
 	if ( !m_activeRequest )
 		return;
@@ -768,14 +795,18 @@ void DownloadManager::CheckActiveDownload()
 		UpdateProgressBar();
 		return;
 	}
-
 	
 	// check active request for completion / error / progress update
 	switch ( m_activeRequest->status )
 	{
 	case HTTP_DONE:
-		ConDColorMsg( DownloadCompleteColor, "Download finished!\n" );
+		if ( download_debug.GetBool() )
+		{
+			ConDColorMsg( DownloadCompleteColor, "Download finished!\n" );
+		}
+
 		UpdateProgressBar();
+		OnHttpDone( m_activeRequest );
 		if ( m_activeRequest->nBytesTotal )
 		{
 			// Persist complete data to disk, and remove cache entry
@@ -792,12 +823,17 @@ void DownloadManager::CheckActiveDownload()
 		}
 		break;
 	case HTTP_ERROR:
-		ConDColorMsg( DownloadErrorColor, "Error downloading %s%s\n", m_activeRequest->baseURL, m_activeRequest->gamePath );
+		if ( download_debug.GetBool() )
+		{
+			ConDColorMsg( DownloadErrorColor, "Error downloading %s%s\n", m_activeRequest->baseURL, m_activeRequest->gamePath );
+		}
+
 		UpdateProgressBar();
 
 		// try to download the next file
 		m_activeRequest->shouldStop = true;
 		m_completedRequests.AddToTail( m_activeRequest );
+		OnHttpError( m_activeRequest );
 		m_activeRequest = NULL;
 		if ( !m_queuedRequests.Count() )
 		{
@@ -814,22 +850,25 @@ void DownloadManager::CheckActiveDownload()
 			int percent = ( m_activeRequest->nBytesCurrent * 100 / m_activeRequest->nBytesTotal );
 			if ( percent != m_lastPercent )
 			{
-				/*
-				ConDColorMsg( DownloadColor, "Downloading %s%s: %3.3d%% - %d of %d bytes\n",
-					m_activeRequest->baseURL, m_activeRequest->gamePath,
-					percent, m_activeRequest->nBytesCurrent, m_activeRequest->nBytesTotal );
-					*/
+				if ( download_debug.GetBool() )
+				{
+					ConDColorMsg( DownloadColor, "Downloading %s%s: %3.3d%% - %d of %d bytes\n",
+						m_activeRequest->baseURL, m_activeRequest->gamePath,
+						percent, m_activeRequest->nBytesCurrent, m_activeRequest->nBytesTotal );
+				}
+
 				m_lastPercent = percent;
 				//TODO: SetSecondaryProgressBar( m_lastPercent * 0.01f );
 			}
 		}
+		OnHttpFetch( m_activeRequest );
 		break;
 	}
 }
 
 //--------------------------------------------------------------------------------------------------------------
 // Starts a new download if there are queued requests
-void DownloadManager::StartNewDownload()
+void CDownloadManager::StartNewDownload()
 {
 	if ( m_activeRequest || !m_queuedRequests.Count() )
 		return;
@@ -840,9 +879,13 @@ void DownloadManager::StartNewDownload()
 		m_activeRequest = m_queuedRequests[0];
 		m_queuedRequests.Remove( 0 );
 
-		if ( g_pFileSystem->FileExists( m_activeRequest->gamePath ) )
+		if ( g_pFileSystem->FileExists( m_activeRequest->absLocalPath ) )
 		{
-			ConDColorMsg( DownloadColor, "Skipping existing file %s%s.\n", m_activeRequest->baseURL, m_activeRequest->gamePath );
+			if ( download_debug.GetBool() )
+			{
+				ConDColorMsg( DownloadColor, "Skipping existing file %s%s.\n", m_activeRequest->baseURL, m_activeRequest->gamePath );
+			}
+
 			m_activeRequest->shouldStop = true;
 			m_activeRequest->threadDone = true;
 			m_completedRequests.AddToTail( m_activeRequest );
@@ -853,7 +896,7 @@ void DownloadManager::StartNewDownload()
 	if ( !m_activeRequest )
 		return;
 
-	if ( g_pFileSystem->FileExists( m_activeRequest->gamePath ) )
+	if ( g_pFileSystem->FileExists( m_activeRequest->absLocalPath ) )
 	{
 		m_activeRequest->shouldStop = true;
 		m_activeRequest->threadDone = true;
@@ -873,17 +916,32 @@ void DownloadManager::StartNewDownload()
 		//TODO: SetSecondaryProgressBar( 0.0f );
 		UpdateProgressBar();
 
-		ConDColorMsg( DownloadColor, "Downloading %s%s.\n", m_activeRequest->baseURL, m_activeRequest->gamePath );
+		if ( download_debug.GetBool() )
+		{
+			ConDColorMsg( DownloadColor, "Downloading %s%s.\n", m_activeRequest->baseURL, m_activeRequest->gamePath );
+		}
+
 		m_lastPercent = 0;
 
 		// Start the thread
 		DWORD threadID;
-		VCRHook_CreateThread(NULL, 0, DownloadThread, m_activeRequest, 0, &threadID );
+		VCRHook_CreateThread(NULL, 0, 
+#ifdef POSIX
+			(void *)
+#endif
+			DownloadThread, m_activeRequest, 0, (unsigned long int *)&threadID );
+
+		ThreadDetach( ( ThreadHandle_t )threadID );
 	}
 	else
 	{
 		UpdateProgressBar();
-		ConDColorMsg( DownloadColor, "Downloading %s.\n", m_activeRequest->gamePath );
+
+		if ( download_debug.GetBool() )
+		{
+			ConDColorMsg( DownloadColor, "Downloading %s.\n", m_activeRequest->gamePath );
+		}
+
 		m_lastPercent = 0;
 		
 		m_activeRequest->nRequestID = cl.m_NetChannel->RequestFile( m_activeRequest->gamePath );
@@ -891,7 +949,7 @@ void DownloadManager::StartNewDownload()
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void DownloadManager::UpdateProgressBar()
+void CDownloadManager::UpdateProgressBar()
 {
 	if ( !m_activeRequest )
 	{
@@ -920,13 +978,15 @@ void DownloadManager::UpdateProgressBar()
 		progress = (float)(received)/(float)(total);
 	}
 
+#ifndef DEDICATED
 	_snwprintf( filenameBuf, 256, L"Downloading %hs", m_activeRequest->gamePath );
 	EngineVGui()->UpdateCustomProgressBar( progress, filenameBuf );
+#endif
 }
 
 //--------------------------------------------------------------------------------------------------------------
 // Monitors download thread, starts new downloads, and updates progress bar
-bool DownloadManager::Update()
+bool CDownloadManager::Update()
 {
 	PruneCompletedRequests();
 	CheckActiveDownload();
@@ -942,91 +1002,92 @@ bool DownloadManager::Update()
 //--------------------------------------------------------------------------------------------------------------
 bool CL_DownloadUpdate(void)
 {
-	return TheDownloadManager.Update();
+	return s_DownloadManager.Update();
 }
 
 //--------------------------------------------------------------------------------------------------------------
 void CL_HTTPStop_f(void)
 {
-	TheDownloadManager.Stop();
+	s_DownloadManager.Stop();
 }
 
 bool CL_FileReceived( const char *filename, unsigned int requestID )
 {
-	return TheDownloadManager.FileReceived( filename, requestID );
+	return s_DownloadManager.FileReceived( filename, requestID );
 }
 
 bool CL_FileDenied( const char *filename, unsigned int requestID )
 {
-	return TheDownloadManager.FileDenied( filename, requestID );
+	return s_DownloadManager.FileDenied( filename, requestID );
 }
 
 //--------------------------------------------------------------------------------------------------------------
 extern ConVar sv_downloadurl;
 void CL_QueueDownload( const char *filename )
 {
-	TheDownloadManager.Queue( sv_downloadurl.GetString(), filename );
+	s_DownloadManager.Queue( sv_downloadurl.GetString(), NULL, filename );
 }
 
 //--------------------------------------------------------------------------------------------------------------
+
 int CL_GetDownloadQueueSize(void)
 {
-	return TheDownloadManager.GetQueueSize();
+	return s_DownloadManager.GetQueueSize();
 }
 
 //--------------------------------------------------------------------------------------------------------------
+
 int CL_CanUseHTTPDownload(void)
 {
 	if ( sv_downloadurl.GetString()[0] )
 	{
-		const char *serverMapName = va( "%s:%s", sv_downloadurl.GetString(), cl.m_szLevelName );
-		return !TheDownloadManager.HasMapBeenDownloadedFromServer( serverMapName );
+		const char *serverMapName = va( "%s:%s", sv_downloadurl.GetString(), cl.m_szLevelFileName );
+		return !s_DownloadManager.HasMapBeenDownloadedFromServer( serverMapName );
 	}
 	return 0;
 }
 
 //--------------------------------------------------------------------------------------------------------------
+
 void CL_MarkMapAsUsingHTTPDownload(void)
 {
-	const char *serverMapName = va( "%s:%s", sv_downloadurl.GetString(), cl.m_szLevelName );
-	TheDownloadManager.MarkMapAsDownloadedFromServer( serverMapName );
+	const char *serverMapName = va( "%s:%s", sv_downloadurl.GetString(), cl.m_szLevelFileName );
+	s_DownloadManager.MarkMapAsDownloadedFromServer( serverMapName );
 }
 
-
 //--------------------------------------------------------------------------------------------------------------
 
-#else // !_WIN32
-
-//--------------------------------------------------------------------------------------------------------------
-void CL_HTTPUpdate(void)
+bool CL_IsGamePathValidAndSafeForDownload( const char *pGamePath )
 {
+	if ( !CNetChan::IsValidFileForTransfer( pGamePath ) )
+		return false;
+
+	return true;
 }
 
 //--------------------------------------------------------------------------------------------------------------
-void CL_HTTPStop_f(void)
+
+class CDownloadSystem : public IDownloadSystem
 {
-}
+public:
+	virtual DWORD CreateDownloadThread( RequestContext_t *pContext )
+	{
+		DWORD nThreadID;
+		VCRHook_CreateThread(NULL, 0,
+#ifdef POSIX
+		 	(void*)
+#endif
+		 	DownloadThread, pContext, 0, (unsigned long int *)&nThreadID );
+
+		ThreadDetach( ( ThreadHandle_t )nThreadID );
+		return nThreadID;
+	}
+};
 
 //--------------------------------------------------------------------------------------------------------------
-void CL_QueueHTTPDownload( const char *filename )
-{
-}
+
+static CDownloadSystem s_DownloadSystem;
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CDownloadSystem, IDownloadSystem, INTERFACEVERSION_DOWNLOADSYSTEM, s_DownloadSystem );
 
 //--------------------------------------------------------------------------------------------------------------
-int CL_GetDownloadQueueSize(void)
-{
-	return 0;
-}
 
-//--------------------------------------------------------------------------------------------------------------
-int CL_CanUseHTTPDownload(void)
-{
-	return 0;
-}
-
-//--------------------------------------------------------------------------------------------------------------
-void CL_MarkMapAsUsingHTTPDownload(void)
-{
-}
-
-#endif // _WIN32

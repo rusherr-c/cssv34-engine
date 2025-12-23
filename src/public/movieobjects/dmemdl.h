@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing an MDL
 //
@@ -11,8 +11,12 @@
 #pragma once
 #endif
 
+#include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "movieobjects/dmeshape.h"
 #include "datacache/imdlcache.h"
+#include "tier3/mdlutils.h"
 
 #include "mathlib/vector.h"
 #include <string>
@@ -41,7 +45,6 @@ class CDmeMDL : public CDmeShape
 
 public:
 	virtual void Draw( const matrix3x4_t& shapeToWorld, CDmeDrawSettings *pDrawSettings = NULL );
-	virtual void Resolve();
 
 	void DrawInEngine( bool bDrawInEngine );
 	bool IsDrawingInEngine() const;
@@ -50,6 +53,7 @@ public:
 	MDLHandle_t GetMDL( ) const;
 	float GetRadius() const; // NOTE: This radius is one that is centered at the origin
 	void GetBoundingSphere( Vector &vecCenter, float &flRadius );
+	void GetBoundingBox( Vector *pMins, Vector *pMaxs ) const;
 
 	// Computes bone-to-world transforms
 	void SetUpBones( const matrix3x4_t& shapeToWorld, int nMaxBoneCount, matrix3x4_t *pOutputMatrices );
@@ -65,24 +69,10 @@ public:
 	CDmaVar<Vector> m_vecViewTarget;
 	CDmaVar<bool> m_bWorldSpaceViewTarget;
 
-	// Returns the bounding box for the model
-	void GetBoundingBox( Vector *pMins, Vector *pMaxs ) const;
-
 private:
-	// Transform from DME to engine coordinates
-	void EngineToDmeMatrix( matrix3x4_t& dmeToEngine );
+	void UpdateMDL();
 
-	// Addref/Release the MDL handle
-	void ReferenceMDL( const char *pMDLName );
-	void UnreferenceMDL();
-
-	// Returns a mask indicating which bones to set up
-	int BoneMask( );
-
-	// Computes bone-to-world transforms
-	void SetUpBones( CStudioHdr &studioHdr, const matrix3x4_t& shapeToWorld, int nMaxBoneCount, matrix3x4_t *pOutputMatrices );
-
-	MDLHandle_t m_MDLHandle;
+	CMDL m_MDL;
 	bool m_bDrawInEngine;
 };
 

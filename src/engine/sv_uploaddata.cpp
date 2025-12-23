@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 
 #if defined(_WIN32) && !defined(_X360)
 #include <winsock.h>
-#elif _LINUX
+#elif POSIX
 #include <sys/socket.h>
 #include <netinet/in.h>
 #elif !defined(_X360)
@@ -68,7 +68,7 @@ static void EncryptBuffer( IceKey& cipher, unsigned char *bufData, uint bufferSi
 static void BuildUploadDataMessage( bf_write& buf, char const *tablename, KeyValues *fields )
 {
 	bf_write	encrypted;
-	byte		encrypted_data[ 2048 ];
+	ALIGN4 byte		encrypted_data[ 2048 ] ALIGN4_POST;
 
 	buf.WriteByte( C2M_UPLOADDATA );
 	buf.WriteByte( '\n' );
@@ -131,7 +131,7 @@ bool UploadData( char const *cserIP, char const *tablename, KeyValues *fields )
 {
 #ifndef _XBOX
 	bf_write	buf;
-	byte		data[ 2048 ];
+	ALIGN4 byte		data[ 2048 ] ALIGN4_POST;
 		
 	buf.StartWriting( data, sizeof( data ) );
 

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -138,11 +138,11 @@ bool CDmSerializerKeyValues::SerializeAttributes( CUtlBuffer& buf, CDmElement *p
 		const char *pName = pAttribute->GetName();
 
 		// Rename "_type", "_name", or "_id" fields, since they are special fields
-		for ( int i = 0; s_pAttributeRemap[i].m_pKeyValuesName; ++i )
+		for ( int iAttr = 0; s_pAttributeRemap[i].m_pKeyValuesName; ++i )
 		{
-			if ( !Q_stricmp( pName, s_pAttributeRemap[i].m_pDmeName ) )
+			if ( !Q_stricmp( pName, s_pAttributeRemap[iAttr].m_pDmeName ) )
 			{
-				pName = s_pAttributeRemap[i].m_pKeyValuesName;
+				pName = s_pAttributeRemap[iAttr].m_pKeyValuesName;
 				break;
 			}
 		}
@@ -301,7 +301,7 @@ void CDmSerializerKeyValues::UnserializeAttribute( CDmElement *pElement, KeyValu
 
 	// Convert to lower case
 	CUtlString pLowerName = pAttributeName;
-	Q_strlower( pLowerName.GetForModify() );
+	pLowerName.ToLower();
 
 	// Rename "type", "name", or "id" fields, since they are special fields
 	for ( int i = 0; s_pAttributeRemap[i].m_pKeyValuesName; ++i )

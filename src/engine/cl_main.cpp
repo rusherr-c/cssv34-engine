@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -46,10 +46,10 @@
 #include "iregistry.h"
 #include "sys.h"
 #include <vstdlib/random.h>
+#include "tier0/etwprof.h"
 #include "tier0/vcrmode.h"
-#include "SteamInterface.h"
 #include "sys_dll.h"
-#include "video/iavi.h"
+#include "video/ivideoservices.h"
 #include "cl_steamauth.h"
 #include "filesystem/IQueuedLoader.h"
 #include "tier2/tier2.h"
@@ -61,9 +61,18 @@
 #include "LoadScreenUpdate.h"
 #include "tier0/systeminformation.h"
 #include "steam/steam_api.h"
+#include "SourceAppInfo.h"
+#include "cl_steamauth.h"
+#include "sv_steamauth.h"
+#include "engine/ivmodelinfo.h"
 #ifdef _X360
 #include "xbox/xbox_launch.h"
 #endif
+#if defined( REPLAY_ENABLED )
+#include "replay_internal.h"
+#endif
+
+#include "igame.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -81,10 +90,11 @@ void WriteConfig_f( ConVar *var, const char *pOldString );
 #define MAX_CMD_BUFFER				4000
 
 CGlobalVarsBase g_ClientGlobalVariables( true );
-AVIHandle_t g_hCurrentAVI = AVIHANDLE_INVALID;
+IVideoRecorder *g_pVideoRecorder = NULL;
 
 extern ConVar rcon_password;
 extern ConVar host_framerate;
+extern ConVar cl_clanid;
 
 ConVar sv_unlockedchapters( "sv_unlockedchapters", "1", FCVAR_ARCHIVE | FCVAR_ARCHIVE_XBOX, "Highest unlocked game chapter." );
 
@@ -92,6 +102,13 @@ static ConVar tv_nochat	( "tv_nochat", "0", FCVAR_ARCHIVE | FCVAR_USERINFO, "Don
 static ConVar cl_LocalNetworkBackdoor( "cl_localnetworkbackdoor", "1", 0, "Enable network optimizations for single player games." );
 static ConVar cl_ignorepackets( "cl_ignorepackets", "0", FCVAR_CHEAT, "Force client to ignore packets (for debugging)." );
 static ConVar cl_playback_screenshots( "cl_playback_screenshots", "0", 0, "Allows the client to playback screenshot and jpeg commands in demos." );
+
+#if defined( STAGING_ONLY ) || defined( _DEBUG )
+static ConVar cl_block_usercommand( "cl_block_usercommand", "0", FCVAR_CHEAT, "Force client to not send usercommand (for debugging)." );
+#endif // STAGING_ONLY || _DEBUG
+
+ConVar dev_loadtime_map_start( "dev_loadtime_map_start", "0.0", FCVAR_HIDDEN);
+ConVar dev_loadtime_map_elapsed( "dev_loadtime_map_elapsed", "0.0", FCVAR_HIDDEN );
 
 MovieInfo_t cl_movieinfo;
 
@@ -103,6 +120,7 @@ CFastPointLeafNum g_ELightLeafAccessors[MAX_ELIGHTS];
 
 bool cl_takesnapshot = false;
 static bool cl_takejpeg = false;
+static bool cl_takesnapshot_internal = false;
 
 static int cl_jpegquality = DEFAULT_JPEG_QUALITY;
 static ConVar jpeg_quality( "jpeg_quality", "90", 0, "jpeg screenshot quality." );
@@ -115,111 +133,116 @@ static char cl_snapshot_subdirname[MAX_OSPATH];
 // HACK HACK FOR E3 -- Remove this after E3
 #define	HIDEHUD_ALL			( 1<<2 )
 
+void PhonemeMP3Shutdown( void );
 
-// 
-// This is called when a client receives the whitelist from a pure server (on map change).
-// Each pure server (and each map on the server) has a whitelist that says which files a 
-// client is allowed to load off disk. When the client gets the whitelist, it must
-// flush out any files that it has loaded previously that were NOT in the Steam cache.
-//
-// -- pseudocode --
-// for all loaded resources (models/sounds/materials/scripts)
-//	 for each file related to this resource
-//     if (file is not in whitelist)
-//       if (file was loaded off disk instead of coming from the Steam cache)
-//         flush the file
-//
-// Note: It could also check in here that the on-disk file is actually different 
-//       than the Steam one. If it happens to have the same CRC, then there's no need
-//       to do all the flushing.
-//
-void CL_HandlePureServerWhitelist( CPureServerWhitelist *pWhitelist )
+struct ResourceLocker 
+{
+	ResourceLocker()
+	{
+		g_pFileSystem->AsyncFinishAll();
+		g_pFileSystem->AsyncSuspend();
+
+		// Need to temporarily disable queued material system, then lock it
+		m_QMS = Host_AllowQueuedMaterialSystem( false );
+		m_MatLock = g_pMaterialSystem->Lock();
+	}
+
+	~ResourceLocker()
+	{
+		// Restore QMS
+		materials->Unlock( m_MatLock );
+		Host_AllowQueuedMaterialSystem( m_QMS );
+		g_pFileSystem->AsyncResume();
+
+		// ??? What?  Why?
+		//// Need to purge cached materials due to a sv_pure change.
+		//g_pMaterialSystem->UncacheAllMaterials();
+	}
+
+	bool			m_QMS;
+	MaterialLock_t	m_MatLock;
+};
+
+// Reloads a list of files if they are still loaded
+void CL_ReloadFilesInList( IFileList *pFilesToReload )
+{
+	if ( !pFilesToReload )
+	{
+		return;
+	}
+
+	ResourceLocker crashPreventer;
+
+	// Handle materials..
+	materials->ReloadFilesInList( pFilesToReload );
+
+	// Handle models.. NOTE: this MUST come after materials->ReloadFilesInList because the
+	// models need to know which materials got flushed.
+	modelloader->ReloadFilesInList( pFilesToReload );
+
+	S_ReloadFilesInList( pFilesToReload );
+
+	// Let the client at it (for particles)
+	if ( g_ClientDLL )
+	{
+		g_ClientDLL->ReloadFilesInList( pFilesToReload );
+	}
+}
+
+void CL_HandlePureServerWhitelist( CPureServerWhitelist *pWhitelist, /* out */ IFileList *&pFilesToReload )
 {
 	// Free the old whitelist and get the new one.
 	if ( cl.m_pPureServerWhitelist )
 		cl.m_pPureServerWhitelist->Release();
-		
+
 	cl.m_pPureServerWhitelist = pWhitelist;
-	
-	IFileList *pForceMatchList = NULL;
-	IFileList *pAllowFromDiskList = NULL;
+	if ( cl.m_pPureServerWhitelist )
+		cl.m_pPureServerWhitelist->AddRef();
 
-	if ( pWhitelist )
-	{
-		pForceMatchList = pWhitelist->GetForceMatchList();
-		pAllowFromDiskList = pWhitelist->GetAllowFromDiskList();
-	}
-	
-	if ( !IsPC() )
-	{
-		if ( pForceMatchList )
-			pForceMatchList->Release();
-		
-		if ( pAllowFromDiskList )
-			pAllowFromDiskList->Release();
-		
-		return;
-	}
-	
-	// First, hand the whitelist to the filesystem. Now it will know which files we want it to
-	// load from the Steam caches BEFORE files on disk.
-	// 
-	// Note: The filesystem now owns the pointer. It will delete it when it shuts down or next time we call this.
-	IFileList *pFilesToReload;
-	g_pFileSystem->RegisterFileWhitelist( pForceMatchList, pAllowFromDiskList, &pFilesToReload );
-
-	if ( pFilesToReload )
-	{
-		// Handle sounds..
-#if 0 // There are problems with the soundemittersystem + sv_pure currently.
-		if ( g_pSoundEmitterSystem )
-			g_pSoundEmitterSystem->ReloadFilesInList( pFilesToReload );
-		else
-			Warning( "CL_HandlePureServerWhitelist: No sound emitter system.\n" );
-#endif
-
-#if 0 // Still under testing for release in OB engine.
-		S_ReloadFilesInList( pFilesToReload );
-#endif
-
-		// Handle materials..
-		materials->ReloadFilesInList( pFilesToReload );
-		
-#if 0 // Still under testing for release in OB engine.
-		// Handle models.. NOTE: this MUST come after materials->ReloadFilesInList because the
-		// models need to know which materials got flushed.
-		modelloader->ReloadFilesInList( pFilesToReload );
-#endif
-		
-		pFilesToReload->Release();
-	}
+	g_pFileSystem->RegisterFileWhitelist( pWhitelist, &pFilesToReload );
 
 	// Now that we've flushed any files that shouldn't have been on disk, we should have a CRC
 	// set that we can check with the server.
-	if ( pForceMatchList && pAllowFromDiskList )
-		cl.m_bCheckCRCsWithServer = true;
+	cl.m_bCheckCRCsWithServer = true;
+}
+
+void PrintSvPureWhitelistClassification( const CPureServerWhitelist *pWhiteList )
+{
+	if ( pWhiteList == NULL )
+	{
+		Msg( "The server is using sv_pure -1 (no file checking).\n" );
+		return;
+	}
+
+	// Load up the default whitelist
+	CPureServerWhitelist *pStandardList = CPureServerWhitelist::Create( g_pFullFileSystem );
+	pStandardList->Load( 0 );
+	if ( *pStandardList == *pWhiteList )
+	{
+		Msg( "The server is using sv_pure 0.  (Enforcing consistency for select files only)\n" );
+	}
 	else
-		cl.m_bCheckCRCsWithServer = false;
+	{
+		pStandardList->Load( 2 );
+		if ( *pStandardList == *pWhiteList )
+		{
+			Msg( "The server is using sv_pure 2.  (Fully pure)\n" );
+		}
+		else
+		{
+			Msg( "The server is using sv_pure 1.  (Custom pure server rules.)\n" );
+		}
+	}
+	pStandardList->Release();
 }
 
 void CL_PrintWhitelistInfo()
 {
+	PrintSvPureWhitelistClassification( cl.m_pPureServerWhitelist );
 	if ( cl.m_pPureServerWhitelist )
 	{
-		if ( cl.m_pPureServerWhitelist->IsInFullyPureMode() )
-		{
-			Msg( "The server is using sv_pure = 2.\n" );
-		}
-		else
-		{
-			Msg( "The server is using sv_pure = 1.\n" );
-			cl.m_pPureServerWhitelist->PrintWhitelistContents();
-		}
+		cl.m_pPureServerWhitelist->PrintWhitelistContents();
 	}
-	else
-	{		
-		Msg( "The server is using sv_pure = 0 (no whitelist).\n" );
-	}	
 }
 
 // Console command to force a whitelist on the system.
@@ -239,37 +262,22 @@ void whitelist_f( const CCommand &args )
 	if ( pureLevel == 0 )
 	{
 		Warning( "whitelist 0: CL_HandlePureServerWhitelist( NULL )\n" );
-		CL_HandlePureServerWhitelist( NULL );
+		IFileList *pFilesToReload = NULL;
+		CL_HandlePureServerWhitelist( NULL, pFilesToReload );
+		CL_ReloadFilesInList( pFilesToReload );
 	}
 	else
 	{
 		CPureServerWhitelist *pWhitelist = CPureServerWhitelist::Create( g_pFileSystem );
-		if( pureLevel == 2 )
-		{
-			Warning( "whitelist 2: pWhitelist->EnableFullyPureMode()\n" );
-			pWhitelist->EnableFullyPureMode();
-		}
-		else
-		{
-			Warning( "whitelist 1: loading pure_server_whitelist.txt\n" );
-			KeyValues *kv = new KeyValues( "" );
-			bool bLoaded = kv->LoadFromFile( g_pFileSystem, "pure_server_whitelist.txt", "game" );
-			if ( bLoaded )
-				bLoaded = pWhitelist->LoadFromKeyValues( kv );
-
-			if ( !bLoaded )
-				Warning( "Error loading pure_server_whitelist.txt\n" );
-			
-			kv->deleteThis();
-		}
-		
-		CL_HandlePureServerWhitelist( pWhitelist );
+		pWhitelist->Load( pureLevel == 1 );
+		IFileList *pFilesToReload = NULL;
+		CL_HandlePureServerWhitelist( pWhitelist, pFilesToReload );
+		CL_ReloadFilesInList( pFilesToReload );
 		pWhitelist->Release();
 	}
 }
 ConCommand whitelist( "whitelist", whitelist_f );
 #endif
-
 
 const CPrecacheUserData* CL_GetPrecacheUserData( INetworkStringTable *table, int index )
 {
@@ -293,28 +301,24 @@ const CPrecacheUserData* CL_GetPrecacheUserData( INetworkStringTable *table, int
 static bool s_bIsHL2Demo = false;
 void CL_InitHL2DemoFlag()
 {
-#ifndef NO_STEAM
 #if defined(_X360)
 	s_bIsHL2Demo = false;
 #else
 	static bool initialized = false;
 	if ( !initialized )
 	{
-		if ( SteamApps() && !Q_stricmp( COM_GetModDirectory(), "hl2" ) && g_pFileSystem->IsSteam() )
+		if ( Steam3Client().SteamApps() && !Q_stricmp( COM_GetModDirectory(), "hl2" ) )
 		{
 			initialized = true;
-			int nRet = 0;
-			char szSubscribedValue[10];
 
+			// if user didn't buy HL2 yet, this must be the free demo
 			if ( VCRGetMode() != VCR_Playback )
-				nRet = SteamApps()->BIsSubscribedApp( 220 );
-#if !defined( NO_VCR )
-			VCRGenericValue( "e", &nRet, sizeof( nRet ) );
-#endif
-			if ( nRet && Q_atoi( szSubscribedValue ) == 0 ) // if they don't own HL2 this must be the demo!
 			{
-					s_bIsHL2Demo = true;
+				s_bIsHL2Demo = !Steam3Client().SteamApps()->BIsSubscribedApp( GetAppSteamAppId( k_App_HL2 ) );
 			}
+#if !defined( NO_VCR )
+			VCRGenericValue( "e", &s_bIsHL2Demo, sizeof( s_bIsHL2Demo ) );
+#endif
 		}
 		
 		if ( !Q_stricmp( COM_GetModDirectory(), "hl2" ) && CommandLine()->CheckParm( "-demo" ) ) 
@@ -322,7 +326,6 @@ void CL_InitHL2DemoFlag()
 			s_bIsHL2Demo = true;
 		}
 	}
-#endif
 #endif
 }
 
@@ -338,25 +341,25 @@ bool CL_IsHL2Demo()
 static bool s_bIsPortalDemo = false;
 void CL_InitPortalDemoFlag()
 {
-#ifndef NO_STEAM
+#if defined(_X360)
+	s_bIsPortalDemo = false;
+#else
 	static bool initialized = false;
 	if ( !initialized )
 	{
-		if ( SteamApps() && !Q_stricmp( COM_GetModDirectory(), "portal" ) && g_pFileSystem->IsSteam() )
+		if ( Steam3Client().SteamApps() && !Q_stricmp( COM_GetModDirectory(), "portal" ) )
 		{
 			initialized = true;
-			int nRet = 0;
-			char szSubscribedValue[10];
-
+		
+			// if user didn't buy Portal yet, this must be the free demo
 			if ( VCRGetMode() != VCR_Playback )
-				nRet = SteamApps()->BIsSubscribedApp( 220 );
-#if !defined( NO_VCR )
-			VCRGenericValue( "e", &nRet, sizeof( nRet ) );
-#endif
-			if ( nRet && Q_atoi( szSubscribedValue ) == 0 ) // if they don't own HL2 this must be the demo!
 			{
-				s_bIsPortalDemo = true;
+				s_bIsPortalDemo = !Steam3Client().SteamApps()->BIsSubscribedApp( GetAppSteamAppId( k_App_PORTAL ) );
 			}
+				
+#if !defined( NO_VCR )
+			VCRGenericValue( "e", &s_bIsPortalDemo, sizeof( s_bIsPortalDemo ) );
+#endif
 		}
 		
 		if ( !Q_stricmp( COM_GetModDirectory(), "portal" ) && CommandLine()->CheckParm( "-demo" ) ) 
@@ -364,8 +367,6 @@ void CL_InitPortalDemoFlag()
 			s_bIsPortalDemo = true;
 		}
 	}
-#else
-	static bool initialized = true;
 #endif
 }
 
@@ -386,7 +387,7 @@ extern void Host_WriteConfiguration( const char *dirname, const char *filename )
 //-----------------------------------------------------------------------------
 void WriteConfig_f( ConVar *var, const char *pOldString )
 {
-	Host_WriteConfiguration( "cfg", "xboxuser.cfg" );
+	Host_WriteConfiguration( "xboxuser.cfg" );
 }
 #endif
 
@@ -414,8 +415,9 @@ void CL_CheckClientState( void )
 //-----------------------------------------------------------------------------
 bool CL_CheckCRCs( const char *pszMap )
 {
-	CRC32_t mapCRC;        // If this is the worldmap, CRC agains server's map
-	char szDllName[MAX_QPATH];    // Client side DLL being used.
+	CRC32_t mapCRC;        // If this is the worldmap, CRC against server's map
+	MD5Value_t mapMD5;
+	V_memset( mapMD5.bits, 0, MD5_DIGEST_LENGTH );
 
 	// Don't verify CRC if we are running a local server (i.e., we are playing single player, or we are the server in multiplay
 	if ( sv.IsActive() ) // Single player
@@ -426,8 +428,18 @@ bool CL_CheckCRCs( const char *pszMap )
 		return true;
 	}
 
-	CRC32_Init(&mapCRC);
-	if (!CRC_MapFile( &mapCRC, pszMap ) )
+	bool couldHash = false;
+	if ( g_ClientGlobalVariables.network_protocol > PROTOCOL_VERSION_17 )
+	{
+		couldHash = MD5_MapFile( &mapMD5, pszMap );
+	}
+	else
+	{
+		CRC32_Init(&mapCRC);
+		couldHash = CRC_MapFile( &mapCRC, pszMap );
+	}
+
+	if (!couldHash )
 	{
 		// Does the file exist?
 		FileHandle_t fp = 0;
@@ -440,59 +452,34 @@ bool CL_CheckCRCs( const char *pszMap )
 		if ( nSize != -1 )
 		{
 			COM_ExplainDisconnection( true, "Couldn't CRC map %s, disconnecting\n", pszMap);
+			Host_Error( "Bad map" );
 		}
 		else
-		{   
+		{
 			COM_ExplainDisconnection( true, "Missing map %s,  disconnecting\n", pszMap);
+			Host_Error( "Map is missing" );
 		}
 
-		Host_Error( "Disconnected" );
 		return false;
 	}
 
+	bool hashValid = false;
+	if ( g_ClientGlobalVariables.network_protocol > PROTOCOL_VERSION_17 )
+	{
+		hashValid = MD5_Compare( cl.serverMD5, mapMD5 );
+	}
+
 	// Hacked map
-	if ( cl.serverCRC != mapCRC && !demoplayer->IsPlayingBack())
+	if ( !hashValid && !demoplayer->IsPlayingBack())
 	{
 		if ( IsX360() )
 		{
 			Warning( "Disconnect: BSP CRC failed!\n" );
 		}
 		COM_ExplainDisconnection( true, "Your map [%s] differs from the server's.\n", pszMap );
-		Host_Error ("Disconnected");
+		Host_Error( "Client's map differs from the server's" );
 		return false;
 	}
-
-	// Don't CRC the client dll
-	if ( IsX360() )
-		return true;
-
-	// Check to see that our copy of the client side dll matches the server's.
-	// Client side DLL  CRC check.
-	Q_snprintf( szDllName, sizeof( szDllName ), IsX360() ? "bin\\client_360.dll" : "bin\\client.dll" );
-
-	CRC32_t clientDllCRC;
-	if ( !CRC_File( &clientDllCRC, szDllName) && !demoplayer->IsPlayingBack() )
-	{
-		COM_ExplainDisconnection( true, "Couldn't CRC client side dll %s.\n", szDllName);
-		Host_Error( "Disconnected" );
-		return false;
-	}
-
-#if !defined( _DEBUG )
-	// These must match.
-	// Except during demo playback.  For that just put a warning.
-	if (cl.serverClientSideDllCRC != 0xFFFFFFFF && cl.serverClientSideDllCRC != clientDllCRC)
-	{
-		if ( !demoplayer->IsPlayingBack() )
-		{
-			// TODO: allow Valve mods to differ!!
-			Warning( "Your .dll [%s] differs from the server's.\n", szDllName );
-			//COM_ExplainDisconnection( true, "Your .dll [%s] differs from the server's.\n", szDllName);
-			//Host_Error( "Disconnected" );
-			//return false;
-		}
-	}
-#endif
 
 	return true;
 }
@@ -521,6 +508,7 @@ Updates the local time and reads/handles messages on client net connection.
 void CL_ReadPackets ( bool bFinalTick )
 {
 	VPROF_BUDGET( "CL_ReadPackets", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
 
 	if ( !Host_ShouldRun() )
 		return;
@@ -545,6 +533,8 @@ void CL_ReadPackets ( bool bFinalTick )
 	// read packets, if any in queue
 	if ( demoplayer->IsPlayingBack() && cl.m_NetChannel )
 	{
+		tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "ReadPacket" );
+
 		// process data from demo file
 		cl.m_NetChannel->ProcessPlayback();
 	}
@@ -552,6 +542,7 @@ void CL_ReadPackets ( bool bFinalTick )
 	{
 		if ( !cl_ignorepackets.GetInt() )
 		{
+			tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "ProcessSocket" );
 			// process data from net socket
 			NET_ProcessSocket( NS_CLIENT, &cl );
 		}
@@ -576,7 +567,7 @@ void CL_ReadPackets ( bool bFinalTick )
 			EngineVGui()->ShowErrorMessage();
 		}
 
-		Host_Disconnect (true);
+		Host_Disconnect( true, "Lost connection" );
 		return;
 	}
 #endif
@@ -588,6 +579,11 @@ void CL_ReadPackets ( bool bFinalTick )
 //-----------------------------------------------------------------------------
 void CL_ClearState ( void )
 {
+	// clear out the current whitelist
+	IFileList *pFilesToReload = NULL;
+	CL_HandlePureServerWhitelist( NULL, pFilesToReload );
+	CL_ReloadFilesInList( pFilesToReload );
+
 	CL_ResetEntityBits();
 
 	R_UnloadSkys();
@@ -629,6 +625,8 @@ void CL_ClearState ( void )
 	Host_FreeStateAndWorld( false );
 	Host_FreeToLowMark( false );
 
+	PhonemeMP3Shutdown();
+
 	// Wipe the remainder of the structure.
 	cl.Clear();
 }
@@ -662,6 +660,8 @@ void CL_AddSound( const SoundInfo_t &sound )
 //-----------------------------------------------------------------------------
 void CL_DispatchSound( const SoundInfo_t &sound )
 {
+	int nSoundNum = sound.nSoundNum;
+
 	CSfxTable *pSfx;
 
 	char name[ MAX_QPATH ];
@@ -676,14 +676,21 @@ void CL_DispatchSound( const SoundInfo_t &sound )
 			pSentenceName = "";
 		}
 
-		Q_snprintf( name, sizeof( name ), "%c%s", CHAR_SENTENCE, pSentenceName );
-		
+		V_snprintf( name, sizeof( name ), "%c%s", CHAR_SENTENCE, pSentenceName );		
 		pSfx = S_DummySfx( name );
 	}
 	else
 	{
-		pSfx = cl.GetSound( sound.nSoundNum );
-		Q_strncpy( name, cl.GetSoundName( sound.nSoundNum ), sizeof( name ) );
+		V_strncpy( name, cl.GetSoundName( sound.nSoundNum ), sizeof( name ) );
+
+		const char *pchTranslatedName = g_ClientDLL->TranslateEffectForVisionFilter( "sounds", name );
+		if ( V_strcmp( pchTranslatedName, name ) != 0 )
+		{
+			V_strncpy( name, pchTranslatedName, sizeof( name ) );
+			nSoundNum = cl.LookupSoundIndex( name );
+		}
+
+		pSfx = cl.GetSound( nSoundNum );
 	}
 
 	if ( snd_show.GetInt() >= 2 )
@@ -713,6 +720,7 @@ void CL_DispatchSound( const SoundInfo_t &sound )
 	params.soundlevel = sound.Soundlevel;
 	params.flags = sound.nFlags;
 	params.pitch = sound.nPitch;
+	params.specialdsp = sound.nSpecialDSP;
 	params.fromserver = true;
 	params.delay = sound.fDelay;
 	// we always want to do this when this flag is set - even if the delay is zero we need to precisely
@@ -726,16 +734,17 @@ void CL_DispatchSound( const SoundInfo_t &sound )
 			// this adjusts for host_thread_mode or any other cases where we're running more than one
 			// tick at a time, but we get network updates on the first tick
 			soundtime -= ((g_ClientGlobalVariables.simTicksThisFrame-1) * host_state.interval_per_tick);
-#if 0
-			static float lastSoundTime = 0;
-			Msg("[%.3f] Play %s at %.3f\n", soundtime - lastSoundTime, name, soundtime );
-			lastSoundTime = soundtime;
-#endif
 			// this sound was networked over from the server, use server clock
 			params.delay = S_ComputeDelayForSoundtime( soundtime, CLOCK_SYNC_SERVER );
-			if ( params.delay < 0 )
+#if 0
+			static float lastSoundTime = 0;
+			Msg("[%.3f] Play %s at %.3f %.1fsms delay\n", soundtime - lastSoundTime, name, soundtime, params.delay * 1000.0f );
+			lastSoundTime = soundtime;
+#endif
+			if ( params.delay <= 0 )
 			{
-				params.delay = 0;
+				// leave a little delay to flag the channel in the low-level sound system
+				params.delay = 1e-6f;
 			}
 		}
 		else
@@ -744,6 +753,10 @@ void CL_DispatchSound( const SoundInfo_t &sound )
 		}
 	}
 	params.speakerentity = sound.nSpeakerEntity;
+
+	// Give the client DLL a chance to run arbitrary code to affect the sound parameters before we
+	// play.
+	g_ClientDLL->ClientAdjustStartSoundParams( params );
 
 	if ( params.staticsound )
 	{
@@ -797,8 +810,18 @@ void CL_Retry()
 		return;
 	}
 
+	// Check that we can add the two execution markers
+	bool bCanAddExecutionMarkers = Cbuf_HasRoomForExecutionMarkers( 2 );
+
 	ConMsg( "Commencing connection retry to %s\n", cl.m_szRetryAddress );
-	Cbuf_AddText( va( "connect %s\n", cl.m_szRetryAddress ) );
+
+	// We need to temporarily disable this execution marker so the connect command succeeds if it was executed by the server.
+	// We would still need this even if we called CL_Connect directly because the connect process may execute commands which we want to succeed.
+	const char *pszCommand = va( "connect %s %s\n", cl.m_szRetryAddress, cl.m_sRetrySourceTag.String() );
+	if ( cl.m_bRestrictServerCommands && bCanAddExecutionMarkers )
+		Cbuf_AddTextWithMarkers( eCmdExecutionMarker_Disable_FCVAR_SERVER_CAN_EXECUTE, pszCommand, eCmdExecutionMarker_Enable_FCVAR_SERVER_CAN_EXECUTE );
+	else
+		Cbuf_AddText( pszCommand );
 }
 
 CON_COMMAND_F( retry, "Retry connection to last server.", FCVAR_DONTRECORD | FCVAR_SERVER_CAN_EXECUTE | FCVAR_CLIENTCMD_CAN_EXECUTE )
@@ -814,16 +837,9 @@ CL_Connect_f
 User command to connect to server
 =====================
 */
-CON_COMMAND_F( connect, "Connect to specified server.", FCVAR_DONTRECORD )
-{
-	if ( args.ArgC() < 2 )
-	{
-		ConMsg( "Usage:  connect <server>\n" );
-		return;
-	}
 
-	const char *address = args.ArgS();
-	
+void CL_Connect( const char *address, const char *pszSourceTag )
+{
 	// If it's not a single player connection to "localhost", initialize networking & stop listenserver
 	if ( Q_strncmp( address, "localhost", 9 ) )
 	{
@@ -843,15 +859,65 @@ CON_COMMAND_F( connect, "Connect to specified server.", FCVAR_DONTRECORD )
 	{
 		// we are connecting/reconnecting to local game
 		// so don't stop listenserver 
-		cl.Disconnect(false);
+		cl.Disconnect( "Connecting to local host", false );
 	}
 
-	cl.Connect( address );
+	// This happens as part of the load process anyway, but on slower systems it causes the server to timeout the
+	// connection.  Use the opportunity to flush anything before starting a new connection.
+	UpdateMaterialSystemConfig();
+
+	cl.Connect( address, pszSourceTag );
 
 	// Reset error conditions
 	gfExtendedError = false;
 }
 
+CON_COMMAND_F( connect, "Connect to specified server.", FCVAR_DONTRECORD )
+{
+	// Default command processing considers ':' a command separator,
+	// and we donly want spaces to count.  So we'll need to re-split the arg string
+	CUtlVector<char*> vecArgs;
+	V_SplitString( args.ArgS(), " ", vecArgs );
+
+	// How many arguments?
+	if ( vecArgs.Count() == 1  )
+	{
+		CL_Connect( vecArgs[0], "" );
+	}
+	else if ( vecArgs.Count() == 2 )
+	{
+		CL_Connect( vecArgs[0], vecArgs[1] );
+	}
+	else
+	{
+		ConMsg( "Usage:  connect <server>\n" );
+	}
+	vecArgs.PurgeAndDeleteElements();
+}
+
+CON_COMMAND_F( redirect, "Redirect client to specified server.", FCVAR_DONTRECORD | FCVAR_SERVER_CAN_EXECUTE )
+{
+	if ( !CBaseClientState::ConnectMethodAllowsRedirects() )
+	{
+		ConMsg( "redirect: Current connection method does not allow silent redirects.\n");
+		return;
+	}
+
+	// Default command processing considers ':' a command separator,
+	// and we donly want spaces to count.  So we'll need to re-split the arg string
+	CUtlVector<char*> vecArgs;
+	V_SplitString( args.ArgS(), " ", vecArgs );
+
+	if ( vecArgs.Count() == 1  )
+	{
+		CL_Connect( vecArgs[0], "redirect" );
+	}
+	else
+	{
+		ConMsg( "Usage:  redirect <server>\n" );
+	}
+	vecArgs.PurgeAndDeleteElements();
+}
 
 //-----------------------------------------------------------------------------
 // Takes the map name, strips path and extension
@@ -872,7 +938,6 @@ void CL_SetupMapName( const char* pName, char* pFixedName, int maxlen )
 	if (pExt)
 		*pExt = 0;
 }
-
 
 CPureServerWhitelist* CL_LoadWhitelist( INetworkStringTable *pTable, const char *pName )
 {
@@ -898,36 +963,31 @@ CPureServerWhitelist* CL_LoadWhitelist( INetworkStringTable *pTable, const char 
 }
 
 
-void CL_CheckForPureServerWhitelist()
+void CL_CheckForPureServerWhitelist( /* out */ IFileList *&pFilesToReload )
 {
 #ifdef DISABLE_PURE_SERVER_STUFF
 	return;
 #endif
 
-	// Don't do sv_pure stuff in SP games or HLTV
-	if ( cl.m_nMaxClients <= 1 || cl.ishltv )
+	// Don't do sv_pure stuff in SP games or HLTV/replay
+	if ( cl.m_nMaxClients <= 1 || cl.ishltv || demoplayer->IsPlayingBack()
+#ifdef REPLAY_ENABLED
+		|| cl.isreplay
+#endif // ifdef REPLAY_ENABLED
+		)
 		return;
 	
 	CPureServerWhitelist *pWhitelist = NULL;
 	if ( cl.m_pServerStartupTable )
 		pWhitelist = CL_LoadWhitelist( cl.m_pServerStartupTable, "PureServerWhitelist" );
 		
+	PrintSvPureWhitelistClassification( pWhitelist );
+	CL_HandlePureServerWhitelist( pWhitelist, pFilesToReload );
 	if ( pWhitelist )
 	{
-		if ( pWhitelist->IsInFullyPureMode() )
-			Msg( "Got pure server whitelist: sv_pure = 2.\n" );
-		else
-			Msg( "Got pure server whitelist: sv_pure = 1.\n" );
-		
-		CL_HandlePureServerWhitelist( pWhitelist );
-	}
-	else
-	{		
-		Msg( "No pure server whitelist. sv_pure = 0\n" );
-		CL_HandlePureServerWhitelist( NULL );
+		pWhitelist->Release();
 	}
 }
-
 
 int CL_GetServerQueryPort()
 {
@@ -970,6 +1030,8 @@ void CL_RegisterResources( void )
 
 void CL_FullyConnected( void )
 {
+	CETWScope timer( "CL_FullyConnected" );
+
 	EngineVGui()->UpdateProgressBar( PROGRESS_FULLYCONNECTED );
 
 	// This has to happen here, in phase 3, because it is in this phase
@@ -982,7 +1044,10 @@ void CL_FullyConnected( void )
 		// Notify the loader the end of the loading context, preloads are about to be purged
 		g_pQueuedLoader->EndMapLoading( false );
 	}
-		
+
+	// flush client-side dynamic models that have no refcount
+	modelloader->FlushDynamicModels();
+
 	// loading completed
 	// can NOW safely purge unused models and their data hierarchy (materials, shaders, etc)
 	modelloader->PurgeUnusedModels();
@@ -993,6 +1058,15 @@ void CL_FullyConnected( void )
 	// NOTE: purposely disabling for singleplayer, memory spike causing issues, preload's stay in
 	// UNDONE: discard preload for TF to save memory
 	// g_pFileSystem->DiscardPreloadData();
+
+	// We initialize this list before the load, but don't perform reloads until after flushes have happened to avoid
+	// unnecessary reloads of items that wont be used on this map.
+	if ( cl.m_pPendingPureFileReloads )
+	{
+		CL_ReloadFilesInList( cl.m_pPendingPureFileReloads );
+		cl.m_pPendingPureFileReloads->Release();
+		cl.m_pPendingPureFileReloads = NULL;
+	}
 
 	// ***************************************************************
 	// NO MORE PRELOAD DATA AVAILABLE PAST THIS POINT!!!
@@ -1011,7 +1085,7 @@ void CL_FullyConnected( void )
 
 	int iQueryPort = CL_GetServerQueryPort();
 	EngineVGui()->NotifyOfServerConnect(com_gamedir, ip, port, iQueryPort);
-	
+
 	GetTestScriptMgr()->CheckPoint( "FinishedMapLoad" );
 
 	EngineVGui()->UpdateProgressBar( PROGRESS_READYTOPLAY );
@@ -1064,11 +1138,19 @@ void CL_FullyConnected( void )
 			{
 				numIterations = 1;
 			}
-			void R_BuildCubemapSamples( int numIterations );
-			R_BuildCubemapSamples( numIterations );
-			//Cbuf_AddText( "quit\n" );
+			char cmd[1024] = { 0 };
+			V_snprintf( cmd, sizeof( cmd ), "buildcubemaps %u\nquit\n", numIterations );
+			Cbuf_AddText( cmd );
 		}
-		if ( CommandLine()->FindParm("-exit") )
+		else if( CommandLine()->FindParm( "-navanalyze" ) )
+		{
+			Cbuf_AddText( "nav_edit 1;nav_analyze_scripted\n" );
+		}
+		else if( CommandLine()->FindParm( "-navforceanalyze" ) )
+		{
+			Cbuf_AddText( "nav_edit 1;nav_analyze_scripted force\n" );
+		}
+		else if ( CommandLine()->FindParm("-exit") )
 		{
 			Cbuf_AddText( "quit\n" );
 		}
@@ -1096,6 +1178,13 @@ void CL_FullyConnected( void )
 	}
 #endif // _X360
 
+	// Now that we're connected, toggle the clan tag so it gets sent to the server
+	int id = cl_clanid.GetInt();
+	cl_clanid.SetValue( 0 );
+	cl_clanid.SetValue( id );
+
+	MemAlloc_CompactHeap();
+
 	extern double g_flAccumulatedModelLoadTime;
 	extern double g_flAccumulatedSoundLoadTime;
 	extern double g_flAccumulatedModelLoadTimeStudio;
@@ -1121,7 +1210,18 @@ void CL_FullyConnected( void )
 //	COM_TimestampedLog( "    Model Loading time meshes studiohdr load %.4f", g_flLoadStudioHdr );
 
 	COM_TimestampedLog( "*** Map Load Complete" );
+
+	float map_loadtime_start = dev_loadtime_map_start.GetFloat();
+	if (map_loadtime_start > 0.0)
+	{
+		float elapsed = Plat_FloatTime() - map_loadtime_start;
+		dev_loadtime_map_elapsed.SetValue( elapsed );
+
+		// Clear this for next time so we know we did.
+		dev_loadtime_map_start.SetValue( 0.0f );
+	}
 }
+
 
 /*
 =====================
@@ -1139,10 +1239,10 @@ void CL_NextDemo (void)
 
 	SCR_BeginLoadingPlaque ();
 
-	if (!cl.demos[cl.demonum][0] || cl.demonum == MAX_DEMOS)
+	if ( cl.demos[cl.demonum].IsEmpty() || cl.demonum == MAX_DEMOS )
 	{
 		cl.demonum = 0;
-		if (!cl.demos[cl.demonum][0])
+		if ( cl.demos[cl.demonum].IsEmpty() )
 		{
 			scr_disabled_for_loading = false;
 
@@ -1150,9 +1250,19 @@ void CL_NextDemo (void)
 			cl.demonum = -1;
 			return;
 		}
+		else if ( !demoplayer->ShouldLoopDemos() )
+		{
+			cl.demonum = -1;
+			scr_disabled_for_loading = false;
+			Host_Disconnect( true );
+
+			demoplayer->OnLastDemoInLoopPlayed();
+
+			return;
+		}
 	}
 
-	Q_snprintf (str,sizeof( str ), "playdemo %s", cl.demos[cl.demonum]);
+	Q_snprintf (str,sizeof( str ), "%s %s", CommandLine()->FindParm("-timedemoloop") ? "timedemo" : "playdemo", cl.demos[cl.demonum].Get());
 	Cbuf_AddText (str);
 	cl.demonum++;
 }
@@ -1164,6 +1274,7 @@ void CL_TakeScreenshot(const char *name)
 {
 	cl_takesnapshot = true;
 	cl_takejpeg = false;
+	cl_takesnapshot_internal = false;
 
 	if ( name != NULL )
 	{
@@ -1224,6 +1335,7 @@ void CL_TakeJpeg(const char *name, int quality)
 	cl_takesnapshot = true;
 	cl_takejpeg = true;
 	cl_jpegquality = clamp( quality, 1, 100 );
+	cl_takesnapshot_internal = false;
 
 	if ( name != NULL )
 	{
@@ -1254,8 +1366,28 @@ CON_COMMAND( jpeg, "Take a jpeg screenshot:  jpeg <filename> <quality 1-100>." )
 	}
 }
 
+static void screenshot_internal( const CCommand &args )
+{
+
+	if( args.ArgC() != 2 )
+	{
+		Assert( args.ArgC() >= 2 );
+		Warning( "__screenshot_internal - wrong number of arguments" );
+		return;
+	}
+	Q_strncpy( cl_snapshotname, args[1], ARRAYSIZE(cl_snapshotname) );
+	cl_takesnapshot = true;
+	cl_takejpeg = true;
+	cl_jpegquality = 70;
+	cl_takesnapshot_internal = true;
+}
+
+ConCommand screenshot_internal_command( "__screenshot_internal", screenshot_internal, "Internal command to take a screenshot without renumbering or notifying Steam.", FCVAR_DONTRECORD | FCVAR_HIDDEN );
+
 void CL_TakeSnapshotAndSwap()
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+
 	bool bReadPixelsFromFrontBuffer = g_pMaterialSystemHardwareConfig->ReadPixelsFromFrontBuffer();
 	if ( bReadPixelsFromFrontBuffer )
 	{
@@ -1264,90 +1396,114 @@ void CL_TakeSnapshotAndSwap()
 	
 	if (cl_takesnapshot)
 	{
+		// Disable threading for the duration of the screenshots, because we need to get pointers to the (complete) 
+		// back buffer right now.
+		bool bEnabled = materials->AllowThreading( false, g_nMaterialSystemThread );
+
 		char base[MAX_OSPATH];
 		char filename[MAX_OSPATH];
 		IClientEntity *world = entitylist->GetClientEntity( 0 );
 
 		g_pFileSystem->CreateDirHierarchy( "screenshots", "DEFAULT_WRITE_PATH" );
 
-		if ( world && world->GetModel() )
+		if ( cl_takesnapshot_internal )
 		{
-			Q_FileBase( modelloader->GetName( ( model_t *)world->GetModel() ), base, sizeof( base ) );
 
-			if ( IsX360() )
-			{
-				// map name has an additional extension
-				V_StripExtension( base, base, sizeof( base ) );
-			}
-		}
-		else
-		{
-			Q_strncpy( base, "Snapshot", sizeof( base ) );
-		}
+			// !KLUDGE! Don't save this screenshot to steam
+			ConVarRef cl_savescreenshotstosteam( "cl_savescreenshotstosteam" );
+			bool bSaveValue = cl_savescreenshotstosteam.GetBool();
+			cl_savescreenshotstosteam.SetValue( false );
 
-		char extension[MAX_OSPATH];
-		Q_snprintf( extension, sizeof( extension ), "%s.%s", GetPlatformExt(), cl_takejpeg ? "jpg" : "tga" );
-
-		// Using a subdir? If so, create it
-		if ( cl_snapshot_subdirname[0] )
-		{
-			Q_snprintf( filename, sizeof( filename ), "screenshots/%s/%s", base, cl_snapshot_subdirname );
-			g_pFileSystem->CreateDirHierarchy( filename, "DEFAULT_WRITE_PATH" );
-		}
-
-		if ( cl_snapshotname[0] )
-		{
-			Q_strncpy( base, cl_snapshotname, sizeof( base ) );
-			Q_snprintf( filename, sizeof( filename ), "screenshots/%s%s", base, extension );
-
-			int iNumber = 0;
-			char renamedfile[MAX_OSPATH];
-
-			while ( 1 )
-			{
-				Q_snprintf( renamedfile, sizeof( renamedfile ), "screenshots/%s_%04d%s", base, iNumber++, extension );	
-				if( !g_pFileSystem->GetFileTime( renamedfile ) )
-					break;
-			}
-
-			if (iNumber > 0)
-			{
-				g_pFileSystem->RenameFile(filename, renamedfile);
-			}
-
-			cl_screenshotname.SetValue( "" );
-		}
-		else
-		{
-			while( 1 )
-			{
-				if ( cl_snapshot_subdirname[0] )
-				{
-					Q_snprintf( filename, sizeof( filename ), "screenshots/%s/%s/%s%04d%s", base, cl_snapshot_subdirname, base, cl_snapshotnum++, extension  );
-				}
-				else
-				{
-					Q_snprintf( filename, sizeof( filename ), "screenshots/%s%04d%s", base, cl_snapshotnum++, extension  );
-				}
-
-				if( !g_pFileSystem->GetFileTime( filename ) )
-				{
-					// woo hoo!  The file doesn't exist already, so use it.
-					break;
-				}
-			}
-		}
-		if ( cl_takejpeg )
-		{
+			Q_snprintf( filename, sizeof( filename ), "screenshots/%s.jpg", cl_snapshotname );
 			videomode->TakeSnapshotJPEG( filename, cl_jpegquality );
-			g_ServerRemoteAccess.UploadScreenshot( filename );
+
+			cl_savescreenshotstosteam.SetValue( bSaveValue );
 		}
 		else
 		{
-			videomode->TakeSnapshotTGA( filename );
+			if ( world && world->GetModel() )
+			{
+				Q_FileBase( modelloader->GetName( ( model_t *)world->GetModel() ), base, sizeof( base ) );
+
+				if ( IsX360() )
+				{
+					// map name has an additional extension
+					V_StripExtension( base, base, sizeof( base ) );
+				}
+			}
+			else
+			{
+				Q_strncpy( base, "Snapshot", sizeof( base ) );
+			}
+
+			char extension[MAX_OSPATH];
+			Q_snprintf( extension, sizeof( extension ), "%s.%s", GetPlatformExt(), cl_takejpeg ? "jpg" : "tga" );
+
+			// Using a subdir? If so, create it
+			if ( cl_snapshot_subdirname[0] )
+			{
+				Q_snprintf( filename, sizeof( filename ), "screenshots/%s/%s", base, cl_snapshot_subdirname );
+				g_pFileSystem->CreateDirHierarchy( filename, "DEFAULT_WRITE_PATH" );
+			}
+
+			if ( cl_snapshotname[0] )
+			{
+				Q_strncpy( base, cl_snapshotname, sizeof( base ) );
+				Q_snprintf( filename, sizeof( filename ), "screenshots/%s%s", base, extension );
+
+				int iNumber = 0;
+				char renamedfile[MAX_OSPATH];
+
+				while ( 1 )
+				{
+					Q_snprintf( renamedfile, sizeof( renamedfile ), "screenshots/%s_%04d%s", base, iNumber++, extension );	
+					if( !g_pFileSystem->GetFileTime( renamedfile ) )
+						break;
+				}
+
+				if ( iNumber > 0 && g_pFileSystem->GetFileTime( filename ) )
+				{
+					g_pFileSystem->RenameFile(filename, renamedfile);
+				}
+
+				cl_screenshotname.SetValue( "" );
+			}
+			else
+			{
+				while( 1 )
+				{
+					if ( cl_snapshot_subdirname[0] )
+					{
+						Q_snprintf( filename, sizeof( filename ), "screenshots/%s/%s/%s%04d%s", base, cl_snapshot_subdirname, base, cl_snapshotnum++, extension  );
+					}
+					else
+					{
+						Q_snprintf( filename, sizeof( filename ), "screenshots/%s%04d%s", base, cl_snapshotnum++, extension  );
+					}
+
+					if( !g_pFileSystem->GetFileTime( filename ) )
+					{
+						// woo hoo!  The file doesn't exist already, so use it.
+						break;
+					}
+				}
+			}
+			if ( cl_takejpeg )
+			{
+				videomode->TakeSnapshotJPEG( filename, cl_jpegquality );
+				g_ServerRemoteAccess.UploadScreenshot( filename );
+			}
+			else
+			{
+				videomode->TakeSnapshotTGA( filename );
+			}
 		}
 		cl_takesnapshot = false;
+		cl_takesnapshot_internal = false;
 		GetTestScriptMgr()->CheckPoint( "screenshot" );
+
+		// Restore threading if it was previously enabled (if it wasn't this will do nothing).
+		materials->AllowThreading( bEnabled, g_nMaterialSystemThread );
 	}
 
 	// If recording movie and the console is totally up, then write out this frame to movie file.
@@ -1370,9 +1526,10 @@ void CL_TakeSnapshotAndSwap()
 }
 
 static float s_flPreviousHostFramerate = 0;
-void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, float flFrameRate, int jpeg_quality )
+ConVar cl_simulate_no_quicktime( "cl_simulate_no_quicktime", "0", FCVAR_HIDDEN );
+void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, float flFrameRate, int nJpegQuality, VideoSystem_t videoSystem )
 {
-	Assert( g_hCurrentAVI == AVIHANDLE_INVALID );
+	Assert( g_pVideoRecorder == NULL );
 
 	// StartMove depends on host_framerate not being 0.
 	s_flPreviousHostFramerate = host_framerate.GetFloat();
@@ -1381,43 +1538,98 @@ void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, fl
 	cl_movieinfo.Reset();
 	Q_strncpy( cl_movieinfo.moviename, filename, sizeof( cl_movieinfo.moviename ) );
 	cl_movieinfo.type = flags;
-	cl_movieinfo.jpeg_quality = jpeg_quality;
+	cl_movieinfo.jpeg_quality = nJpegQuality;
 
-	if ( cl_movieinfo.DoAVI() || cl_movieinfo.DoAVISound() )
+	bool bSuccess = true;
+	if ( cl_movieinfo.DoVideo() || cl_movieinfo.DoVideoSound() )
 	{
 // HACK:  THIS MUST MATCH snd_device.h.  Should be exposed more cleanly!!!
 #define SOUND_DMA_SPEED		44100		// hardware playback rate
 
-		AVIParams_t params;
-		Q_strncpy( params.m_pFileName, filename, sizeof( params.m_pFileName ) );
-		Q_strncpy( params.m_pPathID, "MOD", sizeof( params.m_pPathID ) );
-		params.m_nNumChannels = 2;
-		params.m_nSampleBits = 16;
-		params.m_nSampleRate = SOUND_DMA_SPEED;
-		params.m_nWidth = nWidth;
-		params.m_nHeight = nHeight;
-
-		if ( IsIntegralValue( flFrameRate ) )
+		// MGP - switched over to using valve video services from avi
+		if ( videoSystem == VideoSystem::NONE && g_pVideo )
 		{
-			params.m_nFrameRate = RoundFloatToInt( flFrameRate );
-			params.m_nFrameScale = 1;
+			// Find a video system based on features if they didn't specify a specific one.
+			VideoSystemFeature_t neededFeatures = VideoSystemFeature::NO_FEATURES;
+			if ( cl_movieinfo.DoVideo() )
+				neededFeatures |= VideoSystemFeature::ENCODE_VIDEO_TO_FILE;
+			if ( cl_movieinfo.DoVideoSound() )
+				neededFeatures |= VideoSystemFeature::ENCODE_AUDIO_TO_FILE;
+		
+			videoSystem = g_pVideo->FindNextSystemWithFeature( neededFeatures );
 		}
-		else if ( IsIntegralValue( flFrameRate * 1001.0f / 1000.0f ) ) // 1001 is the ntsc divisor (30*1000/1001 = 29.97, etc)
+
+		if ( !cl_simulate_no_quicktime.GetBool() && g_pVideo && videoSystem != VideoSystem::NONE )
 		{
-			params.m_nFrameRate = RoundFloatToInt( flFrameRate * 1001 );
-			params.m_nFrameScale = 1001;
+			g_pVideoRecorder = g_pVideo->CreateVideoRecorder( videoSystem );
+			if ( g_pVideoRecorder != NULL )
+			{
+				VideoFrameRate_t theFps;
+	 			if ( IsIntegralValue( flFrameRate ) )
+	 			{
+	 				theFps.SetFPS( RoundFloatToInt( flFrameRate ), false );
+	 			}
+	 			else if ( IsIntegralValue( flFrameRate * 1001.0f / 1000.0f ) ) // 1001 is the ntsc divisor (30*1000/1001 = 29.97, etc)
+	 			{
+	 				theFps.SetFPS( RoundFloatToInt( flFrameRate + 0.05f ), true );
+	 			}
+	 			else
+	 			{
+					theFps.SetFPS( RoundFloatToInt( flFrameRate ), false );
+	 			} 	
+
+				const int nSize = 256;
+				CFmtStrN<nSize> fmtFullFilename( "%s%c%s", com_gamedir, CORRECT_PATH_SEPARATOR, filename );
+
+				char szFullFilename[nSize];
+				V_FixupPathName( szFullFilename, nSize, fmtFullFilename.Access() );
+#ifdef USE_WEBM_FOR_REPLAY
+				V_DefaultExtension( szFullFilename, ".webm", sizeof( szFullFilename ) );
+#else
+				V_DefaultExtension( szFullFilename, ".mp4", sizeof( szFullFilename ) );
+#endif
+
+				g_pVideoRecorder->CreateNewMovieFile( szFullFilename, cl_movieinfo.DoVideoSound() );
+#ifdef USE_WEBM_FOR_REPLAY
+				g_pVideoRecorder->SetMovieVideoParameters( VideoEncodeCodec::WEBM_CODEC, nJpegQuality, nWidth, nHeight, theFps );
+#else
+				g_pVideoRecorder->SetMovieVideoParameters( VideoEncodeCodec::DEFAULT_CODEC, nJpegQuality, nWidth, nHeight, theFps );
+#endif
+				
+				if ( cl_movieinfo.DoVideo() )
+				{
+					g_pVideoRecorder->SetMovieSourceImageParameters( VideoEncodeSourceFormat::BGR_24BIT, nWidth, nHeight );
+				}
+				
+				if ( cl_movieinfo.DoVideoSound() )
+				{
+					g_pVideoRecorder->SetMovieSourceAudioParameters( AudioEncodeSourceFormat::AUDIO_16BIT_PCMStereo, SOUND_DMA_SPEED, AudioEncodeOptions::LIMIT_AUDIO_TRACK_TO_VIDEO_DURATION  );
+				}
+			}
+			else
+			{
+				bSuccess = false;
+			}
 		}
 		else
 		{
-			// arbitrarily choosing 1000 as the divisor
-			params.m_nFrameRate = RoundFloatToInt( flFrameRate * 1000 );
-			params.m_nFrameScale = 1000;
+			bSuccess = false;
 		}
-
-		g_hCurrentAVI = avi->StartAVI( params );
 	}
 
-	SND_MovieStart();
+	if ( bSuccess )
+	{
+		SND_MovieStart();
+	}
+	else
+	{
+#ifdef USE_WEBM_FOR_REPLAY
+		Warning( "Failed to launch startmovie!\n" );
+#else
+		Warning( "Failed to launch startmovie!  If you are trying to use h264, please make sure you have QuickTime installed.\n" );
+#endif
+		CL_EndMovie();
+	}
 }
 
 void CL_EndMovie()
@@ -1429,13 +1641,15 @@ void CL_EndMovie()
 	s_flPreviousHostFramerate = 0.0f;
 
 	SND_MovieEnd();
-	
-	if ( cl_movieinfo.DoAVI() || cl_movieinfo.DoAVISound() )
-	{
-		avi->FinishAVI( g_hCurrentAVI );
-		g_hCurrentAVI = AVIHANDLE_INVALID;
-	}
 
+	if ( g_pVideoRecorder && ( cl_movieinfo.DoVideo() || cl_movieinfo.DoVideoSound() ) )
+	{
+		g_pVideoRecorder->FinishMovie();
+		
+		g_pVideo->DestroyVideoRecorder( g_pVideoRecorder );
+		g_pVideoRecorder = NULL;
+	}
+	
 	cl_movieinfo.Reset();
 }
 
@@ -1461,15 +1675,25 @@ CON_COMMAND_F( startmovie, "Start recording movie frames.", FCVAR_DONTRECORD )
 	{
 		ConMsg( "startmovie <filename>\n [\n" );
 		ConMsg( " (default = TGAs + .wav file)\n" );
-		ConMsg( " avi = AVI + AVISOUND\n" );
+#ifdef USE_WEBM_FOR_REPLAY
+		ConMsg( " webm = WebM encoded audio and video\n" );
+#else
+		ConMsg( " h264 = H.264-encoded audio and video (must have QuickTime installed!)\n" );
+#endif
 		ConMsg( " raw = TGAs + .wav file, same as default\n" );
 		ConMsg( " tga = TGAs\n" );
 		ConMsg( " jpg/jpeg = JPegs\n" );
 		ConMsg( " wav = Write .wav audio file\n" );
 		ConMsg( " jpeg_quality nnn = set jpeq quality to nnn (range 1 to 100), default %d\n", DEFAULT_JPEG_QUALITY );
 		ConMsg( " ]\n" );
-		ConMsg( "e.g.:  startmovie testmovie jpg wav jpeg_qality 75\n" );
-		ConMsg( "Using AVI will bring up a dialog for choosing the codec, which may not show if you are running the engine in fullscreen mode!\n" );
+		ConMsg( "examples:\n" );
+		ConMsg( "   startmovie testmovie jpg wav jpeg_qality 75\n" );
+#ifdef USE_WEBM_FOR_REPLAY
+		ConMsg( "   startmovie testmovie webm\n" );
+#else
+		ConMsg( "   startmovie testmovie h264   <--- requires QuickTime\n" );
+		ConMsg( "AVI is no longer supported.\n" );
+#endif
 		return;
 	}
 
@@ -1480,7 +1704,8 @@ CON_COMMAND_F( startmovie, "Start recording movie frames.", FCVAR_DONTRECORD )
 	}
 
 	int flags = MovieInfo_t::FMOVIE_TGA | MovieInfo_t::FMOVIE_WAV;
-	int jpeg_quality = DEFAULT_JPEG_QUALITY;
+	VideoSystem_t videoSystem = VideoSystem::NONE;
+	int nJpegQuality = DEFAULT_JPEG_QUALITY;
 
 	if ( args.ArgC() > 2 )
 	{
@@ -1489,8 +1714,38 @@ CON_COMMAND_F( startmovie, "Start recording movie frames.", FCVAR_DONTRECORD )
 		{
 			if ( !Q_stricmp( args[ i ], "avi" ) )
 			{
-				flags |= MovieInfo_t::FMOVIE_AVI | MovieInfo_t::FMOVIE_AVISOUND;
+				//flags |= MovieInfo_t::FMOVIE_VID | MovieInfo_t::FMOVIE_VIDSOUND;
+				//videoSystem = VideoSystem::AVI;
+#ifdef USE_WEBM_FOR_REPLAY
+				Warning( "AVI is not supported on this platform!  Use \"webm\".\n" );
+#else
+				Warning( "AVI is no longer supported!  Make sure QuickTime is installed and use \"h264\" - if you install QuickTime, you will need to reboot before using startmovie.\n" );
+#endif
+				return;
 			}
+#ifdef USE_WEBM_FOR_REPLAY
+			else if ( !Q_stricmp( args[ i ], "webm" ) )
+			{
+				flags |= MovieInfo_t::FMOVIE_VID | MovieInfo_t::FMOVIE_VIDSOUND;
+				videoSystem = VideoSystem::WEBM;
+			}
+			else if ( !Q_stricmp( args[ i ], "h264" ) )
+			{
+				Warning( "h264 is not supported on this platform!  Use \"webm\".\n" );
+				return;
+			}
+#else
+			else if ( !Q_stricmp( args[ i ], "h264" ) )
+			{
+				flags |= MovieInfo_t::FMOVIE_VID | MovieInfo_t::FMOVIE_VIDSOUND;
+				videoSystem = VideoSystem::QUICKTIME;
+			}
+			else if ( !Q_stricmp( args[ i ], "webm" ) )
+			{
+				Warning( "WebM is not supported on this platform!  Make sure QuickTime is installed and use \"h264\" - if you install QuickTime, you will need to reboot before using startmovie.\n" );
+				return;
+			}
+#endif
 			if ( !Q_stricmp( args[ i ], "raw" ) )
 			{
 				flags |= MovieInfo_t::FMOVIE_TGA | MovieInfo_t::FMOVIE_WAV;
@@ -1506,7 +1761,7 @@ CON_COMMAND_F( startmovie, "Start recording movie frames.", FCVAR_DONTRECORD )
 			}
 			if ( !Q_stricmp( args[ i ], "jpeg_quality" ) )
 			{
-				jpeg_quality = clamp( Q_atoi( args[ ++i ] ), 1, 100 );
+				nJpegQuality = clamp( Q_atoi( args[ ++i ] ), 1, 100 );
 			}
 			if ( !Q_stricmp( args[ i ], "wav" ) )
 			{
@@ -1518,7 +1773,11 @@ CON_COMMAND_F( startmovie, "Start recording movie frames.", FCVAR_DONTRECORD )
 
 	if ( flags == 0 )
 	{
-		Warning( "Missing or unknown recording types, must specify one or both of 'avi' or 'raw'\n" );
+#ifdef USE_WEBM_FOR_REPLAY
+		Warning( "Missing or unknown recording types, must specify one or both of 'webm' or 'raw'\n" );
+#else
+		Warning( "Missing or unknown recording types, must specify one or both of 'h264' or 'raw'\n" );
+#endif
 		return;
 	}
 
@@ -1527,7 +1786,7 @@ CON_COMMAND_F( startmovie, "Start recording movie frames.", FCVAR_DONTRECORD )
 	{
 		flFrameRate = 30.0f;
 	}
-	CL_StartMovie( args[ 1 ], flags, videomode->GetModeWidth(), videomode->GetModeHeight(), flFrameRate, jpeg_quality );
+	CL_StartMovie( args[ 1 ], flags, videomode->GetModeStereoWidth(), videomode->GetModeStereoHeight(), flFrameRate, nJpegQuality, videoSystem );
 	ConMsg( "Started recording movie, frames will record after console is cleared...\n" );
 }
 
@@ -1791,8 +2050,13 @@ void CL_ExtraMouseUpdate( float frametime )
 		return;
 
 	// Don't create usercmds here during playback, they were encoded into the packet already
+#if defined( REPLAY_ENABLED )
+	if ( demoplayer->IsPlayingBack() && !cl.ishltv && !cl.isreplay )
+		return;
+#else
 	if ( demoplayer->IsPlayingBack() && !cl.ishltv )
 		return;
+#endif
 
 	// Have client .dll create and store usercmd structure
 	g_ClientDLL->ExtraMouseSample( frametime, !cl.m_bPaused );
@@ -1807,6 +2071,11 @@ Constructs the movement command and sends it to the server if it's time.
 */
 void CL_SendMove( void )
 {
+#if defined( STAGING_ONLY ) || defined( _DEBUG )
+	if ( cl_block_usercommand.GetBool() )
+		return;
+#endif // STAGING_ONLY || _DEBUG
+
 	byte data[ MAX_CMD_BUFFER ];
 	
 	int nextcommandnr = cl.lastoutgoingcommand + cl.chokedcommands + 1;
@@ -1855,15 +2124,21 @@ void CL_Move(float accumulated_extra_samples, bool bFinalTick )
 	if ( !Host_ShouldRun() )
 		return;
 
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	// only send packets on the final tick in one engine frame
 	bool bSendPacket = true;	
 
 	// Don't create usercmds here during playback, they were encoded into the packet already
 	if ( demoplayer->IsPlayingBack() )
 	{
+#if defined( REPLAY_ENABLED )
+		if ( cl.ishltv || cl.isreplay )
+#else
 		if ( cl.ishltv )
+#endif
 		{
-			// still do it when playing back a HLTV demo
+			// still do it when playing back a HLTV/replay demo
 			bSendPacket = false;
 		}
 		else
@@ -1960,7 +2235,7 @@ void CL_Move(float accumulated_extra_samples, bool bFinalTick )
 		// use full update rate when active
 		float commandInterval = 1.0f / cl_cmdrate->GetFloat();
 		float maxDelta = min ( host_state.interval_per_tick, commandInterval );
-        float delta = clamp( net_time - cl.m_flNextCmdTime, 0.0f, maxDelta );
+		float delta = clamp( (float)(net_time - cl.m_flNextCmdTime), 0.0f, maxDelta );
 		cl.m_flNextCmdTime = net_time + commandInterval - delta;
 	}
 	else
@@ -2035,7 +2310,12 @@ bool CL_ShouldLoadBackgroundLevel( const CCommand &args )
 		return false;
 
 	// If TF2 and PC we don't want to load the background map.
-	bool bIsTF2 = ( Q_stricmp( COM_GetModDirectory(), "tf" ) == 0 );
+	bool bIsTF2 = false;
+	if ( ( Q_stricmp( COM_GetModDirectory(), "tf" ) == 0 ) || ( Q_stricmp( COM_GetModDirectory(), "tf_beta" ) == 0 ) )
+	{
+		bIsTF2 = true;
+	}
+
 	if ( bIsTF2 && IsPC() )
 		return false;
 
@@ -2063,7 +2343,9 @@ bool CL_ShouldLoadBackgroundLevel( const CCommand &args )
 			// Bail back to the menu and play the end game video.
 			CommandLine()->AppendParm( "-endgamevid", NULL ); 
 			CommandLine()->RemoveParm( "-recapvid" );
-			HostState_Restart();
+			game->PlayStartupVideos();
+			CommandLine()->RemoveParm( "-endgamevid" );
+			cl.Disconnect( "Finished playing end game videos", true );
 			return false;
 		}
 
@@ -2221,12 +2503,84 @@ void CL_CheckToDisplayStartupMenus( const CCommand &args )
 	}
 }
 
+static float s_fDemoRevealGameUITime = -1;
+float s_fDemoPlayMusicTime = -1;
+static bool s_bIsRavenHolmn = false;
+//-----------------------------------------------------------------------------
+// Purpose: run the special demo logic when transitioning from the trainstation levels
+//----------------------------------------------------------------------------
+void CL_DemoTransitionFromTrainstation()
+{
+	// kick them out to GameUI instead and bring up the chapter page with raveholm unlocked
+	sv_unlockedchapters.SetValue(6); // unlock ravenholm
+	Cbuf_AddText( "sv_cheats 1; fadeout 1.5; sv_cheats 0;");
+	Cbuf_Execute();
+	s_fDemoRevealGameUITime = Sys_FloatTime() + 1.5;
+	s_bIsRavenHolmn = false;
+}
+
+void CL_DemoTransitionFromRavenholm()
+{
+	Cbuf_AddText( "sv_cheats 1; fadeout 2; sv_cheats 0;");
+	Cbuf_Execute();
+	s_fDemoRevealGameUITime = Sys_FloatTime() + 1.9;
+	s_bIsRavenHolmn = true;
+}
+
+void CL_DemoTransitionFromTestChmb()
+{
+	Cbuf_AddText( "sv_cheats 1; fadeout 2; sv_cheats 0;");
+	Cbuf_Execute();
+	s_fDemoRevealGameUITime = Sys_FloatTime() + 1.9;	
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: make the gameui appear after a certain interval
 //----------------------------------------------------------------------------
 void V_RenderVGuiOnly();
 bool V_CheckGamma();
+void CL_DemoCheckGameUIRevealTime( ) 
+{
+	if ( s_fDemoRevealGameUITime > 0 )
+	{
+		if ( s_fDemoRevealGameUITime < Sys_FloatTime() )
+		{
+			s_fDemoRevealGameUITime = -1;
+
+			SCR_BeginLoadingPlaque();
+			Cbuf_AddText( "disconnect;");
+
+			CCommand args;
+			CL_CheckToDisplayStartupMenus( args );
+
+			s_fDemoPlayMusicTime = Sys_FloatTime() + 1.0;
+		}
+	}
+
+	if ( s_fDemoPlayMusicTime > 0 )
+	{
+		V_CheckGamma();
+		V_RenderVGuiOnly();
+		if ( s_fDemoPlayMusicTime < Sys_FloatTime() )
+		{
+			s_fDemoPlayMusicTime = -1;
+			EngineVGui()->ActivateGameUI();
+
+			if ( CL_IsHL2Demo() )
+			{
+				if ( s_bIsRavenHolmn )
+				{
+					Cbuf_AddText( "play music/ravenholm_1.mp3;" );
+				}
+				else
+				{
+					EngineVGui()->ShowNewGameDialog(6);// bring up the new game dialog in game UI
+				}
+			}
+		}
+	}
+}
 
 
 //-----------------------------------------------------------------------------
@@ -2241,7 +2595,7 @@ void CL_SetPagedPoolInfo()
 {
 	if ( IsX360() )
 		return;
-#if !defined( _X360 ) && !defined(NO_STEAM) && !defined(SWDS) && !defined(LINUX)
+#if !defined( _X360 ) && !defined(NO_STEAM) && !defined(SWDS)
 	Plat_GetPagedPoolInfo( &g_pagedpoolinfo );
 #endif
 }
@@ -2274,9 +2628,10 @@ void CL_SetSteamCrashComment()
 	materials->GetDisplayAdapterInfo( materials->GetCurrentAdapter(), info );
 
 	const char *dxlevel = "Unk";
+	int nDxLevel = g_pMaterialSystemHardwareConfig->GetDXSupportLevel();
 	if ( g_pMaterialSystemHardwareConfig )
 	{
-		dxlevel = COM_DXLevelToString( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() ) ;
+		dxlevel = COM_DXLevelToString( nDxLevel ) ;
 	}
 
 	// Make a string out of the high part and low parts of driver version
@@ -2287,14 +2642,14 @@ void CL_SetSteamCrashComment()
 		( long )( info.m_nDriverVersionLow>>16 ), 
 		( long )( info.m_nDriverVersionLow & 0xffff ) );
 
-	Q_snprintf( driverinfo, sizeof(driverinfo), "Driver Name:  %s\nDriver Version: %s\nVendorId / DeviceId:  0x%x / 0x%x\nSubSystem / Rev:  0x%x / 0x%x\nDXLevel:  %s\nVid:  %i x %i",
+	Q_snprintf( driverinfo, sizeof(driverinfo), "Driver Name:  %s\nDriver Version: %s\nVendorId / DeviceId:  0x%x / 0x%x\nSubSystem / Rev:  0x%x / 0x%x\nDXLevel:  %s [%d]\nVid:  %i x %i",
 		info.m_pDriverName,
 		szDXDriverVersion,
 		info.m_VendorID,
 		info.m_DeviceID,
 		info.m_SubSysID,
 		info.m_Revision,
-		dxlevel ? dxlevel : "Unk",
+		dxlevel ? dxlevel : "Unk", nDxLevel, 
 		videomode->GetModeWidth(), videomode->GetModeHeight() );
 
 	ConVarRef mat_picmip( "mat_picmip" );
@@ -2325,7 +2680,7 @@ void CL_SetSteamCrashComment()
 #else
 		Q_snprintf( videoinfo, sizeof(videoinfo), "picmip: %i forceansio: %i trilinear: %i antialias: %i vsync: %i rootlod: %i reducefillrate: %i\n"\
 			"shadowrendertotexture: %i r_flashlightdepthtexture %i waterforceexpensive: %i waterforcereflectentities: %i mat_motion_blur_enabled: %i mat_queue_mode %i",
-											mat_picmip.GetInt(), mat_forceaniso.GetInt(), mat_trilinear.GetInt(), mat_antialias.GetInt(), mat_aaquality.GetInt(),
+											mat_picmip.GetInt(), mat_forceaniso.GetInt(), mat_trilinear.GetInt(), mat_antialias.GetInt(), 
 											mat_vsync.GetInt(), r_rootlod.GetInt(), mat_reducefillrate.GetInt(), 
 											r_shadowrendertotexture.GetInt(), r_flashlightdepthtexture.GetInt(),
 											r_waterforceexpensive.GetInt(), r_waterforcereflectentities.GetInt(),
@@ -2366,7 +2721,8 @@ void CL_SetSteamCrashComment()
 				map, com_gamedir, build_number(), misc, pNetChannel, CommandLine()->GetCmdLine(), driverinfo, videoinfo, osversion );
 
 		char full[ 4096 ];
-		Q_snprintf( full, sizeof( full ), "%sPP PAGES: used: %d, free %d\n", g_minidumpinfo, g_pagedpoolinfo.numPagesUsed, g_pagedpoolinfo.numPagesFree );
+		Q_snprintf( full, sizeof( full ), "%sPP PAGES: used: %d, free %d\n", g_minidumpinfo, (int)g_pagedpoolinfo.numPagesUsed, (int)g_pagedpoolinfo.numPagesFree );
+
 #ifndef NO_STEAM
 	SteamAPI_SetMiniDumpComment( full );
 #endif
@@ -2381,25 +2737,50 @@ static ConCommand startupmenu( "startupmenu", &CL_CheckToDisplayStartupMenus, "O
 ConVar cl_language( "cl_language", "english", FCVAR_USERINFO, "Language (from HKCU\\Software\\Valve\\Steam\\Language)" );
 void CL_InitLanguageCvar()
 {
-	// !! bug do i need to do something linux-wise here.
-#ifdef _WIN32
-	char language[64];
-	if ( IsPC() )
+	if ( Steam3Client().SteamApps() )
 	{
-		memset( language, 0, sizeof( language ) );
-		vgui::system()->GetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Steam\\Language", language, sizeof( language ) - 1 );
-		if ( Q_strlen( language ) == 0 )
-		{
-			Q_strncpy( language, "english", sizeof( language ) );
-		}
+		cl_language.SetValue( Steam3Client().SteamApps()->GetCurrentGameLanguage() );
 	}
 	else
 	{
-		Q_strncpy( language, XBX_GetLanguageString(), sizeof( language ) );
+		cl_language.SetValue( "english" );
 	}
-	cl_language.SetValue( language );
-#endif
+}
 
+void CL_ChangeCloudSettingsCvar( IConVar *var, const char *pOldValue, float flOldValue );
+ConVar cl_cloud_settings( "cl_cloud_settings", "1", FCVAR_HIDDEN, "Cloud enabled from (from HKCU\\Software\\Valve\\Steam\\Apps\\appid\\Cloud)", CL_ChangeCloudSettingsCvar );
+void CL_ChangeCloudSettingsCvar( IConVar *var, const char *pOldValue, float flOldValue )
+{
+	// !! bug do i need to do something linux-wise here.
+	if ( IsPC() && Steam3Client().SteamRemoteStorage() )
+	{
+		ConVarRef ref( var->GetName() );
+		Steam3Client().SteamRemoteStorage()->SetCloudEnabledForApp( ref.GetBool() );
+		if ( cl_cloud_settings.GetInt() == STEAMREMOTESTORAGE_CLOUD_ON && flOldValue == STEAMREMOTESTORAGE_CLOUD_OFF )
+		{
+			// If we were just turned on, get our configuration from remote storage.
+			engineClient->ReadConfiguration( false );
+			engineClient->ClientCmd_Unrestricted( "refresh_options_dialog" );
+		}
+
+	}
+}
+
+void CL_InitCloudSettingsCvar()
+{
+	if ( IsPC()	&& Steam3Client().SteamRemoteStorage() )
+	{
+		int iCloudSettings = STEAMREMOTESTORAGE_CLOUD_OFF;
+		if ( Steam3Client().SteamRemoteStorage()->IsCloudEnabledForApp() )
+			iCloudSettings = STEAMREMOTESTORAGE_CLOUD_ON;
+		
+		cl_cloud_settings.SetValue( iCloudSettings );
+	}
+	else
+	{
+		// If not on PC or steam not available, set to 0 to make sure no replication occurs or is attempted
+		cl_cloud_settings.SetValue( STEAMREMOTESTORAGE_CLOUD_OFF );
+	}
 }
 
 
@@ -2411,27 +2792,9 @@ CL_Init
 void CL_Init (void)
 {	
 	cl.Clear();
-
-	char szRate[128];
-	szRate[0] = 0;
-
-	// get rate from registry
-	Sys_GetRegKeyValue("Software\\Valve\\Steam", "Rate", szRate, sizeof(szRate), IsX360() ? "6000" : "10000" );
-
-	if (Q_strlen(szRate) > 0)
-	{
-		cl_rate->SetValue( clamp( Q_atoi(szRate), MIN_RATE, MAX_RATE) );
-	}
 	
 	CL_InitLanguageCvar();
-	
-// We don't want to unlock all the chapters by default for cert!
-#if 0
-	if ( IsX360() && !IsRetail() )
-	{
-		sv_unlockedchapters.SetValue( 15 );
-	}
-#endif
+	CL_InitCloudSettingsCvar();
 }
 
 //-----------------------------------------------------------------------------
@@ -2447,7 +2810,7 @@ CON_COMMAND_F( cl_fullupdate, "Forces the server to send a full update packet", 
 }
 
 
-#ifdef _DEBUG
+#ifdef STAGING_ONLY
 
 CON_COMMAND( cl_download, "Downloads a file from server." )
 {
@@ -2460,10 +2823,10 @@ CON_COMMAND( cl_download, "Downloads a file from server." )
 	cl.m_NetChannel->RequestFile( args[ 1 ] ); // just for testing stuff
 }
 
-#endif // _DEBUG
+#endif // STAGING_ONLY
 
 
-CON_COMMAND_F( setinfo, "Addes a new user info value", FCVAR_CLIENTCMD_CAN_EXECUTE )
+CON_COMMAND_F( setinfo, "Adds a new user info value", FCVAR_CLIENTCMD_CAN_EXECUTE )
 {
 	if ( args.ArgC() != 3 )
 	{
@@ -2474,7 +2837,29 @@ CON_COMMAND_F( setinfo, "Addes a new user info value", FCVAR_CLIENTCMD_CAN_EXECU
 	const char *name = args[ 1 ];
 	const char *value = args[ 2 ];
 
+	// Prevent players manually changing their name (their Steam account provides it now)
+	if ( Q_stricmp( name, "name" ) == 0 )
+		return;
+
+	// Discard any convar change request if contains funky characters
+	bool bFunky = false;
+	for (const char *s = name ; *s != '\0' ; ++s )
+	{
+		if ( !V_isalnum(*s) && *s != '_' )
+		{
+			bFunky = true;
+			break;
+		}
+	}
+	if ( bFunky )
+	{
+		Msg( "Ignoring convar change request for variable '%s', which contains invalid character(s)\n", name );
+		return;
+	}
+
 	ConCommandBase *pCommand = g_pCVar->FindCommandBase( name );
+
+	ConVarRef sv_cheats( "sv_cheats" );
 
 	if ( pCommand )
 	{
@@ -2489,12 +2874,46 @@ CON_COMMAND_F( setinfo, "Addes a new user info value", FCVAR_CLIENTCMD_CAN_EXECU
 			Msg("Convar %s is already registered but not as user info value\n", name );
 			return;
 		}
+
+		if ( pCommand->IsFlagSet( FCVAR_NOT_CONNECTED ) )
+		{
+#ifndef DEDICATED
+			// Connected to server?
+			if ( cl.IsConnected() )
+			{
+				extern IBaseClientDLL *g_ClientDLL;
+				if ( pCommand->IsFlagSet( FCVAR_USERINFO ) && g_ClientDLL && g_ClientDLL->IsConnectedUserInfoChangeAllowed( NULL ) )
+				{
+					// Client.dll is allowing the convar change
+				}
+				else
+				{
+					ConMsg( "Can't change %s when playing, disconnect from the server or switch team to spectators\n", pCommand->GetName() );
+					return;
+				}
+			}
+#endif
+		}
+
+		if ( IsPC() )
+		{
+#if !defined(NO_STEAM)
+			EUniverse eUniverse = GetSteamUniverse();
+			if ( (( eUniverse != k_EUniverseBeta ) && ( eUniverse != k_EUniverseDev )) && pCommand->IsFlagSet( FCVAR_DEVELOPMENTONLY ) )
+				return;
+#endif 
+		}
+
+		if ( pCommand->IsFlagSet( FCVAR_CHEAT ) && sv_cheats.GetBool() == 0  )
+		{
+			Msg("Convar %s is marked as cheat and cheats are off\n", name );
+			return;
+		}
 	}
 	else
 	{
 		// cvar not found, create it now
-		char *pszString = new char[Q_strlen( name ) + 1];
-		Q_strcpy( pszString, name );
+		char *pszString = V_strdup( name );
 
 		pCommand = new ConVar( pszString, "", FCVAR_USERINFO, "Custom user info value" );
 	}
@@ -2541,8 +2960,9 @@ void Callback_ModelChanged( void *object, INetworkStringTable *stringTable, int 
 	{
 		// Index 0 is always NULL, just ignore it
 		// Index 1 == the world, don't 
-		if ( stringNumber >= 1 )
+		if ( stringNumber > 1 )
 		{
+//			DevMsg( "Preloading model %s\n", newString );
 			cl.SetModel( stringNumber );
 		}
 	}
@@ -2650,6 +3070,17 @@ void Callback_UserInfoChanged( void *object, INetworkStringTable *stringTable, i
 
 		g_GameEventManager.FireEventClientSide( event );
 	}
+}
+
+void Callback_DynamicModelsChanged( void *object, INetworkStringTable *stringTable, int stringNumber, const char *newString, const void *newData )
+{
+#ifndef SWDS
+	extern IVModelInfoClient *modelinfoclient;
+	if ( modelinfoclient )
+	{
+		modelinfoclient->OnDynamicModelsStringTableChange( stringNumber, newString, newData );
+	}
+#endif
 }
 
 void CL_HookClientStringTables()

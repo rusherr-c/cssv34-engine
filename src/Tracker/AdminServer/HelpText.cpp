@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include <stdio.h>
 
 #include <VGUI_Controls.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "HelpText.h"
 using namespace vgui;
 

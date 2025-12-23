@@ -31,7 +31,6 @@
 #include "tier0/threadtools.h"
 #include "mathlib/vector2d.h"
 #include "mathlib/math_pfns.h"
-#include "minmax.h"
 
 // Uncomment this to add extra Asserts to check for NANs, uninitialized vecs, etc.
 //#define VECTOR_PARANOIA	1
@@ -228,7 +227,7 @@ public:
 	void Init(short ix = 0, short iy = 0, short iz = 0, short iw = 0 );
 
 
-#if USE_M64S
+#ifdef USE_M64S
 	__m64 &AsM64() { return *(__m64*)&x; }
 	const __m64 &AsM64() const { return *(const __m64*)&x; } 
 #endif
@@ -285,7 +284,7 @@ public:
 	// Initialization
 	void Init(int ix = 0, int iy = 0, int iz = 0, int iw = 0 );
 
-#if USE_M64S
+#ifdef USE_M64S
 	__m64 &AsM64() { return *(__m64*)&x; }
 	const __m64 &AsM64() const { return *(const __m64*)&x; } 
 #endif
@@ -1476,9 +1475,9 @@ inline float ComputeVolume( const Vector &vecMins, const Vector &vecMaxs )
 // Get a random vector.
 inline Vector RandomVector( float minVal, float maxVal )
 {
-	Vector random;
-	random.Random( minVal, maxVal );
-	return random;
+	Vector vRandom;
+	vRandom.Random( minVal, maxVal );
+	return vRandom;
 }
 
 #endif //slow
@@ -1910,9 +1909,9 @@ inline void QAngle::Random( vec_t minVal, vec_t maxVal )
 
 inline QAngle RandomAngle( float minVal, float maxVal )
 {
-	Vector random;
-	random.Random( minVal, maxVal );
-	QAngle ret( random.x, random.y, random.z );
+	Vector vRandom;
+	vRandom.Random( minVal, maxVal );
+	QAngle ret( vRandom.x, vRandom.y, vRandom.z );
 	return ret;
 }
 

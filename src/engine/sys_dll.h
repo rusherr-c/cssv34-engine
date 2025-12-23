@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Expose functions from sys_dll.cpp.
 //
@@ -12,7 +12,6 @@
 #pragma once
 #endif
 
-
 #include "interface.h"
 
 //-----------------------------------------------------------------------------
@@ -23,8 +22,8 @@ class IDataCache;
 class IPhysics;
 class IMDLCache;
 class IMatSystemSurface;
-class IAvi;
-class IBik;
+class IVideoServices;
+class IVideoRecorder;
 class IInputSystem;
 class IDedicatedExports;
 class ISoundEmitterSystemBase;
@@ -52,21 +51,18 @@ extern IPhysics *g_pPhysics;
 extern IMDLCache *g_pMDLCache;
 extern IMatSystemSurface *g_pMatSystemSurface;
 extern IInputSystem *g_pInputSystem;
-extern IAvi *avi;
-extern IBik *bik;
+extern IVideoServices *g_pVideo;
 extern IDedicatedExports *dedicated;
 
 //-----------------------------------------------------------------------------
 // Other singletons
 //-----------------------------------------------------------------------------
-extern AVIHandle_t g_hCurrentAVI;
-
+extern IVideoRecorder *g_pVideoRecorder;
 
 inline bool InEditMode()
 {
 	return g_pHammer != NULL;
 }
-
 
 struct modinfo_t
 {
@@ -81,7 +77,7 @@ struct modinfo_t
 
 extern modinfo_t gmodinfo;
 
-void LoadEntityDLLs( const char *szBaseDir );
+void LoadEntityDLLs( const char *szBaseDir, bool bIsServerOnly );
 void UnloadEntityDLLs( void );
 
 // This returns true if someone called Error() or Sys_Error() and we're exiting.
@@ -91,11 +87,25 @@ bool IsInErrorExit();
 // error message
 bool Sys_MessageBox(const char *title, const char *info, bool bShowOkAndCancel);
 
-bool ServerDLL_Load();
+bool ServerDLL_Load( bool bIsServerOnly );
 void ServerDLL_Unload();
+
+typedef uint32 AppId_t;
+
+// steam.inf information.
+struct SteamInfVersionInfo_t
+{
+	int32 ClientVersion; // PatchVersion
+	int32 ServerVersion; // ServerVersion
+	char szVersionString[ 32 ]; // PatchVersion string
+	char szProductString[ 32 ]; // ProductName string
+
+	AppId_t AppID; // Steam AppID. Read from steam.inf(AppID) or gameinfo.txt(SteamAppId)
+	AppId_t ServerAppID; // ServerAppID. Used for dedicated server crash reporting.
+};
+const SteamInfVersionInfo_t& GetSteamInfIDVersionInfo();
 
 extern CreateInterfaceFn g_ServerFactory;
 
 #endif
-
 

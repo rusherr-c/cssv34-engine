@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -22,7 +22,6 @@ class CHudNumericDisplay : public vgui::Panel
 
 public:
 	CHudNumericDisplay(vgui::Panel *parent, const char *name);
-	virtual ~CHudNumericDisplay() {}
 
 	void SetDisplayValue(int value);
 	void SetSecondaryValue(int value);

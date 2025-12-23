@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -135,8 +135,10 @@ void CSession::UpdateSlots( const CClientInfo *pClient, bool bAddPlayers )
 	}
 	else
 	{
-		m_nPlayerSlots[SLOTS_FILLEDPRIVATE] = max( 0, m_nPlayerSlots[SLOTS_FILLEDPRIVATE] - pClient->m_numPrivateSlotsUsed );
-		m_nPlayerSlots[SLOTS_FILLEDPUBLIC]  = max( 0, m_nPlayerSlots[SLOTS_FILLEDPUBLIC]  - ( pClient->m_cPlayers - pClient->m_numPrivateSlotsUsed ) );
+		// The cast to 'int' is needed since otherwise underflow will wrap around to very large
+		// numbers and the 'max' macro will do nothing.
+		m_nPlayerSlots[SLOTS_FILLEDPRIVATE] = max( 0, (int)( m_nPlayerSlots[SLOTS_FILLEDPRIVATE] - pClient->m_numPrivateSlotsUsed ) );
+		m_nPlayerSlots[SLOTS_FILLEDPUBLIC]  = max( 0, (int)( m_nPlayerSlots[SLOTS_FILLEDPUBLIC]  - ( pClient->m_cPlayers - pClient->m_numPrivateSlotsUsed ) ) );
 	}
 
 }
@@ -329,13 +331,13 @@ void CSession::UpdateCreating()
 //-----------------------------------------------------------------------------
 void CSession::CancelCreateSession()
 {
-#ifndef _LINUX
 	if ( m_SessionState != SESSION_STATE_CREATING )
 		return;
 
 	g_pXboxSystem->CancelOverlappedOperation( &m_hCreateHandle );
 	g_pXboxSystem->ReleaseAsyncHandle( m_hCreateHandle );
 
+#ifndef POSIX
 	if( INVALID_HANDLE_VALUE != m_hSession )
 	{
 		CloseHandle( m_hSession );

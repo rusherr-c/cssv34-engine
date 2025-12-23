@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,6 +26,16 @@
 	#include "bot.h"
 	#include "cs_player.h"
 	#include <KeyValues.h>
+
+//=============================================================================
+// HPE_BEGIN
+// [dwenger] Necessary for stats tracking
+//=============================================================================
+#include "cs_gamestats.h"
+#include "cs_achievement_constants.h"
+//=============================================================================
+// HPE_END
+//=============================================================================
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -74,6 +84,20 @@ END_PREDICTION_DATA()
 	CPlantedC4::CPlantedC4()
 	{
 		g_PlantedC4s.AddToTail( this );
+        //=============================================================================
+        // HPE_BEGIN:        
+        //=============================================================================
+         
+        // [tj] No planter initially
+        m_pPlanter = NULL;
+
+        // [tj] Assume this is the original owner
+        m_bPlantedAfterPickup = false;
+         
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+        
 	}
 
 	CPlantedC4::~CPlantedC4()
@@ -108,6 +132,8 @@ END_PREDICTION_DATA()
 		PrecacheVGuiScreen( "c4_panel" );
 
 		engine->ForceModelBounds( PLANTED_C4_MODEL, Vector( -7, -13, -3 ), Vector( 9, 12, 11 ) );
+
+		PrecacheParticleSystem( "bomb_explosion_huge" );
 	}
 
 	void CPlantedC4::GetControlPanelInfo( int nPanelIndex, const char *&pPanelName )
@@ -131,10 +157,10 @@ END_PREDICTION_DATA()
 
 		// If we're attached to an entity, spawn control panels on it instead of use
 		CBaseAnimating *pEntityToSpawnOn = this;
-		char *pOrgLL = "controlpanel%d_ll";
-		char *pOrgUR = "controlpanel%d_ur";
-		char *pAttachmentNameLL = pOrgLL;
-		char *pAttachmentNameUR = pOrgUR;
+		const char *pOrgLL = "controlpanel%d_ll";
+		const char *pOrgUR = "controlpanel%d_ur";
+		const char *pAttachmentNameLL = pOrgLL;
+		const char *pAttachmentNameUR = pOrgUR;
 
 		Assert( pEntityToSpawnOn );
 
@@ -243,11 +269,22 @@ END_PREDICTION_DATA()
 		SetModel( PLANTED_C4_MODEL );	// Change this to c4 model
 
 		SetCollisionBounds( Vector( 0, 0, 0 ), Vector( 8, 8, 8 ) );
-		
 
 		SetAbsOrigin( vecStart );
 		SetAbsAngles( vecAngles );
 		SetOwnerEntity( pevOwner );
+        
+        //=============================================================================
+        // HPE_BEGIN:
+        // [tj] Set the planter when the bomb is planted.
+        //=============================================================================
+         
+        SetPlanter( pevOwner );
+         
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
+        
 		
 		// Detonate in "time" seconds
 		SetThink( &CPlantedC4::C4Think );
@@ -301,10 +338,11 @@ END_PREDICTION_DATA()
 		if (m_flC4Blow <= gpGlobals->curtime)
 		{
 			// give the defuser credit for defusing the bomb
-			CBasePlayer *pBombOwner = dynamic_cast< CBasePlayer* >( GetOwnerEntity() );
+			CCSPlayer* pBombOwner = ToCSPlayer(GetOwnerEntity());
 			if ( pBombOwner )
 			{
-				pBombOwner->IncrementFragCount( 3 );
+                if (CSGameRules()->m_iRoundWinStatus == WINNER_NONE)
+				    pBombOwner->IncrementFragCount( 3 );
 			}
 
 			CSGameRules()->m_bBombDropped = false;
@@ -319,6 +357,8 @@ END_PREDICTION_DATA()
 
 			CSGameRules()->m_bBombPlanted = false;
 
+			CCS_GameStats.Event_BombExploded(pBombOwner);
+
 			IGameEvent * event = gameeventmanager->CreateEvent( "bomb_exploded" );
 			if( event )
 			{
@@ -327,6 +367,9 @@ END_PREDICTION_DATA()
 				event->SetInt( "priority", 9 );
 				gameeventmanager->FireEvent( event );
 			}
+
+			// skip additional processing once the bomb has exploded
+			return;
 		}
 
 		//if the defusing process has started
@@ -344,7 +387,6 @@ END_PREDICTION_DATA()
 						ClientPrint( m_pBombDefuser, HUD_PRINTCENTER, "#C4_Defuse_Must_Be_On_Ground");
 
 					// release the player from being frozen
-					m_pBombDefuser->ResetMaxSpeed();
 					m_pBombDefuser->m_bIsDefusing = false;
 
 #ifndef CLIENT_DLL
@@ -360,6 +402,7 @@ END_PREDICTION_DATA()
 
 					//cancel the progress bar
 					m_pBombDefuser->SetProgressBarTime( 0 );
+                    m_pBombDefuser->OnCanceledDefuse();
 					m_pBombDefuser = NULL;
 					m_bStartDefuse = false;
 					m_flDefuseCountDown = 0;
@@ -368,9 +411,19 @@ END_PREDICTION_DATA()
 
 				return;
 			}
+
 			//if the defuse process has ended, kill the c4
-			else if ( !m_pBombDefuser->IsDead() )
+			if ( !m_pBombDefuser->IsDead() )
 			{
+                //=============================================================================
+                // HPE_BEGIN
+                // [dwenger] Stats update for bomb defusing
+                //=============================================================================
+                CCS_GameStats.Event_BombDefused( m_pBombDefuser );
+                //=============================================================================
+                // HPE_END
+                //=============================================================================
+
 				IGameEvent * event = gameeventmanager->CreateEvent( "bomb_defused" );
 				if( event )
 				{
@@ -378,6 +431,37 @@ END_PREDICTION_DATA()
 					event->SetInt("site", m_iBombSiteIndex );
 					event->SetInt( "priority", 9 );
 					gameeventmanager->FireEvent( event );
+
+                    //=============================================================================
+                    // HPE_BEGIN
+                    // [dwenger] Server-side processing for defusing bombs
+                    //=============================================================================
+                    m_pBombDefuser->AwardAchievement(CSWinBombDefuse);
+
+                    float   timeToDetonation = (m_flC4Blow - gpGlobals->curtime);
+
+					if ((timeToDetonation > 0.0f) && (timeToDetonation <= AchievementConsts::BombDefuseCloseCall_MaxTimeRemaining))
+                    {
+                        // Give achievement for defusing with < 1 second before detonation
+                        m_pBombDefuser->AwardAchievement(CSBombDefuseCloseCall);
+                    }
+
+                    if ((timeToDetonation > 0.0f) && (m_pBombDefuser->HasDefuser()) && (timeToDetonation < AchievementConsts::BombDefuseNeededKit_MaxTime))
+                    {
+                        // Give achievement for defusing with a defuse kit when not having the kit would have taken too long
+                        m_pBombDefuser->AwardAchievement(CSDefuseAndNeededKit);
+                    }
+
+                    // [dwenger] Added for fun-fact support
+                    if ( m_pBombDefuser->PickedUpDefuser() )
+                    {
+                        // Defuser kit was picked up, so set the fun fact
+                        m_pBombDefuser->SetDefusedWithPickedUpKit(true);
+                    }
+
+                    //=============================================================================
+                    // HPE_END
+                    //=============================================================================
 				}
 
 			
@@ -390,11 +474,22 @@ END_PREDICTION_DATA()
 				m_bBombTicking = false;
 
 				// release the player from being frozen
-				m_pBombDefuser->ResetMaxSpeed();
 				m_pBombDefuser->m_bIsDefusing = false;
 
 				CSGameRules()->m_bBombDefused = true;
-				CSGameRules()->CheckWinConditions();
+				//=============================================================================
+				// HPE_BEGIN:
+				// [menglish] Give the bomb defuser an mvp if they ended the round
+				//=============================================================================				 
+				bool roundWasAlreadyWon = (CSGameRules()->m_iRoundWinStatus != WINNER_NONE);
+
+				if(CSGameRules()->CheckWinConditions() && !roundWasAlreadyWon)
+				{
+					m_pBombDefuser->IncrementNumMVPs( CSMVP_BOMBDEFUSE );
+				}				 
+				//=============================================================================
+				// HPE_END
+				//=============================================================================
 
 				// give the defuser credit for defusing the bomb
 				m_pBombDefuser->IncrementFragCount( 3 );
@@ -413,10 +508,12 @@ END_PREDICTION_DATA()
 				return;
 			}
 
+			//if it gets here then the previouse defuser has taken off or been killed
+
 #ifndef CLIENT_DLL
 			// tell the bots someone has aborted defusing
 			IGameEvent * event = gameeventmanager->CreateEvent( "bomb_abortdefuse" );
-			if( event )
+			if ( event )
 			{
 				event->SetInt("userid", m_pBombDefuser->GetUserID() );
 				event->SetInt( "priority", 6 );
@@ -424,9 +521,7 @@ END_PREDICTION_DATA()
 			}
 #endif
 
-			//if it gets here then the previouse defuser has taken off or been killed
 			// release the player from being frozen
-			m_pBombDefuser->ResetMaxSpeed();
 			m_pBombDefuser->m_bIsDefusing = false;
 			m_bStartDefuse = false;
 			m_pBombDefuser = NULL;
@@ -439,7 +534,45 @@ END_PREDICTION_DATA()
 		// Check to see if the round is over after the bomb went off...
 		CSGameRules()->m_bTargetBombed = true;
 		m_bBombTicking = false;
-		CSGameRules()->CheckWinConditions();
+		//=============================================================================
+		// HPE_BEGIN:
+		// [tj] Saving off this value so we can see if the detonation is what caused the round to end.
+		//=============================================================================
+		bool roundWasAlreadyWon = (CSGameRules()->m_iRoundWinStatus != WINNER_NONE);
+		//=============================================================================
+		// HPE_END
+		//=============================================================================		
+
+		bool bWin = CSGameRules()->CheckWinConditions();
+
+        //=============================================================================
+        // HPE_BEGIN
+        //=============================================================================		
+
+        // [dwenger] Server-side processing for winning round by planting a bomb
+        if (bWin)
+        {
+            CCSPlayer *pBombOwner = ToCSPlayer( GetOwnerEntity() );
+            if ( pBombOwner )
+            {
+                pBombOwner->AwardAchievement(CSWinBombPlant);
+
+                //[tj]more specific achievement for planting the bomb after recovering it.
+                if (m_bPlantedAfterPickup)
+                {
+                    pBombOwner->AwardAchievement(CSWinBombPlantAfterRecovery);
+                }
+				// [menglish] awarding mvp to bomb planter
+				if (!roundWasAlreadyWon)
+				{
+					pBombOwner->IncrementNumMVPs( CSMVP_BOMBPLANT );
+				}
+            }
+        }
+
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
 
 		// Do the Damage
 		float flBombRadius = 500;
@@ -479,33 +612,6 @@ END_PREDICTION_DATA()
 				flBombRadius * 3.5,
 				200 );
 		}
-		
-		// Fireball sprite and sound!!
-		{
-			Vector fireballPos = GetAbsOrigin();
-			CPVSFilter filter( fireballPos );
-			te->Sprite( filter, 0, &fireballPos, g_sModelIndexFireball, 100, 150 );
-		}
-
-		{
-			Vector fireballPos = GetAbsOrigin() + Vector( 
-				random->RandomFloat( -512, 512 ), 
-				random->RandomFloat( -512, 512 ),
-				random->RandomFloat( -10, 10 ) );
-
-			CPVSFilter filter( fireballPos );
-			te->Sprite( filter, 0, &fireballPos, g_sModelIndexFireball, 100, 150 );
-		}
-
-		{
-			Vector fireballPos = GetAbsOrigin() + Vector( 
-				random->RandomFloat( -512, 512 ), 
-				random->RandomFloat( -512, 512 ),
-				random->RandomFloat( -10, 10 ) );
-
-			CPVSFilter filter( fireballPos );
-			te->Sprite( filter, 0, &fireballPos, g_sModelIndexFireball, 100, 150 );
-		}
 
 		// Sound! for everyone
 		CBroadcastRecipientFilter filter;
@@ -539,8 +645,6 @@ END_PREDICTION_DATA()
 			WRITE_LONG( 15 | DRC_FLAG_FINAL );   // eventflags (priority and flags)
 		MESSAGE_END();
 		*/
-
-		UTIL_Remove( this );
 	}
 
 	
@@ -576,7 +680,6 @@ END_PREDICTION_DATA()
 		else
 		{
 			// freeze the player in place while defusing
-			player->SetMaxSpeed( 1 );
 
 			IGameEvent * event = gameeventmanager->CreateEvent("bomb_begindefuse" );
 			if( event )
@@ -615,6 +718,9 @@ END_PREDICTION_DATA()
 
 			//start the progress bar
 			player->SetProgressBarTime( m_flDefuseLength );
+
+
+            player->OnStartedDefuse();
 		}
 	}
 
@@ -669,6 +775,7 @@ CUtlVector< CC4* > g_C4s;
 CC4::CC4()
 {
 	g_C4s.AddToTail( this );
+    m_bDroppedFromDeath = false;
 
 #if defined( CLIENT_DLL )
 	m_szScreenText[0] = '\0';
@@ -709,10 +816,6 @@ void CC4::ItemPostFrame()
 	else
 	{
 		WeaponIdle();
-		
-		#ifndef CLIENT_DLL
-			pPlayer->ResetMaxSpeed();
-		#endif
 	}
 }
 
@@ -775,7 +878,10 @@ void CC4::ItemPostFrame()
 		if ( pPlayer )
 			pPlayer->SetProgressBarTime( 0 );
 
-		m_bStartedArming = false; // stop arming sequence
+		if ( m_bStartedArming )
+		{
+			AbortBombPlant();
+		}
 		
 		return BaseClass::Holster( pSwitchingTo );
 	}
@@ -796,7 +902,7 @@ void CC4::ItemPostFrame()
 
 void CC4::PrimaryAttack()
 {
-	bool	PlaceBomb = false;
+	bool	bArmingTimeSatisfied = false;
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
@@ -833,7 +939,6 @@ void CC4::PrimaryAttack()
 				m_bPlayedArmingBeeps[i] = false;
 
 			// freeze the player in place while planting
-			pPlayer->SetMaxSpeed( 1 );
 
 			// player "arming bomb" animation
 			pPlayer->SetAnimation( PLAYER_ATTACK1 );
@@ -852,7 +957,7 @@ void CC4::PrimaryAttack()
 
 			SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 
-			FX_PlantBomb( pPlayer->entindex(), pPlayer->Weapon_ShootPosition() );
+			FX_PlantBomb( pPlayer->entindex(), pPlayer->Weapon_ShootPosition(), PLANTBOMB_PLANT );
 		}
 		else
 		{
@@ -882,27 +987,8 @@ void CC4::PrimaryAttack()
 				ClientPrint( pPlayer, HUD_PRINTCENTER, "#C4_Plant_Must_Be_On_Ground" );
 			}
 
-			m_flNextPrimaryAttack = gpGlobals->curtime + 1.5;
-			m_bStartedArming = false;
+			AbortBombPlant();
 
-#if !defined( CLIENT_DLL )
-			// release the player from being frozen, we've somehow left the bomb zone
-			pPlayer->ResetMaxSpeed();
-
-			pPlayer->SetProgressBarTime( 0 );
-
-			//pPlayer->SetAnimation( PLAYER_HOLDBOMB );
-
-			IGameEvent * event = gameeventmanager->CreateEvent( "bomb_abortplant" );
-			if( event )
-			{
-				event->SetInt("userid", pPlayer->GetUserID() );
-				event->SetInt("site", pPlayer->m_iBombSiteIndex );
-				event->SetInt( "priority", 8 );
-				gameeventmanager->FireEvent( event );
-			}
-
-#endif
 			if(m_bBombPlacedAnimation == true) //this means the placement animation is canceled
 			{
 				SendWeaponAnim( ACT_VM_DRAW );
@@ -923,7 +1009,7 @@ void CC4::PrimaryAttack()
 			if( gpGlobals->curtime >= m_fArmedTime ) //the c4 is ready to be armed
 			{
 				//check to make sure the player is still in the bomb target area
-				PlaceBomb = true;
+				bArmingTimeSatisfied = true;
 			}
 			else if( ( gpGlobals->curtime >= (m_fArmedTime - 0.75) ) && ( !m_bBombPlacedAnimation ) )
 			{
@@ -940,7 +1026,7 @@ void CC4::PrimaryAttack()
 		}
 	}
 
-	if ( PlaceBomb && m_bStartedArming )
+	if ( bArmingTimeSatisfied && m_bStartedArming )
 	{
 		m_bStartedArming = false;
 		m_fArmedTime = 0;
@@ -948,7 +1034,6 @@ void CC4::PrimaryAttack()
 		if( pPlayer->m_bInBombZone )
 		{
 #if !defined( CLIENT_DLL )
-
 			CPlantedC4 *pC4 = CPlantedC4::ShootSatchelCharge( pPlayer, pPlayer->GetAbsOrigin(), pPlayer->GetAbsAngles() );
 
 			if ( pC4 )
@@ -975,7 +1060,31 @@ void CC4::PrimaryAttack()
 					variant_t emptyVariant;
 					pBombTarget->AcceptInput( "BombPlanted", pC4, pC4, emptyVariant, 0 );
 				}
+
+				// [tj] If the bomb is planted by someone that picked it up after the 
+				//      original owner was killed, pass that along to the planted bomb
+				pC4->SetPlantedAfterPickup( m_bDroppedFromDeath );
 			}
+
+            //=============================================================================
+            // HPE_BEGIN
+            // [dwenger] Stats update for bomb planting
+            //=============================================================================
+
+            // Determine how elapsed time from start of round until the bomb was planted
+            float   plantingTime = gpGlobals->curtime - CSGameRules()->GetRoundStartTime();
+
+            // Award achievement to bomb planter if time <= 25 seconds
+            if ((plantingTime > 0.0f) && (plantingTime <= AchievementConsts::FastBombPlant_Time))
+            {
+                pPlayer->AwardAchievement(CSPlantBombWithin25Seconds);
+            }
+
+            CCS_GameStats.Event_BombPlanted( pPlayer );
+
+            //=============================================================================
+            // HPE_END
+            //=============================================================================
 
 			IGameEvent * event = gameeventmanager->CreateEvent( "bomb_planted" );
 			if( event )
@@ -1007,13 +1116,11 @@ void CC4::PrimaryAttack()
 			CPASAttenuationFilter filter( plantPosition );
 			EmitSound( filter, entindex(), "c4.plant" );
 
-			// release the player from being frozen
-			pPlayer->ResetMaxSpeed();
-
 			// No more c4!
 			pPlayer->Weapon_Drop( this, NULL, NULL );
 			UTIL_Remove( this );
 #endif
+
 			//don't allow the planting to start over again next frame.
 			m_bBombPlanted = true;
 
@@ -1025,9 +1132,6 @@ void CC4::PrimaryAttack()
 
 #if !defined( CLIENT_DLL )
 			//pPlayer->SetAnimation( PLAYER_HOLDBOMB );
-
-			// release the player from being frozen
-			pPlayer->ResetMaxSpeed();
 
 			IGameEvent * event = gameeventmanager->CreateEvent( "bomb_abortplant" );
 			if( event )
@@ -1050,32 +1154,12 @@ void CC4::PrimaryAttack()
 
 void CC4::WeaponIdle()
 {
+	// if the player releases the attack button cancel the arming sequence
 	if ( m_bStartedArming )
 	{
-		m_bStartedArming = false; //if the player releases the attack button cancel the arming sequence
+		AbortBombPlant();
 
 		CCSPlayer *pPlayer = GetPlayerOwner();
-		if ( !pPlayer )
-			return;
-
-		#if !defined( CLIENT_DLL )
-			// release the player from being frozen
-			pPlayer->ResetMaxSpeed();
-
-			m_flNextPrimaryAttack = gpGlobals->curtime + 1.0;
-
-			pPlayer->SetProgressBarTime( 0 );
-
-			IGameEvent * event = gameeventmanager->CreateEvent( "bomb_abortplant" );
-			if( event )
-			{
-				event->SetInt("userid", pPlayer->GetUserID() );
-				event->SetInt("site", pPlayer->m_iBombSiteIndex );
-				event->SetInt( "priority", 8 );
-				gameeventmanager->FireEvent( event );
-			}
-
-		#endif 
 
 		// TODO: make this use SendWeaponAnim and activities when the C4 has the activities hooked up.
 		if ( pPlayer )
@@ -1166,6 +1250,15 @@ void CC4::PlayArmingBeeps( void )
 	}
 }
 
+float CC4::GetMaxSpeed() const
+{
+	if ( m_bStartedArming )
+		return CS_PLAYER_SPEED_STOPPED;
+	else
+		return BaseClass::GetMaxSpeed();
+}
+
+
 void CC4::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 {
 	BaseClass::OnPickedUp( pNewOwner );
@@ -1190,6 +1283,8 @@ void CC4::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 	{
 		ClientPrint( pPlayer, HUD_PRINTCENTER, "#Got_bomb" );
 	}
+
+    pPlayer->SetBombPickupTime(gpGlobals->curtime);
 #endif
 }
 
@@ -1204,9 +1299,6 @@ void CC4::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 void CC4::Drop( const Vector &vecVelocity )
 {
 #if !defined( CLIENT_DLL )
-
-	m_bStartedArming = false; // stop arming sequence
-
 	if ( !CSGameRules()->m_bBombPlanted ) // its not dropped if its planted
 	{
 		// tell the bots about the dropped bomb
@@ -1226,5 +1318,36 @@ void CC4::Drop( const Vector &vecVelocity )
 		}
 	}
 #endif
+
+	if ( m_bStartedArming )
+		AbortBombPlant();  // stop arming sequence
+
 	BaseClass::Drop( vecVelocity );
+}
+
+void CC4::AbortBombPlant()
+{
+	m_bStartedArming = false; 
+
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
+		return;
+
+#if !defined( CLIENT_DLL )
+	m_flNextPrimaryAttack = gpGlobals->curtime + 1.0;
+
+	pPlayer->SetProgressBarTime( 0 );
+
+	IGameEvent * event = gameeventmanager->CreateEvent( "bomb_abortplant" );
+	if( event )
+	{
+		event->SetInt("userid", pPlayer->GetUserID() );
+		event->SetInt("site", pPlayer->m_iBombSiteIndex );
+		event->SetInt( "priority", 8 );
+		gameeventmanager->FireEvent( event );
+	}
+
+#endif 
+
+	FX_PlantBomb( pPlayer->entindex(), pPlayer->Weapon_ShootPosition(), PLANTBOMB_ABORT );
 }

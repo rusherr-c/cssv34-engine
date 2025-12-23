@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -218,7 +218,7 @@ public:
 
 	bool IsLocalPlayerWatchingMe( void ) const;					///< return true if local player is observing this bot
 
-	void PrintIfWatched( char *format, ... ) const;				///< output message to console if we are being watched by the local player
+	void PrintIfWatched( PRINTF_FORMAT_STRING const char *format, ... ) const;				///< output message to console if we are being watched by the local player
 
 	virtual void UpdatePlayer( void );							///< update player physics, movement, weapon firing commands, etc
 	virtual void BuildUserCmd( CUserCmd& cmd, const QAngle& viewangles, float forwardmove, float sidemove, float upmove, int buttons, byte impulse );
@@ -292,7 +292,7 @@ inline void CBot<T>::SetModel( const char *modelName )
 template < class T >
 inline float CBot<T>::GetMoveSpeed( void )
 {
-	return MaxSpeed();
+	return this->MaxSpeed();
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -354,7 +354,7 @@ inline void CBot<T>::PopPostureContext( void )
 template < class T >
 inline bool CBot<T>::IsPlayerFacingMe( CBasePlayer *other ) const
 {
-	Vector toOther = other->GetAbsOrigin() - GetAbsOrigin();
+	Vector toOther = other->GetAbsOrigin() - this->GetAbsOrigin();
 
 	Vector otherForward;
 	AngleVectors( other->EyeAngles() + other->GetPunchAngle(), &otherForward );
@@ -369,7 +369,7 @@ inline bool CBot<T>::IsPlayerFacingMe( CBasePlayer *other ) const
 template < class T >
 inline bool CBot<T>::IsPlayerLookingAtMe( CBasePlayer *other, float cosTolerance ) const
 {
-	Vector toOther = other->GetAbsOrigin() - GetAbsOrigin();
+	Vector toOther = other->GetAbsOrigin() - this->GetAbsOrigin();
 	toOther.NormalizeInPlace();
 
 	Vector otherForward;
@@ -386,7 +386,7 @@ inline bool CBot<T>::IsPlayerLookingAtMe( CBasePlayer *other, float cosTolerance
 template < class T >
 inline const Vector &CBot<T>::GetViewVector( void )
 {
-	AngleVectors( EyeAngles() + GetPunchAngle(), &m_viewForward );
+	AngleVectors( this->EyeAngles() + this->GetPunchAngle(), &m_viewForward );
 	return m_viewForward;
 }
 
@@ -462,10 +462,10 @@ inline void CBot< PlayerType >::Spawn( void )
 	PlayerType::Spawn();
 
 	// Make sure everyone knows we are a bot
-	AddFlag( FL_CLIENT | FL_FAKECLIENT );
+	this->AddFlag( FL_CLIENT | FL_FAKECLIENT );
 
 	// Bots use their own thinking mechanism
-	SetThink( NULL );
+	this->SetThink( NULL );
 
 	m_isRunning = true;
 	m_isCrouching = false;
@@ -600,7 +600,7 @@ inline bool CBot< PlayerType >::IsJumping( void )
 		return true;
 
 	// a little after our jump, we're jumping until we hit the ground
-	if (FBitSet( GetFlags(), FL_ONGROUND ))
+	if (FBitSet( this->GetFlags(), FL_ONGROUND ))
 		return false;
 
 	return true;
@@ -679,7 +679,7 @@ inline void CBot< PlayerType >::Reload( void )
 template < class PlayerType >
 inline float CBot< PlayerType >::GetActiveWeaponAmmoRatio( void ) const
 {
-	CWeaponCSBase *weapon = GetActiveCSWeapon();
+	CWeaponCSBase *weapon = this->GetActiveCSWeapon();
 
 	if (weapon == NULL)
 		return 0.0f;
@@ -698,7 +698,7 @@ inline float CBot< PlayerType >::GetActiveWeaponAmmoRatio( void ) const
 template < class PlayerType >
 inline bool CBot< PlayerType >::IsActiveWeaponClipEmpty( void ) const
 {
-	CWeaponCSBase *gun = GetActiveCSWeapon();
+	CWeaponCSBase *gun = this->GetActiveCSWeapon();
 
 	if (gun && gun->Clip1() == 0)
 		return true;
@@ -713,7 +713,7 @@ inline bool CBot< PlayerType >::IsActiveWeaponClipEmpty( void ) const
 template < class PlayerType >
 inline bool CBot< PlayerType >::IsActiveWeaponOutOfAmmo( void ) const
 {
-	CWeaponCSBase *weapon = GetActiveCSWeapon();
+	CWeaponCSBase *weapon = this->GetActiveCSWeapon();
 
 	if (weapon == NULL)
 		return true;
@@ -729,7 +729,7 @@ template < class PlayerType >
 inline bool CBot< PlayerType >::IsUsingScope( void )
 {
 	// if our field of view is less than 90, we're looking thru a scope (maybe only true for CS...)
-	if (GetFOV() < GetDefaultFOV())
+	if (this->GetFOV() < this->GetDefaultFOV())
 		return true;
 
 	return false;
@@ -770,7 +770,7 @@ inline void CBot< PlayerType >::UpdatePlayer( void )
 		SETBITS( m_buttonFlags, IN_SPEED );
 	}
 
-	if ( IsEFlagSet(EFL_BOT_FROZEN) )
+	if ( this->IsEFlagSet(EFL_BOT_FROZEN) )
 	{
 		m_buttonFlags = 0; // Freeze.
 		m_forwardSpeed = 0;
@@ -779,10 +779,10 @@ inline void CBot< PlayerType >::UpdatePlayer( void )
 	}
 
 	// Fill in a CUserCmd with our data
-	BuildUserCmd( m_userCmd, EyeAngles(), m_forwardSpeed, m_strafeSpeed, m_verticalSpeed, m_buttonFlags, 0 );
+	this->BuildUserCmd( m_userCmd, this->EyeAngles(), m_forwardSpeed, m_strafeSpeed, m_verticalSpeed, m_buttonFlags, 0 );
 
 	// Save off the CUserCmd to execute later
-	ProcessUsercmds( &m_userCmd, 1, 1, 0, false );
+	this->ProcessUsercmds( &m_userCmd, 1, 1, 0, false );
 }
 
 
@@ -901,7 +901,7 @@ inline bool CBot< PlayerType >::IsEnemy( CBaseEntity *ent ) const
 	CBasePlayer *player = static_cast<CBasePlayer *>( ent );
 
 	// if they are on our team, they are our friends
-	if (player->GetTeamNumber() == GetTeamNumber())
+	if (player->GetTeamNumber() == this->GetTeamNumber())
 		return false;
 
 	// yep, we hate 'em
@@ -983,7 +983,7 @@ inline bool CBot< PlayerType >::IsLocalPlayerWatchingMe( void ) const
 
 	if ( cv_bot_debug_target.GetInt() > 0 )
 	{
-		return entindex() == cv_bot_debug_target.GetInt();
+		return this->entindex() == cv_bot_debug_target.GetInt();
 	}
 
 	if ( player->IsObserver() || !player->IsAlive() )
@@ -1008,7 +1008,7 @@ inline bool CBot< PlayerType >::IsLocalPlayerWatchingMe( void ) const
  * Output message to console if we are being watched by the local player
  */
 template < class PlayerType >
-inline void CBot< PlayerType >::PrintIfWatched( char *format, ... ) const
+inline void CBot< PlayerType >::PrintIfWatched( PRINTF_FORMAT_STRING const char *format, ... ) const
 {
 	if (cv_bot_debug.GetInt() == 0)
 	{

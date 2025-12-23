@@ -1,4 +1,4 @@
-//=========== (C) Copyright 2007 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -15,12 +15,15 @@
 #include "appframework/tier3app.h"
 #include "datamodel/idatamodel.h"
 #include "filesystem.h"
+#include "filesystem_init.h"
 #include "icommandline.h"
 #include "materialsystem/imaterialsystem.h"
 #include "istudiorender.h"
 #include "mathlib/mathlib.h"
 #include "vstdlib/vstdlib.h"
 #include "vstdlib/iprocessutils.h"
+#include "tier2/p4helpers.h"
+#include "p4lib/ip4.h"
 #include "tier1/utlbuffer.h"
 #include "tier1/utlstringmap.h"
 #include "sfmobjects/sfmsession.h"
@@ -51,6 +54,150 @@
 #include <windows.h>
 #undef GetCurrentDirectory
 #endif
+
+class StdIOReadBinary : public IFileReadBinary
+{
+public:
+	int open( const char *pFileName )
+	{
+		return (int)g_pFullFileSystem->Open( pFileName, "rb" );
+	}
+
+	int read( void *pOutput, int size, int file )
+	{
+		if ( !file )
+			return 0;
+
+		return g_pFullFileSystem->Read( pOutput, size, (FileHandle_t)file );
+	}
+
+	void seek( int file, int pos )
+	{
+		if ( !file )
+			return;
+
+		g_pFullFileSystem->Seek( (FileHandle_t)file, pos, FILESYSTEM_SEEK_HEAD );
+	}
+
+	unsigned int tell( int file )
+	{
+		if ( !file )
+			return 0;
+
+		return g_pFullFileSystem->Tell( (FileHandle_t)file );
+	}
+
+	unsigned int size( int file )
+	{
+		if ( !file )
+			return 0;
+
+		return g_pFullFileSystem->Size( (FileHandle_t)file );
+	}
+
+	void close( int file )
+	{
+		if ( !file )
+			return;
+
+		g_pFullFileSystem->Close( (FileHandle_t)file );
+	}
+};
+
+class StdIOWriteBinary : public IFileWriteBinary
+{
+public:
+	int create( const char *pFileName )
+	{
+		return (int)g_pFullFileSystem->Open( pFileName, "wb" );
+	}
+
+	int write( void *pData, int size, int file )
+	{
+		return g_pFullFileSystem->Write( pData, size, (FileHandle_t)file );
+	}
+
+	void close( int file )
+	{
+		g_pFullFileSystem->Close( (FileHandle_t)file );
+	}
+
+	void seek( int file, int pos )
+	{
+		g_pFullFileSystem->Seek( (FileHandle_t)file, pos, FILESYSTEM_SEEK_HEAD );
+	}
+
+	unsigned int tell( int file )
+	{
+		return g_pFullFileSystem->Tell( (FileHandle_t)file );
+	}
+};
+
+static StdIOReadBinary io_in;
+static StdIOWriteBinary io_out;
+
+#define RIFF_WAVE			MAKEID('W','A','V','E')
+#define WAVE_FMT			MAKEID('f','m','t',' ')
+#define WAVE_DATA			MAKEID('d','a','t','a')
+#define WAVE_FACT			MAKEID('f','a','c','t')
+#define WAVE_CUE			MAKEID('c','u','e',' ')
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+// Input  : &walk - 
+//-----------------------------------------------------------------------------
+static void SceneManager_ParseSentence( CSentence& sentence, IterateRIFF &walk )
+{
+	CUtlBuffer buf( 0, 0, CUtlBuffer::TEXT_BUFFER );
+
+	buf.EnsureCapacity( walk.ChunkSize() );
+	walk.ChunkRead( buf.Base() );
+	buf.SeekPut( CUtlBuffer::SEEK_HEAD, walk.ChunkSize() );
+
+	sentence.InitFromDataChunk( buf.Base(), buf.TellPut() );
+}
+
+bool SceneManager_LoadSentenceFromWavFileUsingIO( char const *wavfile, CSentence& sentence, IFileReadBinary& io )
+{
+	sentence.Reset();
+
+	InFileRIFF riff( wavfile, io );
+
+	// UNDONE: Don't use printf to handle errors
+	if ( riff.RIFFName() != RIFF_WAVE )
+	{
+		return false;
+	}
+
+	// set up the iterator for the whole file (root RIFF is a chunk)
+	IterateRIFF walk( riff, riff.RIFFSize() );
+
+	// This chunk must be first as it contains the wave's format
+	// break out when we've parsed it
+	bool found = false;
+	while ( walk.ChunkAvailable() && !found )
+	{
+		switch ( walk.ChunkName() )
+		{
+		case WAVE_VALVEDATA:
+		{
+			found = true;
+			SceneManager_ParseSentence( sentence, walk );
+		}
+			break;
+		}
+		walk.ChunkNext();
+	}
+
+	return found;
+}
+
+bool SceneManager_LoadSentenceFromWavFile( char const *wavfile, CSentence& sentence )
+{
+	return SceneManager_LoadSentenceFromWavFileUsingIO( wavfile, sentence, io_in );
+}
+
 
 //-----------------------------------------------------------------------------
 // Standard spew functions
@@ -105,12 +252,15 @@ private:
 		bool m_bUsePhonemesInWavs;
 		float m_flSampleRateHz;
 		float m_flSampleFilterSize;
+		bool m_bGenerateSFMFiles;
+		bool m_bExtractPhonemeFromWavsForMp3;
 	};
 
 	enum TokenRetVal_t
 	{
 		TOKEN_COMMA = 0,
 		TOKEN_RETURN,
+		TOKEN_COMMENT,
 		TOKEN_EOF,
 	};
 
@@ -153,6 +303,7 @@ bool CSFMGenApp::Create()
 	{
 		{ "vstdlib.dll",			PROCESS_UTILS_INTERFACE_VERSION },
 		{ "materialsystem.dll",		MATERIAL_SYSTEM_INTERFACE_VERSION },
+		{ "p4lib.dll",				P4_INTERFACE_VERSION },
 		{ "datacache.dll",			DATACACHE_INTERFACE_VERSION },
 		{ "datacache.dll",			MDLCACHE_INTERFACE_VERSION },
 		{ "studiorender.dll",		STUDIO_RENDER_INTERFACE_VERSION },
@@ -207,15 +358,17 @@ void CSFMGenApp::PrintHelp( )
 {
 	Msg( "Usage: sfmgen -i <in .csv file> -m <.mdl relative path> -o <output dir>\n" );
 	Msg( "				[-f <fac output dir>] [-p] [-w] [-r <sample rate in hz>] [-s <sample filter size>]\n" );
-	Msg( "				[-vproject <path to gameinfo.txt>]\n" );
+	Msg( "				[-nop4] [-vproject <path to gameinfo.txt>]\n" );
 	Msg( "\t-i\t: Source .CSV file indicating game sound names, text for phoneme extraction, output sfm file names.\n" );
 	Msg( "\t-m\t: Indicates the path of the .mdl file under game/mod/models/ to use in the sfm files.\n" );
-	Msg( "\t-o\t: Indicates output directory to place generated files in.\n" );
+	Msg( "\t-o\t: Indicates output directory to place generated files in.  Required if Generating SFM files.\n" );
 	Msg( "\t-f\t: [Optional] Indicates that facial files should be created in the specified fac output dir.\n" );
 	Msg( "\t-p\t: [Optional] Indicates the extracted phonemes should be written into the wav file.\n" );
 	Msg( "\t-w\t: [Optional] Indicates the phonemes should be read from the wav file. Cannot also have -p specified.\n" );
 	Msg( "\t-r\t: [Optional] Specifies the phoneme extraction sample rate (default = 20)\n" );
 	Msg( "\t-s\t: [Optional] Specifies the phoneme extraction sample filter size (default = 0.08)\n" );
+	Msg( "\t-nop4\t: Disables auto perforce checkout/add.\n" );
+	Msg( "\t-nosfm\t: Disables generating of SFM files (dmx).\n" );
 	Msg( "\t-vproject\t: Specifies path to a gameinfo.txt file (which mod to build for).\n" );
 }
 
@@ -233,8 +386,14 @@ CSFMGenApp::TokenRetVal_t CSFMGenApp::ParseToken( CUtlBuffer &buf, char *pToken,
 	int nLen = 0;
 	char c = buf.GetChar();
 	bool bIsQuoted = false;
+	bool bIsComment = false;
 	while ( true )
 	{
+		if ( c == '#' )
+		{
+			bIsComment = true;
+		}
+
 		if ( c == '"' )
 		{
 			bIsQuoted = !bIsQuoted;
@@ -242,6 +401,9 @@ CSFMGenApp::TokenRetVal_t CSFMGenApp::ParseToken( CUtlBuffer &buf, char *pToken,
 		else if ( ( c == ',' || c == '\n' ) && !bIsQuoted )
 		{
 			pToken[nLen] = 0;
+			if ( bIsComment )
+				return TOKEN_COMMENT;
+
 			return ( c == '\n' ) ? TOKEN_RETURN : TOKEN_COMMA;
 		}
 
@@ -277,6 +439,11 @@ void CSFMGenApp::ParseCSVFile( CUtlBuffer &buf, CUtlVector< SFMInfo_t > &infoLis
 		TokenRetVal_t nTokenRetVal = ParseToken( buf, pToken, sizeof(pToken) );
 		if ( nTokenRetVal == TOKEN_EOF )
 			return;
+		
+		if ( nTokenRetVal == TOKEN_COMMENT )
+		{
+			continue;
+		}
 
 		if ( nTokenRetVal != TOKEN_COMMA )
 		{
@@ -297,11 +464,18 @@ void CSFMGenApp::ParseCSVFile( CUtlBuffer &buf, CUtlVector< SFMInfo_t > &infoLis
 			Warning( "sfmgen: Missing Column at line %d\n", nLine );
 			continue;
 		}
+
 		info.m_GameSound = pToken;
 
 		nTokenRetVal = ParseToken( buf, pToken, sizeof(pToken) );
 		info.m_Text = pToken;
+		if ( nTokenRetVal == TOKEN_COMMENT )
+		{
+			Warning( "sfmgen: No VO Transcript on line %d - Skipping \n", nLine );
+			continue;
+		}
 
+		// extract the VO Transcript
 		while ( nTokenRetVal == TOKEN_COMMA )
 		{
 			nTokenRetVal = ParseToken( buf, pToken, sizeof(pToken) );
@@ -372,6 +546,8 @@ void CSFMGenApp::SaveSFMFile( CDmElement *pRoot, const char *pOutputDir, const c
 	Q_snprintf( pFullPathBuf, sizeof(pFullPathBuf), "%s/%s.dmx", pOutputDir, pFileName );
 	const char *pFullPath = pFullPathBuf;
 
+	CP4AutoEditAddFile checkout( pFullPath );
+
 	if ( !g_pDataModel->SaveToFile( pFullPath, NULL, g_pDataModel->GetDefaultEncoding( "sfm_session" ), "sfm_session", pRoot ) )
 	{
 		Warning( "sfmgen: Unable to write file %s\n", pFullPath );
@@ -393,7 +569,7 @@ CDmeSoundClip *CSFMGenApp::CreateSoundClip( CDmeFilmClip *pShot, const char *pAn
 	CDmeTrack *pTrack = pTrackGroup->FindOrAddTrack( pAnimationSetName, DMECLIP_SOUND );
 
 	// Get the gender for the model
-	gender_t actorGender = g_pSoundEmitterSystem->GetActorGender( pStudioHdr->name );
+	gender_t actorGender = g_pSoundEmitterSystem->GetActorGender( pStudioHdr->pszName() );
 
 	// Get the wav file for the gamesound.
 	CSoundParameters params;
@@ -492,7 +668,7 @@ void CSFMGenApp::GenerateSFMFile( const SFMGenInfo_t& sfmGenInfo, const SFMInfo_
 	session.Init();
 
 	char pAnimationSetName[256];
-	Q_FileBase( pStudioHdr->name, pAnimationSetName, sizeof(pAnimationSetName) );
+	Q_FileBase( pStudioHdr->pszName(), pAnimationSetName, sizeof(pAnimationSetName) );
 
 	// Set the file id(	necessary for phoneme extraction)
 	DmFileId_t fileid = g_pDataModel->FindOrCreateFileId( pAnimationSetName );
@@ -522,15 +698,15 @@ void CSFMGenApp::GenerateSFMFile( const SFMGenInfo_t& sfmGenInfo, const SFMInfo_
 	CDmeGameSound *pGameSound;
 	CDmeSoundClip *pSoundClip = CreateSoundClip( pMovie, pAnimationSetName, info.m_GameSound, pStudioHdr, &pGameSound );
 
-	pShot->SetDuration( pSoundClip->GetDuration() );
-	pMovie->SetDuration( pSoundClip->GetDuration() );
-
-	// Create an animation set
-	CDmeAnimationSet *pAnimationSet = CreateAnimationSet( pMovie, pShot, pGameModel, pAnimationSetName, 0, false );
-
-	// Extract phonemes
 	if ( pSoundClip )
 	{
+		pShot->SetDuration( pSoundClip->GetDuration() );
+		pMovie->SetDuration( pSoundClip->GetDuration() );
+
+		// Create an animation set
+		CDmeAnimationSet *pAnimationSet = CreateAnimationSet( pMovie, pShot, pGameModel, pAnimationSetName, 0, false );
+
+		// Extract phonemes
 		CExtractInfo extractInfo;
 		extractInfo.m_pClip = pSoundClip;
 		extractInfo.m_pSound = pGameSound;
@@ -568,7 +744,7 @@ void CSFMGenApp::GenerateSFMFile( const SFMGenInfo_t& sfmGenInfo, const SFMInfo_
 			resultsArray.AddToTail( tagElement );
 		}
 
-		if ( pExportFacPath )
+		if ( sfmGenInfo.m_bGenerateSFMFiles && pExportFacPath )
 		{
 			char pFACFileName[MAX_PATH];
 			Q_ComposeFileName( pExportFacPath, info.m_DMXFileName, pFACFileName, sizeof(pFACFileName) );
@@ -576,8 +752,11 @@ void CSFMGenApp::GenerateSFMFile( const SFMGenInfo_t& sfmGenInfo, const SFMInfo_
 			ExportFacialAnimation( pFACFileName, pMovie, pShot, pAnimationSet );
 		}
 	}
-
-	SaveSFMFile( session.Root(), pOutputDirectory, info.m_DMXFileName );
+	
+	if ( sfmGenInfo.m_bGenerateSFMFiles )
+	{
+		SaveSFMFile( session.Root(), pOutputDirectory, info.m_DMXFileName );
+	}
 
 	session.Shutdown();
 }
@@ -606,6 +785,7 @@ static void ComputeFullPath( const char *pRelativeDir, char *pFullPath, int nBuf
 	// Ensure the output directory exists
 	g_pFullFileSystem->CreateDirHierarchy( pFullPath );
 }
+
 
 
 //-----------------------------------------------------------------------------
@@ -653,20 +833,78 @@ void CSFMGenApp::GenerateSFMFiles( SFMGenInfo_t& info )
 	char pFullPath[MAX_PATH];
 	char pFullFacPathBuf[MAX_PATH];
 	const char *pExportFacPath = NULL;
-	ComputeFullPath( info.m_pOutputDirectory, pFullPath, sizeof(pFullPath) );
 	if ( info.m_pExportFacDirectory )
 	{
-		ComputeFullPath( info.m_pExportFacDirectory, pFullFacPathBuf, sizeof(pFullFacPathBuf) );
+		ComputeFullPath( info.m_pExportFacDirectory, pFullFacPathBuf, sizeof( pFullFacPathBuf ) );
 		pExportFacPath = pFullFacPathBuf;
 	}
 
-	for ( int i = 0; i < nCount; ++i )
+	if ( info.m_pOutputDirectory )
 	{
-		GenerateSFMFile( info, infoList[i], pStudioHdr, pFullPath, pExportFacPath ); 
+		ComputeFullPath( info.m_pOutputDirectory, pFullPath, sizeof( pFullPath ) );
+	}
+	else
+	{
+		pFullPath[0] = '\0';
+	}
+
+
+	if (!info.m_bExtractPhonemeFromWavsForMp3)
+	{
+		for (int i = 0; i < nCount; ++i)
+		{
+			GenerateSFMFile(info, infoList[i], pStudioHdr, pFullPath, pExportFacPath);
+		}
+	}
+	else
+	{
+		// Extra Phoneme Data from .wav files for .mp3
+		CUtlBuffer bufOutput(0, 0, CUtlBuffer::TEXT_BUFFER);		// Phoneme outout
+		CUtlBuffer bufFilenames(0, 0, CUtlBuffer::TEXT_BUFFER);	// Affected Files for reference (files with Phoneme data)
+		for (int i = 0; i < nCount; ++i)
+		{
+			CSentence sSentence;
+			if (SceneManager_LoadSentenceFromWavFile(infoList[i].m_GameSound, sSentence))
+			{
+				// Save Phoneme Data
+				CUtlString strTemp(infoList[i].m_DMXFileName);
+				//	//bufOutput.Printf( "\n" );
+				bufOutput.Printf(strTemp.Replace(".wav", ".mp3").Get());
+				bufOutput.Printf("\n{\n");
+				sSentence.SaveToBuffer(bufOutput);
+				bufOutput.Printf("}\n\n");
+
+				// Save file name
+				bufFilenames.Printf(infoList[i].m_GameSound);
+				bufFilenames.Printf("\n");
+
+				Msg("%s\n", infoList[i].m_GameSound.Get());
+			}
+		}
+
+		// output
+		//if ( sfm_phonemeextractor->GetSentence( pGameSound, sSentence ) )
+		{
+			// write this to a text file
+			FileHandle_t fh = g_pFullFileSystem->Open("tf_PhonemeData.txt", "wb");
+			if (fh)
+			{
+				g_pFullFileSystem->Write(bufOutput.Base(), bufOutput.TellPut(), fh);
+				g_pFullFileSystem->Close(fh);
+			}
+		}
+
+		{
+			// write this to a text file
+			FileHandle_t fh = g_pFullFileSystem->Open("tf_PhonemeFiles.txt", "wb");
+			if (fh)
+			{
+				g_pFullFileSystem->Write(bufFilenames.Base(), bufFilenames.TellPut(), fh);
+				g_pFullFileSystem->Close(fh);
+			}
+		}
 	}
 }
-
-
 //-----------------------------------------------------------------------------
 // The application object
 //-----------------------------------------------------------------------------
@@ -683,6 +921,14 @@ int CSFMGenApp::Main()
 		return 0;
 	}
 
+	// Do Perforce Stuff
+	if ( CommandLine()->FindParm( "-nop4" ) )
+	{
+		g_p4factory->SetDummyMode( true );
+	}
+
+	g_p4factory->SetOpenFileChangeList( "Automatically Generated SFM files" );
+
 	SFMGenInfo_t info;
 	info.m_pCSVFile = CommandLine()->ParmValue( "-i" );
 	info.m_pModelName = CommandLine()->ParmValue( "-m" );
@@ -692,8 +938,16 @@ int CSFMGenApp::Main()
 	info.m_bUsePhonemesInWavs = CommandLine()->FindParm( "-w" ) != 0;
 	info.m_flSampleRateHz = CommandLine()->ParmValue( "-r", 20.0f );
 	info.m_flSampleFilterSize = CommandLine()->ParmValue( "-s", 0.08f );
+	info.m_bGenerateSFMFiles = CommandLine()->FindParm( "-nosfm" ) == 0;
+	info.m_bExtractPhonemeFromWavsForMp3 = CommandLine()->FindParm("-mp3");
 
-	if ( !info.m_pCSVFile || !info.m_pModelName || !info.m_pOutputDirectory )
+	if ( !info.m_pCSVFile || !info.m_pModelName )
+	{
+		PrintHelp();
+		return 0;
+	}
+
+	if ( !info.m_pOutputDirectory && info.m_bGenerateSFMFiles )
 	{
 		PrintHelp();
 		return 0;

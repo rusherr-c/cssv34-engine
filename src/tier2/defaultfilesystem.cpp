@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A higher level link library for general use in the game and tools.
 //
@@ -27,7 +27,11 @@ void InitDefaultFileSystem( void )
 	if ( !Sys_LoadInterface( "filesystem_stdio", FILESYSTEM_INTERFACE_VERSION,
 		&g_pFullFileSystemModule, (void**)&g_pFullFileSystem ) )
 	{
-		exit(0);
+		if ( !Sys_LoadInterface( "filesystem_steam", FILESYSTEM_INTERFACE_VERSION,
+			&g_pFullFileSystemModule, (void**)&g_pFullFileSystem ) )
+		{
+			exit(0);
+		}
 	}
 
 	if ( !g_pFullFileSystem->Connect( DefaultCreateInterfaceFn ) )

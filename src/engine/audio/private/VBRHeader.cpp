@@ -1,21 +1,22 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================
 
 #include "audio_pch.h"
-#include "mpafile.h"	// also includes vbrheader.h
+#include "tier0/platform.h"
+#include "MPAFile.h"	// also includes vbrheader.h
 #include "tier0/dbg.h"
 
 #ifndef MAKEFOURCC
     #define MAKEFOURCC(ch0, ch1, ch2, ch3)                              \
-                ((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) |   \
-                ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24 ))
+                ((uint32)(BYTE)(ch0) | ((uint32)(BYTE)(ch1) << 8) |   \
+                ((uint32)(BYTE)(ch2) << 16) | ((uint32)(BYTE)(ch3) << 24 ))
 #endif //defined(MAKEFOURCC)
 
 // XING Header offset: 1. index = lsf, 2. index = mono
-DWORD CVBRHeader::m_dwXINGOffsets[2][2] =
+uint32 CVBRHeader::m_dwXINGOffsets[2][2] =
 {
 	// MPEG 1 (not mono, mono)
 	{ 32 + MPA_HEADER_SIZE, 17 + MPA_HEADER_SIZE },
@@ -24,12 +25,12 @@ DWORD CVBRHeader::m_dwXINGOffsets[2][2] =
 };
 
 // first test with this static method, if it does exist
-bool CVBRHeader::IsVBRHeaderAvailable( CMPAFile* pMPAFile, VBRHeaderType& HeaderType, DWORD& dwOffset )
+bool CVBRHeader::IsVBRHeaderAvailable( CMPAFile* pMPAFile, VBRHeaderType& HeaderType, uint32& dwOffset )
 {
 	Assert(pMPAFile);
 	
 	// where does VBR header begin (XING)
-	DWORD dwNewOffset = dwOffset + m_dwXINGOffsets[pMPAFile->m_pMPAHeader->IsLSF()][pMPAFile->m_pMPAHeader->IsMono()];
+	uint32 dwNewOffset = dwOffset + m_dwXINGOffsets[pMPAFile->m_pMPAHeader->IsLSF()][pMPAFile->m_pMPAHeader->IsMono()];
 
 	// check for XING header first
 	if( CheckXING( pMPAFile, dwNewOffset ) )
@@ -53,7 +54,7 @@ bool CVBRHeader::IsVBRHeaderAvailable( CMPAFile* pMPAFile, VBRHeaderType& Header
 	return false;
 }
 
-CVBRHeader::CVBRHeader( CMPAFile* pMPAFile, VBRHeaderType HeaderType, DWORD dwOffset ) :
+CVBRHeader::CVBRHeader( CMPAFile* pMPAFile, VBRHeaderType HeaderType, uint32 dwOffset ) :
 	m_pMPAFile( pMPAFile ), m_pnToc(NULL), m_HeaderType( HeaderType ), m_dwOffset(dwOffset), m_dwFrames(0), m_dwBytes(0)
 {
 	switch( m_HeaderType )
@@ -83,12 +84,12 @@ CVBRHeader::CVBRHeader( CMPAFile* pMPAFile, VBRHeaderType HeaderType, DWORD dwOf
 	}
 }
 
-bool CVBRHeader::CheckID( CMPAFile* pMPAFile, char ch0, char ch1, char ch2, char ch3, DWORD& dwOffset )
+bool CVBRHeader::CheckID( CMPAFile* pMPAFile, char ch0, char ch1, char ch2, char ch3, uint32& dwOffset )
 {
 	return ( pMPAFile->ExtractBytes( dwOffset, 4 ) == MAKEFOURCC( ch3, ch2, ch1, ch0 ) );
 }
 
-bool CVBRHeader::CheckXING( CMPAFile* pMPAFile, DWORD& dwOffset )
+bool CVBRHeader::CheckXING( CMPAFile* pMPAFile, uint32& dwOffset )
 {
 	// XING ID found?
 	if( !CheckID( pMPAFile, 'X', 'i', 'n', 'g', dwOffset) && !CheckID( pMPAFile, 'I', 'n', 'f', 'o', dwOffset) )
@@ -96,7 +97,7 @@ bool CVBRHeader::CheckXING( CMPAFile* pMPAFile, DWORD& dwOffset )
 	return true;
 }
 
-bool CVBRHeader::CheckVBRI( CMPAFile* pMPAFile, DWORD& dwOffset )
+bool CVBRHeader::CheckVBRI( CMPAFile* pMPAFile, uint32& dwOffset )
 {
 	// VBRI ID found?
 	if( !CheckID( pMPAFile, 'V', 'B', 'R', 'I', dwOffset ) )
@@ -106,7 +107,7 @@ bool CVBRHeader::CheckVBRI( CMPAFile* pMPAFile, DWORD& dwOffset )
 
 
 // currently not used
-bool CVBRHeader::ExtractLAMETag( DWORD dwOffset )
+bool CVBRHeader::ExtractLAMETag( uint32 dwOffset )
 {
 	// LAME ID found?
 	if( !CheckID( m_pMPAFile, 'L', 'A', 'M', 'E', dwOffset ) && !CheckID( m_pMPAFile, 'G', 'O', 'G', 'O', dwOffset ) )
@@ -115,7 +116,7 @@ bool CVBRHeader::ExtractLAMETag( DWORD dwOffset )
 	return true;
 }
 
-bool CVBRHeader::ExtractXINGHeader( DWORD dwOffset )
+bool CVBRHeader::ExtractXINGHeader( uint32 dwOffset )
 {
 	/* XING VBR-Header
 
@@ -131,7 +132,7 @@ bool CVBRHeader::ExtractXINGHeader( DWORD dwOffset )
 	if( !CheckXING( m_pMPAFile, dwOffset ) )
 		return false;
 
-	DWORD dwFlags;
+	uint32 dwFlags;
 
 	// get flags (mandatory in XING header)
 	dwFlags = m_pMPAFile->ExtractBytes( dwOffset, 4 ); 
@@ -152,19 +153,19 @@ bool CVBRHeader::ExtractXINGHeader( DWORD dwOffset )
 
 		if( m_pnToc )
 		{
-			for(DWORD i=0;i<m_dwTableSize;i++)
+			for(uint32 i=0;i<m_dwTableSize;i++)
 				m_pnToc[i] = m_pMPAFile->ExtractBytes( dwOffset, 1 );
 		}
 	}
 
-	m_dwQuality = (DWORD)-1;
+	m_dwQuality = (uint32)-1;
 	if(dwFlags & VBR_SCALE_FLAG )
 		m_dwQuality = m_pMPAFile->ExtractBytes(dwOffset, 4);
 		
 	return true;
 }
 
-bool CVBRHeader::ExtractVBRIHeader( DWORD dwOffset )
+bool CVBRHeader::ExtractVBRIHeader( uint32 dwOffset )
 {
 	/* FhG VBRI Header
 
@@ -218,7 +219,7 @@ CVBRHeader::~CVBRHeader(void)
 }
 
 // get byte position for percentage value (fPercent) of file
-bool CVBRHeader::SeekPoint(float fPercent, DWORD& dwSeekPoint)
+bool CVBRHeader::SeekPoint(float fPercent, uint32& dwSeekPoint)
 {
 	if( !m_pnToc || m_dwBytes == 0 )
 		return false;
@@ -240,7 +241,7 @@ bool CVBRHeader::SeekPoint(float fPercent, DWORD& dwSeekPoint)
 	return true;
 }
 
-DWORD CVBRHeader::SeekPointXING(float fPercent) const
+uint32 CVBRHeader::SeekPointXING(float fPercent) const
 {
 	// interpolate in TOC to get file seek point in bytes
 	int a;
@@ -261,19 +262,19 @@ DWORD CVBRHeader::SeekPointXING(float fPercent) const
 
 	fx = fa + (fb-fa)*(fPercent-a);
 
-	DWORD dwSeekpoint = (int)((1.0f/256.0f)*fx*m_dwBytes); 
+	uint32 dwSeekpoint = (int)((1.0f/256.0f)*fx*m_dwBytes); 
 	return dwSeekpoint;
 }
 
-DWORD CVBRHeader::SeekPointVBRI(float fPercent) const
+uint32 CVBRHeader::SeekPointVBRI(float fPercent) const
 {
 	return SeekPointByTimeVBRI( (fPercent/100.0f) * m_pMPAFile->m_pMPAHeader->GetLengthSecond( m_dwFrames ) * 1000.0f );
 }
 
-DWORD CVBRHeader::SeekPointByTimeVBRI(float fEntryTimeMS) const
+uint32 CVBRHeader::SeekPointByTimeVBRI(float fEntryTimeMS) const
 {
 	unsigned int i=0,  fraction = 0;
-	DWORD dwSeekPoint = 0;
+	uint32 dwSeekPoint = 0;
 
 	float fLengthMS;
 	float fLengthMSPerTOCEntry;
@@ -295,7 +296,7 @@ DWORD CVBRHeader::SeekPointByTimeVBRI(float fEntryTimeMS) const
 	fraction = ( (int)(((( fAccumulatedTimeMS - fEntryTimeMS ) / fLengthMSPerTOCEntry ) 
 				+ (1.0f/(2.0f*(float)m_dwFramesPerEntry))) * (float)m_dwFramesPerEntry));
 
-	dwSeekPoint -= (DWORD)((float)m_pnToc[i-1] * (float)(fraction) 
+	dwSeekPoint -= (uint32)((float)m_pnToc[i-1] * (float)(fraction) 
 					/ (float)m_dwFramesPerEntry);
 
 	return dwSeekPoint;

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -2631,18 +2631,18 @@ struct EdgeInfo_t
 // for the first face listed and vert1 -> vert0 is clockwise for the 2nd face listed
 static EdgeInfo_t s_pEdges[12] = 
 {
-	{ 0, 1, 2, 4, 0, 0 },		// 0: Edge between -y + -z
-	{ 2, 0, 0, 4, 0, 0 },		// 1: Edge between -x + -z
-	{ 1, 3, 1, 4, 0, 0 },		// 2: Edge between +x + -z
-	{ 3, 2, 3, 4, 0, 0 },		// 3: Edge between +y + -z
-	{ 0, 4, 0, 2, 0, 0 },		// 4: Edge between -x + -y
-	{ 5, 1, 1, 2, 0, 0 },		// 5: Edge between +x + -y
-	{ 6, 2, 0, 3, 0, 0 },		// 6: Edge between -x + +y
-	{ 3, 7, 1, 3, 0, 0 },		// 7: Edge between +x + +y
-	{ 5, 4, 2, 5, 0, 0 },		// 8: Edge between -y + +z
-	{ 4, 6, 0, 5, 0, 0 },		// 9: Edge between -x + +z
-	{ 7, 5, 1, 5, 0, 0 },		// 10:Edge between +x + +z
-	{ 6, 7, 3, 5, 0, 0 },		// 11:Edge between +y + +z
+	{ { 0, 1 }, { 2, 4 }, 0, 0 },		// 0: Edge between -y + -z
+	{ { 2, 0 }, { 0, 4 }, 0, 0 },		// 1: Edge between -x + -z
+	{ { 1, 3 }, { 1, 4 }, 0, 0 },		// 2: Edge between +x + -z
+	{ { 3, 2 }, { 3, 4 }, 0, 0 },		// 3: Edge between +y + -z
+	{ { 0, 4 }, { 0, 2 }, 0, 0 },		// 4: Edge between -x + -y
+	{ { 5, 1 }, { 1, 2 }, 0, 0 },		// 5: Edge between +x + -y
+	{ { 6, 2 }, { 0, 3 }, 0, 0 },		// 6: Edge between -x + +y
+	{ { 3, 7 }, { 1, 3 }, 0, 0 },		// 7: Edge between +x + +y
+	{ { 5, 4 }, { 2, 5 }, 0, 0 },		// 8: Edge between -y + +z
+	{ { 4, 6 }, { 0, 5 }, 0, 0 },		// 9: Edge between -x + +z
+	{ { 7, 5 }, { 1, 5 }, 0, 0 },		// 10:Edge between +x + +z
+	{ { 6, 7 }, { 3, 5 }, 0, 0 },		// 11:Edge between +y + +z
 };
 
 static int s_pFaceEdges[6][4] = 

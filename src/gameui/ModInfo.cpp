@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -9,7 +9,7 @@
 #include "ModInfo.h"
 #include "KeyValues.h"
 #include "vgui_controls/Controls.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "EngineInterface.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -152,6 +152,15 @@ bool CModInfo::HasPortals()
 //-----------------------------------------------------------------------------
 // Purpose: data accessor
 //-----------------------------------------------------------------------------
+bool CModInfo::HasHDContent()
+{
+	return (stricmp(m_pModData->GetString("hashdcontent", "0"), "1") == 0);
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: data accessor
+//-----------------------------------------------------------------------------
 bool CModInfo::NoDifficulty()
 {
 	return (stricmp(m_pModData->GetString("nodifficulty", "0"), "1") == 0);
@@ -186,7 +195,15 @@ bool CModInfo::NoCrosshair()
 //-----------------------------------------------------------------------------
 bool CModInfo::AdvCrosshair()
 {
-	return (stricmp(m_pModData->GetString("advcrosshair", "0"), "1") == 0);
+	return ( m_pModData->GetInt( "advcrosshair" ) > 0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: data accessor
+//-----------------------------------------------------------------------------
+int CModInfo::AdvCrosshairLevel()
+{
+	return m_pModData->GetInt( "advcrosshair" );
 }
 
 //-----------------------------------------------------------------------------
@@ -214,4 +231,21 @@ void CModInfo::LoadGameInfoFromBuffer( const char *buffer )
 bool CModInfo::UseGameLogo()
 {
 	return ( Q_stricmp( m_pModData->GetString( "gamelogo", "0" ), "1" ) == 0 );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: data accessor
+//-----------------------------------------------------------------------------
+bool CModInfo::UseBots()
+{
+	return ( Q_stricmp( m_pModData->GetString( "bots", "0" ), "1" ) == 0 );
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: data accessor
+//-----------------------------------------------------------------------------
+bool CModInfo::SupportsVR()
+{
+	return (m_pModData->GetInt( "supportsvr" ) > 0);
 }

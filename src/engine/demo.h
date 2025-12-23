@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -39,6 +39,7 @@ public:
 	virtual void	RecordMessages( bf_read &data, int bits ) = 0; // add messages to current packet
 	virtual void	RecordPacket( void ) = 0; // packet finished, write all recorded stuff to file
 	virtual void	RecordServerClasses( ServerClass *pClasses ) = 0; // packet finished, write all recorded stuff to file
+	virtual void	RecordStringTables() = 0; 
 
 	virtual void	ResetDemoInterpolation() = 0;
 };
@@ -49,6 +50,7 @@ public:
 	virtual ~IDemoPlayer() {};
 
 	virtual CDemoFile *GetDemoFile() = 0;
+	virtual int		GetPlaybackStartTick( void ) = 0;
 	virtual int		GetPlaybackTick( void ) = 0;
 	virtual int		GetTotalTicks( void ) = 0;
 	
@@ -65,18 +67,22 @@ public:
 
 	virtual void	PausePlayback( float seconds ) = 0; // pause playback n seconds, -1 = forever
 	virtual void	SkipToTick( int tick, bool bRelative, bool bPause ) = 0; // goto a specific tick, 0 = start, -1 = end
+	virtual void	SetEndTick( int tick ) = 0;	// set end tick
 	virtual void	ResumePlayback( void ) = 0; // resume playback
 	virtual void	StopPlayback( void ) = 0;	// stop playback, close file
 	virtual void	InterpolateViewpoint() = 0; // override viewpoint
 	virtual netpacket_t *ReadPacket( void ) = 0; // read packet from demo file
 
-	virtual void ResetDemoInterpolation() = 0;
+	virtual void	ResetDemoInterpolation() = 0;
+	virtual int		GetProtocolVersion() = 0;
+
+	virtual bool	ShouldLoopDemos() = 0;		// if we're in "startdemos" - should we loop?
+	virtual void	OnLastDemoInLoopPlayed() = 0;	// Last demo of "startdemos" just completed
+
+	virtual bool	IsLoading( void ) = 0; // true if demo is currently loading
 };
 
-#ifndef _LINUX
 extern IDemoPlayer *demoplayer;	// reference to current demo player
 extern IDemoRecorder *demorecorder; // reference to current demo recorder
-#endif
-
 
 #endif // DEMO_H

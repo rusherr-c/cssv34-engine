@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,7 @@
 //=============================================================================//
 #include "hlfaceposer.h"
 #include "faceposertoolwindow.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 #include "tier1/strtools.h"
 #include "MDLViewer.h"
 #include "choreowidgetdrawhelper.h"

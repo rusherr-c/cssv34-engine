@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -33,7 +33,7 @@ const char *gNetworkMessageNames[MAX_NETMESSAGE] = { NETWORK_MESSAGE1, NETWORK_M
 
 client_textmessage_t	gNetworkTextMessage[MAX_NETMESSAGE] = 
 {
-	0, // effect
+	{ 0, // effect
 	255,255,255,255,
 	255,255,255,255,
 	-1.0f, // x
@@ -44,7 +44,7 @@ client_textmessage_t	gNetworkTextMessage[MAX_NETMESSAGE] =
 	0.0f, // fxTime,
 	NULL,//pVGuiSchemeFontName (NULL == default)
 	NETWORK_MESSAGE1,  // pName message name.
-	gNetworkTextMessageBuffer[0]    // pMessage
+	gNetworkTextMessageBuffer[0] }    // pMessage
 };
 
 char	gDemoMessageBuffer[512];
@@ -425,8 +425,9 @@ void TextMessageParse( byte *pMemFile, int fileSize )
 
 				// Terminate text in-place in the memory file (it's temporary memory that will be deleted)
 				// If the string starts with #, it's a localization string and we don't
-				// want the \n on the end or the Find() lookup will fail (so subtract 2)
-				if ( pCurrentText && pCurrentText[0] && pCurrentText[0] == '#' && lastLinePos > 1 ) 
+				// want the \n (or \r) on the end or the Find() lookup will fail (so subtract 2)
+				if ( pCurrentText && pCurrentText[0] && pCurrentText[0] == '#' && lastLinePos > 1 && 
+					( ( pMemFile[lastLinePos - 2] == '\n' ) || ( pMemFile[lastLinePos - 2] == '\r' ) ) )
 				{
 					pMemFile[ lastLinePos - 2 ] = 0;
 				}

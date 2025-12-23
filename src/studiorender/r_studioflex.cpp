@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -205,6 +205,8 @@ void CStudioRender::R_StudioFlexVerts( mstudiomesh_t *pmesh, int lod )
 
 	Assert( pmesh );
 
+	const float flVertAnimFixedPointScale = m_pStudioHdr->VertAnimFixedPointScale();
+
 	// There's a chance we can actually do the flex twice on a single mesh
 	// since there's flexed HW + SW portions of the mesh.
 	if (m_VertexCache.IsFlexComputationDone())
@@ -324,12 +326,12 @@ void CStudioRender::R_StudioFlexVerts( mstudiomesh_t *pmesh, int lod )
 				float w = (w1 * s + (1.0f - s) * w2) * (1.0f - b) + b * (w3 * s + (1.0f - s) * w4);
 
 				// Accumulate weighted deltas
-				pFlexedVertex->m_Position += pAnim->GetDeltaFixed()  * w;
-				pFlexedVertex->m_Normal   += pAnim->GetNDeltaFixed() * w;
+				pFlexedVertex->m_Position += pAnim->GetDeltaFixed( flVertAnimFixedPointScale ) * w;
+				pFlexedVertex->m_Normal += pAnim->GetNDeltaFixed( flVertAnimFixedPointScale ) * w;
 
 				if ( pStudioTangentS )
 				{
-					pFlexedVertex->m_TangentS.AsVector3D() += pAnim->GetNDeltaFixed() * w;
+					pFlexedVertex->m_TangentS.AsVector3D() += pAnim->GetNDeltaFixed( flVertAnimFixedPointScale ) * w;
 					Assert( pFlexedVertex->m_TangentS.w == -1.0f || pFlexedVertex->m_TangentS.w == 1.0f );
 				}
 			}
@@ -638,15 +640,19 @@ ITexture* CStudioRender::RenderGlintTexture( const eyeballstate_t *pState,
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 	pRenderContext->PushRenderTargetAndViewport( m_pGlintTexture );
 
-	pRenderContext->ClearColor4ub( 0, 0, 0, 0 );
-	pRenderContext->ClearBuffers( true, false, false );
-
 	IMaterial *pPrevMaterial = pRenderContext->GetCurrentMaterial();
 	void *pPrevProxy = pRenderContext->GetCurrentProxy();
 	int nPrevBoneCount = pRenderContext->GetCurrentNumBones();
 	MaterialHeightClipMode_t nPrevClipMode = pRenderContext->GetHeightClipMode( );
 	bool bPrevClippingEnabled = pRenderContext->EnableClipping( false );
 	bool bInFlashlightMode = pRenderContext->GetFlashlightMode();
+
+	if ( bInFlashlightMode )
+	{
+		DisableScissor();
+	}
+	pRenderContext->ClearColor4ub( 0, 0, 0, 0 );
+	pRenderContext->ClearBuffers( true, false, false );
 
 	pRenderContext->SetFlashlightMode( false );
 	pRenderContext->SetHeightClipMode( MATERIAL_HEIGHTCLIPMODE_DISABLE );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@
 #include "AudioWaveOutput.h"
 #include "ifaceposersound.h"
 #include "utlvector.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "sentence.h"
 
 typedef struct channel_s

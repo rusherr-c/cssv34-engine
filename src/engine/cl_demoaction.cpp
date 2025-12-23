@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -120,7 +120,7 @@ void *CBaseDemoAction::operator new( size_t sz )
 //-----------------------------------------------------------------------------
 void CBaseDemoAction::operator delete( void *pMem )
 {
-#ifdef _DEBUG
+#if defined( WIN32 ) && defined( _DEBUG )
 	// set the memory to a known value
 	int size = _msize( pMem );
 	Q_memset( pMem, 0xcd, size );

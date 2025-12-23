@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Engine specific CRC functions
 //
@@ -111,7 +111,7 @@ bool CRC_File(CRC32_t *crcvalue, const char *pszFileName)
 			break;
 		}
 		// If there was a disk error, indicate failure.
-		else if ( !g_pFileSystem->IsOk(fp) )
+		else if ( nBytesRead <= 0 || !g_pFileSystem->IsOk(fp) )
 		{
 			if ( fp )
 				g_pFileSystem->Close(fp);
@@ -219,6 +219,97 @@ bool CRC_MapFile(CRC32_t *crcvalue, const char *pszFileName)
 	return true;
 }
 
+bool MD5_MapFile(MD5Value_t *md5value, const char *pszFileName)
+{
+	FileHandle_t fp;
+	byte chunk[1024];
+	int i, l;
+	int nBytesRead;
+	dheader_t	header;
+	int nSize;
+	lump_t *curLump;
+	long startOfs;
+
+	nSize = COM_OpenFile(pszFileName, &fp);
+	if ( !fp || ( nSize == -1 ) )
+		return false;
+
+	MD5Context_t ctx;
+	V_memset( &ctx, 0, sizeof(MD5Context_t) );
+	MD5Init( &ctx );
+
+	startOfs = g_pFileSystem->Tell(fp);
+
+	// Don't MD5 the header.
+	if (g_pFileSystem->Read(&header, sizeof(dheader_t), fp) == 0)
+	{
+		ConMsg("Could not read BSP header for map [%s].\n", pszFileName);
+		g_pFileSystem->Close(fp);
+		return false;
+	}
+
+	i = header.version;
+	if ( i < MINBSPVERSION || i > BSPVERSION )
+	{
+		g_pFileSystem->Close(fp);
+		ConMsg("Map [%s] has incorrect BSP version (%i should be %i).\n", pszFileName, i, BSPVERSION);
+		return false;
+	}
+
+	if ( IsX360() )
+	{
+		// 360 bsp's store the pc checksum in the flags lump header
+		g_pFileSystem->Close(fp);
+		char versionString[65] = {0};
+		V_snprintf( versionString, ARRAYSIZE(versionString), "%d", header.lumps[LUMP_MAP_FLAGS].version );
+		V_memcpy( md5value->bits, versionString, MD5_DIGEST_LENGTH );
+		return true;
+	}
+
+	// MD5 across all lumps except for the Entities lump
+	for (l = 0; l < HEADER_LUMPS; l++)
+	{
+		if (l == LUMP_ENTITIES)
+			continue;
+
+		curLump = &header.lumps[l];
+		nSize = curLump->filelen;
+
+		g_pFileSystem->Seek( fp, startOfs + curLump->fileofs, FILESYSTEM_SEEK_HEAD );
+
+		// Now read in 1K chunks
+		while (nSize > 0)
+		{
+			if (nSize > 1024)
+				nBytesRead = g_pFileSystem->Read(chunk, 1024, fp);
+			else
+				nBytesRead = g_pFileSystem->Read(chunk, nSize, fp);
+
+			// If any data was received, CRC it.
+			if (nBytesRead > 0)
+			{
+				nSize -= nBytesRead;
+				MD5Update( &ctx, chunk, nBytesRead );
+			}
+
+			// If there was a disk error, indicate failure.
+			if ( !g_pFileSystem->IsOk(fp) )
+			{
+				if ( fp )
+					g_pFileSystem->Close(fp);
+				return false;
+			}
+		}	
+	}
+
+	if ( fp )
+		g_pFileSystem->Close(fp);
+
+	MD5Final( md5value->bits, &ctx );
+
+	return true;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Input  : digest[16] - 
@@ -227,7 +318,7 @@ bool CRC_MapFile(CRC32_t *crcvalue, const char *pszFileName)
 //			seed[4] - 
 // Output : Returns true on success, false on failure.
 //-----------------------------------------------------------------------------
-bool MD5_Hash_File(unsigned char digest[16], char *pszFileName, bool bSeed /* = FALSE */, unsigned int seed[4] /* = NULL */)
+bool MD5_Hash_File(unsigned char digest[16], const char *pszFileName, bool bSeed /* = FALSE */, unsigned int seed[4] /* = NULL */)
 {
 	FileHandle_t fp;
 	byte chunk[1024];
@@ -289,3 +380,36 @@ bool MD5_Hash_File(unsigned char digest[16], char *pszFileName, bool bSeed /* = 
 	return TRUE;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool MD5_Hash_Buffer( unsigned char pDigest[16], const unsigned char *pBuffer, int nSize, bool bSeed /* = FALSE */, unsigned int seed[4] /* = NULL */ )
+{
+	MD5Context_t ctx;
+	
+	if ( !pBuffer || !nSize )
+		return false;
+
+	memset( &ctx, 0, sizeof( MD5Context_t ) );
+	MD5Init( &ctx );
+
+	if ( bSeed )
+	{
+		// Seed the hash with the seed value
+		MD5Update( &ctx, (const unsigned char *)&seed[0], 16 );
+	}
+
+	// Now read in 1024 chunks
+	const unsigned char *pChunk = pBuffer;
+	while ( nSize > 0 )
+	{
+		const int nChunkSize = MIN( 1024, nSize );
+		MD5Update( &ctx, pChunk, nChunkSize );
+		nSize -= nChunkSize;
+		pChunk += nChunkSize;	AssertValidReadPtr( pChunk );
+	}	
+
+	MD5Final( pDigest, &ctx );
+
+	return true;
+}

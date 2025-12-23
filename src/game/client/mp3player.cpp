@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A simple .mp3 player example
 //
@@ -6,10 +6,10 @@
 
 #include "cbase.h"
 
-#if 1
+#if 0
 #include "mp3player.h"
 #include "KeyValues.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include "vgui_controls/MenuButton.h"
 #include "vgui_controls/Menu.h"
@@ -18,7 +18,7 @@
 #include "vgui_controls/Slider.h"
 #include "vgui_controls/ListPanel.h"
 #include "vgui/IPanel.h"
-#include "vgui/IVgui.h"
+#include "vgui/IVGui.h"
 #include "vgui/ISurface.h"
 #include "vgui/IInput.h"
 #include "vgui/ILocalize.h"
@@ -56,7 +56,7 @@ vgui::Panel *GetSDKRootPanel();
 #define DB_FILENAME			"resource/mp3player_db.txt"
 #define MP3_SETTINGS_FILE	"resource/mp3settings.txt"
 
-#define MP3_DEFAULT_MP3DIR ".\\my music"
+#define MP3_DEFAULT_MP3DIR "c:\\my music"
 
 CMP3Player *GetMP3Player()
 {

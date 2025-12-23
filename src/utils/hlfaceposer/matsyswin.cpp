@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,13 +21,14 @@
 #include "ViewerSettings.h"
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/imaterialproxyfactory.h"
-#include "FileSystem.h"
-#include "materialsystem/IMesh.h"
+#include "filesystem.h"
+#include <keyvalues.h>
+#include "materialsystem/imesh.h"
 #include "expressions.h"
 #include "hlfaceposer.h"
 #include "ifaceposersound.h"
 #include "materialsystem/IMaterialSystemHardwareConfig.h"
-#include "materialsystem/ITexture.h"
+#include "materialsystem/itexture.h"
 #include "materialsystem/MaterialSystem_Config.h"
 #include "istudiorender.h"
 #include "choreowidgetdrawhelper.h"
@@ -73,6 +74,8 @@ Vector g_vright( 50, 50, 0 );		// needs to be set to viewer's right in order for
 IMaterial *g_materialBackground = NULL;
 IMaterial *g_materialWireframe = NULL;
 IMaterial *g_materialWireframeVertexColor = NULL;
+IMaterial *g_materialWireframeVertexColorNoCull = NULL;
+IMaterial *g_materialDebugCopyBaseTexture = NULL;
 IMaterial *g_materialFlatshaded = NULL;
 IMaterial *g_materialSmoothshaded = NULL;
 IMaterial *g_materialBones = NULL;
@@ -126,6 +129,23 @@ MatSysWindow::MatSysWindow (mxWindow *parent, int x, int y, int w, int h, const 
 	g_materialBackground	= g_pMaterialSystem->FindMaterial("particle/particleapp_background", TEXTURE_GROUP_OTHER, true);
 	g_materialWireframe		= g_pMaterialSystem->FindMaterial("debug/debugmrmwireframe", TEXTURE_GROUP_OTHER, true);
 	g_materialWireframeVertexColor = g_pMaterialSystem->FindMaterial("debug/debugwireframevertexcolor", TEXTURE_GROUP_OTHER, true);
+
+	// test: create this from code - you need a vmt to make $nocull 1 happen, can't do it from the render context
+	{
+		KeyValues *pVMTKeyValues = new KeyValues( "Wireframe" );
+		pVMTKeyValues->SetInt("$ignorez", 1);
+		pVMTKeyValues->SetInt("$nocull", 1);
+		pVMTKeyValues->SetInt("$vertexcolor", 1);
+		pVMTKeyValues->SetInt("$decal", 1);
+		g_materialWireframeVertexColorNoCull = g_pMaterialSystem->CreateMaterial( "debug/wireframenocull", pVMTKeyValues );
+	}
+	{
+		KeyValues *pVMTKeyValues = new KeyValues( "UnlitGeneric" );
+		pVMTKeyValues->SetString("$basetexture", "vgui/white" );
+		g_materialDebugCopyBaseTexture = g_pMaterialSystem->CreateMaterial( "debug/copybasetexture", pVMTKeyValues );
+
+	}
+
 	g_materialFlatshaded	= g_pMaterialSystem->FindMaterial("debug/debugdrawflatpolygons", TEXTURE_GROUP_OTHER, true);
 	g_materialSmoothshaded	= g_pMaterialSystem->FindMaterial("debug/debugmrmfullbright2", TEXTURE_GROUP_OTHER, true);
 	g_materialBones			= g_pMaterialSystem->FindMaterial("debug/debugmrmwireframe", TEXTURE_GROUP_OTHER, true);
@@ -140,6 +160,10 @@ MatSysWindow::MatSysWindow (mxWindow *parent, int x, int y, int w, int h, const 
 		mx::setIdleWindow (this);
 
 	m_bSuppressResize = false;
+
+	m_stickyDepth = 0;
+	m_bIsSticky = false;
+	m_snapshotDepth = 0;
 }
 
 
@@ -564,6 +588,76 @@ void MatSysWindow::draw ()
 
 	g_pMaterialSystem->EndFrame();
 }
+
+void MatSysWindow::EnableStickySnapshotMode( )
+{
+	m_stickyDepth++;
+}
+
+void MatSysWindow::DisableStickySnapshotMode( )
+{
+	if (--m_stickyDepth == 0)
+	{
+		if (m_bIsSticky)
+		{
+			m_bIsSticky = false;
+
+			HWND wnd = (HWND)getHandle();
+
+			// Move back to original position
+			SetWindowPlacement( wnd, &m_wp );
+
+			SuppressResize( false );
+
+			SetCursor( m_hPrevCursor );
+		}
+	}
+}
+
+
+void MatSysWindow::PushSnapshotMode( int nSnapShotSize )
+{
+	if (m_snapshotDepth++ == 0)
+	{
+		if (m_stickyDepth)
+		{
+			if (m_bIsSticky)
+				return;
+
+			m_bIsSticky = true;
+			m_hPrevCursor = SetCursor( LoadCursor( NULL, IDC_WAIT ) );
+		}
+
+		SuppressResize( true );
+
+		RECT rcClient;
+		HWND wnd = (HWND)getHandle();
+
+		GetWindowPlacement( wnd, &m_wp );
+
+		GetClientRect( wnd, &rcClient );
+
+		MoveWindow( wnd, 0, 0, nSnapShotSize + 16, nSnapShotSize + 16, TRUE );
+	}
+}
+
+
+void MatSysWindow::PopSnapshotMode( )
+{
+	if (--m_snapshotDepth == 0)
+	{
+		if (m_stickyDepth == 0)
+		{
+			HWND wnd = (HWND)getHandle();
+
+			// Move back to original position
+			SetWindowPlacement( wnd, &m_wp );
+
+			SuppressResize( false );
+		}
+	}
+}
+
 
 void MatSysWindow::TakeSnapshotRect( const char *pFilename, int x, int y, int w, int h )
 {

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,8 +13,9 @@
 
 class CEntityReadInfo;		
 
-void CL_DeleteDLLEntity( int iEnt, char *reason, bool bOnRecreatingAllEntities = false );
+void CL_DeleteDLLEntity( int iEnt, const char *reason, bool bOnRecreatingAllEntities = false );
 void CL_CopyExistingEntity( CEntityReadInfo &u );
+void CL_PreserveExistingEntity( int nOldEntity );
 void CL_CopyNewEntity( CEntityReadInfo &u, int iClass, int iSerialNum );
 void CL_PreprocessEntities( void );
 bool CL_ProcessPacketEntities ( SVC_PacketEntities * entmsg );

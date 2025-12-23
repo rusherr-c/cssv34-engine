@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,7 +10,7 @@
 #include "vgui/IScheme.h"
 #include "vgui/ISurface.h"
 #include "vgui/IVGui.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "tier0/icommandline.h"
 #include "inputsystem/iinputsystem.h"
 #include "appframework/tier3app.h"

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -98,7 +98,7 @@ public:
 	int ListCount() { return m_targetList.Count(); }
 	int ListCopy( CBaseEntity *pList[], int listMax )
 	{
-		int count = min(listMax, ListCount() );
+		int count = MIN(listMax, ListCount() );
 		memcpy( pList, m_targetList.Base(), sizeof(CBaseEntity *) * count );
 		return count;
 	}
@@ -192,7 +192,7 @@ public:
 
 	int ListCopy( CBaseEntity *pList[], int listMax )
 	{
-		int count = min(listMax, ListCount());
+		int count = MIN(listMax, ListCount());
 		int out = 0;
 		for ( int i = 0; i < count; i++ )
 		{
@@ -279,39 +279,6 @@ void SimThink_EntityChanged( CBaseEntity *pEntity )
 {
 	g_SimThinkManager.EntityChanged( pEntity );
 }
-
-// This manages a list of entities queued up to receive PostClientMessages callbacks
-class CPostClientMessageManager
-{
-public:
-	void LevelShutdownPostEntity()
-	{
-		m_list.Purge();
-	}
-	void AddEntity( CBaseEntity *pEntity )
-	{
-		MEM_ALLOC_CREDIT();
-		m_list.AddToTail( (unsigned short)pEntity->GetRefEHandle().GetEntryIndex() );
-	}
-	void PostClientMessagesSent()
-	{
-		for ( int i = m_list.Count()-1; i >= 0; --i )
-		{
-			CBaseEntity *pEntity = (CBaseEntity *)gEntList.GetEntInfoPtrByIndex( m_list[i] )->m_pEntity;
-
-			if ( pEntity )
-			{
-				pEntity->PostClientMessagesSent();
-			}
-		}
-		m_list.RemoveAll();
-	}
-private:
-	// UNDONE: Need to use ehandles instead?
-	CUtlVector<unsigned short>	m_list;
-};
-
-static CPostClientMessageManager g_PostClientManager;
 
 static CBaseEntityClassList *s_pClassLists = NULL;
 CBaseEntityClassList::CBaseEntityClassList()
@@ -488,15 +455,6 @@ void CGlobalEntityList::ReportEntityFlagsChanged( CBaseEntity *pEntity, unsigned
 	}
 }
 
-void CGlobalEntityList::AddPostClientMessageEntity( CBaseEntity *pEntity )
-{
-	g_PostClientManager.AddEntity( pEntity );
-}
-void CGlobalEntityList::PostClientMessagesSent()
-{
-	g_PostClientManager.PostClientMessagesSent();
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: Used to confirm a pointer is a pointer to an entity, useful for
 //			asserts.
@@ -563,7 +521,7 @@ CBaseEntity *CGlobalEntityList::FindEntityProcedural( const char *szName, CBaseE
 		//
 		if ( FStrEq( pName, "player" ) )
 		{
-			return (CBaseEntity *)UTIL_GetLocalPlayer();
+			return (CBaseEntity *)UTIL_PlayerByIndex( 1 );
 		}
 		else if ( FStrEq( pName, "pvsplayer" ) )
 		{
@@ -579,7 +537,7 @@ CBaseEntity *CGlobalEntityList::FindEntityProcedural( const char *szName, CBaseE
 			else
 			{
 				// FIXME: error condition?
-				return (CBaseEntity *)UTIL_GetLocalPlayer();
+				return (CBaseEntity *)UTIL_PlayerByIndex( 1 );
 			}
 
 		}
@@ -593,8 +551,7 @@ CBaseEntity *CGlobalEntityList::FindEntityProcedural( const char *szName, CBaseE
 		}
 		else if ( FStrEq( pName, "picker" ) )
 		{
-			// this doesn't seem right
-			return FindPickerEntity( UTIL_GetLocalPlayer() );
+			return FindPickerEntity( UTIL_PlayerByIndex(1) );
 		}
 		else if ( FStrEq( pName, "self" ) )
 		{
@@ -916,6 +873,39 @@ CBaseEntity *CGlobalEntityList::FindEntityByClassnameWithin( CBaseEntity *pStart
 
 
 //-----------------------------------------------------------------------------
+// Purpose: Finds the first entity within an extent by class name.
+// Input  : pStartEntity - The entity to start from when doing the search.
+//			szName - Entity class name, ie "info_target".
+//			vecMins - Search mins.
+//			vecMaxs - Search maxs.
+// Output : Returns a pointer to the found entity, NULL if none.
+//-----------------------------------------------------------------------------
+CBaseEntity *CGlobalEntityList::FindEntityByClassnameWithin( CBaseEntity *pStartEntity, const char *szName, const Vector &vecMins, const Vector &vecMaxs )
+{
+	//
+	// Check for matching class names within the search radius.
+	//
+	CBaseEntity *pEntity = pStartEntity;
+
+	while ((pEntity = gEntList.FindEntityByClassname( pEntity, szName )) != NULL)
+	{
+		if ( !pEntity->edict() && !pEntity->IsEFlagSet( EFL_SERVER_ONLY ) )
+			continue;
+
+		// check if the aabb intersects the search aabb.
+		Vector entMins, entMaxs;
+		pEntity->CollisionProp()->WorldSpaceAABB( &entMins, &entMaxs );
+		if ( IsBoxIntersectingBox( vecMins, vecMaxs, entMins, entMaxs ) )
+		{
+			return pEntity;
+		}
+	}
+
+	return NULL;
+}
+
+
+//-----------------------------------------------------------------------------
 // Purpose: Finds an entity by target name or class name.
 // Input  : pStartEntity - The entity to start from when doing the search.
 //			szName - Entity name to search for. Treated as a target name first,
@@ -1115,7 +1105,7 @@ void CGlobalEntityList::OnAddEntity( IHandleEntity *pEnt, CBaseHandle handle )
 
 void CGlobalEntityList::OnRemoveEntity( IHandleEntity *pEnt, CBaseHandle handle )
 {
-#ifdef DEBUG
+#ifdef DBGFLAG_ASSERT
 	if ( !g_fInCleanupDelete )
 	{
 		int i;
@@ -1423,7 +1413,6 @@ public:
 	{
 		g_TouchManager.LevelShutdownPostEntity();
 		g_AimManager.LevelShutdownPostEntity();
-		g_PostClientManager.LevelShutdownPostEntity();
 		g_SimThinkManager.LevelShutdownPostEntity();
 #ifdef HL2_DLL
 		OverrideMoveCache_LevelShutdownPostEntity();
@@ -1580,6 +1569,9 @@ private:
 
 CON_COMMAND(report_entities, "Lists all entities")
 {
+	if ( !UTIL_IsCommandIssuedByServerAdmin() )
+		return;
+
 	CSortedEntityList list;
 	CBaseEntity *pEntity = gEntList.FirstEnt();
 	while ( pEntity )
@@ -1593,6 +1585,9 @@ CON_COMMAND(report_entities, "Lists all entities")
 
 CON_COMMAND(report_touchlinks, "Lists all touchlinks")
 {
+	if ( !UTIL_IsCommandIssuedByServerAdmin() )
+		return;
+
 	CSortedEntityList list;
 	CBaseEntity *pEntity = gEntList.FirstEnt();
 	const char *pClassname = NULL;
@@ -1622,6 +1617,9 @@ CON_COMMAND(report_touchlinks, "Lists all touchlinks")
 
 CON_COMMAND(report_simthinklist, "Lists all simulating/thinking entities")
 {
+	if ( !UTIL_IsCommandIssuedByServerAdmin() )
+		return;
+
 	CBaseEntity *pTmp[NUM_ENT_ENTRIES];
 	int count = SimThink_ListCopy( pTmp, ARRAYSIZE(pTmp) );
 

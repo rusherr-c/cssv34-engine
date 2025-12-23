@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: languages definition
 //
@@ -9,19 +9,19 @@
 
 struct SourceAppInfo_t
 {	
-	char *m_pchFullName;
-	char *m_pchModName;
+	const char *m_pchFullName;
+	const char *m_pchModName;
 	int m_nSteamAppId;
 	ESourceApp m_ESourceApp;
 };
 
 
-static SourceAppInfo_t s_SteamAppInfo[] = 
+static const SourceAppInfo_t s_SteamAppInfo[] = 
 {
 	{	"Source SDK Base",				"sourcetest",	215,	k_App_SDK_BASE },
 	{	"Half-Life 2",					"hl2",			220,	k_App_HL2 } ,
 	{	"Counter-Strike: Source",		"cstrike",		240,	k_App_CSS } ,
-	{	"Day of Defeat: Source",		"dods",			300,	k_App_DODS } ,
+	{	"Day of Defeat: Source",		"dod",			300,	k_App_DODS } ,
 	{	"Half-Life 2: Deathmatch",		"hl2mp",		320,	k_App_HL2MP } ,
 	{	"Half-Life 2: Lost Coast",		"lostcoast",	340,	k_App_LOST_COAST } ,
 	{	"Half-Life Deathmatch: Source",	"hl1mp",		360,	k_App_HL1DM } ,

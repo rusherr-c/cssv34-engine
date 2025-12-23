@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,7 +20,7 @@
 #include "vgui_controls/ImagePanel.h"
 #include "vgui_controls/Frame.h"
 #include "vgui_controls/ControllerMap.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "ModInfo.h"
 #include "tier1/convar.h"
 #include "GameUI_Interface.h"
@@ -128,6 +128,8 @@ class CGameChapterPanel : public vgui::EditablePanel
 	bool m_bHasBonus;
 	bool m_bCommentaryMode;
 
+	bool m_bIsSelected;
+
 public:
 	CGameChapterPanel( CNewGameDialog *parent, const char *name, const char *chapterName, int chapterIndex, const char *chapterNumber, const char *chapterConfigFile, bool bCommentary ) : BaseClass( parent, name )
 	{
@@ -138,12 +140,13 @@ public:
 		m_pLevelPic = SETUP_PANEL( new ImagePanel( this, "LevelPic" ) );
 		m_pCommentaryIcon = NULL;
 		m_bCommentaryMode = bCommentary;
+		m_bIsSelected = false;
 
 		wchar_t text[32];
 		wchar_t num[32];
 		wchar_t *chapter = g_pVGuiLocalize->Find("#GameUI_Chapter");
 		g_pVGuiLocalize->ConvertANSIToUnicode( chapterNumber, num, sizeof(num) );
-		_snwprintf( text, sizeof(text), L"%s %s", chapter ? chapter : L"CHAPTER", num );
+		_snwprintf( text, ARRAYSIZE(text), L"%ls %ls", chapter ? chapter : L"CHAPTER", num );
 
 		if ( ModInfo().IsSinglePlayerOnly() )
 		{
@@ -215,8 +218,12 @@ public:
 			m_pCommentaryIcon->SetVisible( m_bCommentaryMode );
 	}
 
+	bool IsSelected( void ) const { return m_bIsSelected; }
+
 	void SetSelected( bool state )
 	{
+		m_bIsSelected = state;
+
 		// update the text/border colors
 		if ( !IsEnabled() )
 		{
@@ -318,7 +325,7 @@ CNewGameDialog::CNewGameDialog(vgui::Panel *parent, bool bCommentaryMode) : Base
 
 	m_pNextButton = new Button( this, "Next", "#gameui_next" );
 	m_pPrevButton = new Button( this, "Prev", "#gameui_prev" );
-	m_pPlayButton = new vgui::Button( this, "Play", "#GameUI_Play" );
+	m_pPlayButton = new CNewGamePlayButton( this, "Play", "#GameUI_Play" );
 	m_pPlayButton->SetCommand( "Play" );
 
 	vgui::Button *cancel = new vgui::Button( this, "Cancel", "#GameUI_Cancel" );
@@ -372,19 +379,22 @@ CNewGameDialog::CNewGameDialog(vgui::Panel *parent, bool bCommentaryMode) : Base
 		fileName = g_pFullFileSystem->FindFirst( fileName, &findHandle );
 		while ( fileName && chapterIndex < MAX_CHAPTERS )
 		{
-			// Only load chapter configs from the current mod's cfg dir
-			// or else chapters appear that we don't want!
-			Q_snprintf( szFullFileName, sizeof(szFullFileName), "cfg/%s", fileName );
-			FileHandle_t f = g_pFullFileSystem->Open( szFullFileName, "rb", "MOD" );
-			if ( f )
-			{	
-				// don't load chapter files that are empty, used in the demo
-				if ( g_pFullFileSystem->Size(f) > 0	)
-				{
-					Q_strncpy(chapters[chapterIndex].filename, fileName, sizeof(chapters[chapterIndex].filename));
-					++chapterIndex;
+			if ( fileName[0] )
+			{
+				// Only load chapter configs from the current mod's cfg dir
+				// or else chapters appear that we don't want!
+				Q_snprintf( szFullFileName, sizeof(szFullFileName), "cfg/%s", fileName );
+				FileHandle_t f = g_pFullFileSystem->Open( szFullFileName, "rb", "MOD" );
+				if ( f )
+				{	
+					// don't load chapter files that are empty, used in the demo
+					if ( g_pFullFileSystem->Size(f) > 0	)
+					{
+						Q_strncpy(chapters[chapterIndex].filename, fileName, sizeof(chapters[chapterIndex].filename));
+						++chapterIndex;
+					}
+					g_pFullFileSystem->Close( f );
 				}
-				g_pFullFileSystem->Close( f );
 			}
 			fileName = g_pFullFileSystem->FindNext(findHandle);
 		}
@@ -413,12 +423,12 @@ CNewGameDialog::CNewGameDialog(vgui::Panel *parent, bool bCommentaryMode) : Base
 			if ( ChapterStringIndex == 10 )
 			{				
 				Q_snprintf( szFullFileName, sizeof( szFullFileName ), "cfg/chapter9a.cfg" );
-				FileHandle_t f = g_pFullFileSystem->Open( szFullFileName, "rb", "MOD" );
-				if ( f )
+				FileHandle_t fChap = g_pFullFileSystem->Open( szFullFileName, "rb", "MOD" );
+				if ( fChap )
 				{		
 					Q_strncpy(chapters[chapterIndex].filename, szFullFileName + 4, sizeof(chapters[chapterIndex].filename));
 					++chapterIndex;
-					g_pFullFileSystem->Close( f );
+					g_pFullFileSystem->Close( fChap );
 				}		
 			}
 
@@ -518,11 +528,22 @@ CNewGameDialog::CNewGameDialog(vgui::Panel *parent, bool bCommentaryMode) : Base
 	// Layout panel positions relative to the dialog center.
 	int panelWidth = m_ChapterPanels[0]->GetWide() + 16;
 	int dialogWidth = GetWide();
+	
 	m_PanelXPos[2] = ( dialogWidth - panelWidth ) / 2 + 8;
-	m_PanelXPos[1] = m_PanelXPos[2] - panelWidth;
-	m_PanelXPos[0] = m_PanelXPos[1];
-	m_PanelXPos[3] = m_PanelXPos[2] + panelWidth;
-	m_PanelXPos[4] = m_PanelXPos[3];
+	
+	if (m_ChapterPanels.Count() > 1)
+	{
+		m_PanelXPos[1] = m_PanelXPos[2] - panelWidth;
+		m_PanelXPos[0] = m_PanelXPos[1];
+		m_PanelXPos[3] = m_PanelXPos[2] + panelWidth;
+		m_PanelXPos[4] = m_PanelXPos[3];
+	}
+	else
+	{
+		m_PanelXPos[0] = m_PanelXPos[1] = m_PanelXPos[3] =
+		m_PanelXPos[4] = m_PanelXPos[2];
+	}
+
 
 	m_PanelAlpha[0] = 0;
 	m_PanelAlpha[1] = 255;
@@ -665,7 +686,7 @@ void CNewGameDialog::UpdateMenuComponents( EScrollDirection dir )
 		{
 			wchar_t buffer[ MAX_PATH ];
 			m_ChapterPanels[ m_PanelIndex[centerIdx] ]->m_pChapterNameLabel->GetText( buffer, sizeof(buffer) );
-			m_pChapterTitleLabels[m_ActiveTitleIdx]->SetText( buffer );
+			m_pChapterTitleLabels[(unsigned)m_ActiveTitleIdx]->SetText( buffer );
 
 			// If it has bonuses show the scroll up and down arrows
 			bHasBonus = m_ChapterPanels[ m_PanelIndex[centerIdx] ]->HasBonus();
@@ -1175,7 +1196,7 @@ void CNewGameDialog::AnimateSelectionPanels( void )
 		
 		// Crossfade the chapter title labels
 		int inactiveTitleIdx = m_ActiveTitleIdx ^ 0x01;
-		GetAnimationController()->RunAnimationCommand( m_pChapterTitleLabels[m_ActiveTitleIdx], "alpha", 255, 0, m_ScrollSpeed, vgui::AnimationController::INTERPOLATOR_LINEAR );
+		GetAnimationController()->RunAnimationCommand( m_pChapterTitleLabels[(unsigned)m_ActiveTitleIdx], "alpha", 255, 0, m_ScrollSpeed, vgui::AnimationController::INTERPOLATOR_LINEAR );
 		GetAnimationController()->RunAnimationCommand( m_pChapterTitleLabels[inactiveTitleIdx], "alpha", 0, 0, m_ScrollSpeed, vgui::AnimationController::INTERPOLATOR_LINEAR );
 		
 		// Scrolling up through chapters, offset is negative
@@ -1354,6 +1375,14 @@ void CNewGameDialog::StartGame( void )
 			// If commentary is on, we go to the explanation dialog (but not for teaser trailers)
 			if ( m_bCommentaryMode && !m_ChapterPanels[m_iSelectedChapter]->IsTeaserChapter() )
 			{
+				// Check our current state and disconnect us from any multiplayer server we're connected to.
+				// This fixes an exploit where players would click "start" on the commentary dialog to enable
+				// sv_cheats on the client (via the code above) and then hit <esc> to get out of the explanation dialog.
+				if ( GameUI().IsInMultiplayer() )
+				{
+					engine->ExecuteClientCmd( "disconnect" );
+				}
+
 				DHANDLE<CCommentaryExplanationDialog> hCommentaryExplanationDialog;
 				if ( !hCommentaryExplanationDialog.Get() )
 				{
@@ -1600,6 +1629,77 @@ void CNewGameDialog::PaintBackground()
 
 void CNewGameDialog::OnKeyCodePressed( KeyCode code )
 {
+	switch ( code )
+	{
+	case KEY_XBUTTON_LEFT:
+	case KEY_XSTICK1_LEFT:
+	case KEY_XSTICK2_LEFT:
+	case KEY_LEFT:
+	case STEAMCONTROLLER_DPAD_LEFT:
+		if ( !m_bScrolling )
+		{
+			for ( int i = 0; i < m_ChapterPanels.Count(); ++i )
+			{
+				if ( m_ChapterPanels[ i ]->IsSelected() )
+				{
+					int nNewChapter = i - 1;
+					if ( nNewChapter >= 0 )
+					{
+						if ( nNewChapter < m_PanelIndex[ SLOT_LEFT ] && m_PanelIndex[ SLOT_LEFT ] != -1 )
+						{
+							ScrollSelectionPanels( SCROLL_RIGHT );
+						}
+						else if ( m_ChapterPanels[ nNewChapter ]->IsEnabled() )
+						{
+							SetSelectedChapterIndex( nNewChapter );
+						}
+					}
+					break;
+				}
+			}
+		}
+		return;
+
+	case KEY_XBUTTON_RIGHT:
+	case KEY_XSTICK1_RIGHT:
+	case KEY_XSTICK2_RIGHT:
+	case KEY_RIGHT:
+	case STEAMCONTROLLER_DPAD_RIGHT:
+		if ( !m_bScrolling )
+		{
+			for ( int i = 0; i < m_ChapterPanels.Count(); ++i )
+			{
+				if ( m_ChapterPanels[ i ]->IsSelected() )
+				{
+					int nNewChapter = i + 1;
+					if ( nNewChapter < m_ChapterPanels.Count() )
+					{
+						if ( nNewChapter > m_PanelIndex[ SLOT_RIGHT ] && m_PanelIndex[ SLOT_RIGHT ] != -1 )
+						{
+							ScrollSelectionPanels( SCROLL_LEFT );
+						}
+						else if ( m_ChapterPanels[ nNewChapter ]->IsEnabled() )
+						{
+							SetSelectedChapterIndex( nNewChapter );
+						}
+					}
+					break;
+				}
+			}
+		}
+		return;
+
+	case KEY_XBUTTON_B:
+	case STEAMCONTROLLER_B:
+		OnCommand( "Close" );
+		return;
+
+	case KEY_XBUTTON_A:
+	case STEAMCONTROLLER_A:
+		OnCommand( "Play" );
+		return;
+	}
+
 	m_KeyRepeat.KeyDown( code );
 
 	BaseClass::OnKeyCodePressed( code );

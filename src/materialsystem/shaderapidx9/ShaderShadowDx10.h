@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,6 +13,7 @@
 #pragma once
 #endif
 
+#include "shaderapi/ishaderapi.h"
 #include "shaderapi/ishadershadow.h"
 
 
@@ -149,11 +150,19 @@ public:
 	{
 		//FIXME: empty for now.
 	}
+	virtual void FogMode( ShaderFogMode_t fogMode, bool bVertexFog ) 
+	{
+		//FIXME: empty for now.
+	}
 
 	// Alpha to coverage
 	void EnableAlphaToCoverage( bool bEnable );
 
 	void SetShadowDepthFiltering( Sampler_t stage );
+
+	// More alpha blending state
+	void BlendOp( ShaderBlendOp_t blendOp );
+	void BlendOpSeparateAlpha( ShaderBlendOp_t blendOp );
 
 	bool m_IsTranslucent;
 	bool m_IsAlphaTested;

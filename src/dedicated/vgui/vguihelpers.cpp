@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 #include <vgui/ISystem.h>
 #include <vgui/IVGui.h>
 #include <vgui/IPanel.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 #include <vgui/ILocalize.h>
 #include <vgui/IScheme.h>
 #include <vgui/ISurface.h>
@@ -175,7 +175,7 @@ void VGUIPrintf( const char *msg )
 {
 	if ( !g_pMainPanel || VGUIIsInConfig() || VGUIIsStopping() )
 	{
-		::MessageBox( NULL, msg, "Dedicated Server Error", MB_OK | MB_TOPMOST );
+		OutputDebugStringA( msg );
 	}
 	else if ( g_pMainPanel )
 	{

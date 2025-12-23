@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,6 +20,9 @@
 
 #endif
 
+const int cScoutMidZoomFOV = 40;
+const int cScoutMaxZoomFOV = 15;
+
 
 class CWeaponScout : public CWeaponCSBaseGun
 {
@@ -33,7 +36,10 @@ public:
 	virtual void PrimaryAttack();
 	virtual void SecondaryAttack();
 
+ 	virtual float GetInaccuracy() const;
 	virtual float GetMaxSpeed() const;
+	virtual bool Reload();
+	virtual bool Deploy();
 
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_SCOUT; }
 
@@ -41,8 +47,6 @@ public:
 private:
 	
 	CWeaponScout( const CWeaponScout & );
-
-	void SCOUTFire( float flSpread );
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponScout, DT_WeaponScout )
@@ -64,39 +68,51 @@ CWeaponScout::CWeaponScout()
 
 void CWeaponScout::SecondaryAttack()
 {
-	#ifndef CLIENT_DLL
-		CCSPlayer *pPlayer = GetPlayerOwner();
-		if (pPlayer == NULL)
-		{
-			Assert(pPlayer != NULL);
-			return;
-		}
+	const float kZoomTime = 0.10f;
 
-		if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV())
-		{
-			pPlayer->SetFOV( pPlayer, 40, 0.15f );
-		}
-		else if (pPlayer->GetFOV() == 40)
-		{
-			pPlayer->SetFOV( pPlayer, 15, 0.05 );
-		}
-		else if (pPlayer->GetFOV() == 15)
-		{
-			pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.05f );
-		}
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if (pPlayer == NULL)
+	{
+		Assert(pPlayer != NULL);
+		return;
+	}
 
-		pPlayer->ResetMaxSpeed();
-	#endif
+	if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV())
+	{
+		pPlayer->SetFOV( pPlayer, cScoutMidZoomFOV, kZoomTime );
+		m_weaponMode = Secondary_Mode;
+		m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyAltSwitch;
+	}
+	else if (pPlayer->GetFOV() == cScoutMidZoomFOV)
+	{
+		pPlayer->SetFOV( pPlayer, cScoutMaxZoomFOV, kZoomTime );
+		m_weaponMode = Secondary_Mode;
+	}
+	else if (pPlayer->GetFOV() == cScoutMaxZoomFOV)
+	{
+		pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), kZoomTime );
+		m_weaponMode = Primary_Mode;
+	}
 
-		m_flNextSecondaryAttack = gpGlobals->curtime + 0.3;   
-		m_zoomFullyActiveTime = gpGlobals->curtime + 0.15; // The worst zoom time from above.  
+	m_flNextSecondaryAttack = gpGlobals->curtime + 0.3f;   
+	m_zoomFullyActiveTime = gpGlobals->curtime + 0.15; // The worst zoom time from above.  
 
 #ifndef CLIENT_DLL
 	// If this isn't guarded, the sound will be emitted twice, once by the server and once by the client.
 	// Let the server play it since if only the client plays it, it's liable to get played twice cause of
-	// a prediction error. joy.
-	EmitSound( "Default.Zoom" ); // zoom sound
-
+	// a prediction error. joy.	
+	
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Playing this from the player so that we don't try to play the sound outside the level.
+	//=============================================================================
+	if ( GetPlayerOwner() )
+	{
+		GetPlayerOwner()->EmitSound( "Default.Zoom" ); // zoom sound
+	}
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 	// let the bots hear the rifle zoom
 	IGameEvent * event = gameeventmanager->CreateEvent( "weapon_zoom" );
 	if( event )
@@ -107,52 +123,66 @@ void CWeaponScout::SecondaryAttack()
 #endif
 }
 
+float CWeaponScout::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if (pPlayer == NULL)
+			return 0.0f;
+	
+		float fSpread = 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			fSpread = 0.2f;
+		else if (pPlayer->GetAbsVelocity().Length2D() > 170)
+			fSpread = 0.075f;
+		else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
+			fSpread = 0.0f;
+		else
+			fSpread = 0.007f;
+	
+		// If we are not zoomed in, or we have very recently zoomed and are still transitioning, the bullet diverts more.
+		if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV() || (gpGlobals->curtime < m_zoomFullyActiveTime))
+		{
+			fSpread += 0.025;
+		}
+	
+		return fSpread;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
 void CWeaponScout::PrimaryAttack( void )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if (pPlayer == NULL)
-	{
-		Assert(pPlayer != NULL);
 		return;
-	}
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		SCOUTFire( 0.2 );
-	else if (pPlayer->GetAbsVelocity().Length2D() > 170)
-		SCOUTFire( 0.075 );
-	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING ) )
-		SCOUTFire( 0.0 );
-	else
-		SCOUTFire( 0.007 );
-}
-
-void CWeaponScout::SCOUTFire( float flSpread )
-{
-	CCSPlayer *pPlayer = GetPlayerOwner();
-	if (pPlayer == NULL)
-	{
-		Assert(pPlayer != NULL);
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, m_weaponMode ) )
 		return;
-	}
 
-	// If we are not zoomed in, or we have very recently zoomed and are still transitioning, the bullet diverts more.
-	if (pPlayer->GetFOV() == pPlayer->GetDefaultFOV() || (gpGlobals->curtime < m_zoomFullyActiveTime))
-	{
-		flSpread += 0.025;
-	}
-
-	if (pPlayer->GetFOV() != pPlayer->GetDefaultFOV())
+	if ( m_weaponMode == Secondary_Mode )
 	{	
-		pPlayer->m_bResumeZoom = true;
-		pPlayer->m_iLastZoom = pPlayer->GetFOV();
-		
-		#ifndef CLIENT_DLL
-			pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.05f );
-		#endif
-	}
+		float	midFOVdistance = fabs( pPlayer->GetFOV() - (float)cScoutMidZoomFOV );
+		float	farFOVdistance = fabs( pPlayer->GetFOV() - (float)cScoutMaxZoomFOV );
 
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
-		return;
+		if ( midFOVdistance < farFOVdistance )
+		{
+			pPlayer->m_iLastZoom = cScoutMidZoomFOV;
+		}
+		else
+		{
+			pPlayer->m_iLastZoom = cScoutMaxZoomFOV;
+		}
+		
+// 		#ifndef CLIENT_DLL
+			pPlayer->m_bResumeZoom = true;
+			pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.05f );
+			m_weaponMode = Primary_Mode;
+// 		#endif
+	}
 
 	QAngle angle = pPlayer->GetPunchAngle();
 	angle.x -= 2;
@@ -173,4 +203,18 @@ float CWeaponScout::GetMaxSpeed() const
 		return BaseClass::GetMaxSpeed();
 	else
 		return 220;	// zoomed in.
+}
+
+
+bool CWeaponScout::Reload()
+{
+	m_weaponMode = Primary_Mode;
+	return BaseClass::Reload();
+
+}
+
+bool CWeaponScout::Deploy()
+{
+	m_weaponMode = Primary_Mode;
+	return BaseClass::Deploy();
 }

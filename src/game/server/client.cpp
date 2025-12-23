@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -38,6 +38,7 @@
 
 #ifdef TF_DLL
 #include "tf_player.h"
+#include "tf_gamerules.h"
 #endif
 
 #ifdef HL2_DLL
@@ -55,6 +56,60 @@ extern CBaseEntity*	FindPickerEntity( CBasePlayer* pPlayer );
 extern bool IsInCommentaryMode( void );
 
 ConVar  *sv_cheats = NULL;
+
+enum eAllowPointServerCommand {
+	eAllowNever,
+	eAllowOfficial,
+	eAllowAlways
+};
+
+#ifdef TF_DLL
+// The default value here should match the default of the convar
+eAllowPointServerCommand sAllowPointServerCommand = eAllowOfficial;
+#else
+eAllowPointServerCommand sAllowPointServerCommand = eAllowAlways;
+#endif // TF_DLL
+
+void sv_allow_point_servercommand_changed( IConVar *pConVar, const char *pOldString, float flOldValue )
+{
+	ConVarRef var( pConVar );
+	if ( !var.IsValid() )
+	{
+		return;
+	}
+
+	const char *pNewValue = var.GetString();
+	if ( V_strcasecmp ( pNewValue, "always" ) == 0 )
+	{
+		sAllowPointServerCommand = eAllowAlways;
+	}
+#ifdef TF_DLL
+	else if ( V_strcasecmp ( pNewValue, "official" ) == 0 )
+	{
+		sAllowPointServerCommand = eAllowOfficial;
+	}
+#endif // TF_DLL
+	else
+	{
+		sAllowPointServerCommand = eAllowNever;
+	}
+}
+
+ConVar sv_allow_point_servercommand ( "sv_allow_point_servercommand",
+#ifdef TF_DLL
+                                      // The default value here should match the default of the convar
+                                      "official",
+#else
+                                      // Other games may use this in their official maps, and only TF exposes IsValveMap() currently
+                                      "always",
+#endif // TF_DLL
+                                      FCVAR_NONE,
+                                      "Allow use of point_servercommand entities in map. Potentially dangerous for untrusted maps.\n"
+                                      "  disallow : Always disallow\n"
+#ifdef TF_DLL
+                                      "  official : Allowed for valve maps only\n"
+#endif // TF_DLL
+                                      "  always   : Allow for all maps", sv_allow_point_servercommand_changed );
 
 void ClientKill( edict_t *pEdict, const Vector &vecForce, bool bExplode = false )
 {
@@ -287,14 +342,14 @@ void Host_Say( edict_t *pEdict, const CCommand &args, bool teamonly )
 	else
 		UTIL_LogPrintf( "\"%s<%i><%s><%s>\" say \"%s\"\n", playerName, userid, networkID, playerTeam, p );
 
-	IGameEvent * event = gameeventmanager->CreateEvent( "player_say" );
+	IGameEvent * event = gameeventmanager->CreateEvent( "player_say", true );
 
-	if ( event )	// will be null if there are no listeners!
+	if ( event )
 	{
 		event->SetInt("userid", userid );
 		event->SetString("text", p );
 		event->SetInt("priority", 1 );	// HLTV event priority, not transmitted
-		gameeventmanager->FireEvent( event );
+		gameeventmanager->FireEvent( event, true );
 	}
 }
 
@@ -310,7 +365,9 @@ void ClientPrecache( void )
 	CBaseEntity::PrecacheModel( "sprites/purpleglow1.vmt" );	
 	CBaseEntity::PrecacheModel( "sprites/purplelaser1.vmt" );	
 	
+#ifndef HL2MP
 	CBaseEntity::PrecacheScriptSound( "Hud.Hint" );
+#endif // HL2MP
 	CBaseEntity::PrecacheScriptSound( "Player.FallDamage" );
 	CBaseEntity::PrecacheScriptSound( "Player.Swim" );
 
@@ -350,7 +407,7 @@ CON_COMMAND_F( cast_ray, "Tests collision detection", FCVAR_CHEAT )
 		DevMsg(1, "Hit %s\nposition %.2f, %.2f, %.2f\nangles %.2f, %.2f, %.2f\n", tr.m_pEnt->GetClassname(),
 			tr.m_pEnt->GetAbsOrigin().x, tr.m_pEnt->GetAbsOrigin().y, tr.m_pEnt->GetAbsOrigin().z,
 			tr.m_pEnt->GetAbsAngles().x, tr.m_pEnt->GetAbsAngles().y, tr.m_pEnt->GetAbsAngles().z );
-		DevMsg(1, "Hit: hitbox %d, hitgroup %d, physics bone %d, solid %d, surface %s, surfaceprop %s\n", tr.hitbox, tr.hitgroup, tr.physicsbone, tr.m_pEnt->GetSolid(), tr.surface.name, physprops->GetPropName( tr.surface.surfaceProps ) );
+		DevMsg(1, "Hit: hitbox %d, hitgroup %d, physics bone %d, solid %d, surface %s, surfaceprop %s, contents %08x\n", tr.hitbox, tr.hitgroup, tr.physicsbone, tr.m_pEnt->GetSolid(), tr.surface.name, physprops->GetPropName( tr.surface.surfaceProps ), tr.contents );
 		NDebugOverlay::Line( start, tr.endpos, 0, 255, 0, false, 10 );
 		NDebugOverlay::Line( tr.endpos, tr.endpos + tr.plane.normal * 12, 255, 255, 0, false, 10 );
 	}
@@ -537,7 +594,7 @@ void CPointClientCommand::InputCommand( inputdata_t& inputdata )
 	if ( !pClient || !pClient->GetUnknown() )
 		return;
 
-	engine->ClientCommand( pClient, UTIL_VarArgs( "%s\n", inputdata.value.String() ) );
+	engine->ClientCommand( pClient, "%s\n", inputdata.value.String() );
 }
 
 BEGIN_DATADESC( CPointClientCommand )
@@ -566,7 +623,22 @@ void CPointServerCommand::InputCommand( inputdata_t& inputdata )
 	if ( !inputdata.value.String()[0] )
 		return;
 
-	engine->ServerCommand( UTIL_VarArgs( "%s\n", inputdata.value.String() ) );
+	bool bAllowed = ( sAllowPointServerCommand == eAllowAlways );
+#ifdef TF_DLL
+	if ( sAllowPointServerCommand == eAllowOfficial )
+	{
+		bAllowed = TFGameRules() && TFGameRules()->IsValveMap();
+	}
+#endif // TF_DLL
+
+	if ( bAllowed )
+	{
+		engine->ServerCommand( UTIL_VarArgs( "%s\n", inputdata.value.String() ) );
+	}
+	else
+	{
+		Warning( "point_servercommand usage blocked by sv_allow_point_servercommand setting\n" );
+	}
 }
 
 BEGIN_DATADESC( CPointServerCommand )
@@ -585,19 +657,19 @@ void CC_DrawLine( const CCommand &args )
 	Vector startPos;
 	Vector endPos;
 
-	startPos.x = atof(args[1]);
-	startPos.y = atof(args[2]);
-	startPos.z = atof(args[3]);
-	endPos.x = atof(args[4]);
-	endPos.y = atof(args[5]);
-	endPos.z = atof(args[6]);
+	startPos.x = clamp( atof(args[1]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	startPos.y = clamp( atof(args[2]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	startPos.z = clamp( atof(args[3]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	endPos.x = clamp( atof(args[4]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	endPos.y = clamp( atof(args[5]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	endPos.z = clamp( atof(args[6]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
 
 	UTIL_AddDebugLine(startPos,endPos,true,true);
 }
 static ConCommand drawline("drawline", CC_DrawLine, "Draws line between two 3D Points.\n\tGreen if no collision\n\tRed is collides with something\n\tArguments: x1 y1 z1 x2 y2 z2", FCVAR_CHEAT);
 
 //------------------------------------------------------------------------------
-// Purpose : Draw a cross at a points.  
+// Purpose : Draw a cross at a points.
 // Input   :
 // Output  :
 //------------------------------------------------------------------------------
@@ -605,9 +677,9 @@ void CC_DrawCross( const CCommand &args )
 {
 	Vector vPosition;
 
-	vPosition.x = atof(args[1]);
-	vPosition.y = atof(args[2]);
-	vPosition.z = atof(args[3]);
+	vPosition.x = clamp( atof(args[1]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	vPosition.y = clamp( atof(args[2]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	vPosition.z = clamp( atof(args[3]), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
 
 	// Offset since min and max z in not about center
 	Vector mins = Vector(-5,-5,-5);
@@ -755,7 +827,11 @@ CON_COMMAND( say, "Display player message" )
 			pPlayer->NotePlayerTalked();
 		}
 	}
-	else
+	// This will result in a "console" say.  Ignore anything from
+	// an index greater than 0 when we don't have a player pointer, 
+	// as would be the case when a client that's connecting generates 
+	// text via a script.  This can be exploited to flood everyone off.
+	else if ( UTIL_GetCommandClientIndex() == 0 )
 	{
 		Host_Say( NULL, args, 0 );
 	}
@@ -790,6 +866,24 @@ CON_COMMAND( give, "Give item to player.\n\tArguments: <item_name>" )
 		char item_to_give[ 256 ];
 		Q_strncpy( item_to_give, args[1], sizeof( item_to_give ) );
 		Q_strlower( item_to_give );
+
+		// Don't allow regular users to create point_servercommand entities for the same reason as blocking ent_fire
+		if ( !Q_stricmp( item_to_give, "point_servercommand" ) )
+		{
+			if ( engine->IsDedicatedServer() )
+			{
+				// We allow people with disabled autokick to do it, because they already have rcon.
+				if ( pPlayer->IsAutoKickDisabled() == false )
+					return;
+			}
+			else if ( gpGlobals->maxClients > 1 )
+			{
+				// On listen servers with more than 1 player, only allow the host to create point_servercommand.
+				CBasePlayer *pHostPlayer = UTIL_GetListenServerHost();
+				if ( pPlayer != pHostPlayer )
+					return;
+			}
+		}
 
 		// Dirty hack to avoid suit playing it's pickup sound
 		if ( !Q_stricmp( item_to_give, "item_suit" ) )
@@ -983,7 +1077,7 @@ void CC_Player_BugBaitSwap( void )
 		}
 	}
 }
-static ConCommand bugswap("bug_swap", CC_Player_BugBaitSwap, "Automatically swaps the current weapon for the bug bait and back again." );
+static ConCommand bugswap("bug_swap", CC_Player_BugBaitSwap, "Automatically swaps the current weapon for the bug bait and back again.", FCVAR_CHEAT );
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -1035,7 +1129,7 @@ static int FindPassableSpace( CBasePlayer *pPlayer, const Vector& direction, flo
 //------------------------------------------------------------------------------
 // Noclip
 //------------------------------------------------------------------------------
-static void EnableNoClip( CBasePlayer *pPlayer )
+void EnableNoClip( CBasePlayer *pPlayer )
 {
 	// Disengage from hierarchy
 	pPlayer->SetParent( NULL );
@@ -1113,8 +1207,16 @@ void CC_God_f (void)
 	if ( !pPlayer )
 		return;
 
+#ifdef TF_DLL
+   if ( TFGameRules() && ( TFGameRules()->IsPVEModeActive() == false ) )
+   {
+	   if ( gpGlobals->deathmatch )
+		   return;
+   }
+#else
 	if ( gpGlobals->deathmatch )
 		return;
+#endif
 
 	pPlayer->ToggleFlag( FL_GODMODE );
 	if (!(pPlayer->GetFlags() & FL_GODMODE ) )
@@ -1127,7 +1229,7 @@ static ConCommand god("god", CC_God_f, "Toggle. Player becomes invulnerable.", F
 
 
 //------------------------------------------------------------------------------
-// Sets client position
+// Sets client to godmode
 //------------------------------------------------------------------------------
 CON_COMMAND_F( setpos, "Move player to specified origin (must have sv_cheats).", FCVAR_CHEAT )
 {
@@ -1147,9 +1249,9 @@ CON_COMMAND_F( setpos, "Move player to specified origin (must have sv_cheats).",
 	Vector oldorigin = pPlayer->GetAbsOrigin();
 
 	Vector newpos;
-	newpos.x = atof( args[1] );
-	newpos.y = atof( args[2] );
-	newpos.z = args.ArgC() == 4 ? atof( args[3] ) : oldorigin.z;
+	newpos.x = clamp( atof( args[1] ), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	newpos.y = clamp( atof( args[2] ), MIN_COORD_FLOAT, MAX_COORD_FLOAT );
+	newpos.z = args.ArgC() == 4 ?  clamp( atof( args[3] ), MIN_COORD_FLOAT, MAX_COORD_FLOAT ) : oldorigin.z;
 
 	pPlayer->SetAbsOrigin( newpos );
 
@@ -1161,7 +1263,7 @@ CON_COMMAND_F( setpos, "Move player to specified origin (must have sv_cheats).",
 
 
 //------------------------------------------------------------------------------
-// Sets client angle
+// Sets client to godmode
 //------------------------------------------------------------------------------
 void CC_setang_f (const CCommand &args)
 {
@@ -1190,6 +1292,16 @@ void CC_setang_f (const CCommand &args)
 
 static ConCommand setang("setang", CC_setang_f, "Snap player eyes to specified pitch yaw <roll:optional> (must have sv_cheats).", FCVAR_CHEAT );
 
+static float GetHexFloat( const char *pStr )
+{
+	if ( ( pStr[0] == '0' ) && ( pStr[1] == 'x' ) )
+	{
+		uint32 f = (uint32)V_atoi64( pStr );
+		return *reinterpret_cast< const float * >( &f );
+	}
+	
+	return atof( pStr );
+}
 
 //------------------------------------------------------------------------------
 // Move position
@@ -1212,9 +1324,9 @@ CON_COMMAND_F( setpos_exact, "Move player to an exact specified origin (must hav
 	Vector oldorigin = pPlayer->GetAbsOrigin();
 
 	Vector newpos;
-	newpos.x = atof( args[1] );
-	newpos.y = atof( args[2] );
-	newpos.z = args.ArgC() == 4 ? atof( args[3] ) : oldorigin.z;
+	newpos.x = GetHexFloat( args[1] );
+	newpos.y = GetHexFloat( args[2] );
+	newpos.z = args.ArgC() == 4 ? GetHexFloat( args[3] ) : oldorigin.z;
 
 	pPlayer->Teleport( &newpos, NULL, NULL );
 
@@ -1246,9 +1358,9 @@ CON_COMMAND_F( setang_exact, "Snap player eyes and orientation to specified pitc
 	QAngle oldang = pPlayer->GetAbsAngles();
 
 	QAngle newang;
-	newang.x = atof( args[1] );
-	newang.y = atof( args[2] );
-	newang.z = args.ArgC() == 4 ? atof( args[3] ) : oldang.z;
+	newang.x = GetHexFloat( args[1] );
+	newang.y = GetHexFloat( args[2] );
+	newang.z = args.ArgC() == 4 ? GetHexFloat( args[3] ) : oldang.z;
 
 	pPlayer->Teleport( NULL, &newang, NULL );
 	pPlayer->SnapEyeAngles( newang );
@@ -1301,11 +1413,12 @@ void CC_HurtMe_f(const CCommand &args)
 		iDamage = atoi( args[ 1 ] );
 	}
 
-	pPlayer->TakeDamage( CTakeDamageInfo( pPlayer, pPlayer, iDamage, DMG_GENERIC ) );
+	pPlayer->TakeDamage( CTakeDamageInfo( pPlayer, pPlayer, iDamage, DMG_PREVENT_PHYSICS_FORCE ) );
 }
 
 static ConCommand hurtme("hurtme", CC_HurtMe_f, "Hurts the player.\n\tArguments: <health to lose>", FCVAR_CHEAT);
 
+#ifdef DBGFLAG_ASSERT
 static bool IsInGroundList( CBaseEntity *ent, CBaseEntity *ground )
 {
 	if ( !ground || !ent )
@@ -1325,8 +1438,8 @@ static bool IsInGroundList( CBaseEntity *ent, CBaseEntity *ground )
 	}
 
 	return false;
-
 }
+#endif
 
 static int DescribeGroundList( CBaseEntity *ent )
 {
@@ -1374,6 +1487,9 @@ static int DescribeGroundList( CBaseEntity *ent )
 
 void CC_GroundList_f(const CCommand &args)
 {
+	if ( !UTIL_IsCommandIssuedByServerAdmin() )
+		return;
+
 	if ( args.ArgC() == 2 )
 	{
 		int idx = atoi( args[1] );

@@ -14,20 +14,77 @@
 #include "tier0/basetypes.h"
 #include "tier0/dbg.h"
 
-#include "../thirdparty/lzma/C/7zTypes.h"
-#include "../thirdparty/lzma/C/LzmaEnc.h"
-#include "../thirdparty/lzma/C/LzmaDec.h"
+#include "../utils/lzma/C/7zTypes.h"
+#include "../utils/lzma/C/LzmaEnc.h"
+#include "../utils/lzma/C/LzmaDec.h"
 
 // Ugly define to let us forward declare the anonymous-struct-typedef that is CLzmaDec in the header.
 #define CLzmaDec_t CLzmaDec
 #include "tier1/lzmaDecoder.h"
+#include "tier1/convar.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+#ifdef OSX
+// OS X is having fragmentation issues, and I suspect this 16meg buffer being recreated many times during load is
+// hitting a bad case in the default allocator. So this is an experiment to see if it reduces crash rates there.
+#define LZMA_DEFAULT_PERSISTENT_BUFFER "1"
+#else
+#define LZMA_DEFAULT_PERSISTENT_BUFFER "0"
+#endif
+
+ConVar lzma_persistent_buffer( "lzma_persistent_buffer", LZMA_DEFAULT_PERSISTENT_BUFFER, FCVAR_NONE,
+                               "If set, attempt to keep a persistent buffer for the LZMA decoder dictionary. " \
+                               "This avoids re-allocating a ~16-64meg buffer for each operation, " \
+                               "at the expensive of keeping extra memory around when it is not in-use." );
+
 // Allocator to pass to LZMA functions
-static void *SzAlloc(ISzAllocPtr p, size_t size) { return malloc(size); }
-static void SzFree(ISzAllocPtr p, void *address) { free(address); }
+static void *g_pStaticLZMABuf = NULL;
+static size_t g_unStaticLZMABufSize = 0;
+static uint32 g_unStaticLZMABufRef = 0;
+static void *SzAlloc(void *p, size_t size) {
+	// Don't touch static buffer on other threads.
+	if ( ThreadInMainThread() )
+	{
+		// If nobody is using the persistent buffer and size is above a threshold, use it.
+		bool bPersistentBuf = (g_pStaticLZMABuf || lzma_persistent_buffer.GetBool()) && size >= (1024 * 1024 * 8) && g_unStaticLZMABufRef == 0;
+		if ( bPersistentBuf )
+		{
+			if ( g_unStaticLZMABufSize < size )
+			{
+				g_pStaticLZMABuf = g_pStaticLZMABuf ? realloc( g_pStaticLZMABuf, size ) : malloc( size );
+				g_unStaticLZMABufSize = size;
+			}
+			g_unStaticLZMABufRef++;
+			return g_pStaticLZMABuf;
+		}
+	}
+
+	// Not using the persistent buffer
+	return malloc(size);
+}
+static void SzFree(void *p, void *address) {
+	// Don't touch static buffer on other threads.
+	if ( ThreadInMainThread() )
+	{
+		if ( address != NULL && g_unStaticLZMABufRef && address == g_pStaticLZMABuf )
+		{
+			g_unStaticLZMABufRef--;
+			// If the convar was turned off, free the buffer
+			if ( g_pStaticLZMABuf && g_unStaticLZMABufRef == 0 && !lzma_persistent_buffer.GetBool() )
+			{
+				free( g_pStaticLZMABuf );
+				g_pStaticLZMABuf = NULL;
+				g_unStaticLZMABufSize = 0;
+			}
+			return;
+		}
+	}
+
+	// Not the static buffer
+	free(address);
+}
 static ISzAlloc g_Alloc = { SzAlloc, SzFree };
 
 //-----------------------------------------------------------------------------
@@ -126,30 +183,30 @@ void CLZMAStream::FreeDecoderState()
 	if ( m_pDecoderState )
 	{
 		LzmaDec_Free( m_pDecoderState, &g_Alloc );
+		delete m_pDecoderState;
 		m_pDecoderState = NULL;
 	}
 }
 
 bool CLZMAStream::CreateDecoderState( const unsigned char *pProperties )
 {
-	if ( m_pDecoderState )
-	{
-		Assert( !m_pDecoderState );
-		FreeDecoderState();
-	}
+	CLzmaDec *pDecoderState = new CLzmaDec();
 
-	m_pDecoderState = new CLzmaDec();
-
-	LzmaDec_Construct( m_pDecoderState );
-	if ( LzmaDec_Allocate( m_pDecoderState, pProperties, LZMA_PROPS_SIZE, &g_Alloc) != SZ_OK )
+	LzmaDec_Construct( pDecoderState );
+	if ( LzmaDec_Allocate( pDecoderState, pProperties, LZMA_PROPS_SIZE, &g_Alloc) != SZ_OK )
 	{
 		AssertMsg( false, "Failed to allocate lzma decoder state" );
-		m_pDecoderState = NULL;
+		delete pDecoderState;
 		return false;
 	}
 
-	LzmaDec_Init( m_pDecoderState );
+	LzmaDec_Init( pDecoderState );
 
+	// Replace current state
+	Assert( !m_pDecoderState );
+	FreeDecoderState();
+
+	m_pDecoderState = pDecoderState;
 	return true;
 }
 

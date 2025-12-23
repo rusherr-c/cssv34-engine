@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,8 +11,8 @@
 #ifdef CLIENT_DLL
 #include "view_shared.h"
 #include "iviewrender.h"
-#include "vgui_controls/controls.h"
-#include "vgui/isurface.h"
+#include "vgui_controls/Controls.h"
+#include "vgui/ISurface.h"
 
 bool ToolFramework_SetupEngineView( Vector &origin, QAngle &angles, float &fov );
 

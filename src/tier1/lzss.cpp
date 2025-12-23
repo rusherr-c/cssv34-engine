@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 //	LZSS Codec. Designed for fast cheap gametime encoding/decoding. Compression results
 //	are	not aggresive as other alogrithms, but gets 2:1 on most arbitrary uncompressed data.
@@ -7,7 +7,10 @@
 
 #include "tier0/platform.h"
 #include "tier0/dbg.h"
+#include "tier0/vprof.h"
+#include "tier0/etwprof.h"
 #include "tier1/lzss.h"
+#include "tier1/utlbuffer.h"
 
 #define LZSS_LOOKSHIFT		4
 #define LZSS_LOOKAHEAD		( 1 << LZSS_LOOKSHIFT )
@@ -89,6 +92,8 @@ unsigned char *CLZSS::CompressNoAlloc( const unsigned char *pInput, int inputLen
 	{
 		return NULL;
 	}
+	VPROF( "CLZSS::CompressNoAlloc" );
+	ETWMark1I("CompressNoAlloc", inputLength );
 
 	// create the compression work buffers, small enough (~64K) for stack
 	m_pHashTable = (lzss_list_t *)stackalloc( 256 * sizeof( lzss_list_t ) );
@@ -224,17 +229,153 @@ unsigned char* CLZSS::Compress( const unsigned char *pInput, int inputLength, un
 	return pStart;
 }
 
-//-----------------------------------------------------------------------------
-// Uncompress a buffer, Returns the uncompressed size. Caller must provide an
-// adequate sized output buffer or memory corruption will occur.
-//-----------------------------------------------------------------------------
+/*
+// BUG BUG:  This code is flaky, don't use until it's debugged!!!
+unsigned int CLZSS::Uncompress( unsigned char *pInput, CUtlBuffer &buf )
+{
+	int cmdByte = 0;
+	int getCmdByte = 0;
+
+	unsigned int actualSize = GetActualSize( pInput );
+	if ( !actualSize )
+	{
+		// unrecognized
+		return 0;
+	}
+
+	unsigned char *pBase = ( unsigned char * )buf.Base();
+
+	pInput += sizeof( lzss_header_t );
+
+	while ( !buf.IsValid() )
+	{
+		if ( !getCmdByte ) 
+		{
+			cmdByte = *pInput++;
+		}
+		getCmdByte = ( getCmdByte + 1 ) & 0x07;
+
+		if ( cmdByte & 0x01 )
+		{
+			int position = *pInput++ << LZSS_LOOKSHIFT;
+			position |= ( *pInput >> LZSS_LOOKSHIFT );
+			int count = ( *pInput++ & 0x0F ) + 1;
+			if ( count == 1 ) 
+			{
+				break;
+			}
+			unsigned int pos = buf.TellPut();
+			unsigned char *pSource = ( pBase + pos ) - position - 1;
+
+			// BUGBUG:
+			// This is failing!!!
+			// buf.WriteBytes( pSource, count );
+			// So have to iterate them manually
+			for ( int i =0; i < count; ++i )
+			{
+				buf.PutUnsignedChar( *pSource++ );
+			}
+		} 
+		else 
+		{
+			buf.PutUnsignedChar( *pInput++ );
+		}
+		cmdByte = cmdByte >> 1;
+	}
+
+	if ( buf.TellPut() != (int)actualSize )
+	{
+		// unexpected failure
+		Assert( 0 );
+		return 0;
+	}
+
+	return buf.TellPut();
+}
+*/
+
 unsigned int CLZSS::SafeUncompress( const unsigned char *pInput, unsigned char *pOutput, unsigned int unBufSize )
 {
 	unsigned int totalBytes = 0;
 	int cmdByte = 0;
 	int getCmdByte = 0;
 
-	unsigned int actualSize = GetActualSize(pInput);
+	unsigned int actualSize = GetActualSize( pInput );
+	if ( !actualSize )
+	{
+		// unrecognized
+		return 0;
+	}
+
+	if ( actualSize > unBufSize )
+	{
+		return 0;
+	}
+
+	pInput += sizeof( lzss_header_t );
+
+	for ( ;; )
+	{
+		if ( !getCmdByte ) 
+		{
+			cmdByte = *pInput++;
+		}
+		getCmdByte = ( getCmdByte + 1 ) & 0x07;
+
+		if ( cmdByte & 0x01 )
+		{
+			int position = *pInput++ << LZSS_LOOKSHIFT;
+			position |= ( *pInput >> LZSS_LOOKSHIFT );
+			int count = ( *pInput++ & 0x0F ) + 1;
+			if ( count == 1 ) 
+			{
+				break;
+			}
+			unsigned char *pSource = pOutput - position - 1;
+
+			if ( totalBytes + count > unBufSize )
+			{
+				return 0;
+			}
+
+			for ( int i=0; i<count; i++ )
+			{
+				*pOutput++ = *pSource++;
+			}
+			totalBytes += count;
+		} 
+		else 
+		{
+			if ( totalBytes + 1 > unBufSize )
+				return 0;
+
+			*pOutput++ = *pInput++;
+			totalBytes++;
+		}
+		cmdByte = cmdByte >> 1;
+	}
+
+	if ( totalBytes != actualSize )
+	{
+		// unexpected failure
+		Assert( 0 );
+		return 0;
+	}
+
+	return totalBytes;
+}
+
+//-----------------------------------------------------------------------------
+// Uncompress a buffer, Returns the uncompressed size. Caller must provide an
+// adequate sized output buffer or memory corruption will occur.
+//-----------------------------------------------------------------------------
+unsigned int CLZSS::Uncompress( const unsigned char *pInput, unsigned char *pOutput )
+{
+	unsigned int totalBytes = 0;
+	int cmdByte = 0;
+	int getCmdByte = 0;
+
+	unsigned int actualSize = GetActualSize( pInput );
 	if ( !actualSize )
 	{
 		// unrecognized

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -26,14 +26,14 @@
 #define SCRUBBER_HANDLE_WIDTH		40
 #define SCRUBBER_HANDLE_HEIGHT		10
 
-char *va( const char *fmt, ... );
+char *va( PRINTF_FORMAT_STRING const char *fmt, ... );
 
 char const *GetGameDirectory(); // e.g. u:\main\game\ep2
 char const *GetGameDirectorySimple();  // e.g.  ep2
 
-void Con_Printf( const char *fmt, ... );
-void Con_ColorPrintf( COLORREF clr, const char *fmt, ... );
-void Con_ErrorPrintf( const char *fmt, ... );
+void Con_Printf( PRINTF_FORMAT_STRING const char *fmt, ... );
+void Con_ColorPrintf( COLORREF clr, PRINTF_FORMAT_STRING const char *fmt, ... );
+void Con_ErrorPrintf( PRINTF_FORMAT_STRING const char *fmt, ... );
 
 bool FPFullpathFileExists( const char *filename );
 void MakeFileWriteable( const char *filename );

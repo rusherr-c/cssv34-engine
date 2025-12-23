@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,7 +15,7 @@
 #pragma once
 #endif // _MSC_VER > 1000
 
-#include "keyvalues.h"
+#include "KeyValues.h"
 
 /////////////////////////////////////////////////////////////////////////////
 // CSteamDebugHelperDlg dialog

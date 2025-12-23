@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -28,6 +28,11 @@ extern bool g_bInitMemory;
 #define ApplyMemoryInitializations( pMem, nSize ) if ( !g_bInitMemory ) ; else { DoApplyMemoryInitializations( pMem, nSize ); }
 void DoApplyMemoryInitializations( void *pMem, int nSize );
 
-int CalcHeapUsed();
+size_t CalcHeapUsed();
+
+// Call this to reserve the bottom 4 GB of memory in order to ensure that we will
+// get crashes if we put pointers in DWORDs or ints. This will be a NOP on some
+// platforms (Xbox 360, PS3, 32-bit Windows, etc.)
+void ReserveBottomMemory();
 
 #endif // MEM_HELPERS_H

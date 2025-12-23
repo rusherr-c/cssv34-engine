@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,13 +34,13 @@
 
 
 struct model_t;
+struct SoundInfo_t;
 
 class ClientClass;
 class CSfxTable;
 class CPureServerWhitelist;
 
 #define	MAX_DEMOS		32
-#define	MAX_DEMONAME	32
 
 struct AddAngle
 {
@@ -70,7 +70,7 @@ public: // IConnectionlessPacketHandler interface:
 	bool ProcessConnectionlessPacket(struct netpacket_s *packet);
 
 public: // CBaseClientState overrides:
-	void Disconnect(bool bShowMainMenu);
+	void Disconnect( const char *pszReason, bool bShowMainMenu );
 	void FullConnect( netadr_t &adr );
 	bool SetSignonState ( int state, int count );
 	void PacketStart(int incoming_sequence, int outgoing_acknowledged);
@@ -78,11 +78,13 @@ public: // CBaseClientState overrides:
 	void FileReceived( const char *fileName, unsigned int transferID );
 	void FileRequested(const char *fileName, unsigned int transferID );
 	void FileDenied(const char *fileName, unsigned int transferID );
+	void FileSent( const char *fileName, unsigned int transferID );
 	void ConnectionCrashed( const char * reason );
 	void ConnectionClosing( const char * reason );
 	const char *GetCDKeyHash( void );
 	void SetFriendsID( uint friendsID, const char *friendsName );
 	void SendClientInfo( void );
+	void SendServerCmdKeyValues( KeyValues *pKeyValues );
 	void InstallStringTableCallback( char const *tableName );
 	bool HookClientStringTable( char const *tableName );
 	bool InstallEngineStringTableCallback( char const *tableName );
@@ -127,6 +129,7 @@ public: // IServerMessageHandlers
 	PROCESS_SVC_MESSAGE( PacketEntities );
 	PROCESS_SVC_MESSAGE( TempEntities );
 	PROCESS_SVC_MESSAGE( Prefetch );
+	PROCESS_SVC_MESSAGE( SetPauseTimed );
 
 public:
 
@@ -147,9 +150,11 @@ public:
 	// information that is static for the entire time connected to a server
 	//
 	bool		ishltv;			// true if HLTV server/demo
+#if defined( REPLAY_ENABLED )
+	bool		isreplay;		// true if Replay server/demo
+#endif
 
-	CRC32_t		serverCRC;              // To determine if client is playing hacked .map. (entities lump is skipped)
-	CRC32_t		serverClientSideDllCRC; // To determine if client is playing on a hacked client dll.
+	MD5Value_t	serverMD5;              // To determine if client is playing hacked .map. (entities lump is skipped)
 	
 	unsigned char	m_chAreaBits[MAX_AREA_STATE_BYTES];
 	unsigned char	m_chAreaPortalBits[MAX_AREA_PORTAL_STATE_BYTES];
@@ -172,7 +177,7 @@ public:
 
 // demo loop control
 	int			demonum;		                  // -1 = don't play demos
-	char		demos[MAX_DEMOS][MAX_DEMONAME];	  // when not playing
+	CUtlString	demos[MAX_DEMOS];				  // when not playing
 
 public:
 
@@ -182,6 +187,7 @@ public:
 	
 	
 	bool				IsPaused() const;
+	float				GetPausedExpireTime() const { return m_flPausedExpireTime; }
 
 	float				GetFrameTime( void ) const;
 	void				SetFrameTime( float dt ) { m_frameTime = dt; }
@@ -230,6 +236,7 @@ public:
 	INetworkStringTable *m_pUserInfoTable;
 	INetworkStringTable *m_pServerStartupTable;
 	INetworkStringTable *m_pDownloadableFileTable;
+	INetworkStringTable *m_pDynamicModelsTable;
 	
 	CPrecacheItem		model_precache[ MAX_MODELS ];
 	CPrecacheItem		generic_precache[ MAX_GENERIC ];
@@ -240,11 +247,18 @@ public:
 	bool m_bUpdateSteamResources;
 	bool m_bShownSteamResourceUpdateProgress;
 	bool m_bDownloadResources;
+	bool m_bPrepareClientDLL;
 	bool m_bCheckCRCsWithServer;
 	float m_flLastCRCBatchTime;
 
-	// This is only kept around to print out the whitelist info if sv_pure is used.	
+	// This is only kept around to print out the whitelist info if sv_pure is used.
 	CPureServerWhitelist *m_pPureServerWhitelist;
+
+	IFileList *m_pPendingPureFileReloads;
+
+private:
+
+	void ProcessSoundsWithProtoVersion( SVC_Sounds *msg, CUtlVector< SoundInfo_t > &sounds, int nProtoVersion );
 
 private:
 	

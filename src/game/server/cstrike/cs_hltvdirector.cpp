@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,6 +7,7 @@
 //=============================================================================//
 #include "cbase.h"
 #include "hltvdirector.h"
+#include "igameevents.h"
 
 class CCSHLTVDirector : public CHLTVDirector
 {
@@ -15,7 +16,7 @@ public:
 
 	const char** GetModEvents();
 	void SetHLTVServer( IHLTVServer *hltv );
-	void CreateShotFromEvent( CGameEvent *event );
+	void CreateShotFromEvent( CHLTVGameEvent *event );
 
 };
 
@@ -40,7 +41,7 @@ void CCSHLTVDirector::SetHLTVServer( IHLTVServer *hltv )
 	}
 }
 
-void CCSHLTVDirector::CreateShotFromEvent( CGameEvent *event )
+void CCSHLTVDirector::CreateShotFromEvent( CHLTVGameEvent *event )
 {
 	// show event at least for 2 more seconds after it occured
 	const char *name = event->m_Event->GetName();
@@ -65,7 +66,7 @@ void CCSHLTVDirector::CreateShotFromEvent( CGameEvent *event )
 		shot->SetInt( "phi", 20 );
 
 		// shot 2 seconds after event
-		m_nNextShotTick = min( m_nNextShotTick, (event->m_Tick+TIME_TO_TICKS(2.0)) );
+		m_nNextShotTick = MIN( m_nNextShotTick, (event->m_Tick+TIME_TO_TICKS(2.0)) );
 		m_iPVSEntity = player->entindex();
 	}
 
@@ -87,7 +88,7 @@ void CCSHLTVDirector::CreateShotFromEvent( CGameEvent *event )
 		shot->SetInt( "phi", 10 );
 
 		// shot 2 seconds after pickup
-		m_nNextShotTick = min( m_nNextShotTick, (event->m_Tick+TIME_TO_TICKS(2.0)) );
+		m_nNextShotTick = MIN( m_nNextShotTick, (event->m_Tick+TIME_TO_TICKS(2.0)) );
 		m_iPVSEntity = player->entindex();
 	}
 	else
@@ -126,8 +127,7 @@ const char** CCSHLTVDirector::GetModEvents()
 		"bomb_planted",	
 		"bomb_defused",
 		"hostage_killed",
-		"hostage_hurt",
-		"round_end_message",
+		"hostage_hurt",		
 		NULL
 	};
 

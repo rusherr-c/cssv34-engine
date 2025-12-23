@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,6 @@
 //--------------------------------------------------------------------------------------------------------
 enum CSWeaponType
 {
-
 	WEAPONTYPE_KNIFE=0,	
 	WEAPONTYPE_PISTOL,
 	WEAPONTYPE_SUBMACHINEGUN,
@@ -78,7 +77,6 @@ enum CSWeaponID
 	WEAPON_MAX,		// number of weapons weapon index
 };
 
-
 #define MAX_EQUIPMENT (WEAPON_MAX - WEAPON_KEVLAR)
 
 void PrepareEquipmentInfo( void );
@@ -86,28 +84,17 @@ void PrepareEquipmentInfo( void );
 //--------------------------------------------------------------------------------------------------------
 const char * WeaponClassAsString( CSWeaponType weaponType );
 
-
 //--------------------------------------------------------------------------------------------------------
-CSWeaponType WeaponClassFromString( const char * weaponType );
-
-//--------------------------------------------------------------------------------------------------------
-enum CSWeaponID;
-
-
-//--------------------------------------------------------------------------------------------------------
-const char * WeaponClassAsString( CSWeaponType weaponType );
-
-
-//--------------------------------------------------------------------------------------------------------
-CSWeaponType WeaponClassFromString( const char * weaponType );
-
+CSWeaponType WeaponClassFromString( const char* weaponType );
 
 //--------------------------------------------------------------------------------------------------------
 CSWeaponType WeaponClassFromWeaponID( CSWeaponID weaponID );
 
+//--------------------------------------------------------------------------------------------------------
+const char * WeaponIdAsString( CSWeaponID weaponID );
 
 //--------------------------------------------------------------------------------------------------------
-CSWeaponType WeaponClassFromWeaponID( CSWeaponID weaponID );
+CSWeaponID WeaponIdFromString( const char *szWeaponName );
 
 
 //--------------------------------------------------------------------------------------------------------
@@ -128,6 +115,8 @@ public:
 	float m_flMaxSpeed;			// How fast the player can run while this is his primary weapon.
 
 	CSWeaponType m_WeaponType;
+
+	bool	m_bFullAuto;		// is this a fully automatic weapon?
 
 	int m_iTeam;				// Which team can have this weapon. TEAM_UNASSIGNED if both can have it.
 	float m_flBotAudibleRange;	// How far away a bot can hear this weapon.
@@ -166,11 +155,25 @@ public:
 	float	m_flAccuracyOffset;
 	float	m_flMaxInaccuracy;
 
+	// variables for new accuracy model
+	float m_fSpread[2];
+	float m_fInaccuracyCrouch[2];
+	float m_fInaccuracyStand[2];
+	float m_fInaccuracyJump[2];
+	float m_fInaccuracyLand[2];
+	float m_fInaccuracyLadder[2];
+	float m_fInaccuracyImpulseFire[2];
+	float m_fInaccuracyMove[2];
+	float m_fRecoveryTimeStand;
+	float m_fRecoveryTimeCrouch;
+	float m_fInaccuracyReload;
+	float m_fInaccuracyAltSwitch;
+
 	// Delay until the next idle animation after shooting.
 	float	m_flTimeToIdleAfterFire;
 	float	m_flIdleInterval;
    
-	int		GetWeaponPrice( void );
+	int		GetWeaponPrice( void ) const;
 	int		GetDefaultPrice( void );
 	int		GetPrevousPrice( void );
 	void	SetWeaponPrice( int iPrice ) { m_iWeaponPrice = iPrice; }

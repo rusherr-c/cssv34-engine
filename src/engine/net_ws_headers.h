@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -30,7 +30,7 @@
 #include "sys.h"
 #include "tier0/tslist.h"
 #include "tier1/mempool.h"
-#include "../thirdparty/bzip2/bzlib.h"
+#include "../utils/bzip2/bzlib.h"
 #include "matchmaking.h"
 
 #if defined(_WIN32)
@@ -44,13 +44,13 @@
 // #include <process.h>
 typedef int socklen_t;
 
-#elif !defined(_X360)
+#elif defined POSIX
 
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <linux/tcp.h>
+#include <netinet/tcp.h>
 #include <netdb.h>
 #include <sys/param.h>
 #include <sys/ioctl.h>

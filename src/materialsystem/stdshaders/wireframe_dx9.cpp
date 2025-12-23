@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,7 +20,7 @@ BEGIN_VS_SHADER( Wireframe_DX9,
 
 	SHADER_FALLBACK
 	{
-		if ( IsPC() && g_pHardwareConfig->GetDXSupportLevel() < 90 )
+		if ( IsWindows() && g_pHardwareConfig->GetDXSupportLevel() < 90 )
 		{
 			return "Wireframe_DX8";
 		}

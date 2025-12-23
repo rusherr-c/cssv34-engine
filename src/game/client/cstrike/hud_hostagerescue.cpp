@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -7,7 +7,7 @@
 #include "cbase.h"
 #include "hudelement.h"
 #include <vgui_controls/Panel.h>
-#include <vgui/isurface.h>
+#include <vgui/ISurface.h>
 #include "clientmode_csnormal.h"
 #include "c_cs_player.h"
 
@@ -38,12 +38,28 @@ CHudHostageRescueZone::CHudHostageRescueZone( const char *pName ) :
 	m_pIcon = NULL;
 
 	SetHiddenBits( HIDEHUD_PLAYERDEAD );
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Add this to the render group that disappears when the scoreboard is up
+	//=============================================================================
+	RegisterForRenderGroup( "hide_for_scoreboard" );
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 bool CHudHostageRescueZone::ShouldDraw()
 {
 	C_CSPlayer *pPlayer = C_CSPlayer::GetLocalCSPlayer();
-	return ( pPlayer &&	pPlayer->IsInHostageRescueZone() );
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Added base class call
+	//=============================================================================
+	return ( pPlayer &&	pPlayer->IsInHostageRescueZone() && CHudElement::ShouldDraw());
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 void CHudHostageRescueZone::Paint()

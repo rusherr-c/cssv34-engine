@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -259,6 +259,8 @@ public:
 	virtual void DisableFlexMesh() {}
 
 	virtual void MarkAsDrawn() {}
+
+	virtual unsigned ComputeMemoryUsed() { return 0; }
 
 	virtual VertexFormat_t GetVertexFormat() const { return VERTEX_POSITION; }
 

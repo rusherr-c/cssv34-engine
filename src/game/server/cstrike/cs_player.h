@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		Player for HL1.
 //
@@ -22,6 +22,10 @@
 class CWeaponCSBase;
 class CMenu;
 class CHintMessageQueue;
+class CNavArea;
+
+#include "cs_weapon_parse.h"
+
 
 void UTIL_AwardMoneyToTeam( int iAmount, int iTeam, CBaseEntity *pIgnore );
 
@@ -200,6 +204,31 @@ enum BuyResult_e
 };
 
 //=============================================================================
+// HPE_BEGIN:
+//=============================================================================
+
+// [tj] The phases for the "Goose Chase" achievement
+enum GooseChaseAchievementStep
+{
+    GC_NONE,    
+    GC_SHOT_DURING_DEFUSE,
+    GC_STOPPED_AFTER_GETTING_SHOT
+};
+
+// [tj] The phases for the "Defuse Defense" achievement
+enum DefuseDefenseAchivementStep
+{
+    DD_NONE,
+    DD_STARTED_DEFUSE,
+    DD_KILLED_TERRORIST       
+};
+ 
+//=============================================================================
+// HPE_END
+//=============================================================================
+
+
+//=============================================================================
 // >> CounterStrike player
 //=============================================================================
 class CCSPlayer : public CBaseMultiplayerPlayer, public ICSPlayerAnimStateHelpers
@@ -219,7 +248,7 @@ public:
 	virtual void		Precache();
 	virtual void		Spawn();
 	virtual void		InitialSpawn( void );
-		
+	
 	virtual void		CheatImpulseCommands( int iImpulse );
 	virtual void		PlayerRunCommand( CUserCmd *ucmd, IMoveHelper *moveHelper );
 	virtual void		PostThink();
@@ -228,7 +257,19 @@ public:
 	virtual int			OnTakeDamage_Alive( const CTakeDamageInfo &info );
 
 	virtual void		Event_Killed( const CTakeDamageInfo &info );
-	virtual void		TraceAttack( const CTakeDamageInfo &inputInfo, const Vector &vecDir, trace_t *ptr );
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] We have a custom implementation so we can check for achievements.
+	//=============================================================================
+	
+	virtual void		Event_KilledOther( CBaseEntity *pVictim, const CTakeDamageInfo &info );
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
+	virtual void		TraceAttack( const CTakeDamageInfo &inputInfo, const Vector &vecDir, trace_t *ptr, CDmgAccumulator *pAccumulator );
 
 	virtual CBaseEntity	*GiveNamedItem( const char *pszName, int iSubType = 0 );
 	virtual bool		IsBeingGivenItem() const { return m_bIsBeingGivenItem; }
@@ -245,7 +286,6 @@ public:
 	// from CBasePlayer
 	virtual void		SetupVisibility( CBaseEntity *pViewEntity, unsigned char *pvs, int pvssize );
 
-
 	virtual int 		GetNextObserverSearchStartPoint( bool bReverse );
 // In shared code.
 public:
@@ -254,11 +294,11 @@ public:
 	virtual CWeaponCSBase* CSAnim_GetActiveWeapon();
 	virtual bool CSAnim_CanMove();
 
+	virtual float GetPlayerMaxSpeed();
 
 	void FireBullet( 
 		Vector vecSrc, 
 		const QAngle &shootAngles, 
-		float vecSpread, 
 		float flDistance, 
 		int iPenetration, 
 		int iBulletType, 
@@ -266,8 +306,7 @@ public:
 		float flRangeModifier, 
 		CBaseEntity *pevAttacker,
 		bool bDoEffects,
-		float x,
-		float y );
+		float xSpread, float ySpread );
 
 	void KickBack(
 		float up_base,
@@ -285,6 +324,9 @@ public:
 
 	// Returns true if the player is allowed to move.
 	bool CanMove() const;
+
+	void OnJump( float fImpulse );
+	void OnLand( float fVelocity );
 
 	bool HasC4() const;	// Is this player carrying a C4 bomb?
 	bool IsVIP() const;
@@ -336,7 +378,7 @@ public:
 	void CheckTKPunishment( void );
 
 	// Add money to this player's account.
-	void AddAccount( int amount, bool bTrackChange=true );
+	void AddAccount( int amount, bool bTrackChange=true, bool bItemBought=false, const char *pItemName = NULL );
 
 	void HintMessage( const char *pMessage, bool bDisplayIfDead, bool bOverrideClientSettings = false ); // Displays a hint message to the player
 	CHintMessageQueue *m_pHintMessageQueue;
@@ -353,8 +395,33 @@ public:
 	void DropC4();	// Get rid of the C4 bomb.
 	
 	bool HasDefuser();		// Is this player carrying a bomb defuser?
-	void GiveDefuser();		// give the player a defuser
+	void GiveDefuser(bool bPickedUp = false);		// give the player a defuser
 	void RemoveDefuser();	// remove defuser from the player and remove the model attachment
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Added for fun-fact support
+    //=============================================================================
+
+    bool PickedUpDefuser() { return m_bPickedUpDefuser; }
+    void SetDefusedWithPickedUpKit(bool bDefusedWithPickedUpKit) { m_bDefusedWithPickedUpKit = bDefusedWithPickedUpKit; }
+    bool GetDefusedWithPickedUpKit() { return m_bDefusedWithPickedUpKit; }
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+
+	//=============================================================================
+	// HPE_BEGIN
+	// [sbodenbender] Need a different test for player blindness for the achievements
+	//=============================================================================
+
+	bool IsBlindForAchievement();	// more stringent than IsBlind; more accurately represents when the player can see again
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 
 	bool IsBlind( void ) const;		// return true if this player is blind (from a flashbang)
 	virtual void Blind( float holdTime, float fadeTime, float startingAlpha = 255 );	// player blinded by a flashbang
@@ -376,8 +443,6 @@ public:
 
 	void EmitPrivateSound( const char *soundName );		///< emit given sound that only we can hear
 
-	void ResetMaxSpeed();
-
 	CWeaponCSBase* GetActiveCSWeapon() const;
 
 	void PreThink();
@@ -391,7 +456,9 @@ public:
 	bool HandleCommand_JoinTeam( int iTeam );
 
 	BuyResult_e HandleCommand_Buy( const char *item );
-	
+
+    BuyResult_e HandleCommand_Buy_Internal( const char * item );
+
 	void HandleMenu_Radio1( int slot );
 	void HandleMenu_Radio2( int slot );
 	void HandleMenu_Radio3( int slot );
@@ -408,8 +475,6 @@ public:
 	int PlayerClass() const;
 
 	void MoveToNextIntroCamera();
-
-	virtual bool Weapon_Switch( CBaseCombatWeapon *pWeapon, int viewmodelindex=0 );
 
 	// Used to be GETINTOGAME state.
 	void GetIntoGame();
@@ -510,17 +575,54 @@ private:
 	int	m_iDeathPose;
 	int	m_iDeathFrame;
 
+//=============================================================================
+// HPE_BEGIN:
+// [menglish] Freeze cam function and variable declarations
+//=============================================================================
+	 
+	bool m_bAbortFreezeCam;
+
+protected:
+	void AttemptToExitFreezeCam( void );
+	 
+//=============================================================================
+// HPE_END
+//=============================================================================
+
 public:
 
 	// Predicted variables.
-	bool m_bResumeZoom;
-	int m_iLastZoom;			// after firing a shot, set the FOV to 90, and after showing the animation, bring the FOV back to last zoom level.
+	CNetworkVar( bool, m_bResumeZoom );
+	CNetworkVar( int , m_iLastZoom ); // after firing a shot, set the FOV to 90, and after showing the animation, bring the FOV back to last zoom level.
 	CNetworkVar( bool, m_bIsDefusing );			// tracks whether this player is currently defusing a bomb
 	int m_LastHitGroup;			// the last body region that took damage
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Adding two variables, keeping track of damage to the player
+	//=============================================================================
+	 
+	int m_LastHitBox;			// the last body hitbox that took damage
+	Vector m_vLastHitLocationObjectSpace; //position where last hit occured in space of the bone associated with the hitbox
+	EHANDLE		m_hDroppedEquipment[DROPPED_COUNT];
+
+	// [tj] overriding the base suicides to trash CS specific stuff
+	virtual void CommitSuicide( bool bExplode = false, bool bForce = false );
+	virtual void CommitSuicide( const Vector &vecForce, bool bExplode = false, bool bForce = false );
+
+    void WieldingKnifeAndKilledByGun( bool bState ) { m_bWieldingKnifeAndKilledByGun = bState; }
+    bool WasWieldingKnifeAndKilledByGun() { return m_bWieldingKnifeAndKilledByGun; }
+
+    // [dwenger] adding tracking for weapon used fun fact
+    void PlayerUsedFirearm( CBaseCombatWeapon* pBaseWeapon );
+    int GetNumFirearmsUsed() { return m_WeaponTypesUsed.Count(); }
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+
 	CNetworkVar( bool, m_bHasHelmet );				// Does the player have helmet armor
 	bool m_bEscaped;			// Has this terrorist escaped yet?
-	
-	
+
 	// Other variables.
 	bool m_bIsVIP;				// Are we the VIP?
 	int m_iNumSpawns;			// Number of times player has spawned this round
@@ -540,11 +642,30 @@ public:
 	bool CanChangeName( void );	// Checks if the player can change his name
 	void ChangeName( const char *pszNewName );
 
-	CNetworkVar( bool, m_bHasDefuser );			// Does this player have a defuser kit?
-	CNetworkVar( bool, m_bHasNightVision );		// Does this player have night vision?
-	CNetworkVar( bool, m_bNightVisionOn );		// Is the NightVision turned on ?
+	void SetClanTag( const char *pTag );
+	const char *GetClanTag( void ) const;
+
+
+	CNetworkVar( bool, m_bHasDefuser );			    // Does this player have a defuser kit?
+	CNetworkVar( bool, m_bHasNightVision );		    // Does this player have night vision?
+	CNetworkVar( bool, m_bNightVisionOn );		    // Is the NightVision turned on ?
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Added for fun-fact support
+    //=============================================================================
+
+    //CNetworkVar( bool, m_bPickedUpDefuser );        // Did player pick up the defuser kit as opposed to buying it?
+    //CNetworkVar( bool, m_bDefusedWithPickedUpKit);  // Did player defuse the bomb with a picked-up defuse kit?
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
 
 	float m_flLastRadarUpdateTime;
+
+	// last known navigation area of player - NULL if unknown
+	CNavArea *m_lastNavArea;
 
 	// Backup copy of the menu text so the player can change this and the menu knows when to update.
 	char	m_MenuStringBuffer[MENU_STRING_BUFFER_SIZE];
@@ -581,6 +702,7 @@ public:
 	void DropShield( void );
 	
 	char m_szNewName [MAX_PLAYER_NAME_LENGTH]; // not empty if player requested a namechange
+	char m_szClanTag[MAX_CLAN_TAG_LENGTH];
 
 	Vector m_vecTotalBulletForce;	//Accumulator for bullet force in a single frame
 	
@@ -626,9 +748,21 @@ protected:
 	CNetworkVar( int, m_iClass ); // One of the CS_CLASS_ enums.
 
 	bool CSWeaponDrop( CBaseCombatWeapon *pWeapon, bool bDropShield = true, bool bThrow = false );
-	bool DropRifle();
-	bool DropPistol();
-	void DropWeapons();
+	bool DropRifle( bool fromDeath = false );
+	bool DropPistol( bool fromDeath = false );
+	
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj] Added a parameter so we know if it was death that caused the drop
+	// [menglish] New parameter to always know if this is from death and not just an enemy death
+    //=============================================================================
+     
+    void DropWeapons( bool fromDeath, bool friendlyFire );
+     
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+    
 
 	virtual int SpawnArmorValue( void ) const { return ArmorValue(); }
 
@@ -657,6 +791,19 @@ private:
 
 	int							m_lastDamageHealth;		// Last damage given to our health
 	int							m_lastDamageArmor;		// Last damage given to our armor
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Added for fun-fact support
+    //=============================================================================
+
+    bool                        m_bPickedUpDefuser;         // Did player pick up the defuser kit as opposed to buying it?
+    bool                        m_bDefusedWithPickedUpKit;  // Did player defuse the bomb with a picked-up defuse kit?
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
 
 	// Last usercmd we shot a bullet on.
 	int m_iLastWeaponFireUsercmd;
@@ -735,6 +882,9 @@ public:
 
 	void StockPlayerAmmo( CBaseCombatWeapon *pNewWeapon = NULL );
 
+	CUtlLinkedList< CDamageRecord *, int >& GetDamageGivenList() {return m_DamageGivenList;}
+	CUtlLinkedList< CDamageRecord *, int >& GetDamageTakenList() {return m_DamageTakenList;}
+
 private:
 	//A list of damage given
 	CUtlLinkedList< CDamageRecord *, int >	m_DamageGivenList;
@@ -758,6 +908,139 @@ private:
 
 	CNetworkVar(int, m_cycleLatch);	// Every so often, we are going to transmit our cycle to the client to correct divergence caused by PVS changes
 	CountdownTimer m_cycleLatchTimer;
+
+//=============================================================================
+// HPE_BEGIN:
+// [menglish, tj] Achievement-based addition to CS player class.
+//=============================================================================
+ 
+public:
+	void ResetRoundBasedAchievementVariables();
+	void OnRoundEnd(int winningTeam, int reason);
+    void OnPreResetRound();
+
+	int GetNumEnemyDamagers();
+	int GetNumEnemiesDamaged();
+	CBaseEntity* GetNearestSurfaceBelow(float maxTrace);
+
+    // Returns the % of the enemies this player killed in the round
+    int GetPercentageOfEnemyTeamKilled();
+
+	//List of times of recent kills to check for sprees
+	CUtlVector<float>			m_killTimes; 
+
+    //List of all players killed this round
+    CUtlVector<CHandle<CCSPlayer> >      m_enemyPlayersKilledThisRound;
+
+	//List of weapons we have used to kill players with this round
+	CUtlVector<int>				m_killWeapons; 
+
+	int m_NumEnemiesKilledThisRound;
+	int m_NumEnemiesAtRoundStart;
+	int m_KillingSpreeStartTime;
+
+	float m_firstKillBlindStartTime; //This is the start time of the blind effect during which we got our most recent kill.
+	int m_killsWhileBlind;
+ 
+    bool m_bIsRescuing;         // tracks whether this player is currently rescuing a hostage
+    bool m_bInjuredAHostage;    // tracks whether this player injured a hostage
+    int  m_iNumFollowers;       // Number of hostages following this player
+	bool m_bSurvivedHeadshotDueToHelmet;
+
+    void IncrementNumFollowers() { m_iNumFollowers++; }
+    void DecrementNumFollowers() { m_iNumFollowers--; if (m_iNumFollowers < 0) m_iNumFollowers = 0; }
+    int GetNumFollowers() { return m_iNumFollowers; }
+    void SetIsRescuing(bool in_bRescuing) { m_bIsRescuing = in_bRescuing; }
+    bool IsRescuing() { return m_bIsRescuing; }
+    void SetInjuredAHostage(bool in_bInjured) { m_bInjuredAHostage = in_bInjured; }
+    bool InjuredAHostage() { return m_bInjuredAHostage; }
+    float GetBombPickuptime() { return m_bombPickupTime; }
+    void SetBombPickupTime(float time) { m_bombPickupTime = time; }
+    CCSPlayer* GetLastFlashbangAttacker() { return m_lastFlashBangAttacker; }
+    void SetLastFlashbangAttacker(CCSPlayer* attacker) { m_lastFlashBangAttacker = attacker; }
+
+	static CSWeaponID GetWeaponIdCausingDamange( const CTakeDamageInfo &info );
+	static void ProcessPlayerDeathAchievements( CCSPlayer *pAttacker, CCSPlayer *pVictim, const CTakeDamageInfo &info );
+
+    void                        OnCanceledDefuse();
+    void                        OnStartedDefuse();
+    GooseChaseAchievementStep   m_gooseChaseStep;
+    DefuseDefenseAchivementStep m_defuseDefenseStep;
+    CHandle<CCSPlayer>          m_pGooseChaseDistractingPlayer;
+
+    int                         m_lastRoundResult; //save the reason for the last round ending.
+
+    bool                        m_bMadeFootstepNoise;
+
+    float                       m_bombPickupTime;
+
+    bool                        m_bMadePurchseThisRound;
+
+    int                         m_roundsWonWithoutPurchase;
+
+	bool						m_bKilledDefuser;
+	bool						m_bKilledRescuer;
+	int							m_maxGrenadeKills;
+
+	int							m_grenadeDamageTakenThisRound;
+
+	bool						GetKilledDefuser() { return m_bKilledDefuser; } 
+	bool						GetKilledRescuer() { return m_bKilledRescuer; } 
+	int							GetMaxGrenadeKills() { return m_maxGrenadeKills; }
+
+	void						CheckMaxGrenadeKills(int grenadeKills);
+
+    CHandle<CCSPlayer>                  m_lastFlashBangAttacker;
+
+    void	SetPlayerDominated( CCSPlayer *pPlayer, bool bDominated );    
+    void	SetPlayerDominatingMe( CCSPlayer *pPlayer, bool bDominated );
+    bool	IsPlayerDominated( int iPlayerIndex );
+    bool	IsPlayerDominatingMe( int iPlayerIndex );
+
+	bool	m_wasNotKilledNaturally; //Set if the player is dead from a kill command or late login
+
+	bool	WasNotKilledNaturally() { return m_wasNotKilledNaturally; }
+
+	//=============================================================================
+	// [menglish] MVP functions
+	//=============================================================================
+	 
+	void	SetNumMVPs( int iNumMVP );
+	void	IncrementNumMVPs( CSMvpReason_t mvpReason );
+	int		GetNumMVPs();
+	 
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
+    void    RemoveNemesisRelationships();
+	void	SetDeathFlags( int iDeathFlags ) { m_iDeathFlags = iDeathFlags; }
+	int		GetDeathFlags() { return m_iDeathFlags; }
+
+private:
+    CNetworkArray( bool, m_bPlayerDominated, MAX_PLAYERS+1 );		// array of state per other player whether player is dominating other players
+    CNetworkArray( bool, m_bPlayerDominatingMe, MAX_PLAYERS+1 );	// array of state per other player whether other players are dominating this player
+
+	//=============================================================================
+	// HPE_BEGIN:
+	//=============================================================================
+
+    // [menglish] number of rounds this player has caused to be won for their team
+	int m_iMVPs;
+
+    // [dwenger] adding tracking for fun fact
+    bool m_bWieldingKnifeAndKilledByGun;
+
+    // [dwenger] adding tracking for which weapons this player has used in a round
+    CUtlVector<CSWeaponID> m_WeaponTypesUsed; 
+
+    //=============================================================================
+	// HPE_END
+	//=============================================================================
+	int m_iDeathFlags; // Flags holding revenge and domination info about a death
+
+//=============================================================================
+// HPE_END
+//=============================================================================
 };
 
 
@@ -793,6 +1076,18 @@ inline bool CCSPlayer::IsBlind( void ) const
 	return gpGlobals->curtime < m_blindUntilTime;
 }
 
+//=============================================================================
+// HPE_BEGIN
+// [sbodenbender] Need a different test for player blindness for the achievements
+//=============================================================================
+inline bool CCSPlayer::IsBlindForAchievement()
+{
+	return (m_blindStartTime + m_flFlashDuration) > gpGlobals->curtime;
+}
+//=============================================================================
+// HPE_END
+//=============================================================================
+
 inline bool CCSPlayer::IsAutoFollowAllowed( void ) const		
 { 
 	return (gpGlobals->curtime > m_allowAutoFollowTime); 
@@ -811,6 +1106,11 @@ inline void CCSPlayer::AllowAutoFollow( void )
 inline int CCSPlayer::GetClass( void ) const
 {
 	return m_iClass;
+}
+
+inline const char *CCSPlayer::GetClanTag( void ) const
+{
+	return m_szClanTag;
 }
 
 #endif	//CS_PLAYER_H

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -85,9 +85,9 @@ public:
 	virtual int			GetShaders( int nFirstShader, int nMaxCount, IShader **ppShaderList ) const;
 
 	// Methods of IShaderInit
-	virtual void		LoadTexture( IMaterialVar *pTextureVar, const char *pTextureGroupName );
+	virtual void		LoadTexture( IMaterialVar *pTextureVar, const char *pTextureGroupName, int nAdditionalCreationFlags = 0 );
 	virtual void		LoadBumpMap( IMaterialVar *pTextureVar, const char *pTextureGroupName );
-	virtual void		LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTextureVar );
+	virtual void		LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTextureVar, int nAdditionalCreationFlags = 0 );
 
 	// Used to prevent re-entrant rendering from warning messages
 	void				BufferSpew( SpewType_t spewType, const Color &c, const char *pMsg );
@@ -187,7 +187,6 @@ private:
 	enum
 	{
 		MATERIAL_FILL_RATE = 0,
-		MATERIAL_FILL_RATE_DX6,
 		MATERIAL_DEBUG_NORMALMAP,
 		MATERIAL_DEBUG_ENVMAPMASK,
 		MATERIAL_DEBUG_DEPTH,
@@ -219,16 +218,11 @@ EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CShaderSystem, IShaderSystem,
 const char *CShaderSystem::s_pDebugShaderName[MATERIAL_DEBUG_COUNT]	=
 {
 	"FillRate",
-	"FillRate_Dx6",
 	"DebugNormalMap",
 	"DebugDrawEnvmapMask",
 	"DebugDepth",
 	"DebugDepth",
-#if !defined( _X360 )
-	"Wireframe_DX6",
-#else
-	"Wireframe_DX9",
-#endif
+	"Wireframe_DX9"
 };
 
 //-----------------------------------------------------------------------------
@@ -317,12 +311,11 @@ void CShaderSystem::LoadAllShaderDLLs( )
 	// Add the shaders to the dictionary of shaders...
 	SetupShaderDictionary( i );
 
-#if defined( _WIN32 )
 	// 360 has the the debug shaders in its dx9 dll
 	if ( IsPC() || !IsX360() )
 	{
 		// Always need the debug shaders
-		LoadShaderDLL( "stdshader_dbg" );
+		LoadShaderDLL( "stdshader_dbg" DLL_EXT_STRING );
 	}
 
 	// Load up standard shader DLLs...
@@ -335,7 +328,7 @@ void CShaderSystem::LoadAllShaderDLLs( )
 	char buf[32];
 	for ( i = dxStart; i <= dxSupportLevel; ++i )
 	{
-		Q_snprintf( buf, sizeof( buf ), "stdshader_dx%d", i );
+		Q_snprintf( buf, sizeof( buf ), "stdshader_dx%d%s", i, DLL_EXT_STRING );
 		LoadShaderDLL( buf );
 	}
 
@@ -356,16 +349,43 @@ void CShaderSystem::LoadAllShaderDLLs( )
 	// For fast-iteration debugging
 	if ( CommandLine()->FindParm( "-testshaders" ) )
 	{
-		LoadShaderDLL( "shader_test" );
+		LoadShaderDLL( "shader_test" DLL_EXT_STRING );
 	}
 #endif
-#endif // _WIN32
+}
+
+const char *COM_GetModDirectory()
+{
+	static char modDir[MAX_PATH];
+	if ( Q_strlen( modDir ) == 0 )
+	{
+		const char *gamedir = CommandLine()->ParmValue("-game", CommandLine()->ParmValue( "-defaultgamedir", "hl2" ) );
+		Q_strncpy( modDir, gamedir, sizeof(modDir) );
+		if ( strchr( modDir, '/' ) || strchr( modDir, '\\' ) )
+		{
+			Q_StripLastDir( modDir, sizeof(modDir) );
+			int dirlen = Q_strlen( modDir );
+			Q_strncpy( modDir, gamedir + dirlen, sizeof(modDir) - dirlen );
+		}
+	}
+
+	return modDir;
 }
 
 void CShaderSystem::LoadModShaderDLLs( int dxSupportLevel )
 {
 	if ( IsX360() )
 		return;
+
+	// Don't do this for Valve mods. They don't need them, and attempting to load them is an opportunity for cheaters to get their code into the process
+	const char *pGameDir = COM_GetModDirectory();
+	if ( !Q_stricmp( pGameDir, "hl2" ) || !Q_stricmp( pGameDir, "cstrike" ) || !Q_stricmp( pGameDir, "cstrike_beta" ) ||
+		!Q_stricmp( pGameDir, "hl2mp" ) || !Q_stricmp( pGameDir, "lostcoast" ) || !Q_stricmp( pGameDir, "episodic" ) ||
+		!Q_stricmp( pGameDir, "portal" ) || !Q_stricmp( pGameDir, "ep2" ) || !Q_stricmp( pGameDir, "dod" ) ||
+		!Q_stricmp( pGameDir, "tf" ) || !Q_stricmp( pGameDir, "tf_beta" ) || !Q_stricmp( pGameDir, "hl1" ) )
+	{
+		return;
+	}
 
 	const char *pModShaderPathID = "GAMEBIN";
 
@@ -375,7 +395,7 @@ void CShaderSystem::LoadModShaderDLLs( int dxSupportLevel )
 	int dxStart = 6;
 	for ( int i = dxStart; i <= dxSupportLevel; ++i )
 	{
-		Q_snprintf( buf, sizeof( buf ), "game_shader_dx%d", i );
+		Q_snprintf( buf, sizeof( buf ), "game_shader_dx%d%s", i, DLL_EXT_STRING );
 		LoadShaderDLL( buf, pModShaderPathID, true );
 	}
 
@@ -384,7 +404,7 @@ void CShaderSystem::LoadModShaderDLLs( int dxSupportLevel )
 	const char *pFilename = g_pFullFileSystem->FindFirstEx( "game_shader_generic*", pModShaderPathID, &findHandle );
 	while ( pFilename )
 	{
-		Q_snprintf( buf, sizeof( buf ), "%s", pFilename );
+		Q_snprintf( buf, sizeof( buf ), "%s%s", pFilename, DLL_EXT_STRING );
 		LoadShaderDLL( buf, pModShaderPathID, true );
 
 		pFilename = g_pFullFileSystem->FindNext( findHandle );
@@ -426,8 +446,7 @@ extern "C"
 void CShaderSystem::VerifyBaseShaderDLL( CSysModule *pModule )
 {
 #if defined( _WIN32 ) && !defined( _X360 )
-	//const tchar *pErrorStr = "Corrupt save data settings.";
-	const tchar *pErrorStr = "Error Veryifing stdshader_ DLL";
+	const char *pErrorStr = "Corrupt save data settings.";
 
 	unsigned char *testData1 = new unsigned char[SHADER_DLL_VERIFY_DATA_LEN1];
 
@@ -500,11 +519,10 @@ bool CShaderSystem::LoadShaderDLL( const char *pFullPath, const char *pPathID, b
 
 	// Make sure it's a valid base shader DLL if necessary.
 	//HACKHACK get rid of this when VAC2 comes online.
-	//DOUBLEHACK this doesn't work for me, so bye
-	/*if ( !bModShaderDLL )
+	if ( !bModShaderDLL )
 	{
 		VerifyBaseShaderDLL( hInstance );
-	}*/
+	}
 
 	// Allow the DLL to try to connect to interfaces it needs
 	if ( !pShaderDLL->Connect( Sys_GetFactoryThis(), false ) )
@@ -594,7 +612,7 @@ void CShaderSystem::UnloadShaderDLL( const char *pFullPath )
 //-----------------------------------------------------------------------------
 // Make sure these match the bits in imaterial.h
 //-----------------------------------------------------------------------------
-static char* s_pShaderStateString[] =
+static const char* s_pShaderStateString[] =
 {
 	"$debug",
 	"$no_fullbright",
@@ -667,6 +685,11 @@ void CShaderSystem::SetupShaderDictionary( int nShaderDLLIndex )
 		IShader *pShader = info.m_pShaderDLL->GetShader( i );
 		const char *pShaderName = pShader->GetName();
 
+#ifdef POSIX
+		if (CommandLine()->FindParm("-glmspew"))
+			printf("CShaderSystem::SetupShaderDictionary: %s", pShaderName );
+#endif
+		
 		// Make sure it doesn't try to override another shader DLL's names.
 		if ( info.m_bModShaderDLL )
 		{
@@ -870,7 +893,7 @@ void CShaderSystem::PrintBufferedSpew( void )
 		{
 			char *pBuf = (char*)_alloca( nLen );
 			m_StoredSpew.GetStringManualCharCount( pBuf, nLen );
-			ColorSpewMessage( spewType, &c, pBuf );
+			ColorSpewMessage( spewType, &c, "%s", pBuf );
 		}
 		else
 		{
@@ -1007,6 +1030,14 @@ void CShaderSystem::InitShaderParameters( IShader *pShader, IMaterialVar **param
 				params[i]->SetMatrixValue( identity );
 			}
 			break;
+		case SHADER_PARAM_TYPE_MATRIX4X2:
+			{
+				VMatrix identity;
+				MatrixSetIdentity( identity );
+				params[i]->SetMatrixValue( identity );
+			}
+			break;
+
 
 		default:
 			Assert(0);
@@ -1545,12 +1576,15 @@ void CShaderSystem::DrawElements( IShader *pShader, IMaterialVar **params,
 	}
 
 	// FIXME: need one conditional that we calculate once a frame for debug or not with everything debug under that.
-	if ( (g_config.bMeasureFillRate || g_config.bVisualizeFillRate)
-		&& ((materialVarFlags & MATERIAL_VAR_USE_IN_FILLRATE_MODE) == 0) )
+#ifndef DX_TO_GL_ABSTRACTION
+	if (  ( ( g_config.bMeasureFillRate || g_config.bVisualizeFillRate ) &&
+		( ( materialVarFlags & MATERIAL_VAR_USE_IN_FILLRATE_MODE ) == 0 ) ) )
 	{
 		DrawMeasureFillRate( pRenderState, mod, vertexCompression );
 	}
-	else if( ( g_config.bShowNormalMap || g_config.nShowMipLevels == 2 ) && 
+	else 
+#endif
+		if( ( g_config.bShowNormalMap || g_config.nShowMipLevels == 2 ) && 
 		( IsFlag2Set( params, MATERIAL_VAR2_LIGHTING_BUMPED_LIGHTMAP ) ||
 		  IsFlag2Set( params, MATERIAL_VAR2_DIFFUSE_BUMPMAPPED_MODEL ) ) )
 	{
@@ -1730,8 +1764,10 @@ void CShaderSystem::DrawMeasureFillRate( ShaderRenderState_t* pRenderState, int 
 {
 	int nPassCount = pRenderState->m_pSnapshots[mod].m_nPassCount;
 
-	bool bUsesVertexShader = (VertexFlags(pRenderState->m_VertexFormat) & VERTEX_FORMAT_VERTEX_SHADER) != 0;
-	IMaterialInternal *pMaterial = m_pDebugMaterials[ bUsesVertexShader ? MATERIAL_FILL_RATE : MATERIAL_FILL_RATE_DX6 ];
+	// We require the use of a vertex shader rather than fixed function transforms
+	Assert( (VertexFlags(pRenderState->m_VertexFormat) & VERTEX_FORMAT_VERTEX_SHADER) != 0 );
+
+	IMaterialInternal *pMaterial = m_pDebugMaterials[ MATERIAL_FILL_RATE ];
 
 	bool bFound;
 	IMaterialVar *pMaterialVar = pMaterial->FindVar( "$passcount", &bFound );
@@ -1835,7 +1871,14 @@ ShaderAPITextureHandle_t CShaderSystem::GetShaderAPITextureBindHandle( ITexture 
 	// Bind away baby
 	if( pTexture )
 	{
-		return static_cast<ITextureInternal*>(pTexture)->GetTextureHandle( nFrame, nTextureChannel );
+		// This is ugly. Basically, this is yet another way that textures can be bound. They don't get bound here, 
+		// but the return is only used to bind them for semistatic command buffer building, which doesn't go through
+		// CTexture::Bind for whatever reason. So let's request the mipmaps here. If you run into this, in a situation
+		// where we shouldn't be doing the request, we could relocate this code to the appropriate callsites instead. 
+		ITextureInternal* pTex = assert_cast< ITextureInternal* >( pTexture );
+		TextureManager()->RequestAllMipmaps( pTex );		
+
+		return pTex->GetTextureHandle( nFrame, nTextureChannel );
 	}
 	else
 		return INVALID_SHADERAPI_TEXTURE_HANDLE;
@@ -1865,7 +1908,7 @@ void CShaderSystem::BindTexture( Sampler_t sampler1, Sampler_t sampler2, ITextur
 	// Bind away baby
 	if( pTexture )
 	{
-		if ( sampler2 == -1 )
+		if ( sampler2 == Sampler_t(-1) )
 		{
 			static_cast<ITextureInternal*>(pTexture)->Bind( sampler1, nFrame );
 		}
@@ -1886,7 +1929,7 @@ void CShaderSystem::BindTexture( Sampler_t sampler1, Sampler_t sampler2, ITextur
 //-----------------------------------------------------------------------------
 // Loads a texture
 //-----------------------------------------------------------------------------
-void CShaderSystem::LoadTexture( IMaterialVar *pTextureVar, const char *pTextureGroupName )
+void CShaderSystem::LoadTexture( IMaterialVar *pTextureVar, const char *pTextureGroupName, int nAdditionalCreationFlags /* = 0 */ )
 {
 	if (pTextureVar->GetType() != MATERIAL_VAR_TYPE_STRING)
 	{
@@ -1914,7 +1957,7 @@ void CShaderSystem::LoadTexture( IMaterialVar *pTextureVar, const char *pTexture
 	}
 	else
 	{
-		pTexture = TextureManager()->FindOrLoadTexture( pName, pTextureGroupName );
+		pTexture = static_cast< ITextureInternal * >( MaterialSystem()->FindTexture( pName, pTextureGroupName, false, nAdditionalCreationFlags ) );
 	}
 
 	if( !pTexture )
@@ -1948,8 +1991,8 @@ void CShaderSystem::LoadBumpMap( IMaterialVar *pTextureVar, const char *pTexture
 	}
 
 	// Convert a string to the actual texture
-	ITextureInternal *pTexture;
-	pTexture = TextureManager()->FindOrLoadTexture( pTextureVar->GetStringValue(), pTextureGroupName );
+	ITexture *pTexture;
+	pTexture = MaterialSystem()->FindTexture( pTextureVar->GetStringValue(), pTextureGroupName, false, 0 );
 
 	// FIXME: Make a bumpmap error texture
 	if (!pTexture)
@@ -1960,10 +2003,11 @@ void CShaderSystem::LoadBumpMap( IMaterialVar *pTextureVar, const char *pTexture
 	pTextureVar->SetTextureValue( pTexture );
 }
 
+
 //-----------------------------------------------------------------------------
 // Loads a cubemap
 //-----------------------------------------------------------------------------
-void CShaderSystem::LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTextureVar )
+void CShaderSystem::LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTextureVar, int nAdditionalCreationFlags /* = 0 */ )
 {
 	if ( !HardwareConfig()->SupportsCubeMaps() )
 		return;
@@ -1988,7 +2032,7 @@ void CShaderSystem::LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTexture
 	}
 	else
 	{
-		ITextureInternal *pTexture;
+		ITexture *pTexture;
 		char textureName[MAX_PATH];
 		Q_strncpy( textureName, pTextureVar->GetStringValue(), MAX_PATH );
 		if ( HardwareConfig()->GetHDRType() != HDR_TYPE_NONE )
@@ -1997,7 +2041,7 @@ void CShaderSystem::LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTexture
 			// HDR enabled.
 			Q_strncat( textureName, ".hdr", MAX_PATH, COPY_ALL_CHARACTERS );
 		}
-		pTexture = TextureManager()->FindOrLoadTexture( textureName, TEXTURE_GROUP_CUBE_MAP );
+		pTexture = MaterialSystem()->FindTexture( textureName, TEXTURE_GROUP_CUBE_MAP, false, nAdditionalCreationFlags );
 
 		// FIXME: Make a cubemap error texture
 		if ( !pTexture )

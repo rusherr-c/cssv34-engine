@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -32,7 +32,7 @@ public:
 
 	// Writes lines containing "set variable value" for all variables
 	// with the archive flag set to true.
-	void WriteVariables( CUtlBuffer &buff );
+	void WriteVariables( CUtlBuffer &buff, bool bAllVars );
 
 	// Returns the # of cvars with the server flag set.
 	int	CountVariablesWithFlags( int flags );

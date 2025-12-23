@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The transform operator class - shortcut to setting transform values from floats
 //
@@ -11,12 +11,14 @@
 #endif
 
 #include "movieobjects/dmeoperator.h"
+#include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 
 
 //-----------------------------------------------------------------------------
 // Forward declarations
 //-----------------------------------------------------------------------------
-class CDmElement;
 class CDmeTransform;
 
 

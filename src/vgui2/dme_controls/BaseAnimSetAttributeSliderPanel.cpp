@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -1056,7 +1056,7 @@ void CBaseAnimSetAttributeSliderPanel::ActivateControlSetInMode( int mode, int o
 		else
 		{
 			// Don't create undo records for this
-			CDisableUndoScopeGuard guard;
+			CDisableUndoScopeGuard guardSet;
 			for ( i = 0; i < c; ++i )
 			{
 				updateChannels[ i ]->SetMode( channelMode );
@@ -1068,7 +1068,7 @@ void CBaseAnimSetAttributeSliderPanel::ActivateControlSetInMode( int mode, int o
 	if ( c > 0 )
 	{
 		// Don't create undo records for this
-		CDisableUndoScopeGuard guard;
+		CDisableUndoScopeGuard guardRecord;
 
 		for ( i = 0; i < c; ++i )
 		{
@@ -1082,7 +1082,7 @@ void CBaseAnimSetAttributeSliderPanel::ActivateControlSetInMode( int mode, int o
 	if ( c > 0 )
 	{
 		// Don't create undo records for this
-		CDisableUndoScopeGuard guard;
+		CDisableUndoScopeGuard guardRecord;
 
 		// For now these should only be able to go into Playback
 		//Assert( (ChannelMode_t)hiddenChannelsMode == CM_PLAY );
@@ -1310,8 +1310,8 @@ void CBaseAnimSetAttributeSliderPanel::SetLogPreviewControl( CDmElement *control
 		const CDmaElementArray< CDmElement > &controls = m_AnimSet->GetControls();
 
 		int itemNumber = 0;
-		int c = m_SliderList.Count();
-		for ( int i = 0; i < c; ++i )
+		int nSliders = m_SliderList.Count();
+		for ( int i = 0; i < nSliders; ++i )
 		{
 			CAttributeSlider *slider = m_SliderList[ i ];
 			slider->SetIsLogPreviewControl( false );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -24,7 +24,7 @@
 #include <vgui/Cursor.h>
 #include <vgui_controls/ProgressBox.h>
 
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "IAdminServer.h"
 
 #include "MainPanel.h"

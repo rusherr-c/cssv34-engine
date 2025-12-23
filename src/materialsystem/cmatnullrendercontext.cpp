@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -266,6 +266,16 @@ public:
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
 	}
 
+	void OverrideColorWriteEnable( bool, bool )
+	{
+		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
+	}
+
+	void OverrideAlphaWriteEnable( bool, bool )
+	{
+		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
+	}
+
 	void DrawScreenSpaceQuad(IMaterial *)
 	{
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
@@ -402,6 +412,11 @@ public:
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
 	}
 
+	void CopyTextureToRenderTargetEx(int,ITexture *,Rect_t *,Rect_t *)
+	{
+		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
+	}
+
 	void SetFloatRenderingParameter(int,float)
 	{
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
@@ -522,6 +537,11 @@ public:
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
 	}
 
+	void ClearBuffersObeyStencilEx( bool bClearColor, bool bClearAlpha, bool bClearDepth )
+	{
+		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
+	}
+
 	void PerformFullScreenStencilOperation( void )
 	{
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
@@ -628,7 +648,7 @@ public:
 		return 0;
 	}
 
-	void DrawClearBufferQuad(unsigned char,unsigned char,unsigned char,unsigned char,bool,bool)
+	void DrawClearBufferQuad(unsigned char,unsigned char,unsigned char,unsigned char,bool,bool,bool)
 	{
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
 	}
@@ -682,6 +702,26 @@ public:
 	void EndFrame()
 	{
 		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
+	}
+
+	void AsyncCreateTextureFromRenderTarget( ITexture* pSrcRt, const char* pDstName, ImageFormat dstFmt, bool bGenMips, int nAdditionalCreationFlags, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE
+	{
+		AssertMsg( 0, "CMatNullRenderContext only provides base features, not a stub (right now)" );
+	}
+
+	virtual void AsyncMap( ITextureInternal* pTexToMap, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE
+	{
+	
+	}
+
+	virtual void AsyncUnmap( ITextureInternal* pTexToUnmap ) OVERRIDE
+	{
+
+	}
+
+	virtual void AsyncCopyRenderTargetToStagingTexture( ITexture* pDst, ITexture* pSrc, IAsyncTextureOperationReceiver* pRecipient, void* pExtraArgs ) OVERRIDE
+	{
+
 	}
 
 	void SetShadowDepthBiasFactors( float fSlopeScaleDepthBias, float fDepthBias )
@@ -790,6 +830,12 @@ public:
 		Assert( 0 );
 	}
 #endif
+
+#ifdef DX_TO_GL_ABSTRACTION
+	void									DoStartupShaderPreloading( void ) {};
+#endif
+
+	void									TextureManagerUpdate( void ) { }
 
 	int m_WidthBackBuffer, m_HeightBackBuffer;
 };

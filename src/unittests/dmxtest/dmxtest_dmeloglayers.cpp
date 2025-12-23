@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -90,12 +90,12 @@ static void ValidateDataSets( int spew, char const *testname, CUtlVector< CUtlVe
 			{
 				if ( differs )
 				{
-					 Msg( "%d found %f to equal %f\n", j, v[ j ], vb[ j ], j );
+					 Msg( "%d found %f to equal %f\n", j, v[ j ], vb[ j ] );
 				}
 				continue;
 			}
 
-			Msg( "%d expected %f to equal %f\n", j, v[ j ], vb[ j ], j );
+			Msg( "%d expected %f to equal %f\n", j, v[ j ], vb[ j ] );
 		}
 	}
 
@@ -369,7 +369,7 @@ static void RunLayerTest( char const *testname, CUtlVector< CDmeChannel * >& cha
 				float underlyingValue = pLog->GetValueSkippingTopmostLayer( j );
 
 				Msg( "t(%d) top [%f] rest [%f]\n",
-					j, topValue, underlyingValue );
+					j.GetTenthsOfMS(), topValue, underlyingValue );
 			}
 		}
 	}
@@ -522,7 +522,7 @@ static void RunTimeSelectionTest( char const *testname, CUtlVector< CDmeChannel 
 			for ( DmeTime_t j = params.mintime; j <= params.maxtime; j += DmeTime_t( 1 ) )
 			{
 				float fval = pLog->GetValue( j );
-				Msg( "%d %f\n", j, fval );
+				Msg( "%d %f\n", j.GetTenthsOfMS(), fval );
 			}
 		}
 	}

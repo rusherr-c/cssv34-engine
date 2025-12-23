@@ -1,12 +1,13 @@
-//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "BaseVSShader.h"
-#include "mathlib/VMatrix.h"
+#include "mathlib/vmatrix.h"
 #include "portal_refract_helper.h"
 #include "convar.h"
 
 // Auto generated inc files
 #include "portal_refract_vs20.inc"
-#include "portal_refract_ps30.inc"
+#include "portal_refract_ps20.inc"
+#include "portal_refract_ps20b.inc"
 
 void InitParamsPortalRefract( CBaseVSShader *pShader, IMaterialVar** params, const char *pMaterialName, PortalRefractVars_t &info )
 {
@@ -50,7 +51,7 @@ void InitPortalRefract( CBaseVSShader *pShader, IMaterialVar** params, PortalRef
 
 		if ( (info.m_nPortalColorTexture != -1) && params[info.m_nPortalColorTexture]->IsDefined() )
 		{
-			pShader->LoadTexture( info.m_nPortalColorTexture );
+			pShader->LoadTexture( info.m_nPortalColorTexture, TEXTUREFLAGS_SRGB );
 		}
 	}
 }
@@ -70,10 +71,23 @@ void DrawPortalRefract( CBaseVSShader *pShader, IMaterialVar** params,
 		SET_STATIC_VERTEX_SHADER_COMBO( STAGE, nStage );
 		SET_STATIC_VERTEX_SHADER( portal_refract_vs20 );
 
+		// On Leopard / 10.5.8, we can't do an sRGB read from a render target, so we must fake it in shader code
+		bool bShaderSRGBRead = IsOSX() && !g_pHardwareConfig->CanDoSRGBReadFromRTs();
+		
 		// Pixel Shader
-		DECLARE_STATIC_PIXEL_SHADER( portal_refract_ps30 );
-		SET_STATIC_PIXEL_SHADER_COMBO( STAGE, nStage );
-		SET_STATIC_PIXEL_SHADER( portal_refract_ps30 );
+		if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // Always send OpenGL / Posix down this path
+		{
+			DECLARE_STATIC_PIXEL_SHADER( portal_refract_ps20b );
+			SET_STATIC_PIXEL_SHADER_COMBO( STAGE, nStage );
+			SET_STATIC_PIXEL_SHADER_COMBO( SHADER_SRGB_READ, bShaderSRGBRead ? 1 : 0 );
+			SET_STATIC_PIXEL_SHADER( portal_refract_ps20b );
+		}
+		else
+		{
+			DECLARE_STATIC_PIXEL_SHADER( portal_refract_ps20 );
+			SET_STATIC_PIXEL_SHADER_COMBO( STAGE, nStage );
+			SET_STATIC_PIXEL_SHADER( portal_refract_ps20 );
+		}
 
 		// Textures
 		pShaderShadow->EnableTexture( SHADER_SAMPLER0, true ); // Refraction texture
@@ -121,9 +135,17 @@ void DrawPortalRefract( CBaseVSShader *pShader, IMaterialVar** params,
 		pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, vPackedVsConst1, 1 );
 
 		// Set Pixel Shader Combos
-		DECLARE_DYNAMIC_PIXEL_SHADER( portal_refract_ps30 );
-		SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
-		SET_DYNAMIC_PIXEL_SHADER( portal_refract_ps30 );
+		if( g_pHardwareConfig->SupportsPixelShaders_2_b() || g_pHardwareConfig->ShouldAlwaysUseShaderModel2bShaders() ) // Always send OpenGL / Posix down this path
+		{
+			DECLARE_DYNAMIC_PIXEL_SHADER( portal_refract_ps20b );
+			SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+			SET_DYNAMIC_PIXEL_SHADER( portal_refract_ps20b );
+		}
+		else
+		{
+			DECLARE_DYNAMIC_PIXEL_SHADER( portal_refract_ps20 );
+			SET_DYNAMIC_PIXEL_SHADER( portal_refract_ps20 );
+		}
 
 		// Bind textures
 		if ( nStage == 0 ) // Only bind frame buffer texture for first stage

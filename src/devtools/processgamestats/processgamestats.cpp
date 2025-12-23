@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,25 +14,48 @@
 #include <string.h>
 #include <windows.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "interface.h"
 #include "imysqlwrapper.h"
-#include "tier1/UtlVector.h"
-#include "tier1/UtlBuffer.h"
-#include "tier1/UtlSymbol.h"
-#include "tier1/UtlString.h"
-#include "tier1/UtlDict.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlbuffer.h"
+#include "tier1/utlsymbol.h"
+#include "tier1/utlstring.h"
+#include "tier1/utldict.h"
 #include "KeyValues.h"
 #include "filesystem_helpers.h"
 #include "tier2/tier2.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "base_gamestats_parse.h"
+#include "cbase.h"
 #include "gamestats.h"
 #include "tier0/icommandline.h"
 
+// roll-our-own symbol table class.  Note we don't use CUtlSymbolTable because that and related classes have short int deeply baked in as index type, so can
+// only hold 64K entries.  We sometimes need to process more than 64K files at a time.
 struct AnalysisData
 {
-	CUtlSymbolTable				symbols;
+	AnalysisData()
+	{
+		symbols.SetLessFunc( CaselessStringLessThanIgnoreSlashes );
+	}
+
+	~AnalysisData()
+	{
+		int i = symbols.FirstInorder();
+		while ( i != symbols.InvalidIndex() )
+		{
+			const char *symbol = symbols[i];
+			if ( symbol )
+			{
+				delete symbol;
+			}
+			i = symbols.NextInorder( i );
+		}
+	}
+
+	CUtlRBTree<const char*,int>	symbols;
 };
 
 static AnalysisData g_Analysis;
@@ -43,7 +66,10 @@ typedef int (*DataParseFunc)( ParseContext_t * );
 typedef void (*PostImportFunc) ( IMySQL *sql );
 typedef bool (*ParseCurrentUserIDFunc)( char const *pchDataFile, char *pchUserID, size_t bufsize, time_t &modifiedtime );
 
+extern int CS_ParseCustomGameStatsData( ParseContext_t *ctx );
 extern int Ep2_ParseCustomGameStatsData( ParseContext_t *ctx );
+extern int TF_ParseCustomGameStatsData( ParseContext_t *ctx );
+extern void TF_PostImport( IMySQL *sql );
 
 int Default_ParseCustomGameStatsData( ParseContext_t *ctx );
 
@@ -59,6 +85,10 @@ struct DataParser_t
 
 static DataParser_t g_ParseFuncs[] =
 {
+	{ "cstrike", CS_ParseCustomGameStatsData, NULL },
+	{ "tf", TF_ParseCustomGameStatsData, TF_PostImport },
+//	{ "dods", Default_ParseCustomGameStatsData, NULL },
+//	{ "portal", Default_ParseCustomGameStatsData, NULL },
 	{ "ep1", Default_ParseCustomGameStatsData, NULL }, // Just a STUB
 	{ "ep2", Ep2_ParseCustomGameStatsData, NULL, Ep2_ParseCurrentUserID }
 };
@@ -82,7 +112,7 @@ void printusage( void )
 	exit( 1 );
 }
 
-void BuildFileList_R( CUtlVector< CUtlSymbol >& files, char const *dir, char const *extension )
+void BuildFileList_R( CUtlVector< int >& files, char const *dir, char const *extension )
 {
 	WIN32_FIND_DATA wfd;
 
@@ -122,7 +152,9 @@ void BuildFileList_R( CUtlVector< CUtlSymbol >& files, char const *dir, char con
 
 					Q_FixSlashes( filename );
 
-					CUtlSymbol sym = g_Analysis.symbols.AddString( filename );
+					char *symbol = strdup( filename );
+					int sym = g_Analysis.symbols.Insert( symbol );
+
 					files.AddToTail( sym );
 				}
 			}
@@ -130,7 +162,7 @@ void BuildFileList_R( CUtlVector< CUtlSymbol >& files, char const *dir, char con
 	} while ( FindNextFile( ff, &wfd ) );
 }
 
-void BuildFileList( CUtlVector< CUtlSymbol >& files, char const *rootdir, char const *extension )
+void BuildFileList( CUtlVector< int >& files, char const *rootdir, char const *extension )
 {
 	files.RemoveAll();
 	BuildFileList_R( files, rootdir, extension );
@@ -580,14 +612,15 @@ int main(int argc, char* argv[])
 
 	bool batchMode = true;
 
-	CUtlVector< CUtlSymbol > files;
+	CUtlVector< int > files;
 	if ( describeonly || Q_stristr( argv[ dirArg ], ".dat" ) )
 	{
 		char filename[ MAX_PATH ];
 		Q_snprintf( filename, sizeof( filename ), "%s", argv[ dirArg ] );
 		_strlwr( filename );
 		Q_FixSlashes( filename );
-		CUtlSymbol sym = g_Analysis.symbols.AddString( filename );
+		char *symbol = strdup( filename );
+		int sym = g_Analysis.symbols.Insert( symbol );
 		files.AddToTail( sym );
 
 		batchMode = false;
@@ -636,7 +669,7 @@ int main(int argc, char* argv[])
 		int nMaxMod = 1;
 		for ( int i = 0; i < c; ++i )
 		{
-			char const *fn = g_Analysis.symbols.String( files[ i ] );
+			char const *fn = g_Analysis.symbols.Element( files[ i ] );
 
 			CUserIDFileMapping search;
 			search.filename = files[ i ];
@@ -748,7 +781,7 @@ int main(int argc, char* argv[])
 
 		for ( int i = 0; i < c; ++i )
 		{
-			char const *fn = g_Analysis.symbols.String( files[ i ] );
+			char const *fn = g_Analysis.symbols.Element( files[ i ] );
 			
 			ctx.file = fn;
 
@@ -812,8 +845,16 @@ static void OverWriteCharsWeHate( char *pStr )
 	}
 }
 
-void InsertKeyDataIntoTable( IMySQL *pSQL, char const *pTableName, char const *pPerfData, char const *pKeyWhiteList[], int nNumFields )
+void InsertKeyDataIntoTable( IMySQL *pSQL, time_t fileTime, char const *pTableName, char const *pPerfData, char const *pKeyWhiteList[], int nNumFields )
 {
+	char szDate[128]="Now()";
+	if ( fileTime > 0 )
+	{
+		tm * pTm = localtime( &fileTime );
+		Q_snprintf( szDate, ARRAYSIZE( szDate ), "'%04d-%02d-%02d %02d:%02d:%02d'",
+			pTm->tm_year + 1900, pTm->tm_mon + 1, pTm->tm_mday, pTm->tm_hour, pTm->tm_min, pTm->tm_sec );
+	}
+
 	// we don't need to worry about semicolons embedded in string fields because we supressed them
 	// on the client.  if some malicious person inserts them, the mandled field names will fail the
 	// whitelist check, causing the record to be ignored.
@@ -857,7 +898,7 @@ void InsertKeyDataIntoTable( IMySQL *pSQL, char const *pTableName, char const *p
 	char fieldNameBuffer[1024];
 	char fieldValueBuffer[2048];
 	strcpy( fieldNameBuffer, "(CreationTimeStamp, " );
-	strcpy( fieldValueBuffer, "( now()," );
+	Q_snprintf( fieldValueBuffer, ARRAYSIZE( fieldValueBuffer), "( %s,", szDate );
 	for( int i = 0; i < tokens.Count(); i++ )
 	{
 		char *pKVData = tokens[i];
@@ -934,8 +975,8 @@ char const *s_PerfKeyList[] = {
 	"NumLevels"
 };
 
-void ProcessPerfData( IMySQL *pSQL, char const *pTableName, char const *pPerfData )
+void ProcessPerfData( IMySQL *pSQL, time_t fileTime, char const *pTableName, char const *pPerfData )
 {
-	InsertKeyDataIntoTable( pSQL, pTableName, pPerfData, s_PerfKeyList, ARRAYSIZE( s_PerfKeyList) );
+	InsertKeyDataIntoTable( pSQL, fileTime, pTableName, pPerfData, s_PerfKeyList, ARRAYSIZE( s_PerfKeyList) );
 }
 

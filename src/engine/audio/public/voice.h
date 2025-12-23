@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,8 +18,10 @@ Defines the engine's interface to the voice code.
 @{
 */
 
-
-#define VOICE_OUTPUT_SAMPLE_RATE			11025	// Sample rate that we feed to the mixer.
+// Voice_Init will pick a sample rate, it must be within RATE_MAX
+#define VOICE_OUTPUT_SAMPLE_RATE_LOW		11025	// Sample rate that we feed to the mixer.
+#define VOICE_OUTPUT_SAMPLE_RATE_HIGH		22050	// Sample rate that we feed to the mixer.
+#define VOICE_OUTPUT_SAMPLE_RATE_MAX		22050	// Sample rate that we feed to the mixer.
 
 
 //! Returned on error from certain voice functions.
@@ -28,7 +30,27 @@ Defines the engine's interface to the voice code.
 
 
 //! Initialize the voice code.
-bool Voice_Init(const char *pCodec);
+bool Voice_Init( const char *pCodec, int nSampleRate );
+
+//! Inits voice with defaults if it is not initialized normally, e.g. for local mixer use.
+void Voice_ForceInit();
+
+//! Get the default sample rate to use for this codec
+inline int Voice_GetDefaultSampleRate( const char *pCodec ) // Inline for DEDICATED builds
+{
+	// Use legacy lower rate for speex
+	if ( Q_stricmp( pCodec, "vaudio_speex" ) == 0 )
+	{
+		return VOICE_OUTPUT_SAMPLE_RATE_LOW;
+	}
+	else if ( Q_stricmp( pCodec, "steam" ) == 0 )
+	{
+		return 0; // For the steam codec, 0 passed to voice_init means "use optimal steam voice rate"
+	}
+
+	// Use high sample rate by default for other codecs.
+	return VOICE_OUTPUT_SAMPLE_RATE_HIGH;
+}
 
 //! Shutdown the voice code.
 void Voice_Deinit();
@@ -36,6 +58,11 @@ void Voice_Deinit();
 //! Returns true if the client has voice enabled
 bool Voice_Enabled( void );
 
+//! The codec voice was initialized with. Empty string if voice is not initialized.
+const char *Voice_ConfiguredCodec();
+
+//! The sample rate voice was initialized with. -1 if voice is not initialized.
+int Voice_ConfiguredSampleRate();
 
 //! Returns true if the user can hear themself speak.
 bool Voice_GetLoopback();
@@ -64,6 +91,9 @@ bool Voice_RecordStart(
 	//! If this is non-null, the voice manager will use this file for input instead of the mic.
 	const char *pMicInputFile		
 	);
+
+// User wants to stop recording
+void Voice_UserDesiresStop();
 
 //! Stop recording from the mic.
 bool Voice_RecordStop();
@@ -99,6 +129,7 @@ int Voice_GetChannel(int nEntity);
 
 #if !defined( NO_VOICE )
 extern IVoiceTweak g_VoiceTweakAPI;
+extern bool g_bUsingSteamVoice;
 #endif
 
 /*! @} */

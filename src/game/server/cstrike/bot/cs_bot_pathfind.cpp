@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -114,11 +114,11 @@ bool CCSBot::ComputePathPositions( void )
 		else if (to->how == GO_LADDER_UP)		// to get to next area, must go up a ladder
 		{
 			// find our ladder
-			const NavLadderConnectList *list = from->area->GetLadderList( CNavLadder::LADDER_UP );
+			const NavLadderConnectVector *pLadders = from->area->GetLadders( CNavLadder::LADDER_UP );
 			int it;
-			for( it = list->Head(); it != list->InvalidIndex(); it = list->Next(it))
+			for ( it = 0; it < pLadders->Count(); ++it)
 			{
-				CNavLadder *ladder = (*list)[ it ].ladder;
+				CNavLadder *ladder = (*pLadders)[ it ].ladder;
 
 				// can't use "behind" area when ascending...
 				if (ladder->m_topForwardArea == to->area ||
@@ -131,7 +131,7 @@ bool CCSBot::ComputePathPositions( void )
 				}
 			}
 
-			if (it == list->InvalidIndex())
+			if (it == pLadders->Count())
 			{
 				PrintIfWatched( "ERROR: Can't find ladder in path\n" );
 				return false;
@@ -140,11 +140,11 @@ bool CCSBot::ComputePathPositions( void )
 		else if (to->how == GO_LADDER_DOWN)		// to get to next area, must go down a ladder
 		{
 			// find our ladder
-			const NavLadderConnectList *list = from->area->GetLadderList( CNavLadder::LADDER_DOWN );
+			const NavLadderConnectVector *pLadders = from->area->GetLadders( CNavLadder::LADDER_DOWN );
 			int it;
-			for( it = list->Head(); it != list->InvalidIndex(); it = list->Next(it))
+			for ( it = 0; it < pLadders->Count(); ++it)
 			{
-				CNavLadder *ladder = (*list)[ it ].ladder;
+				CNavLadder *ladder = (*pLadders)[ it ].ladder;
 
 				if (ladder->m_bottomArea == to->area)
 				{
@@ -155,7 +155,7 @@ bool CCSBot::ComputePathPositions( void )
 				}
 			}
 
-			if (it == list->InvalidIndex())
+			if (it == pLadders->Count())
 			{
 				PrintIfWatched( "ERROR: Can't find ladder in path\n" );
 				return false;
@@ -665,7 +665,7 @@ bool CCSBot::UpdateLadderMovement( void )
 			break;
 	}
 
-	if (cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() || cv_bot_traceview.GetInt() == 10)
+	if ( ( cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() ) || cv_bot_traceview.GetInt() == 10 )
 	{
 		DrawPath();
 	}
@@ -1126,7 +1126,7 @@ int CCSBot::FindPathPoint( float aheadRange, Vector *point, int *prevIndex )
  */
 void CCSBot::SetPathIndex( int newIndex )
 {
-	m_pathIndex = min( newIndex, m_pathLength-1 );
+	m_pathIndex = MIN( newIndex, m_pathLength-1 );
 	m_areaEnteredTimestamp = gpGlobals->curtime;
 
 	if (m_path[ m_pathIndex ].ladder)
@@ -1321,7 +1321,7 @@ void CCSBot::FeelerReflexAdjustment( Vector *goalPosition )
 	}
 */
 
-	if (cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() || cv_bot_traceview.GetInt() == 10)
+	if ( ( cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() ) || cv_bot_traceview.GetInt() == 10 )
 	{
 		if (leftClear)
 			UTIL_DrawBeamPoints( from, to, 1, 0, 255, 0 );
@@ -1343,7 +1343,7 @@ void CCSBot::FeelerReflexAdjustment( Vector *goalPosition )
 	}
 */
 
-	if (cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() || cv_bot_traceview.GetInt() == 10)
+	if ( ( cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() ) || cv_bot_traceview.GetInt() == 10 )
 	{
 		if (rightClear)
 			UTIL_DrawBeamPoints( from, to, 1, 0, 255, 0 );
@@ -1393,7 +1393,6 @@ bool CCSBot::IsRunning( void ) const
 
 	return BaseClass::IsRunning();
 }
-
 
 //--------------------------------------------------------------------------------------------------------------
 /**
@@ -1673,7 +1672,7 @@ CCSBot::PathResult CCSBot::UpdatePathMovement( bool allowSpeedChange )
 	}
 
 	// draw debug visualization
-	if (cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() || cv_bot_traceview.GetInt() == 10)
+	if ( ( cv_bot_traceview.GetInt() == 1 && IsLocalPlayerWatchingMe() ) || cv_bot_traceview.GetInt() == 10 )
 	{
 		DrawPath();
 
@@ -1810,10 +1809,10 @@ CCSBot::PathResult CCSBot::UpdatePathMovement( bool allowSpeedChange )
 		{
 			if (m_lastNavArea)
 			{
-				m_lastNavArea->DecrementPlayerCount( GetTeamNumber() );
+				m_lastNavArea->DecrementPlayerCount( GetTeamNumber(), entindex() );
 			}
 
-			area->IncrementPlayerCount( GetTeamNumber() );
+			area->IncrementPlayerCount( GetTeamNumber(), entindex() );
 
 			m_lastNavArea = area;
 			if ( area->GetPlace() != UNDEFINED_PLACE )
@@ -1907,7 +1906,7 @@ bool CCSBot::ComputePath( const Vector &goal, RouteType route )
 	{
 		// we can't reach our last known area - find nearest area to us
 		PrintIfWatched( "Last known area is above my head - resetting to nearest area.\n" );
-		m_lastKnownArea = TheNavMesh->GetNearestNavArea( GetAbsOrigin(), false, 500.0f, true );
+		m_lastKnownArea = (CCSNavArea*)TheNavMesh->GetNearestNavArea( GetAbsOrigin(), false, 500.0f, true );
 		if (m_lastKnownArea == NULL)
 		{
 			return false;

@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include <stdlib.h>
 #include <stdio.h>
 #include "UtlBuffer.h"
@@ -5,6 +6,7 @@
 #include "filesystem_tools.h"
 #include "tier1/strtools.h"
 #include "tier0/icommandline.h"
+#include "cmdlib.h"
 
 void Usage( void )
 {
@@ -147,9 +149,13 @@ int main( int argc, char **argv )
 	{
 		Usage();
 	}
-	FileSystem_Init( argv[1], 0, FS_INIT_COMPATIBILITY_MODE, true );
-
+	CmdLib_InitFileSystem( argv[ argc-1 ] );
 	CUtlBuffer srcFileData;
+
+	// Expand the path so that it can run correctly from a shortcut
+	char		source[1024];
+	strcpy (source, ExpandPath(argv[1]));
+
 	LoadFile( argv[1], srcFileData, true );
 
 	float *pSrcImage = NULL;
@@ -169,6 +175,9 @@ int main( int argc, char **argv )
 	WriteSubRect( nSrcWidth, nSrcHeight, pSrcImage, nDstWidth * 3, nDstHeight * 1, nDstWidth, nDstHeight, argv[1], "rt" );
 	WriteSubRect( nSrcWidth, nSrcHeight, pSrcImage, nDstWidth * 3, nDstHeight * 0, nDstWidth, nDstHeight, argv[1], "up" );
 	WriteSubRect( nSrcWidth, nSrcHeight, pSrcImage, nDstWidth * 3, nDstHeight * 2, nDstWidth, nDstHeight, argv[1], "dn" );
+
+	CmdLib_Cleanup();
+	CmdLib_Exit( 1 );
 
 	return 0;
 }

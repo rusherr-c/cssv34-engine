@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,14 +10,14 @@
 #include "BaseVSShader.h"
 
 #if !defined( _X360 )
-#include "shadowmodel.inc"
+#include "shadowmodel_ps20.inc"
+#include "shadowmodel_vs20.inc"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 DEFINE_FALLBACK_SHADER( ShadowModel, ShadowModel_DX9 )
-
 
 
 #if !defined( _X360 ) //not used for anything at time of 360 ship, and we want to avoid storing/loading assembly shaders
@@ -59,7 +59,9 @@ SHADER_FALLBACK
 SHADER_INIT
 {
 	if (params[BASETEXTURE]->IsDefined())
+	{
 		LoadTexture( BASETEXTURE );
+	}
 }
 
 SHADER_DRAW
@@ -75,10 +77,11 @@ SHADER_DRAW
 		int fmt = VERTEX_POSITION | VERTEX_NORMAL;
 		pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
-		shadowmodel_Static_Index vshIndex;
-		pShaderShadow->SetVertexShader( "ShadowModel", vshIndex.GetIndex() );
+		DECLARE_STATIC_VERTEX_SHADER( shadowmodel_vs20 );
+		SET_STATIC_VERTEX_SHADER( shadowmodel_vs20 );
 
-		pShaderShadow->SetPixelShader( "ShadowModel" );
+		DECLARE_STATIC_PIXEL_SHADER( shadowmodel_ps20 );
+		SET_STATIC_PIXEL_SHADER( shadowmodel_ps20 );
 
 		// We need to fog to *white* regardless of overbrighting...
 		FogToWhite();
@@ -102,19 +105,21 @@ SHADER_DRAW
 		// The constant color is the shadow color...
 		SetModulationVertexShaderDynamicState();
 
-		shadowmodel_Dynamic_Index vshIndex;
-		vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
-		vshIndex.SetSKINNING( pShaderAPI->GetCurrentNumBones() > 0 );
-		pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
+		DECLARE_DYNAMIC_VERTEX_SHADER( shadowmodel_vs20 );
+		SET_DYNAMIC_VERTEX_SHADER_COMBO( DOWATERFOG, pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
+		SET_DYNAMIC_VERTEX_SHADER_COMBO( SKINNING, pShaderAPI->GetCurrentNumBones() > 0 );
+		SET_DYNAMIC_VERTEX_SHADER( shadowmodel_vs20 );
+
+		DECLARE_DYNAMIC_PIXEL_SHADER( shadowmodel_ps20 );
+		SET_DYNAMIC_PIXEL_SHADER( shadowmodel_ps20 );
 	}
 	Draw( );
 }
 END_SHADER
 
 
-
-
 #else
+
 //360 version
 
 BEGIN_VS_SHADER_FLAGS( ShadowModel_DX9, "Help for ShadowModel", SHADER_NOT_EDITABLE )

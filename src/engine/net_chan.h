@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: net_chan.h
 //
@@ -198,17 +198,21 @@ public:	// INetChannel interface
 	virtual void	SetMaxRoutablePayloadSize( int nSplitSize );
 	virtual int	GetMaxRoutablePayloadSize();
 
+	virtual int		GetProtocolVersion();
+
 	int			IncrementSplitPacketSequence();
+
 public:
 
-	void		Setup(int sock, netadr_t *adr, const char * name, INetChannelHandler * handler);
+	static bool	IsValidFileForTransfer( const char *pFilename );
+
+	void		Setup(int sock, netadr_t *adr, const char * name, INetChannelHandler * handler, int nProtocolVersion);
 	// Send queue management
 	void		IncrementQueuedPackets();
 	void		DecrementQueuedPackets();
 	bool		HasQueuedPackets() const;
 
 private:
-
 	
 	void	FlowReset( void );
 	void	FlowUpdate( int flow, int addbytes  );
@@ -222,7 +226,7 @@ private:
 	void	AcknowledgeSubChannel(int seqnr, int list );
 
 	bool	CreateFragmentsFromBuffer( bf_write *buffer, int stream );
-	bool	CreateFragmentsFromFile( const char *filename, int stream, unsigned int transferID );
+	bool	CreateFragmentsFromFile( const char *filename, int stream, unsigned int transferID);
 
 	void	CompressFragments();
 	void	UncompressFragments( dataFragments_t *data );
@@ -237,13 +241,20 @@ private:
 	subChannel_s *GetFreeSubChannel(); // NULL == all subchannels in use
 	void	UpdateSubChannels( void );
 	void	SendTCPData( void );
-	
-	
+
 	INetMessage *FindMessage(int type);
+
+	static bool HandleUpload( dataFragments_t *data, INetChannelHandler *MessageHandler );
+
+#ifdef STAGING_ONLY
+public:
+	static bool TestUpload( const char *filename );
+#endif
 
 public:
 
 	bool		m_bProcessingMessages;
+	bool		m_bClearedDuringProcessing;
 	bool		m_bShouldDelete;
 
 	// last send outgoing sequence number
@@ -334,6 +345,9 @@ public:
 	int							m_nMaxRoutablePayloadSize;
 
 	int							m_nSplitPacketSequence;
+	bool						m_bStreamContainsChallenge;  // true if PACKET_FLAG_CHALLENGE was set when receiving packets from the sender
+
+	int							m_nProtocolVersion;		// PROTOCOL_VERSION if we're not playing a demo - otherwise, whatever was in the demo header's networkprotocol if the CNetChan instance was created by a demo player.
 };
 
 

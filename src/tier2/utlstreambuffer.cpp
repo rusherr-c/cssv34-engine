@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -40,9 +40,7 @@ CUtlStreamBuffer::CUtlStreamBuffer( const char *pFileName, const char *pPath, in
 
 	if ( bDelayOpen )
 	{
-		int nFileNameLen = Q_strlen( pFileName );
-		m_pFileName = new char[ nFileNameLen + 1 ];
-		Q_strcpy( m_pFileName, pFileName );
+		m_pFileName = V_strdup( pFileName );
 
 		if ( pPath )
 		{
@@ -65,7 +63,6 @@ CUtlStreamBuffer::CUtlStreamBuffer( const char *pFileName, const char *pPath, in
 		m_hFileHandle = OpenFile( pFileName, pPath );
 		if ( m_hFileHandle == FILESYSTEM_INVALID_HANDLE )
 		{
-			m_Error |= FILE_OPEN_ERROR;
 			return;
 		}
 	}
@@ -97,17 +94,29 @@ void CUtlStreamBuffer::Close()
 			if ( ( m_hFileHandle == FILESYSTEM_INVALID_HANDLE ) && m_pFileName )
 			{
 				m_hFileHandle = OpenFile( m_pFileName, m_pPath );
+				if( m_hFileHandle == FILESYSTEM_INVALID_HANDLE )
+				{
+					Error( "CUtlStreamBuffer::Close() Unable to open file %s!\n", m_pFileName );
+				}
 			}
 			if ( m_hFileHandle != FILESYSTEM_INVALID_HANDLE )
 			{
-				g_pFullFileSystem->Write( Base(), nBytesToWrite, m_hFileHandle );
+				if ( g_pFullFileSystem )
+				{
+					int nBytesWritten = g_pFullFileSystem->Write( Base(), nBytesToWrite, m_hFileHandle );
+					if( nBytesWritten != nBytesToWrite )
+					{
+						Error( "CUtlStreamBuffer::Close() Write %s failed %d != %d.\n", m_pFileName, nBytesWritten, nBytesToWrite );
+					}
+				}
 			}
 		}
 	}
 
 	if ( m_hFileHandle != FILESYSTEM_INVALID_HANDLE )
 	{
-		g_pFullFileSystem->Close( m_hFileHandle );
+		if ( g_pFullFileSystem )
+			g_pFullFileSystem->Close( m_hFileHandle );
 		m_hFileHandle = FILESYSTEM_INVALID_HANDLE;
 	}
 
@@ -149,10 +158,7 @@ void CUtlStreamBuffer::Open( const char *pFileName, const char *pPath, int nFlag
 	m_Flags = nFlags;
 	m_hFileHandle = OpenFile( pFileName, pPath );
 	if ( m_hFileHandle == FILESYSTEM_INVALID_HANDLE )
-	{
-		m_Error |= FILE_OPEN_ERROR;
 		return;
-	}
 
 	if ( IsReadOnly() )
 	{
@@ -233,6 +239,8 @@ bool CUtlStreamBuffer::StreamPutOverflow( int nSize )
 		if ( m_hFileHandle == FILESYSTEM_INVALID_HANDLE )
 		{
 			m_hFileHandle = OpenFile( m_pFileName, m_pPath );
+			if( m_hFileHandle == FILESYSTEM_INVALID_HANDLE )
+				return false;
 		}
 	}
 
@@ -240,7 +248,10 @@ bool CUtlStreamBuffer::StreamPutOverflow( int nSize )
 	{
 		int nBytesWritten = g_pFullFileSystem->Write( Base(), nBytesToWrite, m_hFileHandle );
 		if ( nBytesWritten != nBytesToWrite )
+		{
+			m_Error	|= FILE_WRITE_ERROR;
 			return false;
+		}
 
 		// This is necessary to deal with auto-NULL terminiation
 		m_Memory[0] = *(unsigned char*)PeekPut( -1 );
@@ -365,5 +376,11 @@ FileHandle_t CUtlStreamBuffer::OpenFile( const char *pFileName, const char *pPat
 	openflags[ 0 ] = IsReadOnly() ? 'r' : 'w';
 	openflags[ 1 ] = IsText() && !ContainsCRLF() ? 't' : 'b';
 
-	return g_pFullFileSystem->Open( pFileName, openflags, pPath );
+	FileHandle_t fh = g_pFullFileSystem->Open( pFileName, openflags, pPath );
+	if( fh == FILESYSTEM_INVALID_HANDLE )
+	{
+		m_Error	|= FILE_OPEN_ERROR;
+	}
+
+	return fh;
 }

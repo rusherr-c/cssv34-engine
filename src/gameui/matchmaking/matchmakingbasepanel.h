@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Serves as the base panel for the entire matchmaking UI
 //
@@ -61,8 +61,21 @@ private:
 	void			OnOpenSystemLinkDialog();
 	void			OnOpenPlayerMatchDialog();
 	void			OnOpenRankedMatchDialog();
-	void			OnOpenAchievementsDialog();
-	void			OnOpenLeaderboardDialog( const char *pResourceName );
+    void			OnOpenAchievementsDialog();
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Specific code for CS Achievements Display
+    //=============================================================================
+
+    // $TODO(HPE): Move this to a game-specific location
+    void			OnOpenCSAchievementsDialog();
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+
+    void			OnOpenLeaderboardDialog( const char *pResourceName );
 	void			OnOpenSessionOptionsDialog( const char *pResourceName );
 	void			OnOpenSessionLobbyDialog( const char *pResourceName );
 	void			OnOpenSessionBrowserDialog( const char *pResourceName );

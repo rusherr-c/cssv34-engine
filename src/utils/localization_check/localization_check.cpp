@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: localization_check.cpp : Defines the entry point for the console application.
 //
@@ -28,7 +28,7 @@
 #include <direct.h>
 #include "tier0/dbg.h"
 #include "utldict.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "KeyValues.h"
 #include "cmdlib.h"
 #include "scriplib.h"
@@ -343,7 +343,7 @@ void vprint( int depth, const char *fmt, ... )
 		}
 	}
 
-	::printf( string );
+	::printf( "%s", string );
 	OutputDebugString( string );
 
 	if ( fp )
@@ -379,7 +379,7 @@ void BuildFileList_R( CUtlVector< CUtlSymbol >& files, char const *dir, char con
 	WIN32_FIND_DATA wfd;
 
 	char directory[ 256 ];
-	char filename[ 256 ];
+	char filename[ MAX_PATH ];
 	HANDLE ff;
 
 	sprintf( directory, "%s\\*.*", dir );
@@ -408,7 +408,6 @@ void BuildFileList_R( CUtlVector< CUtlSymbol >& files, char const *dir, char con
 			{
 				if ( !stricmp( &wfd.cFileName[ len - extlen ], extension ) )
 				{
-					char filename[ MAX_PATH ];
 					Q_snprintf( filename, sizeof( filename ), "%s\\%s", dir, wfd.cFileName );
 					_strlwr( filename );
 
@@ -882,18 +881,18 @@ void ParseVCDFilesFromResList( CUtlVector< CUtlSymbol >& vcdsinreslist, char con
 
 				char *pFileList = pStart;
 
-				char token[512];
+				char tokenFile[512];
 
 				while ( 1 )
 				{
-					pFileList = ParseFile( pFileList, token, NULL );
+					pFileList = ParseFile( pFileList, tokenFile, NULL );
 					if ( !pFileList )
 						break;
 
-					if ( strlen( token ) > 0 )
+					if ( strlen( tokenFile ) > 0 )
 					{
 						char szFileName[ 256 ];
-						Q_strncpy( szFileName, token, sizeof( szFileName ) );
+						Q_strncpy( szFileName, tokenFile, sizeof( szFileName ) );
 						_strlwr( szFileName );
 						Q_FixSlashes( szFileName );
 						while ( szFileName[ strlen( szFileName ) - 1 ] == '\n' ||
@@ -911,7 +910,7 @@ void ParseVCDFilesFromResList( CUtlVector< CUtlSymbol >& vcdsinreslist, char con
 						{
 							// Ack
 							//vprint( 1, "File %s not under game directory but in reslist, skipping!!!\n", szFileName );
-							pFileList = ParseFile( pFileList, token, NULL );
+							pFileList = ParseFile( pFileList, tokenFile, NULL );
 							continue;
 						}
 
@@ -1118,18 +1117,18 @@ void ParseUsedSoundsFromSndFile( CUtlRBTree< int, int >& usedsounds, char const 
 
 				char *pFileList = pStart;
 
-				char token[512];
+				char tokenFile[512];
 
 				while ( 1 )
 				{
-					pFileList = ParseFile( pFileList, token, NULL );
+					pFileList = ParseFile( pFileList, tokenFile, NULL );
 					if ( !pFileList )
 						break;
 
-					if ( strlen( token ) > 0 )
+					if ( strlen( tokenFile ) > 0 )
 					{
 						char soundname[ 256 ];
-						Q_strncpy( soundname, token, sizeof( soundname ) );
+						Q_strncpy( soundname, tokenFile, sizeof( soundname ) );
 						_strlwr( soundname );
 
 						++resourcesConsidered;
@@ -1465,7 +1464,7 @@ void CheckUnusedSounds()
 
 							for ( int w = 0; w < internal->NumSoundNames() ; ++w )
 							{
-								char const *wavname = g_pSoundEmitterSystem->GetWaveName( internal->GetSoundNames()[ w ].symbol );
+								wavname = g_pSoundEmitterSystem->GetWaveName( internal->GetSoundNames()[ w ].symbol );
 								logprint( "todo.csv", "\"%s\",\"%s\",\"%s\"\n",
 									keyname, ansi, va( "sound/%s", PSkipSoundChars( wavname ) ) );
 							}
@@ -1525,7 +1524,7 @@ void CheckUnusedSounds()
 
 					for ( int w = 0; w < internal->NumSoundNames() ; ++w )
 					{
-						char const *wavname = g_pSoundEmitterSystem->GetWaveName( internal->GetSoundNames()[ w ].symbol );
+						wavname = g_pSoundEmitterSystem->GetWaveName( internal->GetSoundNames()[ w ].symbol );
 						logprint( "todo.csv", "\"%s\",\"%s\",\"%s\"\n",
 							soundname, ansi, va( "sound/%s", PSkipSoundChars( wavname ) ) );
 					}
@@ -2219,7 +2218,7 @@ static void COM_CreatePath (const char *path)
 	}
 }
 
-void MakeBatchFile( CUtlVector< CUtlSymbol >& wavfiles, char const *fromdir, char const *todir )
+void MakeBatchFile( CUtlVector< CUtlSymbol >& wavfiles, char const *pchFromdir, char const *pchTodir )
 {
 	g_pFullFileSystem->RemoveFile( "copywaves.bat", "GAME" );
 
@@ -2229,7 +2228,7 @@ void MakeBatchFile( CUtlVector< CUtlSymbol >& wavfiles, char const *fromdir, cha
 	BuildWavFileToFullPathLookup( wavfiles, wavtofullpath );
 
 	CUtlVector< CUtlSymbol > files;
-	BuildFileList( files, fromdir, ".wav" );
+	BuildFileList( files, pchFromdir, ".wav" );
 
 	int gamedirskip = Q_strlen( gamedir ) + Q_strlen( "sound//" );
 
@@ -2257,7 +2256,7 @@ void MakeBatchFile( CUtlVector< CUtlSymbol >& wavfiles, char const *fromdir, cha
 		}
 
 		char fullname[ 512 ];
-		Q_snprintf( fullname, sizeof( fullname ), "%s/%s", todir, &g_Analysis.symbols.String( wavfiles[ wavtofullpath[ slot ] ] )[ gamedirskip ] );
+		Q_snprintf( fullname, sizeof( fullname ), "%s/%s", pchTodir, &g_Analysis.symbols.String( wavfiles[ wavtofullpath[ slot ] ] )[ gamedirskip ] );
 		Q_strlower( fullname );
 		Q_FixSlashes( fullname );
 
@@ -2986,13 +2985,13 @@ void LoadImportData( char const *filename, CUtlDict< LookupData_t, int >& lookup
 //   closecaption_test.txt file based on the unicode caption strings
 // Input  : *importfile - 
 //-----------------------------------------------------------------------------
-void ImportCaptions( char const *importfile )
+void ImportCaptions( char const *pchImportfile )
 {
 	CUtlVector< OrderedCaption_t > captionlist;
 	BuildOrderedCaptionList( captionlist );
 
 	CUtlDict< LookupData_t, int >	newCaptions;
-	LoadImportData( importfile, newCaptions );
+	LoadImportData( pchImportfile, newCaptions );
 
 	// Now build a .wav to caption name lookup
 	CUtlDict< CUtlSymbol, int >	wavtosound;
@@ -3311,11 +3310,11 @@ int CLocalizationCheckApp::Main()
 	bool extractenglish = false;
 	bool forceducking = false;
 
-	int i=1;
+	int iArg = 1;
 	int argc = CommandLine()->ParmCount();
-	for ( ; i<argc ; i++)
+	for (; iArg<argc ; iArg++)
 	{
-		char const *pArg = CommandLine()->GetParm( i );
+		char const *pArg = CommandLine()->GetParm( iArg );
 		if ( pArg[ 0 ] == '-' )
 		{
 			switch( pArg[ 1 ] )
@@ -3349,20 +3348,20 @@ int CLocalizationCheckApp::Main()
 				break;
 			case 'w':
 				wavcheck = true;
-				Q_strncpy( sounddir, CommandLine()->GetParm( i + 1 ), sizeof( sounddir ) );
-				i++;
+				Q_strncpy( sounddir, CommandLine()->GetParm( iArg + 1 ), sizeof( sounddir ) );
+				iArg++;
 				break;
 			case 'e':
 				extractphonemes = true;
-				Q_strncpy( sounddir, CommandLine()->GetParm( i + 1 ), sizeof( sounddir ) );
-				i++;
+				Q_strncpy( sounddir, CommandLine()->GetParm( iArg + 1 ), sizeof( sounddir ) );
+				iArg++;
 				break;
 			case 'l':
 				if ( !Q_stricmp( &pArg[1], "loop" ) )
 				{
 					checkforloops = true;
-					Q_strncpy( sounddir, CommandLine()->GetParm( i + 1 ), sizeof( sounddir ) );
-					i++;
+					Q_strncpy( sounddir, CommandLine()->GetParm( iArg + 1 ), sizeof( sounddir ) );
+					iArg++;
 				}
 				else
 				{
@@ -3383,24 +3382,24 @@ int CLocalizationCheckApp::Main()
 			case 'i':
 				{
 					importcaptions = true;
-					Q_strncpy( importfile, CommandLine()->GetParm( i + 1 ), sizeof( importfile ) );
-					i++;
+					Q_strncpy( importfile, CommandLine()->GetParm( iArg + 1 ), sizeof( importfile ) );
+					iArg++;
 				}
 				break;
 			case 'm':
 				{
 					makecopybatch = true;
-					Q_strncpy( fromdir, CommandLine()->GetParm( i + 1 ), sizeof( fromdir ) );
-					Q_strncpy( todir, CommandLine()->GetParm( i + 2 ), sizeof( todir ) );
-					i += 2;
+					Q_strncpy( fromdir, CommandLine()->GetParm( iArg + 1 ), sizeof( fromdir ) );
+					Q_strncpy( todir, CommandLine()->GetParm( iArg + 2 ), sizeof( todir ) );
+					iArg += 2;
 				}
 				break;
 			case 'a':
 				{
 					syncducking = true;
-					Q_strncpy( fromdir, CommandLine()->GetParm( i + 1 ), sizeof( fromdir ) );
-					Q_strncpy( todir, CommandLine()->GetParm( i + 2 ), sizeof( todir ) );
-					i += 2;
+					Q_strncpy( fromdir, CommandLine()->GetParm( iArg + 1 ), sizeof( fromdir ) );
+					Q_strncpy( todir, CommandLine()->GetParm( iArg + 2 ), sizeof( todir ) );
+					iArg += 2;
 				}
 				break;
 			default:
@@ -3410,7 +3409,7 @@ int CLocalizationCheckApp::Main()
 		}
 	}
 
-	if ( argc < 2 || ( i != argc ) )
+	if ( argc < 2 || (iArg != argc ) )
 	{
 		PrintHeader();
 		printusage();

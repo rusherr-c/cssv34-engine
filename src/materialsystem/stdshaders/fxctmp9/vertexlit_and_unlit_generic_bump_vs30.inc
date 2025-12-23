@@ -88,7 +88,7 @@ public:
 		bool bAllStaticVarsDefined = m_bHALFLAMBERT && m_bUSE_WITH_2B && m_bDECAL;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 32 * m_nHALFLAMBERT ) + ( 64 * m_nUSE_WITH_2B ) + ( 128 * m_nDECAL ) + 0;
+		return ( 16 * m_nHALFLAMBERT ) + ( 32 * m_nUSE_WITH_2B ) + ( 64 * m_nDECAL ) + 0;
 	}
 };
 #define shaderStaticTest_vertexlit_and_unlit_generic_bump_vs30 vsh_forgot_to_set_static_HALFLAMBERT + vsh_forgot_to_set_static_USE_WITH_2B + vsh_forgot_to_set_static_DECAL + 0
@@ -178,27 +178,6 @@ public:
 		m_bMORPHING = true;
 #endif
 	}
-private:
-	int m_nCASCADED_SHADOW;
-#ifdef _DEBUG
-	bool m_bCASCADED_SHADOW;
-#endif
-public:
-	void SetCASCADED_SHADOW( int i )
-	{
-		Assert( i >= 0 && i <= 1 );
-		m_nCASCADED_SHADOW = i;
-#ifdef _DEBUG
-		m_bCASCADED_SHADOW = true;
-#endif
-	}
-	void SetCASCADED_SHADOW( bool i )
-	{
-		m_nCASCADED_SHADOW = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bCASCADED_SHADOW = true;
-#endif
-	}
 public:
 	vertexlit_and_unlit_generic_bump_vs30_Dynamic_Index()
 	{
@@ -218,20 +197,16 @@ public:
 		m_bMORPHING = false;
 #endif // _DEBUG
 		m_nMORPHING = 0;
-#ifdef _DEBUG
-		m_bCASCADED_SHADOW = false;
-#endif // _DEBUG
-		m_nCASCADED_SHADOW = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllDynamicVarsDefined = m_bCOMPRESSED_VERTS && m_bDOWATERFOG && m_bSKINNING && m_bMORPHING && m_bCASCADED_SHADOW;
+		bool bAllDynamicVarsDefined = m_bCOMPRESSED_VERTS && m_bDOWATERFOG && m_bSKINNING && m_bMORPHING;
 		Assert( bAllDynamicVarsDefined );
 #endif // _DEBUG
-		return ( 1 * m_nCOMPRESSED_VERTS ) + ( 2 * m_nDOWATERFOG ) + ( 4 * m_nSKINNING ) + ( 8 * m_nMORPHING ) + ( 16 * m_nCASCADED_SHADOW ) + 0;
+		return ( 1 * m_nCOMPRESSED_VERTS ) + ( 2 * m_nDOWATERFOG ) + ( 4 * m_nSKINNING ) + ( 8 * m_nMORPHING ) + 0;
 	}
 };
-#define shaderDynamicTest_vertexlit_and_unlit_generic_bump_vs30 vsh_forgot_to_set_dynamic_COMPRESSED_VERTS + vsh_forgot_to_set_dynamic_DOWATERFOG + vsh_forgot_to_set_dynamic_SKINNING + vsh_forgot_to_set_dynamic_MORPHING + vsh_forgot_to_set_dynamic_CASCADED_SHADOW + 0
+#define shaderDynamicTest_vertexlit_and_unlit_generic_bump_vs30 vsh_forgot_to_set_dynamic_COMPRESSED_VERTS + vsh_forgot_to_set_dynamic_DOWATERFOG + vsh_forgot_to_set_dynamic_SKINNING + vsh_forgot_to_set_dynamic_MORPHING + 0

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -629,7 +629,7 @@ public:
 		{
 			::Serialize( serialized, m_Value );
 		}
-		Q_snprintf( buf, sizeof( buf ), "%s(%s) = %s", base, g_pDataModel->GetString( m_symAttribute ), serialized.Base() ? serialized.Base() : "\"\"" );
+		Q_snprintf( buf, sizeof( buf ), "%s(%s) = %s", base, g_pDataModel->GetString( m_symAttribute ), serialized.Base() ? (const char*)serialized.Base() : "\"\"" );
 		return buf;
 	}
 
@@ -2445,11 +2445,16 @@ const char *CDmAttribute::GetValueAsString( char *pBuffer, size_t nBufLen ) cons
 //-----------------------------------------------------------------------------
 const char* CDmAttribute::GetTypeString() const
 {
-	DmAttributeType_t type = GetType();
-	if ( ( type >= 0 ) && ( type < AT_TYPE_COUNT ) ) 
+	return ::GetTypeString( GetType() );
+}
+
+const char *GetTypeString( DmAttributeType_t type )
+{
+	if ( ( type >= 0 ) && ( type < AT_TYPE_COUNT ) )
 		return s_pAttrInfo[ type ]->AttributeTypeName();
 	return "unknown";
 }
+
 
 void CDmAttribute::SetName( const char *pNewName )
 {
@@ -2889,7 +2894,7 @@ void CDmaArrayBase<T,B>::Purge()
 // Attribute initialization
 //-----------------------------------------------------------------------------
 template< class T, class B >
-void CDmaDecorator<T,B>::Init( CDmElement *pOwner, const char *pAttributeName, int nFlags /*= 0*/ )
+void CDmaDecorator<T,B>::Init( CDmElement *pOwner, const char *pAttributeName, int nFlags = 0 )
 {
 	Assert( pOwner );
 	this->m_pAttribute = pOwner->AddExternalAttribute( pAttributeName, CDmAttributeInfo<CUtlVector<T> >::AttributeType(), &Value() );

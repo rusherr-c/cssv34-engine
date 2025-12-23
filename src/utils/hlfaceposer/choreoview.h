@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -197,6 +197,7 @@ public:
 	void				Save( void );
 	void				SaveAs( void );
 	void				Load( void );
+	void				LoadNext( void );
 	bool				Close( void );
 
 	// Drag/drop from expression thumbnail
@@ -729,6 +730,9 @@ private:
 	bool						m_bShowCloseCaptionData;
 
 	bool				m_bForceProcess;
+
+	// cached version of the local directory when a scene is loaded
+	CUtlVector< CUtlString > m_nextFileList;
 };
 
 extern CChoreoView		*g_pChoreoView;

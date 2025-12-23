@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Implements the tripmine grenade.
 //
@@ -229,6 +229,7 @@ void CTripmineGrenade::BeamBreakThink( void  )
 	SetNextThink( gpGlobals->curtime + 0.05f );
 }
 
+#if 0 // FIXME: OnTakeDamage_Alive() is no longer called now that base grenade derives from CBaseAnimating
 int CTripmineGrenade::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 {
 	if (gpGlobals->curtime < m_flPowerUp && info.GetDamage() < m_iHealth)
@@ -242,6 +243,7 @@ int CTripmineGrenade::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 	}
 	return BaseClass::OnTakeDamage_Alive( info );
 }
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose:

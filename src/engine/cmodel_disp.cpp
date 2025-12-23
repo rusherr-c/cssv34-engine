@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -426,7 +426,7 @@ void CM_PreStab( TraceInfo_t *pTraceInfo, cleaf_t *pLeaf, Vector &vStabDir, int 
 	//
 	for( int i = 0; i < pLeaf->dispCount; i++ )
 	{
-		int dispIndex = pTraceInfo->m_pBSPData->map_dispList[pLeaf->dispListStart + i];
+		dispIndex = pTraceInfo->m_pBSPData->map_dispList[pLeaf->dispListStart + i];
 		pDispTree = &g_pDispCollTrees[dispIndex];
 
 		// Respect trace contents

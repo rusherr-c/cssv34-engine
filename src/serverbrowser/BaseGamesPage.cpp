@@ -322,6 +322,16 @@ void CBaseGamesPage::PerformLayout()
 		m_pRefreshQuick->SetEnabled(false);
 	}
 
+	if ( !steamapicontext->SteamMatchmakingServers() || !steamapicontext->SteamMatchmaking() )
+	{
+		m_pAddCurrentServer->SetVisible( false );
+		m_pRefreshQuick->SetEnabled( false );
+		m_pAddServer->SetEnabled( false );
+		m_pConnect->SetEnabled( false );
+		m_pRefreshAll->SetEnabled( false );
+		m_pAddToFavoritesButton->SetEnabled( false );
+		m_pGameList->SetEmptyListText( "#ServerBrowser_SteamRunning" );
+	}
 
 	Repaint();
 }
@@ -1715,17 +1725,17 @@ void CBaseGamesPage::OnItemSelected()
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::OnKeyCodePressed(vgui::KeyCode code)
 {
-	if ( code == KEY_XBUTTON_A )
+	if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
 	{
 		m_pConnect->DoClick();
 	}
-	else if ( code == KEY_F5 || code == KEY_XBUTTON_X  )
+	else if ( code == KEY_F5 || code == KEY_XBUTTON_X || code == STEAMCONTROLLER_X )
 	{
 		StartRefresh();
 	}
 	else if (  m_pGameList->GetItemCount() > 0 &&
-			   ( code == KEY_XBUTTON_UP || code == KEY_XSTICK1_UP || code == KEY_XSTICK2_UP  || 
-				 code == KEY_XBUTTON_DOWN || code == KEY_XSTICK1_DOWN || code == KEY_XSTICK2_DOWN  ) )
+			   ( code == KEY_XBUTTON_UP || code == KEY_XSTICK1_UP || code == KEY_XSTICK2_UP || code == STEAMCONTROLLER_DPAD_UP || 
+				 code == KEY_XBUTTON_DOWN || code == KEY_XSTICK1_DOWN || code == KEY_XSTICK2_DOWN || code == STEAMCONTROLLER_DPAD_DOWN ) )
 	{
 		m_pGameList->RequestFocus();
 	}

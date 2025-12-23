@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,9 +11,9 @@
 #pragma once
 #endif
 
-#include "Win32Font.h"
+#include "vguifont.h"
 #include "BitmapFont.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: object that holds a set of fonts in specified ranges
@@ -28,13 +28,16 @@ public:
 	void SetName(const char *name);
 
 	// adds a font to the amalgam
-	void AddFont(CWin32Font *font, int lowRange, int highRange);
+	void AddFont( font_t *font, int lowRange, int highRange);
 
 	// returns the font for the given character
-	CWin32Font *GetFontForChar(int ch);
+	font_t *GetFontForChar(int ch);
 
 	// returns the max height of the font set
 	int GetFontHeight();
+
+	// returns height requested
+	int GetFontHeightRequested();
 
 	// returns the maximum width of a character in a font
 	int GetFontMaxWidth();
@@ -44,6 +47,7 @@ public:
 
 	// returns the windows name for the font
 	const char *GetFontName(int i);
+	const char *GetFontFamilyName(int i);
 
 	// returns the number of fonts in this amalgam
 	int GetCount();
@@ -62,7 +66,7 @@ private:
 	{
 		int lowRange;
 		int highRange;
-		CWin32Font *font;
+		font_t *font;
 	};
 
 	CUtlVector<TFontRange> m_Fonts;

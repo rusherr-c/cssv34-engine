@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,10 +16,14 @@
 #include <vgui/IPanel.h>
 #include <vgui/ISystem.h>
 #include <vstdlib/IKeyValuesSystem.h>
+#include <vgui/IVGui.h>
 
-#include <UtlVector.h>
-#include <UtlRBTree.h>
-#include "vgui_border.h"
+#include "tier1/utlvector.h"
+#include "tier1/utlrbtree.h"
+#include "tier1/utldict.h"
+#include "VGUI_Border.h"
+#include "ScalableImageBorder.h"
+#include "ImageBorder.h"
 #include "vgui_internal.h"
 #include "bitmap.h"
 #include "filesystem.h"
@@ -50,20 +54,6 @@ public:
 	// m_pkvColors
 	virtual Color GetColor( const char *colorName, Color defaultColor);
 
-	// Get the number of borders
-	virtual int GetBorderCount() const;
-
-	// Get the border at the given index
-	virtual IBorder *GetBorderAtIndex( int iIndex );
-
-	// Get the number of fonts
-	virtual int GetFontCount() const;
-
-	// Get the font at the given index
-	virtual HFont GetFontAtIndex( int iIndex );	
-
-	// Get color data
-	virtual const KeyValues *GetColorData() const;
 
 	void Shutdown( bool full );
 	void LoadFromFile( VPANEL sizingPanel, const char *filename, const char *tag, KeyValues *inKeys );
@@ -77,6 +67,26 @@ public:
 	void ReloadFontGlyphs();
 
 	VPANEL		GetSizingPanel() { return m_SizingPanel; }
+
+	void SpewFonts();
+
+	bool GetFontRange( const char *fontname, int &nMin, int &nMax );
+	void SetFontRange( const char *fontname, int nMin, int nMax );
+	
+	// Get the number of borders
+	virtual int GetBorderCount() const;
+
+	// Get the border at the given index
+	virtual IBorder *GetBorderAtIndex( int iIndex );
+
+	// Get the number of fonts
+	virtual int GetFontCount() const;
+
+	// Get the font at the given index
+	virtual HFont GetFontAtIndex( int iIndex );
+	
+	// Get color data
+	virtual const KeyValues *GetColorData() const;
 
 private:
 	const char *LookupSchemeSetting(const char *pchSetting);
@@ -92,10 +102,11 @@ private:
 	KeyValues *m_pData;
 	KeyValues *m_pkvBaseSettings;
 	KeyValues *m_pkvColors;
+	int		   m_nColorCount;
 
 	struct SchemeBorder_t
 	{
-		Border *border;
+		IBorder *border;
 		int borderSymbol;
 		bool bSharedBorder;
 	};
@@ -105,18 +116,24 @@ private:
 #pragma pack(1)
 	struct fontalias_t
 	{
-		CUtlSymbol _fontName;
 		CUtlSymbol _trueFontName;
 		unsigned short _font : 15;
 		unsigned short m_bProportional : 1;
 	};
 #pragma pack()
-	friend fontalias_t;
+	friend struct fontalias_t;
 
-	CUtlVector<fontalias_t>	m_FontAliases;
+	CUtlDict< fontalias_t, int >	m_FontAliases;
 	VPANEL m_SizingPanel;
 	int			m_nScreenWide;
 	int			m_nScreenTall;
+
+	struct fontrange_t
+	{
+		int _min;
+		int _max;
+	};
+	CUtlDict< fontrange_t, int >	m_FontRanges;
 };
 
 
@@ -171,6 +188,8 @@ public:
 	int GetProportionalScaledValueEx( CScheme *pScheme, int normalizedValue );
 	int GetProportionalNormalizedValueEx( CScheme *pScheme, int scaledValue );
 
+	void SpewFonts();
+
 private:
 
 	int GetProportionalScaledValue_( int rootWide, int rootTall, int normalizedValue );
@@ -184,7 +203,7 @@ private:
 	static const char *s_pszSearchString;
 	struct CachedBitmapHandle_t
 	{
-		Bitmap *bitmap;
+		Bitmap *pBitmap;
 	};
 	static bool BitmapHandleSearchFunc(const CachedBitmapHandle_t &, const CachedBitmapHandle_t &);
 	CUtlRBTree<CachedBitmapHandle_t, int> m_Bitmaps;
@@ -198,15 +217,15 @@ const char *CSchemeManager::s_pszSearchString = NULL;
 bool CSchemeManager::BitmapHandleSearchFunc(const CachedBitmapHandle_t &lhs, const CachedBitmapHandle_t &rhs)
 {
 	// a NULL bitmap indicates to use the search string instead
-	if (lhs.bitmap && rhs.bitmap)
+	if (lhs.pBitmap && rhs.pBitmap)
 	{
-		return stricmp(lhs.bitmap->GetName(), rhs.bitmap->GetName()) > 0;
+		return stricmp(lhs.pBitmap->GetName(), rhs.pBitmap->GetName()) > 0;
 	}
-	else if (lhs.bitmap)
+	else if (lhs.pBitmap)
 	{
-		return stricmp(lhs.bitmap->GetName(), s_pszSearchString) > 0;
+		return stricmp(lhs.pBitmap->GetName(), s_pszSearchString) > 0;
 	}
-	return stricmp(s_pszSearchString, rhs.bitmap->GetName()) > 0;
+	return stricmp(s_pszSearchString, rhs.pBitmap->GetName()) > 0;
 }
 
 
@@ -219,6 +238,11 @@ namespace vgui
 {
 vgui::ISchemeManager *g_pScheme = &g_Scheme;
 } // namespace vgui
+
+CON_COMMAND( vgui_spew_fonts, "" )
+{
+	g_Scheme.SpewFonts();
+}
  
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -247,7 +271,7 @@ CSchemeManager::~CSchemeManager()
 	{
 		if (m_Bitmaps.IsValidIndex(i))
 		{
-			delete m_Bitmaps[i].bitmap;
+			delete m_Bitmaps[i].pBitmap;
 		}
 	}
 	m_Bitmaps.RemoveAll();
@@ -326,6 +350,7 @@ CScheme::CScheme()
 	m_pData = NULL;
 	m_pkvBaseSettings = NULL;
 	m_pkvColors = NULL;
+	m_nColorCount = 0;
 
 	m_pBaseBorder = NULL;	// default border to use if others not found
 	m_pkvBorders = NULL;
@@ -354,16 +379,12 @@ HScheme  CSchemeManager::LoadSchemeFromFileEx( VPANEL sizingPanel, const char *f
 
 	data->UsesEscapeSequences( true );	// VGUI uses this
 	
-	// look first in skins directory
-	bool result = data->LoadFromFile( g_pFullFileSystem, fileName, "SKIN" );
-	if (!result)
+	// Look first in game directory
+	bool result = data->LoadFromFile( g_pFullFileSystem, fileName, "GAME" );
+	if ( !result )
 	{
-		result = data->LoadFromFile( g_pFullFileSystem, fileName, "GAME" );
-		if ( !result )
-		{
-			// look in any directory
-			result = data->LoadFromFile( g_pFullFileSystem, fileName, NULL );
-		}
+		// look in any directory
+		result = data->LoadFromFile( g_pFullFileSystem, fileName, NULL );
 	}
 
 	if (!result)
@@ -383,6 +404,10 @@ HScheme  CSchemeManager::LoadSchemeFromFileEx( VPANEL sizingPanel, const char *f
 		{
 			data->ProcessResolutionKeys( "_minmode" );
 		}
+	}
+	if( g_pIVgui->GetVRMode() )
+	{
+		data->ProcessResolutionKeys( "_vrmode" );
 	}
 
 	CScheme *newScheme = new CScheme();
@@ -557,6 +582,8 @@ SchemeEntryTranslation_t g_SchemeTranslation[] =
 //-----------------------------------------------------------------------------
 void CScheme::LoadFromFile( VPANEL sizingPanel, const char *inFilename, const char *inTag, KeyValues *inKeys )
 {
+	COM_TimestampedLog( "CScheme::LoadFromFile( %s )", inFilename );
+
 	Q_strncpy(fileName, inFilename, sizeof(fileName) );
 	
 	m_SizingPanel = sizingPanel;
@@ -607,17 +634,124 @@ void CScheme::LoadFromFile( VPANEL sizingPanel, const char *inFilename, const ch
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CScheme::GetFontRange( const char *fontname, int &nMin, int &nMax )
+{
+	int i = m_FontRanges.Find( fontname );
+	if ( i != m_FontRanges.InvalidIndex() )
+	{
+		nMin = m_FontRanges[i]._min;
+		nMax = m_FontRanges[i]._max;
+		return true;
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CScheme::SetFontRange( const char *fontname, int nMin, int nMax )
+{
+	int i = m_FontRanges.Find( fontname );
+	if ( i != m_FontRanges.InvalidIndex() )
+	{
+		m_FontRanges[i]._min = nMin;
+		m_FontRanges[i]._max = nMax;
+		return;
+	}
+
+	// not already in our list
+	int iNew = m_FontRanges.Insert( fontname );
+	
+	m_FontRanges[iNew]._min = nMin;
+	m_FontRanges[iNew]._max = nMax;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: adds all the font specifications to the surface
 //-----------------------------------------------------------------------------
 void CScheme::LoadFonts()
 {
+	bool bValid = false;
+	char language[64];
+	memset( language, 0, sizeof( language ) );
+
+	// get our language
+	if ( IsPC() )
+	{
+		bValid = vgui::g_pSystem->GetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Source\\Language", language, sizeof( language ) - 1 );
+	}
+	else
+	{
+		Q_strncpy( language, XBX_GetLanguageString(), sizeof( language ) );
+		bValid = true;
+	}
+
+	if ( !bValid )
+	{
+		Q_strncpy( language, "english", sizeof( language ) );
+	}
+
 	// add our custom fonts
 	for (KeyValues *kv = m_pData->FindKey("CustomFontFiles", true)->GetFirstSubKey(); kv != NULL; kv = kv->GetNextKey())
 	{
 		const char *fontFile = kv->GetString();
 		if (fontFile && *fontFile)
 		{
-			g_pSurface->AddCustomFontFile( kv->GetName(), fontFile );
+			g_pSurface->AddCustomFontFile( NULL, fontFile );
+		}
+		else
+		{
+			// we have a block to read
+			int nRangeMin = 0, nRangeMax = 0;
+			const char *pszName = NULL;
+			bool bUseRange = false;
+
+			for ( KeyValues *pData = kv->GetFirstSubKey(); pData != NULL; pData = pData->GetNextKey() )
+			{
+				const char *pszKey = pData->GetName();
+				if ( !Q_stricmp( pszKey, "font" ) )
+				{
+					fontFile = pData->GetString();
+				}
+				else if ( !Q_stricmp( pszKey, "name" ) )
+				{
+					pszName = pData->GetString();
+				}
+				else
+				{
+					// we must have a language
+					if ( Q_stricmp( language, pszKey ) == 0 ) // matches the language we're running?
+					{
+						// get the range
+						KeyValues *pRange = pData->FindKey( "range" );
+						if ( pRange )
+						{
+							bUseRange = true;
+							sscanf( pRange->GetString(), "%x %x", &nRangeMin, &nRangeMax );
+
+							if ( nRangeMin > nRangeMax )
+							{
+								int nTemp = nRangeMin;
+								nRangeMin = nRangeMax;
+								nRangeMax = nTemp;
+							}
+						}
+					}
+				}
+			}
+
+			if ( fontFile && *fontFile )
+			{
+				g_pSurface->AddCustomFontFile( pszName, fontFile );
+
+				if ( bUseRange )
+				{
+					SetFontRange( pszName, nRangeMin, nRangeMax );
+				}
+			}
 		}
 	}
 
@@ -645,8 +779,8 @@ void CScheme::LoadFonts()
 			bool proportionalFont = static_cast<bool>( i );
 			const char *fontName = GetMungedFontName( kv->GetName(), tag, proportionalFont ); // first time it adds a normal font, and then a proportional one
 			HFont font = g_pSurface->CreateFont();
-			int j = m_FontAliases.AddToTail();
-			m_FontAliases[j]._fontName = fontName;
+
+			int j = m_FontAliases.Insert( fontName );
 			m_FontAliases[j]._trueFontName = kv->GetName();
 			m_FontAliases[j]._font = font;
 			m_FontAliases[j].m_bProportional = proportionalFont;
@@ -662,6 +796,8 @@ void CScheme::LoadFonts()
 //-----------------------------------------------------------------------------
 void CScheme::ReloadFontGlyphs()
 {
+	COM_TimestampedLog( "ReloadFontGlyphs(): Start" );
+
 	// get our current resolution
 	if ( m_SizingPanel != 0 )
 	{
@@ -677,9 +813,9 @@ void CScheme::ReloadFontGlyphs()
 
 	// add the data to all the fonts
 	KeyValues *fonts = m_pData->FindKey("Fonts", true);
-	for (int i = 0; i < m_FontAliases.Count(); i++)
+	FOR_EACH_DICT_FAST( m_FontAliases, i )
 	{
-		KeyValues *kv = fonts->FindKey(m_FontAliases[i]._trueFontName.String(), true);
+		KeyValues *kv = fonts->FindKey( m_FontAliases[i]._trueFontName.String(), true );
 	
 		// walk through creating adding the first matching glyph set to the font
 		for (KeyValues *fontdata = kv->GetFirstSubKey(); fontdata != NULL; fontdata = fontdata->GetNextKey())
@@ -744,25 +880,30 @@ void CScheme::ReloadFontGlyphs()
 				flags |= ISurface::FONTFLAG_ADDITIVE;
 			}
 
-			int tall = fontdata->GetInt("tall");
-			int blur = fontdata->GetInt("blur");
-			int scanlines = fontdata->GetInt("scanlines");
+			int tall = fontdata->GetInt( "tall" );
+			int blur = fontdata->GetInt( "blur" );
+			int scanlines = fontdata->GetInt( "scanlines" );
+			float scalex = fontdata->GetFloat( "scalex", 1.0f );
+			float scaley = fontdata->GetFloat( "scaley", 1.0f );
 
-			if ( (!fontYResMin && !fontYResMax) && m_FontAliases[i].m_bProportional ) // only grow this font if it doesn't have a resolution filter specified
+			// only grow this font if it doesn't have a resolution filter specified
+			if ( ( !fontYResMin && !fontYResMax ) && m_FontAliases[i].m_bProportional )
 			{
 				tall = g_Scheme.GetProportionalScaledValueEx( this, tall );
 				blur = g_Scheme.GetProportionalScaledValueEx( this, blur );
-				scanlines = g_Scheme.GetProportionalScaledValueEx( this, scanlines );
+				scanlines = g_Scheme.GetProportionalScaledValueEx( this, scanlines ); 
+				scalex = g_Scheme.GetProportionalScaledValueEx( this, scalex * 10000.0f ) * 0.0001f;
+				scaley = g_Scheme.GetProportionalScaledValueEx( this, scaley * 10000.0f ) * 0.0001f;
 			}
 
 			// clip the font size so that fonts can't be too big
-			if (tall > 127)
+			if ( tall > 127 )
 			{
 				tall = 127;
 			}
 
 			// check our minimum font height
-			if (tall < minimumFontHeight)
+			if ( tall < minimumFontHeight )
 			{
 				tall = minimumFontHeight;
 			}
@@ -773,27 +914,48 @@ void CScheme::ReloadFontGlyphs()
 				g_pSurface->SetBitmapFontGlyphSet(
 					m_FontAliases[i]._font,
 					g_pSurface->GetBitmapFontName( fontdata->GetString( "name" ) ), 
-					fontdata->GetFloat( "scalex", 1.0f ),
-					fontdata->GetFloat( "scaley", 1.0f ),
+					scalex,
+					scaley,
 					flags);
 			}
 			else
 			{
-				// add the new set
-				g_pSurface->SetFontGlyphSet(
-					m_FontAliases[i]._font,
-					fontdata->GetString( "name" ), 
-					tall, 
-					fontdata->GetInt( "weight" ), 
-					blur,
-					scanlines,
-					flags);
+				int nRangeMin, nRangeMax;
+
+				if ( GetFontRange( fontdata->GetString( "name" ), nRangeMin, nRangeMax ) )
+				{
+					// add the new set
+					g_pSurface->SetFontGlyphSet(
+						m_FontAliases[i]._font,
+						fontdata->GetString( "name" ), 
+						tall, 
+						fontdata->GetInt( "weight" ), 
+						blur,
+						scanlines,
+						flags,
+						nRangeMin,
+						nRangeMax);					
+				}
+				else
+				{
+					// add the new set
+					g_pSurface->SetFontGlyphSet(
+						m_FontAliases[i]._font,
+						fontdata->GetString( "name" ), 
+						tall, 
+						fontdata->GetInt( "weight" ), 
+						blur,
+						scanlines,
+						flags);
+				}
 			}
 
 			// don't add any more
 			break;
 		}
 	}
+
+	COM_TimestampedLog( "ReloadFontGlyphs(): End" );
 }
 
 //-----------------------------------------------------------------------------
@@ -812,7 +974,31 @@ void CScheme::LoadBorders()
 		{
 			int i = m_BorderList.AddToTail();
 
-			Border *border = new Border();
+			IBorder *border = NULL;
+			const char *pszBorderType = kv->GetString( "bordertype", NULL );
+			if ( pszBorderType && pszBorderType[0] )
+			{
+				if ( !stricmp(pszBorderType,"image") )
+				{
+					border = new ImageBorder();
+				}
+				else if ( !stricmp(pszBorderType,"scalable_image") )
+				{
+					border = new ScalableImageBorder();
+				}
+				else
+				{
+					Assert(0);
+					// Fall back to the base border type. See below.
+					pszBorderType = NULL;
+				}
+			}
+
+			if ( !pszBorderType || !pszBorderType[0] )
+			{
+				border = new Border();
+			}
+
 			border->SetName(kv->GetName());
 			border->ApplySchemeSettings(this, kv);
 
@@ -843,6 +1029,30 @@ void CScheme::LoadBorders()
 	m_pBaseBorder = GetBorder("BaseBorder");
 }
 
+void CScheme::SpewFonts( void )
+{
+	Msg( "Scheme: %s (%s)\n", GetName(), GetFileName() );
+	FOR_EACH_DICT_FAST( m_FontAliases, i )
+	{
+		const fontalias_t& FontAlias = m_FontAliases[ i ];
+		uint32 Font = FontAlias._font;
+		const char *szFontName = g_pSurface->GetFontName( Font );
+		const char *szFontFamilyName = g_pSurface->GetFontFamilyName( Font );
+		const char *szTrueFontName = FontAlias._trueFontName.String();
+		const char *szFontAlias = m_FontAliases.GetElementName( i );
+
+		Msg( "  %2d: HFont:0x%8.8x, %s, %s, font:%s, tall:%d(%d). %s\n", 
+			i, 
+			Font,
+			szTrueFontName ? szTrueFontName : "??", 
+			szFontAlias ? szFontAlias : "??",
+			szFontName ? szFontName : "??", 
+			g_pSurface->GetFontTall( Font ),
+			g_pSurface->GetFontTallRequested( Font ),
+			szFontFamilyName ? szFontFamilyName : "" );
+	}
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: reloads the scheme from the file
 //-----------------------------------------------------------------------------
@@ -858,11 +1068,6 @@ void CSchemeManager::ReloadSchemes()
 	}
 }
 
-const KeyValues * CScheme::GetColorData() const
-{
-	return nullptr;
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: kills all the schemes
 //-----------------------------------------------------------------------------
@@ -873,7 +1078,7 @@ void CScheme::Shutdown( bool full )
 		// delete if it's not shared
 		if (!m_BorderList[i].bSharedBorder)
 		{
-			Border *border = m_BorderList[i].border;
+			IBorder *border = m_BorderList[i].border;
 			delete border;
 		}
 	}
@@ -1005,6 +1210,14 @@ int CSchemeManager::GetProportionalNormalizedValueEx( HScheme scheme, int scaled
 	return GetProportionalNormalizedValueEx( p, scaledValue );
 }
 
+void CSchemeManager::SpewFonts( void )
+{
+	for ( int i = 1; i < m_Schemes.Count(); i++ )
+	{
+		m_Schemes[i]->SpewFonts();
+	}
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
@@ -1025,34 +1238,40 @@ IImage *CSchemeManager::GetImage(const char *imageName, bool hardwareFiltered)
 
 	// set up to search for the bitmap
 	CachedBitmapHandle_t searchBitmap;
-	searchBitmap.bitmap = NULL;
+	searchBitmap.pBitmap = NULL;
 
 	// Prepend 'vgui/'. Resource files try to load images assuming they live in the vgui directory.
 	// Used to do this in Bitmap::Bitmap, moved so that the s_pszSearchString is searching for the
 	// filename with 'vgui/' already added.
-	char szFileName[256];
+	char szFileName[MAX_PATH];
 
-	if ( Q_stristr( imageName, ".pic" ) )
+	//if ( Q_IsAbsolutePath(imageName) )
+	//{
+	//	Q_strncpy( szFileName, imageName, sizeof(szFileName) );
+	//}
+	//else
 	{
-		Q_snprintf( szFileName, sizeof(szFileName), "%s", imageName );
-	}
-	else
-	{
-		Q_snprintf( szFileName, sizeof(szFileName), "vgui/%s", imageName );
+		if ( Q_stristr( imageName, ".pic" ) )
+		{
+			Q_snprintf( szFileName, sizeof(szFileName), "%s", imageName );
+		}
+		else
+		{
+			Q_snprintf( szFileName, sizeof(szFileName), "vgui/%s", imageName );
+		}
 	}
 
 	s_pszSearchString = szFileName;
-
-	int i = m_Bitmaps.Find(searchBitmap);
-	if (m_Bitmaps.IsValidIndex(i))
+	int i = m_Bitmaps.Find( searchBitmap );
+	if (m_Bitmaps.IsValidIndex( i ) )
 	{
-		return m_Bitmaps[i].bitmap;
+		return m_Bitmaps[i].pBitmap;
 	}
 
 	// couldn't find the image, try and load it
-	CachedBitmapHandle_t bitmap = { new Bitmap(szFileName, hardwareFiltered) };
-	m_Bitmaps.Insert(bitmap);
-	return bitmap.bitmap;
+	CachedBitmapHandle_t hBitmap = { new Bitmap( szFileName, hardwareFiltered ) };
+	m_Bitmaps.Insert( hBitmap );
+	return hBitmap.pBitmap;
 }
 
 //-----------------------------------------------------------------------------
@@ -1070,21 +1289,42 @@ HTexture CSchemeManager::GetImageID(const char *imageName, bool hardwareFiltered
 bool CSchemeManager::DeleteImage( const char *pImageName )
 {
 	if ( !pImageName )
+	{
+		// nothing to do
 		return false;
+	}
 
 	// set up to search for the bitmap
 	CachedBitmapHandle_t searchBitmap;
-	searchBitmap.bitmap = NULL;
+	searchBitmap.pBitmap = NULL;
 
-	s_pszSearchString = pImageName;
-	int i = m_Bitmaps.Find( searchBitmap );
-	if ( m_Bitmaps.IsValidIndex( i ) )
+	// Prepend 'vgui/'. Resource files try to load images assuming they live in the vgui directory.
+	// Used to do this in Bitmap::Bitmap, moved so that the s_pszSearchString is searching for the
+	// filename with 'vgui/' already added.
+	char szFileName[256];
+	if ( Q_stristr( pImageName, ".pic" ) )
 	{
-		delete m_Bitmaps[i].bitmap;	
-		m_Bitmaps.RemoveAt( i );
-		return true;
+		Q_snprintf( szFileName, sizeof(szFileName), "%s", pImageName );
 	}
-	return false;
+	else
+	{
+		Q_snprintf( szFileName, sizeof(szFileName), "vgui/%s", pImageName );
+	}
+	s_pszSearchString = szFileName;
+
+	int i = m_Bitmaps.Find( searchBitmap );
+	if ( !m_Bitmaps.IsValidIndex( i ) )
+	{
+		// not found
+		return false;
+	}
+		
+	// no way to know if eviction occured, assume it does
+	m_Bitmaps[i].pBitmap->Evict();
+	delete  m_Bitmaps[i].pBitmap;	
+	m_Bitmaps.RemoveAt( i );
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -1105,16 +1345,33 @@ IBorder *CScheme::GetBorder(const char *borderName)
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: Get the number of borders
+//-----------------------------------------------------------------------------
+int CScheme::GetBorderCount() const
+{
+	return m_BorderList.Count();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Get the border at the given index
+//-----------------------------------------------------------------------------
+IBorder *CScheme::GetBorderAtIndex( int iIndex )
+{
+	if ( !m_BorderList.IsValidIndex( iIndex ) )
+		return NULL;
+
+	return m_BorderList[ iIndex ].border;
+}
+
+//-----------------------------------------------------------------------------
 // Finds a font in the alias list
 //-----------------------------------------------------------------------------
 HFont CScheme::FindFontInAliasList( const char *fontName )
 {
-	// FIXME: Slow!!!
-	for (int i = m_FontAliases.Count(); --i >= 0; )
+	int i = m_FontAliases.Find( fontName );
+	if ( i != m_FontAliases.InvalidIndex() )
 	{
-//		const char *name = m_FontAliases[i]._fontName.String();
-		if (!strnicmp(fontName, m_FontAliases[i]._fontName.String(), FONT_ALIAS_NAME_LENGTH ))
-			return m_FontAliases[i]._font;
+		return m_FontAliases[i]._font;
 	}
 
 	// No dice
@@ -1139,12 +1396,31 @@ char const *CScheme::GetFontName( const HFont& font )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: returns a pointer to an existing font, tall=0 means use default
+// Purpose: returns a pointer to an existing font, proportional=false means use default
 //-----------------------------------------------------------------------------
-HFont CScheme::GetFont(const char *fontName,bool proportional)
+HFont CScheme::GetFont( const char *fontName, bool proportional )
 {
 	// First look in the list of aliases...
 	return FindFontInAliasList( GetMungedFontName( fontName, tag, proportional ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:Get the number of fonts
+//-----------------------------------------------------------------------------
+int CScheme::GetFontCount() const
+{
+	return m_FontAliases.Count();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Get the font at the given index
+//-----------------------------------------------------------------------------
+HFont CScheme::GetFontAtIndex( int iIndex )
+{
+	if ( !m_FontAliases.IsValidIndex( iIndex ) )
+		return INVALID_FONT;
+	
+	return m_FontAliases[ iIndex ]._font;
 }
 
 //-----------------------------------------------------------------------------
@@ -1173,31 +1449,19 @@ Color CScheme::GetColor(const char *colorName, Color defaultColor)
 	if (!pchT)
 		return defaultColor;
 
-	int r, g, b, a = 0;
+	int r = 0, g = 0, b = 0, a = 0;
 	if (sscanf(pchT, "%d %d %d %d", &r, &g, &b, &a) >= 3)
 		return Color(r, g, b, a);
 
 	return defaultColor;
 }
 
-int CScheme::GetBorderCount() const
+//-----------------------------------------------------------------------------
+// Purpose: Get the color at the given index
+//-----------------------------------------------------------------------------
+const KeyValues *CScheme::GetColorData() const
 {
-	return 0;
-}
-
-IBorder * CScheme::GetBorderAtIndex( int iIndex )
-{
-	return nullptr;
-}
-
-int CScheme::GetFontCount() const
-{
-	return 0;
-}
-
-HFont CScheme::GetFontAtIndex( int iIndex )
-{
-	return HFont();
+	return m_pkvColors;
 }
 
 //-----------------------------------------------------------------------------
@@ -1237,7 +1501,7 @@ int CScheme::GetMinimumFontHeightForCurrentLanguage()
 	bool bValid;
 	if ( IsPC() )
 	{
-		bValid = vgui::g_pSystem->GetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Steam\\Language", language, sizeof(language)-1 );
+		bValid = vgui::g_pSystem->GetRegistryString( "HKEY_CURRENT_USER\\Software\\Valve\\Source\\Language", language, sizeof(language)-1 );
 	}
 	else
 	{

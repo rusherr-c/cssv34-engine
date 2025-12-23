@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: loads and unloads main matsystem dll and interface
 //
@@ -37,15 +37,24 @@
 #include "game/client/iclientrendertargets.h"
 #include "tier2/tier2.h"
 #include "LoadScreenUpdate.h"
+#include "client.h"
+#include "sourcevr/isourcevirtualreality.h"
+#if defined( _X360 )
+#include "xbox/xbox_launch.h"
+#endif
+
+#if defined( USE_SDL )
+#include "SDL.h"
+#endif
+
+//X360TEMP
+#include "materialsystem/itexture.h"
 
 extern IFileSystem *g_pFileSystem;
 #ifndef SWDS
 #include "iregistry.h"
 #endif
 
-#ifndef HWND
-#define HWND int
-#endif
 #include "igame.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -69,8 +78,6 @@ void RestoreMaterialSystemObjects( int nChangeFlags );
 extern ConVar mat_colorcorrection;
 extern ConVar sv_allow_color_correction;
 
-static ConVar mat_shadowstate( "mat_shadowstate", "1" );
-static ConVar mat_maxframelatency( "mat_maxframelatency", "1" );
 ConVar mat_debugalttab( "mat_debugalttab", "0", FCVAR_CHEAT );
 
 // Static pointers to renderable textures
@@ -88,6 +95,7 @@ static CTextureReference g_FullFrameFBTexture0;
 static CTextureReference g_FullFrameFBTexture1;
 static CTextureReference g_FullFrameFBTexture2;
 static CTextureReference g_FullFrameDepth;
+static CTextureReference g_ResolvedFullFrameDepth;
 
 void WorldStaticMeshCreate( void );
 void WorldStaticMeshDestroy( void );
@@ -95,8 +103,8 @@ void WorldStaticMeshDestroy( void );
 ConVar	r_norefresh( "r_norefresh","0");
 ConVar	r_decals( "r_decals", "2048" );
 ConVar	mp_decals( "mp_decals","200", FCVAR_ARCHIVE);
-ConVar	r_lightmap( "r_lightmap", "-1", FCVAR_CHEAT);
-ConVar	r_lightstyle( "r_lightstyle","-1", FCVAR_CHEAT);
+ConVar	r_lightmap( "r_lightmap", "-1", FCVAR_CHEAT | FCVAR_MATERIAL_SYSTEM_THREAD );
+ConVar	r_lightstyle( "r_lightstyle","-1", FCVAR_CHEAT | FCVAR_MATERIAL_SYSTEM_THREAD );
 ConVar	r_dynamic( "r_dynamic","1");
 
 ConVar  mat_norendering( "mat_norendering", "0", FCVAR_CHEAT );
@@ -115,15 +123,20 @@ static ConVar mat_monitorgamma_tv_range_min( "mat_monitorgamma_tv_range_min", "1
 static ConVar mat_monitorgamma_tv_range_max( "mat_monitorgamma_tv_range_max", "255" );
 // TV's generally have a 2.5 gamma, so we need to convert our 2.2 frame buffer into a 2.5 frame buffer for display on a TV
 static ConVar mat_monitorgamma_tv_exp( "mat_monitorgamma_tv_exp", "2.5", 0, "", true, 1.0f, true, 4.0f );
+#ifdef _X360
+static ConVar mat_monitorgamma_tv_enabled( "mat_monitorgamma_tv_enabled", "1", FCVAR_ARCHIVE, "" );
+#else
 static ConVar mat_monitorgamma_tv_enabled( "mat_monitorgamma_tv_enabled", "0", FCVAR_ARCHIVE, "" );
+#endif
 				  
 ConVar r_drawbrushmodels( "r_drawbrushmodels", "1", FCVAR_CHEAT, "Render brush models. 0=Off, 1=Normal, 2=Wireframe" );
 
 ConVar r_shadowrendertotexture( "r_shadowrendertotexture", "0" );
 ConVar r_flashlightdepthtexture( "r_flashlightdepthtexture", "1" );
-ConVar r_waterforceexpensive( "r_waterforceexpensive", "1" );
-ConVar r_waterforcereflectentities( "r_waterforcereflectentities", "1" );
-ConVar mat_motion_blur_enabled( "mat_motion_blur_enabled", "1" );
+#ifndef _X360
+ConVar r_waterforceexpensive( "r_waterforceexpensive", "0", FCVAR_ARCHIVE );
+#endif
+ConVar r_waterforcereflectentities( "r_waterforcereflectentities", "0" );
 
 // Note: this is only here so we can ship an update without changing materialsystem.dll.
 // Once we ship materialsystem.dll again, we can get rid of this and make the only one exist in materialsystem.dll.
@@ -134,18 +147,30 @@ ConVar mat_show_ab_hdr( "mat_show_ab_hdr", "0" );
 
 static void NukeModeSwitchSaveGames( void )
 {
-	if( g_pFileSystem->FileExists( "SAVE\\modeswitchsave.sav" ) )
+	if( g_pFileSystem->FileExists( "save\\modeswitchsave.sav" ) )
 	{
-		g_pFileSystem->RemoveFile( "SAVE\\modeswitchsave.sav" );
+		g_pFileSystem->RemoveFile( "save\\modeswitchsave.sav" );
 	}
-	if( g_pFileSystem->FileExists( "SAVE\\modeswitchsave.tga" ) )
+	if( g_pFileSystem->FileExists( "save\\modeswitchsave.tga" ) )
 	{
-		g_pFileSystem->RemoveFile( "SAVE\\modeswitchsave.tga" );
+		g_pFileSystem->RemoveFile( "save\\modeswitchsave.tga" );
 	}
 }
 
 void mat_hdr_level_Callback( IConVar *var, const char *pOldString, float flOldValue )
 {
+	if ( IsX360() )
+	{
+		// can't support, expected to be static
+		return;
+	}
+
+#ifdef CSS_PERF_TEST
+	ConVarRef hdr( var );
+	if ( hdr.GetInt() > 0 )
+		hdr.SetValue( 0 );
+	return;
+#endif
 	// Can do any reloading that is necessary here upon change.
 	// FIXME: should check if there is actually going to be a change here (ie. are we able to run in HDR
 	// given the current map and hardware.
@@ -163,9 +188,15 @@ void mat_hdr_level_Callback( IConVar *var, const char *pOldString, float flOldVa
 #endif
 }
 
-ConVar mat_hdr_level( "mat_hdr_level", "2", 0, 
+#ifdef CSS_PERF_TEST
+ConVar mat_hdr_level( "mat_hdr_level", "0", 0, 
+					 "Set to 0 for no HDR, 1 for LDR+bloom on HDR maps, and 2 for full HDR on HDR maps.",
+					 mat_hdr_level_Callback );
+#else
+ConVar mat_hdr_level( "mat_hdr_level", "2", FCVAR_ARCHIVE, 
 					  "Set to 0 for no HDR, 1 for LDR+bloom on HDR maps, and 2 for full HDR on HDR maps.",
 					  mat_hdr_level_Callback );
+#endif
 
 MaterialSystem_SortInfo_t *materialSortInfoArray = 0;
 static bool s_bConfigLightingChanged = false;
@@ -194,7 +225,7 @@ static const char *s_pRegistryConVars[] =
 {
 	"mat_forceaniso",
 	"mat_picmip",
-	"mat_dxlevel",
+//	"mat_dxlevel",
 	"mat_trilinear",
 	"mat_vsync",
 	"mat_forcehardwaresync",
@@ -202,7 +233,9 @@ static const char *s_pRegistryConVars[] =
 	"mat_reducefillrate",
 	"r_shadowrendertotexture",
 	"r_rootlod",
+#ifndef _X360
 	"r_waterforceexpensive",
+#endif
 	"r_waterforcereflectentities",
 	"mat_antialias",
 	"mat_aaquality",
@@ -215,25 +248,195 @@ static const char *s_pRegistryConVars[] =
 	""
 };
 
+#if defined( OSX )
+	#define MOD_VIDEO_CONFIG_SETTINGS "videoconfig_mac.cfg"
+	#define USE_VIDEOCONFIG_FILE 1
+#elif defined( POSIX )
+	#define MOD_VIDEO_CONFIG_SETTINGS "videoconfig_linux.cfg"
+	#define USE_VIDEOCONFIG_FILE 1
+#elif defined( DX_TO_GL_ABSTRACTION )
+	#define MOD_VIDEO_CONFIG_SETTINGS "videoconfig_gl.cfg"
+	#define USE_VIDEOCONFIG_FILE 1
+#else
+	#define MOD_VIDEO_CONFIG_SETTINGS "videoconfig.cfg"
+	#define USE_VIDEOCONFIG_FILE 0
+#endif
+
+#if USE_VIDEOCONFIG_FILE
+static CThreadMutex g_VideoConfigMutex;
+#endif
+
+static int ReadVideoConfigInt( const char *pName, int nDefault )
+{
+#if USE_VIDEOCONFIG_FILE
+	AUTO_LOCK( g_VideoConfigMutex );
+	
+	// Try to make a keyvalues from the cfg file
+	KeyValues *pVideoConfig = new KeyValues( "videoconfig" );
+	bool bFileExists = pVideoConfig->LoadFromFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD" );
+	
+	// We probably didn't have one on disk yet, just bail.  It'll get created soon.
+	if ( !bFileExists )
+		return nDefault;
+	
+	int nInt = pVideoConfig->GetInt( pName, nDefault );
+	pVideoConfig->deleteThis();
+	return nInt;
+#else
+	return registry->ReadInt( pName, nDefault );
+#endif
+}
+
+static void ReadVideoConfigInt( const char *pName, int *pEntry )
+{
+#if USE_VIDEOCONFIG_FILE
+	AUTO_LOCK( g_VideoConfigMutex );
+	
+	// Try to make a keyvalues from the cfg file
+	KeyValues *pVideoConfig = new KeyValues( "videoconfig" );
+	bool bFileExists = pVideoConfig->LoadFromFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD" );
+	
+	// We probably didn't have one on disk yet, just bail.  It'll get created soon.
+	if ( !bFileExists )
+		return;
+
+	if ( pVideoConfig->GetInt( pName, -1 ) != -1 )
+	{
+		*pEntry = pVideoConfig->GetInt( pName, 0 );
+	}
+
+	pVideoConfig->deleteThis();
+#else
+	if ( registry->ReadInt( pName, -1 ) != -1 )
+	{
+		*pEntry = registry->ReadInt( pName, 0 );
+	}
+#endif
+}
+
+static const char *ReadVideoConfigString( const char *pName, const char *pDefault )
+{
+#if USE_VIDEOCONFIG_FILE
+	AUTO_LOCK( g_VideoConfigMutex );
+	static char szRetString[ 255 ];
+	
+	// Try to make a keyvalues from the cfg file
+	KeyValues *pVideoConfig = new KeyValues( "videoconfig" );
+	bool bFileExists = pVideoConfig->LoadFromFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD" );
+	
+	// We probably didn't have one on disk yet, just bail.  It'll get created soon.
+	if ( !bFileExists )
+		return pDefault;
+	
+	const char *pString = pVideoConfig->GetString( pName, pDefault );
+	Q_strncpy( szRetString, pString, sizeof(szRetString) );
+	pVideoConfig->deleteThis();
+	return szRetString;
+#else
+	return registry->ReadString( pName, pDefault );
+#endif
+}
+
+
+
+static void WriteVideoConfigInt( const char *pName, int nEntry )
+{
+#if USE_VIDEOCONFIG_FILE
+	AUTO_LOCK( g_VideoConfigMutex );
+	
+	// Try to make a keyvalues from the cfg file
+	KeyValues *pVideoConfig = new KeyValues( "videoconfig" );
+	pVideoConfig->LoadFromFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD" );
+	
+	pVideoConfig->SetInt( pName, nEntry );
+	
+	pVideoConfig->SaveToFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD", false, false, true );
+	pVideoConfig->deleteThis();
+#else
+	registry->WriteInt( pName, nEntry );
+#endif
+}
+
+
+static void WriteVideoConfigString( const char *pName, const char *pString )
+{
+#if USE_VIDEOCONFIG_FILE
+	AUTO_LOCK( g_VideoConfigMutex );
+
+	// Try to make a keyvalues from the cfg file
+	KeyValues *pVideoConfig = new KeyValues( "videoconfig" );
+	pVideoConfig->LoadFromFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD" );
+	
+	pVideoConfig->SetString( pName, pString );
+	
+	pVideoConfig->SaveToFile( g_pFullFileSystem, MOD_VIDEO_CONFIG_SETTINGS, "MOD", false, false, true );
+	pVideoConfig->deleteThis();
+#else
+	registry->WriteString( pName, pString );
+#endif
+}
+
+//-----------------------------------------------------------------------------
+// Scan for video config convars which are overridden on the cmd line, used
+// for development and automated timedemo regression testing.
+// (Unfortunately, convars aren't set early enough during init from the cmd line 
+// for the usual machinery to work here.)
+//-----------------------------------------------------------------------------
+static bool s_bVideoConfigOverriddenFromCmdLine;
+
+template<typename T>
+static T OverrideVideoConfigFromCommandLine( const char *pCVarName, T curVal )
+{
+	char szOption[256];
+	V_snprintf( szOption, sizeof( szOption ), "+%s", pCVarName );
+	if ( CommandLine()->CheckParm( szOption ) )
+	{
+		T newVal = CommandLine()->ParmValue( szOption, curVal );
+		Warning( "Video configuration ignoring %s due to command line override\n", pCVarName );
+		s_bVideoConfigOverriddenFromCmdLine = true;
+		return newVal;
+	}
+	return curVal;
+}
+
 //-----------------------------------------------------------------------------
 // Reads convars from the registry
 //-----------------------------------------------------------------------------
 static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &config )
 {
 #ifndef SWDS
+	if ( IsX360() )
+		return;
 
-#define READ_VIDCFG_ENTRY(name,entry) \
-	if( registry->ReadInt( name, -1 ) != -1 ) \
-	{ \
-		entry = registry->ReadInt( name, 0 ); \
-	} \
+	ReadVideoConfigInt( "ScreenWidth", &config.m_VideoMode.m_Width );
+	ReadVideoConfigInt( "ScreenHeight", &config.m_VideoMode.m_Height );
+	config.SetFlag( MATSYS_VIDCFG_FLAGS_WINDOWED, ReadVideoConfigInt( "ScreenWindowed", 0 ) != 0 );
+#if defined( USE_SDL ) && !defined( SWDS )
+	// Read the ScreenDisplayIndex and set sdl_displayindex if it's there.
+	ConVarRef conVar( "sdl_displayindex" );
+	if ( conVar.IsValid() )
+	{
+		int displayIndex = 0;
 
-	READ_VIDCFG_ENTRY( "ScreenWidth", config.m_VideoMode.m_Width );
-	READ_VIDCFG_ENTRY( "ScreenHeight", config.m_VideoMode.m_Height );
-	config.SetFlag( MATSYS_VIDCFG_FLAGS_WINDOWED, registry->ReadInt( "ScreenWindowed", 0 ) != 0 );
+		ReadVideoConfigInt( "ScreenDisplayIndex", &displayIndex );
+		conVar.SetValue( displayIndex );
+		displayIndex = conVar.GetInt();
+
+		// Make sure the width / height isn't too large for this display.
+		SDL_Rect rect;
+		if ( !SDL_GetDisplayBounds( displayIndex, &rect ) )
+		{
+			if ( ( config.m_VideoMode.m_Width > rect.w ) || ( config.m_VideoMode.m_Height > rect.h ) )
+			{
+				config.m_VideoMode.m_Width = rect.w;
+				config.m_VideoMode.m_Height = rect.h;
+			}
+		}
+	}
+#endif // USE_SDL && !SWDS
 
 	// Special case...
-	const char *szMonitorGamma = registry->ReadString( "ScreenMonitorGamma", "2.2" );
+	const char *szMonitorGamma = ReadVideoConfigString( "ScreenMonitorGamma", "2.2" );
 	if ( szMonitorGamma && strlen(szMonitorGamma) > 0 )
 	{
 		float flMonitorGamma = atof( szMonitorGamma );
@@ -242,15 +445,20 @@ static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &confi
 		{
 			flMonitorGamma = 2.2f;
 		}
+		
+		flMonitorGamma = OverrideVideoConfigFromCommandLine( "mat_monitorgamma", flMonitorGamma );
+		
 		mat_monitorgamma.SetValue( flMonitorGamma );
 		config.m_fMonitorGamma = mat_monitorgamma.GetFloat();
 	}
 
 	for ( int i = 0; s_pRegistryConVars[i][0]; ++i )
 	{
-		int nValue = registry->ReadInt( s_pRegistryConVars[i], 0x80000000 );
+		int nValue = ReadVideoConfigInt( s_pRegistryConVars[i], 0x80000000 );
 		if ( nValue == 0x80000000 )
 			continue;
+		
+		nValue = OverrideVideoConfigFromCommandLine( s_pRegistryConVars[i], nValue );
 
 		ConVarRef conVar( s_pRegistryConVars[i] );
 		if ( conVar.IsValid() )
@@ -259,9 +467,11 @@ static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &confi
 		}
 	}
 
-	int nValue = registry->ReadInt( "DXLevel_V1", -1 );
+	int nValue = ReadVideoConfigInt( "DXLevel_V1", -1 );
 	if ( nValue != -1 )
 	{
+		nValue = OverrideVideoConfigFromCommandLine( "mat_dxlevel", nValue );
+
 		ConVarRef conVar( "mat_dxlevel" );
 		if ( conVar.IsValid() )
 		{
@@ -269,30 +479,46 @@ static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &confi
 		}
 	}
 
-	nValue = registry->ReadInt( "MotionBlur", -1 );
+	nValue = ReadVideoConfigInt( "MotionBlur", -1 );
 	if ( nValue != -1 )
 	{
+		nValue = OverrideVideoConfigFromCommandLine( "mat_motion_blur_enabled", nValue );
+
 		ConVarRef conVar( "mat_motion_blur_enabled" );
 		if ( conVar.IsValid() )
 		{
 			conVar.SetValue( nValue );
-			config.m_bMotionBlur = registry->ReadInt( "MotionBlur", 0 ) != 0;
+			config.m_bMotionBlur = ReadVideoConfigInt( "MotionBlur", 0 ) != 0;
 		}
 	}
 
-	nValue = registry->ReadInt( "ShadowDepthTexture", -1 );
+	nValue = ReadVideoConfigInt( "ShadowDepthTexture", -1 );
 	if ( nValue != -1 )
 	{
+		nValue = OverrideVideoConfigFromCommandLine( "r_flashlightdepthtexture", nValue );
+
 		ConVarRef conVar( "r_flashlightdepthtexture" );
 		if ( conVar.IsValid() )
 		{
 			conVar.SetValue( nValue );
-			config.m_bShadowDepthTexture = registry->ReadInt( "ShadowDepthTexture", 0 ) != 0;
+			config.m_bShadowDepthTexture = ReadVideoConfigInt( "ShadowDepthTexture", 0 ) != 0;
 		}
 	}
-	
-#undef READ_VIDCFG_ENTRY
-#endif
+
+	nValue = ReadVideoConfigInt( "VRModeAdapter", -1 );
+	if ( nValue != -1 )
+	{
+		nValue = OverrideVideoConfigFromCommandLine( "mat_vrmode_adapter", nValue );
+
+		ConVarRef conVar( "mat_vrmode_adapter" );
+		if ( conVar.IsValid() )
+		{
+			conVar.SetValue( nValue );
+			config.m_nVRModeAdapter = ReadVideoConfigInt( "VRModeAdapter", -1 );
+		}
+	}
+
+#endif	
 }
 
 //-----------------------------------------------------------------------------
@@ -301,20 +527,28 @@ static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &confi
 static void WriteMaterialSystemConfigToRegistry( const MaterialSystem_Config_t &config )
 {
 #ifndef SWDS
+	if ( IsX360() )
+		return;
 
-#define WRITE_VIDCFG_ENTRY(name,entry) \
-	registry->WriteInt( name, entry )
-
-	WRITE_VIDCFG_ENTRY( "ScreenWidth", config.m_VideoMode.m_Width );
-	WRITE_VIDCFG_ENTRY( "ScreenHeight", config.m_VideoMode.m_Height );
-	WRITE_VIDCFG_ENTRY( "ScreenWindowed", config.Windowed() );
-	WRITE_VIDCFG_ENTRY( "ScreenMSAA", config.m_nAASamples );
-	WRITE_VIDCFG_ENTRY( "ScreenMSAAQuality", config.m_nAAQuality );
-	WRITE_VIDCFG_ENTRY( "MotionBlur", config.m_bMotionBlur ? 1 : 0 );
-	WRITE_VIDCFG_ENTRY( "ShadowDepthTexture", config.m_bShadowDepthTexture ? 1 : 0 );
+#if defined( USE_SDL ) && !defined( SWDS )
+	// Save sdl_displayindex out to ScreenDisplayIndex.
+	ConVarRef conVar( "sdl_displayindex" );
+	if ( conVar.IsValid() && !UseVR() )
+	{
+		WriteVideoConfigInt( "ScreenDisplayIndex", conVar.GetInt() );
+	}
+#endif // USE_SDL && !SWDS
+	WriteVideoConfigInt( "ScreenWidth", config.m_VideoMode.m_Width );
+	WriteVideoConfigInt( "ScreenHeight", config.m_VideoMode.m_Height );
+	WriteVideoConfigInt( "ScreenWindowed", config.Windowed() );
+	WriteVideoConfigInt( "ScreenMSAA", config.m_nAASamples );
+	WriteVideoConfigInt( "ScreenMSAAQuality", config.m_nAAQuality );
+	WriteVideoConfigInt( "MotionBlur", config.m_bMotionBlur ? 1 : 0 );
+	WriteVideoConfigInt( "ShadowDepthTexture", config.m_bShadowDepthTexture ? 1 : 0 );
+	WriteVideoConfigInt( "VRModeAdapter", config.m_nVRModeAdapter );
 
 	// Registry only stores ints, so divide/multiply by 100 when reading/writing.
-	registry->WriteString( "ScreenMonitorGamma", mat_monitorgamma.GetString() );
+	WriteVideoConfigString( "ScreenMonitorGamma", mat_monitorgamma.GetString() );
 
 	for ( int i = 0; s_pRegistryConVars[i][0]; ++i )
 	{
@@ -322,10 +556,8 @@ static void WriteMaterialSystemConfigToRegistry( const MaterialSystem_Config_t &
 		if ( !conVar.IsValid() )
 			continue;
 
-		registry->WriteInt( s_pRegistryConVars[i], conVar.GetInt() );
+		WriteVideoConfigInt( s_pRegistryConVars[i], conVar.GetInt() );
 	}
-
-#undef WRITE_VIDCFG_ENTRY
 #endif
 }
 
@@ -334,6 +566,13 @@ static void WriteMaterialSystemConfigToRegistry( const MaterialSystem_Config_t &
 //-----------------------------------------------------------------------------
 static void OverrideMaterialSystemConfigFromCommandLine( MaterialSystem_Config_t &config )
 {
+	if ( IsX360() )
+	{
+		// these overrides cannot be supported
+		// the console configuration is explicit
+		return;
+	}
+
 	if ( CommandLine()->FindParm( "-dxlevel" ) )
 	{
 		config.dxSupportLevel = CommandLine()->ParmValue( "-dxlevel", config.dxSupportLevel );
@@ -378,19 +617,52 @@ static void OverrideMaterialSystemConfigFromCommandLine( MaterialSystem_Config_t
 		config.m_VideoMode.m_Height = CommandLine()->ParmValue( "-h", config.m_VideoMode.m_Height );
 	}
 
+#if defined( USE_SDL ) && !defined( SWDS )
+	// If -displayindex was specified on the command line, then set sdl_displayindex.
+	if ( CommandLine()->FindParm( "-displayindex" ) )
+	{
+		ConVarRef conVar( "sdl_displayindex" );
+
+		if ( conVar.IsValid() )
+		{
+			int displayIndex = CommandLine()->ParmValue( "-displayindex", conVar.GetInt() );
+
+			conVar.SetValue( displayIndex );
+			displayIndex = conVar.GetInt();
+
+			// Make sure the width / height isn't too large for this display.
+			SDL_Rect rect;
+			if ( !SDL_GetDisplayBounds( displayIndex, &rect ) )
+			{
+				if ( ( config.m_VideoMode.m_Width > rect.w ) || ( config.m_VideoMode.m_Height > rect.h ) )
+				{
+					config.m_VideoMode.m_Width = rect.w;
+					config.m_VideoMode.m_Height = rect.h;
+				}
+			}
+		}
+	}
+#endif // USE_SDL && !SWDS
+
 	if ( CommandLine()->FindParm( "-resizing" ) )
 	{
 		config.SetFlag( MATSYS_VIDCFG_FLAGS_RESIZING, CommandLine()->CheckParm( "-resizing" ) ? true : false );
 	}
-
+#ifndef CSS_PERF_TEST
 	if ( CommandLine()->FindParm( "-mat_vsync" ) )
 	{
 		int vsync = CommandLine()->ParmValue( "-mat_vsync", 1 );
 		config.SetFlag( MATSYS_VIDCFG_FLAGS_NO_WAIT_FOR_VSYNC, vsync == 0 );
 	}
-
+#endif
 	config.m_nAASamples = CommandLine()->ParmValue( "-mat_antialias", config.m_nAASamples );
 	config.m_nAAQuality = CommandLine()->ParmValue( "-mat_aaquality", config.m_nAAQuality );
+
+	// Clamp the requested dimensions to the display resolution
+	MaterialVideoMode_t videoMode;
+	materials->GetDisplayMode( videoMode );
+	config.m_VideoMode.m_Width = MIN( videoMode.m_Width, config.m_VideoMode.m_Width );
+	config.m_VideoMode.m_Height = MIN( videoMode.m_Height, config.m_VideoMode.m_Height );
 
 	// safe mode
 	if ( CommandLine()->FindParm( "-safe" ) )
@@ -417,7 +689,8 @@ void OverrideMaterialSystemConfig( MaterialSystem_Config_t &config )
 	{
 		const char * gameName = COM_GetModDirectory();
 		if ( !V_stricmp( gameName, "portal" ) ||
-			 !V_stricmp( gameName, "tf" ) )
+			 !V_stricmp( gameName, "tf" ) ||
+			 !V_stricmp( gameName, "tf_beta" ) )
 		{
 			mat_supportflashlight.SetValue( false );
 		}
@@ -434,6 +707,14 @@ void OverrideMaterialSystemConfig( MaterialSystem_Config_t &config )
 	{
 		s_bConfigLightingChanged = true;
 	}
+
+	// if VRModeAdapter is set, don't let things come up full screen
+	// They will be on the HMD display and that's BAD.
+	if( config.m_nVRModeAdapter != -1 )
+	{
+		WriteVideoConfigInt( "ScreenWindowed", 1 );
+		config.SetFlag( MATSYS_VIDCFG_FLAGS_WINDOWED, true );
+	}
 }	
 
 
@@ -448,7 +729,7 @@ void HandleServerAllowColorCorrection()
 #endif
 }
 
-// auto config version to store in the rgeistry so we can force reconfigs if needed
+// auto config version to store in the registry so we can force reconfigs if needed
 #define AUTOCONFIG_VERSION 1 
 
 //-----------------------------------------------------------------------------
@@ -473,16 +754,16 @@ void InitMaterialSystemConfig( bool bInEditMode )
 	materials->GetDisplayAdapterInfo( materials->GetCurrentAdapter(), driverInfo );
 
 	// see if the user has changed video cards or dx levels
-	uint currentVendorID = registry->ReadInt( "VendorID", -1 );
-	uint currentDeviceID = registry->ReadInt( "DeviceID", -1 );
+	uint currentVendorID = ReadVideoConfigInt( "VendorID", -1 );
+	uint currentDeviceID = ReadVideoConfigInt( "DeviceID", -1 );
 
-	uint autoConfigVersion = registry->ReadInt( "AutoConfigVersion", -1 );
+	uint autoConfigVersion = ReadVideoConfigInt( "AutoConfigVersion", -1 );
 
 	if ( autoConfigVersion != AUTOCONFIG_VERSION )
 	{
 		uint max_dxlevel, recommended_dxlevel;
 		materials->GetDXLevelDefaults( max_dxlevel, recommended_dxlevel );
-		uint currentDXLevel = registry->ReadInt( "DXLevel_V1", -1 );
+		uint currentDXLevel = ReadVideoConfigInt( "DXLevel_V1", -1 );
 		if ((max_dxlevel != recommended_dxlevel) && (currentDXLevel != recommended_dxlevel))
 		{
 			ConVarRef conVar( "mat_dxlevel" );
@@ -492,7 +773,7 @@ void InitMaterialSystemConfig( bool bInEditMode )
 			}
 		}
 		// Update the autoconfig version.
-		registry->WriteInt( "AutoConfigVersion", AUTOCONFIG_VERSION );
+		WriteVideoConfigInt( "AutoConfigVersion", AUTOCONFIG_VERSION );
 	}
 	
 	if ( driverInfo.m_VendorID == currentVendorID && 
@@ -507,9 +788,12 @@ void InitMaterialSystemConfig( bool bInEditMode )
 
 	OverrideMaterialSystemConfigFromCommandLine( config );
 	OverrideMaterialSystemConfig( config );
-	
-	// Don't smack registry if dxlevel is overridden
-	if ( !CommandLine()->FindParm( "-dxlevel" ) )
+
+	// Force the convars to update -- need this due to threading
+	g_pCVar->ProcessQueuedMaterialThreadConVarSets();
+
+	// Don't smack registry if dxlevel is overridden, or if the video config was overridden from the command line.
+	if ( !CommandLine()->FindParm( "-dxlevel" ) && !s_bVideoConfigOverriddenFromCmdLine )
 	{
 		WriteMaterialSystemConfigToRegistry( *g_pMaterialSystemConfig );
 	}
@@ -518,9 +802,9 @@ void InitMaterialSystemConfig( bool bInEditMode )
 
 #if !defined(SWDS)
 	// write out the current vendor has been seen & registered
-	registry->WriteInt( "VendorID", driverInfo.m_VendorID );
-	registry->WriteInt( "DeviceID", driverInfo.m_DeviceID );
-	registry->WriteInt( "DXLevel_V1", g_pMaterialSystemConfig->dxSupportLevel );
+	WriteVideoConfigInt( "VendorID", driverInfo.m_VendorID );
+	WriteVideoConfigInt( "DeviceID", driverInfo.m_DeviceID );
+	WriteVideoConfigInt( "DXLevel_V1", g_pMaterialSystemConfig->dxSupportLevel );
 #endif
 }
 
@@ -541,6 +825,7 @@ void UpdateMaterialSystemConfig( void )
 	{
 		s_bConfigLightingChanged = true;
 	}
+
 }
 
 
@@ -585,7 +870,9 @@ void GetMaterialSystemConfigForBenchmarkUpload(KeyValues *dataToUpload)
 	dataToUpload->SetInt( "ReduceFillRate", (g_pMaterialSystemConfig->m_Flags & MATSYS_VIDCFG_FLAGS_REDUCE_FILLRATE) ? 1 : 0 );
 	dataToUpload->SetInt( "RenderToTextureShadows", r_shadowrendertotexture.GetInt() ? 1 : 0 );
 	dataToUpload->SetInt( "FlashlightDepthTexture", r_flashlightdepthtexture.GetInt() ? 1 : 0 );
+#ifndef _X360
 	dataToUpload->SetInt( "RealtimeWaterReflection", r_waterforceexpensive.GetInt() ? 1 : 0 );
+#endif
 	dataToUpload->SetInt( "WaterReflectEntities", r_waterforcereflectentities.GetInt() ? 1 : 0 );
 #endif
 }
@@ -605,7 +892,6 @@ void PrintMaterialSystemConfig( const MaterialSystem_Config_t &config )
 	Warning( "dxSupportLevel: %d\n", config.dxSupportLevel );
 	Warning( "monitorGamma: %f\n", config.m_fMonitorGamma );
 	Warning( "MATSYS_VIDCFG_FLAGS_WINDOWED: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_WINDOWED ) ? "true" : "false" );
-	Warning( "MATSYS_VIDCFG_FLAGS_NOBORDER: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_NOBORDERWINDOW ) ? "true" : "false" );
 	Warning( "MATSYS_VIDCFG_FLAGS_FORCE_TRILINEAR: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_FORCE_TRILINEAR ) ? "true" : "false" );
 	Warning( "MATSYS_VIDCFG_FLAGS_FORCE_HWSYNC: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_FORCE_HWSYNC ) ? "true" : "false" );
 	Warning( "MATSYS_VIDCFG_FLAGS_DISABLE_SPECULAR: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_DISABLE_SPECULAR ) ? "true" : "false" );
@@ -615,7 +901,9 @@ void PrintMaterialSystemConfig( const MaterialSystem_Config_t &config )
 	Warning( "r_shadowrendertotexture: %s\n", r_shadowrendertotexture.GetInt() ? "true" : "false" );
 	Warning( "motionblur: %s\n", config.m_bMotionBlur ? "true" : "false" );
 	Warning( "shadowdepthtexture: %s\n", config.m_bShadowDepthTexture ? "true" : "false" );
+#ifndef _X360
 	Warning( "r_waterforceexpensive: %s\n", r_waterforceexpensive.GetInt() ? "true" : "false" );
+#endif
 	Warning( "r_waterforcereflectentities: %s\n", r_waterforcereflectentities.GetInt() ? "true" : "false" );
 }
 
@@ -625,28 +913,49 @@ CON_COMMAND( mat_configcurrent, "show the current video control panel config for
 	PrintMaterialSystemConfig( config );
 }
 
-#if !defined(SWDS)
+#if !defined(SWDS) && !defined( _X360 )
 CON_COMMAND( mat_setvideomode, "sets the width, height, windowed state of the material system" )
 {
-	if ( args.ArgC() < 4 )
-	{
-		ConMsg ( "usage: width, height, windowed\n" );
+	if ( args.ArgC() != 4 )
 		return;
-	}
 
 	int nWidth = Q_atoi( args[1] );
 	int nHeight = Q_atoi( args[2] );
 	bool bWindowed = Q_atoi( args[3] ) > 0 ? true : false;
-	bool isNoBorder = videomode->IsNoborderWindowMode();
 
-	if (args.ArgC() >= 5)
-	{
-		isNoBorder = Q_atoi(args[4]) > 0 ? true : false;
-	}
-
-	videomode->SetMode( nWidth, nHeight, bWindowed, isNoBorder );
+	videomode->SetMode( nWidth, nHeight, bWindowed );
 }
 #endif
+
+CON_COMMAND( mat_enable_vrmode, "Switches the material system to VR mode (after restart)" )
+{
+	if( args.ArgC() != 2 )
+		return;
+
+	if( !g_pSourceVR )
+		return;
+
+	ConVarRef mat_vrmode_adapter( "mat_vrmode_adapter" );
+	bool bVRMode = Q_atoi( args[1] ) != 0;
+	if( bVRMode )
+	{
+#if defined( _WIN32 )
+		int32 nVRModeAdapter = g_pSourceVR->GetVRModeAdapter();
+		if( nVRModeAdapter == -1 )
+		{
+			Warning( "Unable to get VRModeAdapter from OpenVR. VR mode will not be enabled. Try restarting and then enabling VR again.\n" );
+		}
+		mat_vrmode_adapter.SetValue( nVRModeAdapter );
+#else
+		mat_vrmode_adapter.SetValue( 0 ); // This convar isn't actually used on other platforms so just use 0 to indicate that it's set
+#endif
+	}
+	else
+	{
+		mat_vrmode_adapter.SetValue( -1 );
+	}
+}
+
 
 CON_COMMAND( mat_savechanges, "saves current video configuration to the registry" )
 {
@@ -661,6 +970,7 @@ CON_COMMAND( mat_savechanges, "saves current video configuration to the registry
 	}
 }
 
+#ifdef _DEBUG
 //-----------------------------------------------------------------------------
 // A console command to debug materials
 //-----------------------------------------------------------------------------
@@ -688,9 +998,13 @@ CON_COMMAND_F( mat_suppress, "Supress a material from drawing", FCVAR_CHEAT )
 
 	materials->ToggleSuppressMaterial( args[1] );
 }
+#endif // _DEBUG
 
 static ITexture *CreatePowerOfTwoFBTexture( void )
 {
+	if ( IsX360() )
+		return NULL;
+
 	return materials->CreateNamedRenderTargetTextureEx2( 
 		"_rt_PowerOfTwoFB",
 		1024, 1024, RT_SIZE_DEFAULT,
@@ -784,11 +1098,15 @@ static ITexture *CreateFullFrameFBTexture( int textureIndex, int iExtraFlags = 0
 	}
 	else
 	{
-		Q_strcpy( textureName, "_rt_FullFrameFB" );
+		V_strcpy_safe( textureName, "_rt_FullFrameFB" );
 	}
 
 	int rtFlags = iExtraFlags | CREATERENDERTARGETFLAGS_HDR;
-	
+	if ( IsX360() )
+	{
+		// just make the system memory texture only
+		rtFlags |= CREATERENDERTARGETFLAGS_NOEDRAM;
+	}
 	return materials->CreateNamedRenderTargetTextureEx2(
 		textureName,
 		1, 1, RT_SIZE_FULL_FRAME_BUFFER, materials->GetBackBufferFormat(), 
@@ -799,9 +1117,35 @@ static ITexture *CreateFullFrameFBTexture( int textureIndex, int iExtraFlags = 0
 
 static ITexture *CreateFullFrameDepthTexture( void )
 {
-	materials->AddTextureAlias( "_rt_FullFrameDepth", "_rt_PowerOfTwoFB" );
+	if ( IsX360() )
+	{
+		return materials->CreateNamedRenderTargetTextureEx2( "_rt_FullFrameDepth", 1, 1, 
+			RT_SIZE_FULL_FRAME_BUFFER, materials->GetShadowDepthTextureFormat(), MATERIAL_RT_DEPTH_NONE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			CREATERENDERTARGETFLAGS_NOEDRAM );
+
+	}
+	else
+	{
+		materials->AddTextureAlias( "_rt_FullFrameDepth", "_rt_PowerOfTwoFB" );
+	}
 	return NULL;
 }
+
+
+static ITexture *CreateResolvedFullFrameDepthTexture( void )
+{
+	if ( IsPC() )
+	{
+		return materials->CreateNamedRenderTargetTextureEx2( "_rt_ResolvedFullFrameDepth", 1, 1, 
+			RT_SIZE_FULL_FRAME_BUFFER, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_SEPARATE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			CREATERENDERTARGETFLAGS_NOEDRAM );
+	}
+
+	return NULL;
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Create render targets which mods rely upon to render correctly
@@ -820,6 +1164,18 @@ void InitWellKnownRenderTargets( void )
 	// JasonM - 
 	// Do we put logic in here to determine which of these to create, based upon DX level, HDR enable etc?
 	// YES! DX Level should gate these
+
+	// before we create anything, see if VR mode wants to override the "framebuffer" size
+	if( UseVR() )
+	{
+		int nWidth, nHeight;
+		g_pSourceVR->GetRenderTargetFrameBufferDimensions( nWidth, nHeight );
+		g_pMaterialSystem->SetRenderTargetFrameBufferSizeOverrides( nWidth, nHeight );
+	}
+	else
+	{
+		g_pMaterialSystem->SetRenderTargetFrameBufferSizeOverrides( 0, 0 );
+	}
 
 	// Create the render targets upon which mods may rely
 
@@ -841,7 +1197,10 @@ void InitWellKnownRenderTargets( void )
 
 		// Used in Bloom effects
 		g_QuarterSizedFBTexture0.Init( CreateQuarterSizedFBTexture( 0, 0 ) );
-		g_QuarterSizedFBTexture1.Init( CreateQuarterSizedFBTexture( 1, 0 ) );			
+		if( IsX360() )
+			materials->AddTextureAlias( "_rt_SmallFB1", "_rt_SmallFB0" ); //an alias is good enough on the 360 since we don't have a texture lock problem during post processing
+		else
+			g_QuarterSizedFBTexture1.Init( CreateQuarterSizedFBTexture( 1, 0 ) );			
 	}
 
 	if ( IsPC() )
@@ -854,7 +1213,19 @@ void InitWellKnownRenderTargets( void )
 	g_FullFrameFBTexture0.Init( CreateFullFrameFBTexture( 0 ) );
 	g_FullFrameFBTexture1.Init( CreateFullFrameFBTexture( 1 ) );
 
+	if ( IsX360() )
+	{
+		g_FullFrameFBTexture2.Init( CreateFullFrameFBTexture( 2, CREATERENDERTARGETFLAGS_TEMP ) );
+	}
+
 	g_FullFrameDepth.Init( CreateFullFrameDepthTexture() );
+	g_ResolvedFullFrameDepth.Init( CreateResolvedFullFrameDepthTexture() );
+
+	// if we're in stereo mode init a render target for VGUI
+	if( UseVR() )
+	{
+		g_pSourceVR->CreateRenderTargets( materials );
+	}
 
 	// Allow the client to init their own mod-specific render targets
 	if ( g_pClientRenderTargets )
@@ -885,6 +1256,14 @@ void InitWellKnownRenderTargets( void )
 void ShutdownWellKnownRenderTargets( void )
 {
 #if !defined( SWDS )
+	if ( IsX360() )
+	{
+		// cannot allowing RT's to reconstruct, causes other fatal problems
+		// many other 360 systems have been coded with this expected constraint
+		Assert( 0 );
+		return;
+	}
+
 	if ( IsPC() && mat_debugalttab.GetBool() )
 	{
 		Warning( "mat_debugalttab: ShutdownWellKnownRenderTargets\n" );
@@ -895,14 +1274,20 @@ void ShutdownWellKnownRenderTargets( void )
 		
 	g_QuarterSizedFBTexture0.Shutdown();
 	
-	g_QuarterSizedFBTexture1.Shutdown();
+	if( IsX360() )
+		materials->RemoveTextureAlias( "_rt_SmallFB1" );
+	else
+		g_QuarterSizedFBTexture1.Shutdown();
 	
 	g_TeenyFBTexture0.Shutdown();
 	g_TeenyFBTexture1.Shutdown();
 	g_TeenyFBTexture2.Shutdown();
 	g_FullFrameFBTexture0.Shutdown();
 	g_FullFrameFBTexture1.Shutdown();
-	
+	if ( IsX360() )
+	{
+		g_FullFrameFBTexture2.Shutdown();
+	}
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 	pRenderContext->SetNonInteractiveTempFullscreenBuffer( NULL, MATERIAL_NON_INTERACTIVE_MODE_LEVEL_LOAD );
 
@@ -911,6 +1296,10 @@ void ShutdownWellKnownRenderTargets( void )
 	{
 		materials->RemoveTextureAlias( "_rt_FullFrameDepth" );
 	}
+
+	if( g_pSourceVR )
+		g_pSourceVR->ShutdownRenderTargets();
+
 
 	// Shutdown client render targets
 	if ( g_pClientRenderTargets )
@@ -924,6 +1313,16 @@ void ShutdownWellKnownRenderTargets( void )
 		g_CameraTexture.Shutdown();
 	}
 #endif
+}
+
+
+//-----------------------------------------------------------------------------
+// A console command to spew out driver information
+//-----------------------------------------------------------------------------
+CON_COMMAND( mat_reset_rendertargets, "Resets all the render targets" )
+{
+	ShutdownWellKnownRenderTargets();
+	InitWellKnownRenderTargets();
 }
 
 
@@ -971,28 +1370,65 @@ static void InitDebugMaterials( void )
 		pVMTKeyValues->SetInt( "$alphatest", 0 );
 		pVMTKeyValues->SetInt( "$nocull", 0 );
 		g_pMaterialDepthWrite[0][0] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite00", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialDepthWrite[0][0]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "DepthWrite" );
 		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
 		pVMTKeyValues->SetInt( "$alphatest", 0 );
 		pVMTKeyValues->SetInt( "$nocull", 1 );
 		g_pMaterialDepthWrite[0][1] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite01", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialDepthWrite[0][1]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "DepthWrite" );
 		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
 		pVMTKeyValues->SetInt( "$alphatest", 1 );
 		pVMTKeyValues->SetInt( "$nocull", 0 );
 		g_pMaterialDepthWrite[1][0] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite10", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialDepthWrite[1][0]->IncrementReferenceCount();
 
 		pVMTKeyValues = new KeyValues( "DepthWrite" );
 		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
 		pVMTKeyValues->SetInt( "$alphatest", 1 );
 		pVMTKeyValues->SetInt( "$nocull", 1 );
 		g_pMaterialDepthWrite[1][1] = g_pMaterialSystem->FindProceduralMaterial( "__DepthWrite11", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialDepthWrite[1][1]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 0 );
+		pVMTKeyValues->SetInt( "$nocull", 0 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		g_pMaterialSSAODepthWrite[0][0] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite00", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialSSAODepthWrite[0][0]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 0 );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		g_pMaterialSSAODepthWrite[0][1] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite01", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialSSAODepthWrite[0][1]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 1 );
+		pVMTKeyValues->SetInt( "$nocull", 0 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		g_pMaterialSSAODepthWrite[1][0] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite10", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialSSAODepthWrite[1][0]->IncrementReferenceCount();
+
+		pVMTKeyValues = new KeyValues( "DepthWrite" );
+		pVMTKeyValues->SetInt( "$no_fullbright", 1 );
+		pVMTKeyValues->SetInt( "$alphatest", 1 );
+		pVMTKeyValues->SetInt( "$nocull", 1 );
+		pVMTKeyValues->SetInt( "$color_depth", 1 );
+		g_pMaterialSSAODepthWrite[1][1] = g_pMaterialSystem->FindProceduralMaterial( "__ColorDepthWrite11", TEXTURE_GROUP_OTHER, pVMTKeyValues );
+		g_pMaterialSSAODepthWrite[1][1]->IncrementReferenceCount();
 	}
 	else
 	{
 		g_pMaterialDepthWrite[0][0] = g_pMaterialDepthWrite[0][1] = g_pMaterialDepthWrite[1][0] = g_pMaterialDepthWrite[1][1] = NULL;
+		g_pMaterialSSAODepthWrite[0][0] = g_pMaterialSSAODepthWrite[0][1] = g_pMaterialSSAODepthWrite[1][0] = g_pMaterialSSAODepthWrite[1][1] = NULL;
 	}
 #endif
 }
@@ -1044,6 +1480,12 @@ static void ShutdownDebugMaterials( void )
 					g_pMaterialDepthWrite[i][j]->DecrementReferenceCount();
 				}
 				g_pMaterialDepthWrite[i][j] = NULL;
+
+				if( g_pMaterialSSAODepthWrite[i][j] )
+				{
+					g_pMaterialSSAODepthWrite[i][j]->DecrementReferenceCount();
+				}
+				g_pMaterialSSAODepthWrite[i][j] = NULL;
 			}
 		}
 	}
@@ -1060,10 +1502,16 @@ void InitStartupScreen()
 	if ( !IsX360() )
 		return;
 
+#ifdef _X360
+	XVIDEO_MODE videoMode;
+	XGetVideoMode( &videoMode );
+	bool bIsWidescreen = videoMode.fIsWideScreen != FALSE;
+#else
 	int width, height;
 	materials->GetBackBufferDimensions( width, height );
 	float aspectRatio = (float)width/(float)height;
 	bool bIsWidescreen = aspectRatio >= 1.5999f;
+#endif
 
 	// NOTE: Brutal hackery, this code is duplicated in gameui.dll
 	// but I have to do this prior to gameui being loaded.
@@ -1159,6 +1607,10 @@ void ReleaseMaterialSystemObjects()
 
 void RestoreMaterialSystemObjects( int nChangeFlags )
 {
+	if ( IsX360() )
+		return;
+
+	bool bThreadingAllowed = Host_AllowQueuedMaterialSystem( false );
 	g_LostVideoMemory = false;
 
 	if ( nChangeFlags & MATERIAL_RESTORE_VERTEX_FORMAT_CHANGED )
@@ -1169,7 +1621,7 @@ void RestoreMaterialSystemObjects( int nChangeFlags )
 
 	if (host_state.worldmodel)
 	{
-		if ( nChangeFlags & MATERIAL_RESTORE_VERTEX_FORMAT_CHANGED )
+		if ( (nChangeFlags & MATERIAL_RESTORE_VERTEX_FORMAT_CHANGED) || materials->GetNumSortIDs() == 0 )
 		{
 #ifndef SWDS
 			// Reload lightmaps, world meshes, etc. because we may have switched from bumped to unbumped
@@ -1192,6 +1644,12 @@ void RestoreMaterialSystemObjects( int nChangeFlags )
 		modelrender->RestoreAllStaticPropColorData();
 #endif
 	}
+
+#ifndef DEDICATED
+	cl.ForceFullUpdate();
+#endif
+
+	Host_AllowQueuedMaterialSystem( bThreadingAllowed );
 }
 
 bool TangentSpaceSurfaceSetup( SurfaceHandle_t surfID, Vector &tVect )
@@ -1568,12 +2026,12 @@ void SetTexInfoBaseTexture2Flags()
 
 		IMaterialVar **pParms = pMaterial->GetShaderParams();
 		int nParms = pMaterial->ShaderParamCount();
-		for ( int i=0; i < nParms; i++ )
+		for ( int j=0; j < nParms; j++ )
 		{
-			if ( !pParms[i]->IsDefined() )
+			if ( !pParms[j]->IsDefined() )
 				continue;
 
-			if ( Q_stricmp( pParms[i]->GetName(), "$basetexture2" ) == 0 )
+			if ( Q_stricmp( pParms[j]->GetName(), "$basetexture2" ) == 0 )
 			{
 				pTexInfo->texinfoFlags |= TEXINFO_USING_BASETEXTURE2;
 				break;

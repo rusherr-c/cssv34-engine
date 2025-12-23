@@ -4,8 +4,7 @@
 //
 // $NoKeywords: $
 //=============================================================================
-#undef OVERRIDE
-#define OVERRIDE 
+
 #ifndef SERVERBROWSER_H
 #define SERVERBROWSER_H
 #ifdef _WIN32

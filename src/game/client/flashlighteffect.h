@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@ class CFlashlightEffect
 public:
 
 	CFlashlightEffect(int nEntIndex = 0);
-	~CFlashlightEffect();
+	virtual ~CFlashlightEffect();
 
 	virtual void UpdateLight(const Vector &vecPos, const Vector &vecDir, const Vector &vecRight, const Vector &vecUp, int nDistance);
 	void TurnOn();
@@ -43,7 +43,7 @@ protected:
 
 	// Vehicle headlight dynamic light pointer
 	dlight_t *m_pPointLight;
-	float m_flCurrentPullBackDist;
+	float m_flDistMod;
 
 	// Texture for flashlight
 	CTextureReference m_FlashlightTexture;

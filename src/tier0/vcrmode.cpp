@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,15 +8,10 @@
 
 #include "pch_tier0.h"
 
-#ifdef _LINUX
-#include "vcrmode_linux.cpp"
-#else
-
 #ifdef _WIN32
 #define WIN_32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock.h>
-#include <intrin.h>
 #endif
 
 #include <time.h>
@@ -254,14 +249,13 @@ static void VCR_Error( const char *pFormat, ... )
 				iCurThread = i;
 		}
 
-		__debugbreak(); //same as int 3
-
+		DebuggerBreak();
 	#endif
 
 	char str[256];
 	va_list marker;
 	va_start( marker, pFormat );
-	_snprintf( str, sizeof( str ), pFormat, marker );
+	_vsnprintf( str, sizeof( str ), pFormat, marker );
 	va_end( marker );
 
 	g_pHelpers->ErrorMessage( str );
@@ -505,8 +499,8 @@ static void VCR_End()
 	{
 		// It's going to get screwy now, especially if we have threads, so just exit.
 		#ifdef _DEBUG
-		if (IsDebuggerPresent())
-			__debugbreak();
+			if ( IsDebuggerPresent() )
+				DebuggerBreak();
 		#endif
 
 		TerminateProcess( GetCurrentProcess(), 1 );
@@ -1781,7 +1775,4 @@ VCR_t g_VCR =
 
 VCR_t *g_pVCR = &g_VCR;
 
-#endif // LINUX
-
-#endif // LINUX
-
+#endif // NO_VCR

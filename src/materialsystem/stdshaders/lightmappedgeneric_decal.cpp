@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Lightmap only shader
 //
@@ -52,7 +52,7 @@ BEGIN_VS_SHADER( LightmappedGeneric_Decal,
 
 	SHADER_INIT
 	{
-		LoadTexture( FLASHLIGHTTEXTURE );
+		LoadTexture( FLASHLIGHTTEXTURE, TEXTUREFLAGS_SRGB );
 		
 		if (params[BASETEXTURE]->IsDefined())
 		{

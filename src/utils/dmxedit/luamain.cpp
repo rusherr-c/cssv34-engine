@@ -1,6 +1,6 @@
 //=============================================================================
 //
-// The copyright to the contents herein is the property of Valve, L.L.C.
+//========= Copyright Valve Corporation, All rights reserved. ============//
 // The contents may be used and/or copied only with the written permission of
 // Valve, L.L.C., or in accordance with the terms and conditions stipulated in
 // the agreement/contract under which the contents have been supplied.
@@ -30,6 +30,9 @@
 #include "tier1/UtlStringMap.h"
 #include "vstdlib/vstdlib.h"
 #include "vstdlib/iprocessutils.h"
+#include "tier2/p4helpers.h"
+#include "p4lib/ip4.h"
+
 
 // Lua includes
 #include <lua.h>
@@ -39,21 +42,6 @@
 
 // Local includes
 #include "dmxedit.h"
-
-
-//-----------------------------------------------------------------------------
-// Standard spew functions
-//-----------------------------------------------------------------------------
-static SpewRetval_t SpewStdout( SpewType_t spewType, char const *pMsg )
-{
-	if ( !pMsg )
-		return SPEW_CONTINUE;
-
-	printf( pMsg );
-	fflush( stdout );
-
-	return ( spewType == SPEW_ASSERT ) ? SPEW_DEBUGGER : SPEW_CONTINUE; 
-}
 
 
 //-----------------------------------------------------------------------------
@@ -79,12 +67,11 @@ DEFINE_CONSOLE_STEAM_APPLICATION_OBJECT( CDmxEditApp );
 //-----------------------------------------------------------------------------
 bool CDmxEditApp::Create()
 {
-	SpewOutputFunc( SpewStdout );
-
 	AppSystemInfo_t appSystems[] = 
 	{
 		{ "vstdlib.dll",			PROCESS_UTILS_INTERFACE_VERSION },
 		{ "materialsystem.dll",		MATERIAL_SYSTEM_INTERFACE_VERSION },
+		{ "p4lib.dll",				P4_INTERFACE_VERSION },
 		{ "", "" }	// Required to terminate the list
 	};
 
@@ -100,7 +87,6 @@ bool CDmxEditApp::Create()
 	pMaterialSystem->SetShaderAPI( "shaderapiempty.dll" );
 	return true;
 }
-
 
 //-----------------------------------------------------------------------------
 //
@@ -188,7 +174,7 @@ int CDmxEditApp::Main()
 			const CUtlString sKey( buf );
 			CUtlString sVal( pEquals + 1 );
 
-			if ( !isdigit( *sVal.Get() ) && *sVal.Get() != '-' && *sVal.Get() != '"' )
+			if ( !V_isdigit( *sVal.Get() ) && *sVal.Get() != '-' && *sVal.Get() != '"' )
 			{
 				CUtlString sqVal( "\"" );
 				sqVal += sVal;
@@ -222,11 +208,21 @@ int CDmxEditApp::Main()
 		{
 			// Don't issue warning on -nop4
 		}
+		else if ( StringHasPrefix( pCmd, "-coe" ) || StringHasPrefix( pCmd, "-ContinueOnError" ) )
+		{
+			// Don't issue warning on -nop4
+		}
 		else if ( StringHasPrefix( pCmd, "-" ) )
 		{
 			Warning( "Warning: Unknown command line argument: %s\n", pCmd );
 		}
 	}
+
+	// Do Perforce Stuff
+	if ( CommandLine()->FindParm( "-nop4" ) )
+		g_p4factory->SetDummyMode( true );
+
+	g_p4factory->SetOpenFileChangeList( "dmxedit" );
 
 	for ( int i = CommandLine()->ParmCount() - 1; i >= 1; --i )
 	{
@@ -286,11 +282,27 @@ CUtlString Wikize( lua_State *pLuaState, const char *pWikiString )
 //-----------------------------------------------------------------------------
 //
 //-----------------------------------------------------------------------------
+template < class T_t >
+int Sort_LuaFunc_s( const T_t *pA, const T_t *pB )
+{
+	return Q_stricmp( (*pA)->m_pFuncName, (*pB)->m_pFuncName );
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
 void CDmxEditApp::PrintHelp( bool bWiki /* = false */ )
 {
-	const CDmxEditLua::LuaFunc_s *pLuaFuncs = CDmxEditLua::GetFunctionList();
+	CUtlVector< LuaFunc_s * > luaFuncs;
 
-	if ( bWiki && pLuaFuncs )
+	for ( LuaFunc_s *pFunc = LuaFunc_s::s_pFirstFunc; pFunc; pFunc = pFunc->m_pNextFunc )
+	{
+		luaFuncs.AddToTail( pFunc );
+	}
+	luaFuncs.Sort( Sort_LuaFunc_s );
+
+	if ( bWiki && LuaFunc_s::s_pFirstFunc )
 	{
 		lua_State *pLuaState = lua_open();
 		if ( pLuaState )
@@ -299,14 +311,15 @@ void CDmxEditApp::PrintHelp( bool bWiki /* = false */ )
 
 			CUtlString wikiString;
 
-			for ( int i = 0; i < CDmxEditLua::FunctionCount(); ++i )
+			for ( int i = 0; i < luaFuncs.Count(); ++i )
 			{
-				if ( i != 0 )
+				const LuaFunc_s *pFunc = luaFuncs[ i ];
+				if ( pFunc != LuaFunc_s::s_pFirstFunc )
 				{
 					Msg( "\n" );
 				}
-				Msg( ";%s( %s );\n", pLuaFuncs[ i ].m_pFuncName, pLuaFuncs[ i ].m_pFuncPrototype );
-				Msg( ":%s\n", Wikize( pLuaState, pLuaFuncs[ i ].m_pFuncDesc ).Get() );
+				Msg( ";%s( %s );\n", pFunc->m_pFuncName, pFunc->m_pFuncPrototype );
+				Msg( ":%s\n", Wikize( pLuaState, pFunc->m_pFuncDesc ).Get() );
 			}
 
 			return;
@@ -328,21 +341,23 @@ void CDmxEditApp::PrintHelp( bool bWiki /* = false */ )
 	Msg( "    Edits dmx files by executing a lua script of dmx editing functions\n" );
 	Msg( "\n" );
 
-	if ( !pLuaFuncs )
+	if ( !LuaFunc_s::s_pFirstFunc )
 		return;
 
 	Msg( "FUNCTIONS\n" );
 
 	const char *pWhitespace = " \t";
 
-	for ( int i = 0; i < CDmxEditLua::FunctionCount(); ++i )
+	for ( int i = 0; i < luaFuncs.Count(); ++i )
 	{
-		Msg( "    %s( %s );\n", pLuaFuncs[ i ].m_pFuncName, pLuaFuncs[ i ].m_pFuncPrototype );
+		const LuaFunc_s *pFunc = luaFuncs[ i ];
+
+		Msg( "    %s( %s );\n", pFunc->m_pFuncName, pFunc->m_pFuncPrototype );
 		Msg( "      * " );
-		
+
 		CUtlString tmpStr;
 
-		const char *pWordBegin = pLuaFuncs[ i ].m_pFuncDesc + strspn( pLuaFuncs[ i ].m_pFuncDesc, pWhitespace );
+		const char *pWordBegin = pFunc->m_pFuncDesc + strspn( pFunc->m_pFuncDesc, pWhitespace );
 		const char *pWhiteSpaceBegin = pWordBegin;
 		const char *pWordEnd = pWordBegin + strcspn( pWordBegin, pWhitespace );
 

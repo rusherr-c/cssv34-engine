@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,6 +12,7 @@
 #endif
 
 #include "tier1/smartptr.h"
+#include "tier2/p4helpers.h"
 
 class CFileBuffer
 {
@@ -58,6 +59,8 @@ public:
 	
 	void WriteToFile( const char *fileName, int size )
 	{
+		CPlainAutoPtr< CP4File > spFile( g_p4factory->AccessFile( fileName ) );
+		spFile->Edit();
 		FILE *fp = fopen( fileName, "wb" );
 		if( !fp )
 		{
@@ -68,6 +71,7 @@ public:
 		fwrite( m_pData, 1, size, fp );
 		
 		fclose( fp );
+		spFile->Add();
 	}
 	
 	void WriteAt( int offset, void *data, int size, const char *name )

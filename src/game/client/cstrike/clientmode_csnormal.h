@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -41,10 +41,23 @@ public:
 
 	virtual bool	CanRecordDemo( char *errorMsg, int length ) const;
 
-private:
-	
-	//	void	UpdateSpectatorMode( void );
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Save server information shown to the client in a persistent place
+	//=============================================================================
+	 
+	virtual wchar_t* GetServerName() { return m_pServerName; }
+	virtual void SetServerName(wchar_t* name);
+	virtual wchar_t* GetMapName() { return m_pMapName; }
+	virtual void SetMapName(wchar_t* name);
 
+private:
+	wchar_t			m_pServerName[256];
+	wchar_t			m_pMapName[256];
+
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 };
 
 

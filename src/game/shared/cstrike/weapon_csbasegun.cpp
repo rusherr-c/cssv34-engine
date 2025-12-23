@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,7 +29,6 @@ LINK_ENTITY_TO_CLASS( weapon_csbase_gun, CWeaponCSBaseGun );
 
 CWeaponCSBaseGun::CWeaponCSBaseGun()
 {
-
 }
 
 void CWeaponCSBaseGun::Spawn()
@@ -67,16 +66,14 @@ void CWeaponCSBaseGun::ItemPostFrame()
 	// And Scout.
 	if ( (m_flNextPrimaryAttack <= gpGlobals->curtime) && (pPlayer->m_bResumeZoom == TRUE) )
 	{
-#ifndef CLIENT_DLL
-		pPlayer->SetFOV( pPlayer, pPlayer->m_iLastZoom, 0.05f );
-		m_zoomFullyActiveTime = gpGlobals->curtime + 0.05f;// Make sure we think that we are zooming on the server so we don't get instant acc bonus
-
-		if ( pPlayer->GetFOV() == pPlayer->m_iLastZoom )
+		pPlayer->m_bResumeZoom = false;
+		
+		if ( m_iClip1 != 0 || ( GetWeaponFlags() & ITEM_FLAG_NOAUTORELOAD ) )
 		{
-			// return the fade level in zoom.
-			pPlayer->m_bResumeZoom = false;
+			m_weaponMode = Secondary_Mode;
+			pPlayer->SetFOV( pPlayer, pPlayer->m_iLastZoom, 0.05f );
+			m_zoomFullyActiveTime = gpGlobals->curtime + 0.05f;// Make sure we think that we are zooming on the server so we don't get instant acc bonus
 		}
-#endif
 	}
 
 	BaseClass::ItemPostFrame();
@@ -89,7 +86,7 @@ void CWeaponCSBaseGun::PrimaryAttack()
 	Assert( false );
 }
 
-bool CWeaponCSBaseGun::CSBaseGunFire( float flSpread, float flCycleTime, bool bPrimaryMode )
+bool CWeaponCSBaseGun::CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
@@ -98,35 +95,46 @@ bool CWeaponCSBaseGun::CSBaseGunFire( float flSpread, float flCycleTime, bool bP
 	const CCSWeaponInfo &pCSInfo = GetCSWpnData();
 
 	m_bDelayFire = true;
-	pPlayer->m_iShotsFired++;
+
+	if ( m_iClip1 > 0 )
+	{
+		pPlayer->m_iShotsFired++;
 	
-	// These modifications feed back into flSpread eventually.
-	if ( pCSInfo.m_flAccuracyDivisor != -1 )
-	{
-		int iShotsFired = pPlayer->m_iShotsFired;
+		// These modifications feed back into flSpread eventually.
+		if ( pCSInfo.m_flAccuracyDivisor != -1 )
+		{
+			int iShotsFired = pPlayer->m_iShotsFired;
 
-		if ( pCSInfo.m_bAccuracyQuadratic )
-			iShotsFired = iShotsFired * iShotsFired;
-		else
-			iShotsFired = iShotsFired * iShotsFired * iShotsFired;
+			if ( pCSInfo.m_bAccuracyQuadratic )
+				iShotsFired = iShotsFired * iShotsFired;
+			else
+				iShotsFired = iShotsFired * iShotsFired * iShotsFired;
 
-		m_flAccuracy = ( iShotsFired / pCSInfo.m_flAccuracyDivisor) + pCSInfo.m_flAccuracyOffset;
-		
-		if (m_flAccuracy > pCSInfo.m_flMaxInaccuracy)
-			m_flAccuracy = pCSInfo.m_flMaxInaccuracy;
+			m_flAccuracy = ( iShotsFired / pCSInfo.m_flAccuracyDivisor ) + pCSInfo.m_flAccuracyOffset;
+			
+			if ( m_flAccuracy > pCSInfo.m_flMaxInaccuracy )
+				m_flAccuracy = pCSInfo.m_flMaxInaccuracy;
+		}
 	}
-
-	// Out of ammo?
-	if ( m_iClip1 <= 0 )
+	else
 	{
-		if (m_bFireOnEmpty)
+		m_flAccuracy = 0;
+
+		if ( m_bFireOnEmpty )
 		{
 			PlayEmptySound();
-			m_flNextPrimaryAttack = gpGlobals->curtime + 0.2;
+
+			// NOTE[pmf]: we don't want to actually play the dry fire animations, as most seem to depict the weapon actually firing.
+			// SendWeaponAnim( ACT_VM_DRYFIRE );
+
+			m_bFireOnEmpty = false;
+			m_flNextPrimaryAttack = gpGlobals->curtime + 0.1f;
 		}
 
 		return false;
 	}
+
+	float flCurAttack = CalculateNextAttackTime( flCycleTime );
 
 	SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 
@@ -140,21 +148,19 @@ bool CWeaponCSBaseGun::CSBaseGunFire( float flSpread, float flCycleTime, bool bP
 		pPlayer->Weapon_ShootPosition(),
 		pPlayer->EyeAngles() + 2.0f * pPlayer->GetPunchAngle(),
 		GetWeaponID(),
-		bPrimaryMode?Primary_Mode:Secondary_Mode,
+		weaponMode,
 		CBaseEntity::GetPredictionRandomSeed() & 255,
-		flSpread );
+		GetInaccuracy(),
+		GetSpread(), 
+		flCurAttack );
 
 	DoFireEffects();
 
-	m_flNextPrimaryAttack = m_flNextSecondaryAttack = gpGlobals->curtime + flCycleTime;
+	SetWeaponIdleTime( gpGlobals->curtime + GetCSWpnData().m_flTimeToIdleAfterFire );
 
-	if (!m_iClip1 && pPlayer->GetAmmoCount( m_iPrimaryAmmoType ) <= 0)
-	{
-		// HEV suit - indicate out of ammo condition
-		pPlayer->SetSuitUpdate("!HEV_AMO0", false, 0);
-	}
+	// update accuracy
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyImpulseFire[weaponMode];
 
-	SetWeaponIdleTime( gpGlobals->curtime + pCSInfo.m_flTimeToIdleAfterFire );
 	return true;
 }
 
@@ -177,18 +183,18 @@ bool CWeaponCSBaseGun::Reload()
 	if (pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) <= 0)
 		return false;
 
+	pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV(), 0.0f );
+
 	int iResult = DefaultReload( GetMaxClip1(), GetMaxClip2(), ACT_VM_RELOAD );
 	if ( !iResult )
 		return false;
 
 	pPlayer->SetAnimation( PLAYER_RELOAD );
 
-#ifndef CLIENT_DLL
 	if ((iResult) && (pPlayer->GetFOV() != pPlayer->GetDefaultFOV()))
 	{
 		pPlayer->SetFOV( pPlayer, pPlayer->GetDefaultFOV() );
 	}
-#endif
 
 	m_flAccuracy = 0.2;
 	pPlayer->m_iShotsFired = 0;

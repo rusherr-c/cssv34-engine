@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -46,8 +46,12 @@ public:
   	bool NoHiModel();
   	bool NoCrosshair();
 	bool AdvCrosshair();
+	int AdvCrosshairLevel();
    	const char *GetFallbackDir();
 	bool UseGameLogo();
+	bool UseBots();
+	bool HasHDContent();
+	bool SupportsVR();
 
 	KeyValues *GetHiddenMaps();
 

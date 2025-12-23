@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,9 +12,9 @@
 #include <conio.h>
 #include "tier1/utlbuffer.h"
 #include "tier2/tier2.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "imysqlwrapper.h"
-#include "dod_gamestats.h"
+#include "../../game/server/dod/dod_gamestats.h"
 #include <time.h>
 
 

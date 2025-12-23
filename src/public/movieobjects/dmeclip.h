@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -11,9 +11,11 @@
 #endif
 
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "datamodel/dmehandle.h"
-#include "video/iavi.h"
-#include "materialsystem/materialsystemutil.h"
+#include "video/ivideoservices.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "tier1/utlmap.h"
 #include "movieobjects/timeutils.h"
 
@@ -427,7 +429,7 @@ public:
 	// AVI tape out
 	void UseCachedVersion( bool bUseCachedVersion );
 	bool IsUsingCachedVersion() const;
-	AVIMaterial_t GetCachedAVI();
+	IVideoMaterial *GetCachedVideoMaterial();
 	void SetCachedAVI( const char *pAVIFile );
 
 	int	GetAnimationSetCount();
@@ -486,7 +488,7 @@ private:
 
 	CDmaVar< float >						m_Volume;
 
-	AVIMaterial_t m_hCachedVersion;
+	IVideoMaterial						   *m_pCachedVersion;	
 	bool m_bReloadCachedVersion;
 	CMaterialReference m_FadeMaterial;
 };

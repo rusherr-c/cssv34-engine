@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing a procedural texture
 //
@@ -11,7 +11,7 @@
 #endif
 
 #include "datamodel/dmelement.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "movieobjects/dmeimage.h"
 
 

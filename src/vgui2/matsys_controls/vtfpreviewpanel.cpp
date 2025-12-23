@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,12 +6,12 @@
 
 #include "matsys_controls/vtfpreviewpanel.h"
 #include "matsys_controls/matsyscontrols.h"
-#include "vguimatsurface/imatsystemsurface.h"
-#include "materialsystem/materialsystemutil.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
+#include "materialsystem/MaterialSystemUtil.h"
 #include "materialsystem/imaterialsystem.h"
 #include "materialsystem/itexture.h"
 #include "materialsystem/imesh.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 
 
 using namespace vgui;
@@ -37,6 +37,15 @@ CVTFPreviewPanel::CVTFPreviewPanel( vgui::Panel *pParent, const char *pName ) :
 {
 	SetVTF( "//platform/materials/vgui/vtfnotloaded", true );
 	m_nTextureID = MatSystemSurface()->CreateNewTextureID( false );
+}
+
+CVTFPreviewPanel::~CVTFPreviewPanel()
+{
+	if ( vgui::surface() && m_nTextureID != -1 )
+	{
+		vgui::surface()->DestroyTextureID( m_nTextureID );
+		m_nTextureID = -1;
+	}
 }
 
 

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -15,6 +15,36 @@
 
 #include "shaderapi/ishaderapi.h"
 #include "locald3dtypes.h"
+
+
+// uncomment to get dynamic compilation for HLSL shaders
+// X360 NOTE: By default, the system looks for a shared folder named "stdshaders" on the host machine and is completely compatible with -dvd. Ensure that the share is writable if you plan on generating UPDB's.
+//#define DYNAMIC_SHADER_COMPILE
+
+// Uncomment to use remoteshadercompiler.exe as a shader compile server
+// Must also set mat_remoteshadercompile to remote shader compile machine name
+//#define REMOTE_DYNAMIC_SHADER_COMPILE
+
+// uncomment to get spew about what combos are being compiled.
+//#define DYNAMIC_SHADER_COMPILE_VERBOSE
+
+// Uncomment to use remoteshadercompiler.exe as a shader compile server
+// Must also set mat_remoteshadercompile to remote shader compile machine name
+//#define REMOTE_DYNAMIC_SHADER_COMPILE
+
+// uncomment and fill in with a path to use a specific set of shader source files. Meant for network use.
+//		PC path format is of style "\\\\somemachine\\sourcetreeshare\\materialsystem\\stdshaders"
+//		Xbox path format is of style "net:\\smb\\somemachine\\sourcetreeshare\\materialsystem\\stdshaders"
+//			- Xbox dynamic compiles without a custom path default to look directly for "stdshaders" share on host pc
+
+//#define DYNAMIC_SHADER_COMPILE_CUSTOM_PATH ""
+
+// uncomment to get disassembled (asm) shader code in your game dir as *.asm
+//#define DYNAMIC_SHADER_COMPILE_WRITE_ASSEMBLY
+
+// uncomment to get disassembled (asm) shader code in your game dir as *.asm
+//#define WRITE_ASSEMBLY
+
 
 enum VertexShaderLightTypes_t
 {
@@ -52,8 +82,8 @@ public:
 	virtual void DestroyPixelShader( PixelShaderHandle_t hShader ) = 0;
 
 	// Creates vertex, pixel shaders
-	virtual VertexShader_t CreateVertexShader( const char *pVertexShaderFile, int nStaticVshIndex = 0 ) = 0;
-	virtual PixelShader_t CreatePixelShader( const char *pPixelShaderFile, int nStaticPshIndex = 0 ) = 0;
+	virtual VertexShader_t CreateVertexShader( const char *pVertexShaderFile, int nStaticVshIndex = 0, char *debugLabel = NULL  ) = 0;
+	virtual PixelShader_t CreatePixelShader( const char *pPixelShaderFile, int nStaticPshIndex = 0, char *debugLabel = NULL ) = 0;
 
 	// Sets which dynamic version of the vertex + pixel shader to use
 	FORCEINLINE void SetVertexShaderIndex( int vshIndex );
@@ -80,6 +110,10 @@ public:
 #if defined( _X360 )
 	virtual const char *GetActiveVertexShaderName() = 0;
 	virtual const char *GetActivePixelShaderName() = 0;
+#endif
+
+#if defined( DX_TO_GL_ABSTRACTION )
+	virtual void DoStartupShaderPreloading() = 0;
 #endif
 };
 

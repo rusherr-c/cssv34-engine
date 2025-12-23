@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2007, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Run procedural glint generation inner loop in pixel shader
 //
@@ -7,7 +7,7 @@
 //===========================================================================//
 
 #include "BaseVSShader.h"
-#include "shaderlib/CShader.h"
+#include "shaderlib/cshader.h"
 
 #include "eyeglint_vs20.inc"
 #include "eyeglint_ps20.inc"
@@ -46,7 +46,7 @@ SHADER_DRAW
 
 		pShaderShadow->EnableCulling( false );
 
-		pShaderShadow->EnableSRGBWrite( true );
+		pShaderShadow->EnableSRGBWrite( false ); // linear texture
 
 		DECLARE_STATIC_VERTEX_SHADER( eyeglint_vs20 );
 		SET_STATIC_VERTEX_SHADER( eyeglint_vs20 );

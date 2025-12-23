@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,10 +16,43 @@
 #include "vgui_internal.h"
 #include "VPanel.h"
 
+#include "tier0/minidump.h"
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 using namespace vgui;
+
+
+// Lame copy from Panel
+enum PinCorner_e 
+{
+	PIN_TOPLEFT = 0,
+	PIN_TOPRIGHT,
+	PIN_BOTTOMLEFT,
+	PIN_BOTTOMRIGHT,
+
+	// For sibling pinning
+	PIN_CENTER_TOP,
+	PIN_CENTER_RIGHT,
+	PIN_CENTER_BOTTOM,
+	PIN_CENTER_LEFT,
+
+	NUM_PIN_POINTS,
+};
+
+float PinDeltas[NUM_PIN_POINTS][2] =
+{
+	{ 0, 0 },	// PIN_TOPLEFT,
+	{ 1, 0 },	// PIN_TOPRIGHT,
+	{ 0, 1 },	// PIN_BOTTOMLEFT,
+	{ 1, 1 },	// PIN_BOTTOMRIGHT,
+	{ 0.5, 0 },	// PIN_CENTER_TOP,
+	{ 1, 0.5 },	// PIN_CENTER_RIGHT,
+	{ 0.5, 1 },	// PIN_CENTER_BOTTOM,
+	{ 0, 0.5 },	// PIN_CENTER_LEFT,
+};
+
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -49,6 +82,13 @@ VPanel::VPanel()
 
 	_mouseInput = true; // by default you want mouse and kb input to this panel
 	_kbInput = true;
+
+	_pinsibling = NULL;
+	_pinsibling_my_corner = PIN_TOPLEFT;
+	_pinsibling_their_corner = PIN_TOPLEFT;
+
+	m_nThinkTraverseLevel = 0;
+	_clientPanelHandle = vgui::INVALID_PANEL;
 }
 
 //-----------------------------------------------------------------------------
@@ -56,6 +96,59 @@ VPanel::VPanel()
 //-----------------------------------------------------------------------------
 VPanel::~VPanel()
 {
+	// Someone just deleted their parent Panel while it was being used in InternalSolveTraverse().
+	// This will cause a difficult to debug crash, so we spew out the panel name here in hopes
+	//  it will help track down the offender.
+	if ( m_nThinkTraverseLevel != 0 )
+	{
+		Warning( "Deleting in-use vpanel: %s/%s %p.\n", GetName(), GetClassName(), this );
+#ifdef STAGING_ONLY
+		DebuggerBreak();
+#endif
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void VPanel::TraverseLevel( int val )
+{
+	// Bump up our traverse level.
+	m_nThinkTraverseLevel += m_nThinkTraverseLevel;
+
+	// Bump up our client panel traverse level.
+	if ( Client() )
+	{
+		VPANEL vp = g_pVGui->HandleToPanel( _clientPanelHandle );
+		if ( vp == vgui::INVALID_PANEL )
+		{
+			// This is really bad - we have a Client() pointer that is invalid.
+			Warning( "Panel '%s/%s' has invalid client: %p.\n", GetName(), GetClassName(), Client() );
+#ifdef STAGING_ONLY
+			DebuggerBreak();
+#endif
+		}
+
+		if ( Client()->GetVPanel() )
+		{
+			VPanel *vpanel = (VPanel *)Client()->GetVPanel();
+			vpanel->m_nThinkTraverseLevel += vpanel->m_nThinkTraverseLevel;
+		}
+	}
+
+	// This doesn't work. It appears we add all kinds of children to various panels in the
+	//  InternalThinkTraverse functions, and that means the refcount is 0 when added, and
+	//  then drops to -1 when we decrement the traverse level.
+#if 0
+	// Bump up our children traverse levels.
+	CUtlVector< VPanel * > &children = GetChildren();
+	for ( int i = 0; i < children.Count(); ++i )
+	{
+		VPanel *child = children[ i ];
+		if ( child )
+			child->m_nThinkTraverseLevel = Max( child->m_nThinkTraverseLevel + val, 0 );
+	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -64,6 +157,7 @@ VPanel::~VPanel()
 void VPanel::Init(IClientPanel *attachedClientPanel)
 {
 	_clientPanel = attachedClientPanel;
+	_clientPanelHandle = g_pVGui->PanelToHandle( attachedClientPanel ? attachedClientPanel->GetVPanel() : 0 );
 }
 
 //-----------------------------------------------------------------------------
@@ -71,12 +165,13 @@ void VPanel::Init(IClientPanel *attachedClientPanel)
 //-----------------------------------------------------------------------------
 void VPanel::Solve()
 {
-	int absX = _pos[0];
-	int absY = _pos[1];
-	_absPos[0] = _pos[0];
-	_absPos[1] = _pos[1];
+	short basePos[2];
+	basePos[0] = _pos[0];
+	basePos[1] = _pos[1];
 
-	// put into parent space
+	int baseSize[2];
+	GetSize( baseSize[0], baseSize[1] );
+
 	VPanel *parent = GetParent();
 	if (IsPopup())
 	{
@@ -84,16 +179,60 @@ void VPanel::Solve()
 		parent = (VPanel *)g_pSurface->GetEmbeddedPanel();
 	}
 
+	int pabs[2];
+	if ( parent )
+	{
+		parent->GetAbsPos(pabs[0], pabs[1]);
+	}
+
+	if ( _pinsibling )
+	{
+		_pinsibling->Solve();
+
+		int sibPos[2];
+		int sibSize[2];
+		_pinsibling->GetInternalAbsPos( sibPos[0], sibPos[1] );
+		_pinsibling->GetSize( sibSize[0], sibSize[1] );
+
+		for ( int i = 0; i < 2; i++ )
+		{
+			if ( parent )
+			{
+				sibPos[i] -= pabs[i];
+			}
+
+			// Determine which direction positive values move in. For center pins, we use screen relative signs.
+			int iSign = 1;
+			if ( i == 0 && (_pinsibling_their_corner == PIN_CENTER_LEFT || _pinsibling_their_corner == PIN_TOPLEFT || _pinsibling_their_corner == PIN_BOTTOMLEFT) )
+			{
+				iSign = -1;
+			}
+			else if ( i == 1 && (_pinsibling_their_corner == PIN_CENTER_TOP || _pinsibling_their_corner == PIN_TOPLEFT || _pinsibling_their_corner == PIN_TOPRIGHT) )
+			{
+				iSign = -1;
+			}
+
+			int iPos = sibPos[i] + (sibSize[i] * PinDeltas[_pinsibling_their_corner][i]);
+			iPos -= (baseSize[i] * PinDeltas[_pinsibling_my_corner][i]);
+			iPos += basePos[i] * iSign;
+
+			basePos[i] = iPos;
+		}
+	}
+
+	int absX = basePos[0];
+	int absY = basePos[1];
+	_absPos[0] = basePos[0];
+	_absPos[1] = basePos[1];
+
+	// put into parent space
 	int pinset[4] = {0, 0, 0, 0}; 
 	if ( parent )
 	{
 		parent->GetInset( pinset[0], pinset[1], pinset[2], pinset[3] );
 
-		int pabsX, pabsY;
-		parent->GetAbsPos(pabsX, pabsY);
-
-		absX += pabsX + pinset[0];
-		absY += pabsY + pinset[1];
+		absX += pabs[0] + pinset[0];
+		absY += pabs[1] + pinset[1];
 
 		_absPos[0] = clamp( absX, -32767, 32767 );
 		_absPos[1] = clamp( absY, -32767, 32767 );
@@ -103,11 +242,8 @@ void VPanel::Solve()
 	_clipRect[0] = _absPos[0];
 	_clipRect[1] = _absPos[1];
 
-	int wide, tall;
-	GetSize( wide, tall );
-
-	int absX2 = absX + wide;
-	int absY2 = absY + tall;
+	int absX2 = absX + baseSize[0];
+	int absY2 = absY + baseSize[1];
 	_clipRect[2] = clamp( absX2, -32767, 32767 );
 	_clipRect[3] = clamp( absY2, -32767, 32767 );
 
@@ -136,8 +272,22 @@ void VPanel::Solve()
 		{
 			_clipRect[3] = pclip[3] - pinset[3];
 		}
+
+		if ( _clipRect[0] > _clipRect[2] )
+		{
+			_clipRect[2] = _clipRect[0];
+		}
+
+		if ( _clipRect[1] > _clipRect[3] )
+		{
+			_clipRect[3] = _clipRect[1];
+		}
 	}
+
+	Assert( _clipRect[0] <= _clipRect[2] );
+	Assert( _clipRect[1] <= _clipRect[3] );
 }
+
 
 
 //-----------------------------------------------------------------------------
@@ -276,6 +426,17 @@ void VPanel::GetAbsPos(int &x, int &y)
 {
 	x = _absPos[0];
 	y = _absPos[1];
+
+	g_pSurface->OffsetAbsPos( x, y );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void VPanel::GetInternalAbsPos(int &x, int &y)
+{
+	x = _absPos[0];
+	y = _absPos[1];
 }
 
 //-----------------------------------------------------------------------------
@@ -321,7 +482,7 @@ void VPanel::SetParent(VPanel *newParent)
 
 	if (_parent == newParent)
 		return;
-	
+
 	if (_parent != NULL)
 	{
 		_parent->_childDar.RemoveElement(this);
@@ -356,10 +517,7 @@ VPanel *VPanel::GetChild(int index)
 	return _childDar[index];
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-CUtlVector<VPanel *> &VPanel::GetChildren()
+CUtlVector< VPanel *> &VPanel::GetChildren()
 {
 	return _childDar;
 }
@@ -611,4 +769,14 @@ bool VPanel::IsKeyBoardInputEnabled()
 bool VPanel::IsMouseInputEnabled()
 {
 	return _mouseInput;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: sibling pins
+//-----------------------------------------------------------------------------
+void VPanel::SetSiblingPin(VPanel *newSibling, byte iMyCornerToPin, byte iSiblingCornerToPinTo )
+{
+	_pinsibling = newSibling;
+	_pinsibling_my_corner = iMyCornerToPin;
+	_pinsibling_their_corner = iSiblingCornerToPinTo;
 }

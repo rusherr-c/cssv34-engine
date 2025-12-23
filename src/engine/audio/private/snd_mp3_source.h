@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -35,8 +35,8 @@ public:
 	// Provide samples for the mixer. You can point pData at your own data, or if you prefer to copy the data,
 	// you can copy it into copyBuf and set pData to copyBuf.
 	virtual int					GetOutputData( void **pData, int samplePosition, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] ) = 0;
-	
-	virtual int					SampleRate( void ) { return m_sampleRate; }
+
+	virtual int					SampleRate( void );
 
 	// Returns true if the source is a voice source.
 	// This affects the voice_overdrive behavior (all sounds get quieter when
@@ -83,6 +83,8 @@ public:
 	virtual int					SampleToStreamPosition( int samplePosition ) { return 0; }
 	virtual int					StreamToSamplePosition( int streamPosition ) { return 0; }
 
+	virtual void				SetSentence( CSentence *pSentence );
+
 protected:
 
 	//-----------------------------------------------------------------------------
@@ -107,8 +109,6 @@ protected:
 	int				m_nCachedDataSize;
 
 protected:
-	bool						GetStartupData( void *dest, int destsize, int& bytesCopied );
-
 	CSfxTable		*m_pSfx;
 	int				m_sampleRate;
 	int				m_dataSize;
@@ -116,6 +116,7 @@ protected:
 	int				m_refCount;
 	bool			m_bIsPlayOnce : 1;
 	bool			m_bIsSentenceWord : 1;
+	bool			m_bCheckedForPendingSentence;
 };
 
 //-----------------------------------------------------------------------------
@@ -128,24 +129,24 @@ public:
 	CAudioSourceStreamMP3( CSfxTable *pSfx, CAudioSourceCachedInfo *info );
 	~CAudioSourceStreamMP3() {}
 
-	bool			IsStreaming( void ) { return true; }
-	bool			IsStereoWav(void) { return false; }
-	CAudioMixer		*CreateMixer( int initialStreamPosition = 0 );
-	int				GetOutputData( void **pData, int samplePosition, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] );
+	bool			IsStreaming( void ) OVERRIDE { return true; }
+	bool			IsStereoWav( void ) OVERRIDE { return false; }
+	CAudioMixer		*CreateMixer( int initialStreamPosition = 0 ) OVERRIDE;
+	int				GetOutputData( void **pData, int samplePosition, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] ) OVERRIDE;
 
 	// IWaveStreamSource
-	virtual int UpdateLoopingSamplePosition( int samplePosition )
+	int UpdateLoopingSamplePosition( int samplePosition ) OVERRIDE
 	{
 		return samplePosition;
 	}
-	virtual void UpdateSamples( char *pData, int sampleCount ) {}
+	void UpdateSamples( char *pData, int sampleCount ) OVERRIDE {}
 
-	virtual int	GetLoopingInfo( int *pLoopBlock, int *pNumLeadingSamples, int *pNumTrailingSamples )
+	int	GetLoopingInfo( int *pLoopBlock, int *pNumLeadingSamples, int *pNumTrailingSamples ) OVERRIDE
 	{
 		return 0;
 	}
 
-	virtual void Prefetch();
+	void Prefetch() OVERRIDE;
 
 private:
 	CAudioSourceStreamMP3( const CAudioSourceStreamMP3 & ); // not implemented, not accessible
@@ -158,14 +159,15 @@ public:
 	CAudioSourceMP3Cache( CSfxTable *pSfx, CAudioSourceCachedInfo *info );
 	~CAudioSourceMP3Cache( void );
 
-	int						GetCacheStatus( void );
-	void					CacheLoad( void );
-	void					CacheUnload( void );
+	int						GetCacheStatus( void ) OVERRIDE;
+	void					CacheLoad( void ) OVERRIDE;
+	void					CacheUnload( void ) OVERRIDE;
 	// NOTE: "samples" are bytes for MP3
-	int						GetOutputData( void **pData, int samplePosition, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] );
-	CAudioMixer				*CreateMixer( int initialStreamPosition = 0 );
+	int						GetOutputData( void **pData, int samplePosition, int sampleCount, char copyBuf[AUDIOSOURCE_COPYBUF_SIZE] ) OVERRIDE;
+	CAudioMixer				*CreateMixer( int initialStreamPosition = 0 ) OVERRIDE;
+	CSentence				*GetSentence( void ) OVERRIDE;
 
-	virtual void			Prefetch() {}
+	void					Prefetch() OVERRIDE {}
 
 protected:
 	virtual char			*GetDataPointer( void );
@@ -173,11 +175,12 @@ protected:
 
 private:
 	CAudioSourceMP3Cache( const CAudioSourceMP3Cache & );
+
+	unsigned int	m_bNoSentence : 1;
 };
 
 bool Audio_IsMP3( const char *pName );
 CAudioSource *Audio_CreateStreamedMP3( CSfxTable *pSfx );
 CAudioSource *Audio_CreateMemoryMP3( CSfxTable *pSfx );
-CAudioMixer *CreateMP3Mixer( IWaveData *data, int *pSampleRate );
 
 #endif // SND_MP3_SOURCE_H

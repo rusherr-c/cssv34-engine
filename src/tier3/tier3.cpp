@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A higher level link library for general use in the game and tools.
 //
@@ -17,10 +17,11 @@
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "datacache/idatacache.h"
 #include "datacache/imdlcache.h"
-#include "video/iavi.h"
+#include "video/ivideoservices.h"
 #include "movieobjects/idmemakefileutils.h"
 #include "vphysics_interface.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
+#include "ivtex.h"
 
 
 //-----------------------------------------------------------------------------
@@ -42,11 +43,11 @@ vgui::ISystem *g_pVGuiSystem = 0;
 IDataCache *g_pDataCache = 0;
 IMDLCache *g_pMDLCache = 0;
 IMDLCache *mdlcache = 0;
-IAvi *g_pAVI = 0;
-IBik *g_pBIK = 0;
+IVideoServices *g_pVideo = NULL;
 IDmeMakefileUtils *g_pDmeMakefileUtils = 0;
 IPhysicsCollision *g_pPhysicsCollision = 0;
 ISoundEmitterSystemBase *g_pSoundEmitterSystem = 0;
+IVTex *g_pVTex = 0;
 
 
 //-----------------------------------------------------------------------------
@@ -57,7 +58,7 @@ void ConnectTier3Libraries( CreateInterfaceFn *pFactoryList, int nFactoryCount )
 {
 	// Don't connect twice..
 	Assert( !g_pStudioRender && !studiorender && !g_pMatSystemSurface && !g_pVGui && !g_pVGuiPanel && !g_pVGuiInput &&
-		!g_pVGuiSurface && !g_pDataCache && !g_pMDLCache && !mdlcache && !g_pAVI && !g_pBIK && 
+		!g_pVGuiSurface && !g_pDataCache && !g_pMDLCache && !mdlcache && !g_pVideo &&
 		!g_pDmeMakefileUtils && !g_pPhysicsCollision && !g_pVGuiLocalize && !g_pSoundEmitterSystem &&
 		!g_pVGuiSchemeManager && !g_pVGuiSystem );
 
@@ -107,9 +108,9 @@ void ConnectTier3Libraries( CreateInterfaceFn *pFactoryList, int nFactoryCount )
 		{
 			g_pMDLCache = mdlcache = (IMDLCache*)pFactoryList[i]( MDLCACHE_INTERFACE_VERSION, NULL );
 		}
-		if ( !g_pAVI )
+		if ( !g_pVideo )
 		{
-			g_pAVI = (IAvi *)pFactoryList[i](AVI_INTERFACE_VERSION, NULL );
+			g_pVideo = (IVideoServices *)pFactoryList[i](VIDEO_SERVICES_INTERFACE_VERSION, NULL);
 		}
 		if ( !g_pDmeMakefileUtils )
 		{
@@ -122,6 +123,10 @@ void ConnectTier3Libraries( CreateInterfaceFn *pFactoryList, int nFactoryCount )
 		if ( !g_pSoundEmitterSystem )
 		{
 			g_pSoundEmitterSystem = ( ISoundEmitterSystemBase* )pFactoryList[i]( SOUNDEMITTERSYSTEM_INTERFACE_VERSION, NULL );
+		}
+		if ( !g_pVTex )
+		{
+			g_pVTex = ( IVTex * )pFactoryList[i]( IVTEX_VERSION_STRING, NULL );
 		}
 	}
 }
@@ -141,8 +146,9 @@ void DisconnectTier3Libraries()
 	g_pDataCache = 0;
 	g_pMDLCache = 0;
 	mdlcache = 0;
-	g_pAVI = 0;
+	g_pVideo = NULL;
 	g_pPhysicsCollision = 0;
 	g_pDmeMakefileUtils = NULL;
 	g_pSoundEmitterSystem = 0;
+	g_pVTex = NULL;
 }

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,6 +21,7 @@
 #include "tier1/utlqueue.h"
 #include "tier1/utlbuffer.h"
 #include "tier2/utlstreambuffer.h"
+#include "tier2/fileutils.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -244,9 +245,9 @@ DmElementHandle_t CDataModel::NextAllocatedElement( DmElementHandle_t hElement )
 	int nHandles = ( int )m_Handles.GetHandleCount();
 	for ( int i = m_Handles.GetIndexFromHandle( hElement ) + 1; i < nHandles; ++i )
 	{
-		DmElementHandle_t hElement = ( DmElementHandle_t )m_Handles.GetHandleFromIndex( i );
-		if ( hElement != DMELEMENT_HANDLE_INVALID )
-			return hElement;
+		DmElementHandle_t hElementCur = ( DmElementHandle_t )m_Handles.GetHandleFromIndex( i );
+		if ( hElementCur != DMELEMENT_HANDLE_INVALID )
+			return hElementCur;
 	}
 
 	return DMELEMENT_HANDLE_INVALID;
@@ -618,27 +619,6 @@ void CDataModel::SetSerializationArrayDelimiter( const char *pDelimiter )
 	::SetSerializationArrayDelimiter( pDelimiter );
 }
 
-bool GenerateFullPath( const char *pFileName, char const *pPathID, char *pBuf, int nBufLen )
-{
-	if ( V_IsAbsolutePath( pFileName ) )
-	{
-		V_strncpy( pBuf, pFileName, nBufLen );
-		return true;
-	}
-
-	const char *pFullPath = g_pFullFileSystem->RelativePathToFullPath( pFileName, pPathID, pBuf, nBufLen );
-	if ( pFullPath && Q_IsAbsolutePath( pFullPath ) )
-		return true;
-
-	char pDir[ MAX_PATH ];
-	if ( !g_pFullFileSystem->GetCurrentDirectory( pDir, sizeof( pDir ) ) )
-		return false;
-
-	V_ComposeFileName( pDir, pFileName, pBuf, nBufLen );
-	V_RemoveDotSlashes( pBuf );
-	return true;
-}
-
 bool CDataModel::SaveToFile( char const *pFileName, char const *pPathID, const char *pEncodingName, const char *pFormatName, CDmElement *pRoot )
 {
 	// NOTE: This guarantees full path names for pathids
@@ -753,7 +733,7 @@ bool CDataModel::Serialize( CUtlBuffer &outBuf, const char *pEncodingName, const
 		{
 			if ( !outBuf.ContainsCRLF() )
 			{
-				Warning( "Serialize: Format %s expects to be written to a binary format, but the buffer is a text-format buffer\n" );
+				Warning( "Serialize: Format %s expects to be written to a binary format, but the buffer is a text-format buffer\n", pFormatName );
 				return false;
 			}
 			outBuf.SetBufferType( false, false );
@@ -864,10 +844,6 @@ const char *CDataModel::GetEncodingFromLegacyFormat( const char *pLegacyFormatNa
 		return "keyvalues2";
 	if ( StringHasPrefixCaseSensitive( pLegacyFormatName, "keyvalues2_flat_v" ) )
 		return "keyvalues2_flat";
-	if ( !V_strcmp( pLegacyFormatName, "xml" ) )
-		return "xml";
-	if ( !V_strcmp( pLegacyFormatName, "xml_flat" ) )
-		return "xml_flat";
 	return NULL;
 }
 
@@ -977,9 +953,16 @@ bool CDataModel::Unserialize( CUtlBuffer &inBuf, const char *pEncodingName, cons
 		char cmdline[ 256 ];
 		V_snprintf( cmdline, sizeof( cmdline ), "dmxconvert -allowdebug -i %s -o %s -oe %s -of %s", pFileName, tempFileName, pDestEncodingName, pDestFormatName );
 
-		ProcessHandle_t hProcess = g_pProcessUtils->StartProcess( cmdline, false );
+		ProcessHandle_t hProcess = PROCESS_HANDLE_INVALID;
+		if ( g_pProcessUtils )
+		{
+			hProcess = g_pProcessUtils->StartProcess( cmdline, false );
+		}
 		if ( hProcess == PROCESS_HANDLE_INVALID )
+		{
+			Warning( "Unserialize: Unable to run conversion process \"%s\"\n", cmdline );
 			return false;
+		}
 
 		g_pProcessUtils->WaitUntilProcessCompletes( hProcess );
 		g_pProcessUtils->CloseProcess( hProcess );
@@ -989,7 +972,7 @@ bool CDataModel::Unserialize( CUtlBuffer &inBuf, const char *pEncodingName, cons
 			CUtlStreamBuffer strbuf( tempFileName, NULL, CUtlBuffer::READ_ONLY );
 			if ( !strbuf.IsValid() )
 			{
-				Warning( "Unerialize: Unable to open temp file \"%s\"\n", tempFileName );
+				Warning( "Unserialize: Unable to open temp file \"%s\"\n", tempFileName );
 				return false;
 			}
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2006, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,8 +6,9 @@
 //=============================================================================//
 
 #include "BaseVSShader.h"
-#include "core_vs30.inc"
-#include "core_ps30.inc"
+#include "core_vs20.inc"
+#include "core_ps20.inc"
+#include "core_ps20b.inc"
 
 #define MAXBLUR 1
 
@@ -75,7 +76,7 @@ BEGIN_VS_SHADER( Core_DX90,
 	{
 		if (params[BASETEXTURE]->IsDefined() )
 		{
-			LoadTexture( BASETEXTURE );
+			LoadTexture( BASETEXTURE, TEXTUREFLAGS_SRGB );
 		}
 		if (params[NORMALMAP]->IsDefined() )
 		{
@@ -83,7 +84,7 @@ BEGIN_VS_SHADER( Core_DX90,
 		}
 		if ( params[ENVMAP]->IsDefined() )
 		{
-			LoadCubeMap( ENVMAP );
+			LoadCubeMap( ENVMAP, TEXTUREFLAGS_SRGB );
 		}
 		if ( params[FLOWMAP]->IsDefined() )
 		{
@@ -176,11 +177,11 @@ BEGIN_VS_SHADER( Core_DX90,
 
 			pShaderShadow->VertexShaderVertexFormat( flags, nTexCoordCount, NULL, userDataSize );
 
-			DECLARE_STATIC_VERTEX_SHADER( core_vs30 );
+			DECLARE_STATIC_VERTEX_SHADER( core_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( MODEL,  bIsModel );
-			SET_STATIC_VERTEX_SHADER( core_vs30 );
+			SET_STATIC_VERTEX_SHADER( core_vs20 );
 
-			/*if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{
 				DECLARE_STATIC_PIXEL_SHADER( core_ps20b );
 				SET_STATIC_PIXEL_SHADER_COMBO( CUBEMAP,  bHasEnvmap && ( nPass == 1 ) );
@@ -197,14 +198,7 @@ BEGIN_VS_SHADER( Core_DX90,
 				SET_STATIC_PIXEL_SHADER_COMBO( CORECOLORTEXTURE, bHasCoreColorTexture && ( nPass == 0 ) );
 				SET_STATIC_PIXEL_SHADER_COMBO( REFRACT, nPass == 0 );
 				SET_STATIC_PIXEL_SHADER( core_ps20 );
-			}*/
-
-			DECLARE_STATIC_PIXEL_SHADER( core_ps30 );
-			SET_STATIC_PIXEL_SHADER_COMBO( CUBEMAP,  bHasEnvmap && ( nPass == 1 ) );
-			SET_STATIC_PIXEL_SHADER_COMBO( FLOWMAP, bHasFlowmap );
-			SET_STATIC_PIXEL_SHADER_COMBO( CORECOLORTEXTURE, bHasCoreColorTexture && ( nPass == 0 ) );
-			SET_STATIC_PIXEL_SHADER_COMBO( REFRACT, nPass == 0 );
-			SET_STATIC_PIXEL_SHADER( core_ps30 );
+			}
 
 			DefaultFog();
 		}
@@ -238,12 +232,12 @@ BEGIN_VS_SHADER( Core_DX90,
 				BindTexture( SHADER_SAMPLER7, CORECOLORTEXTURE, CORECOLORTEXTUREFRAME );
 			}
 
-			DECLARE_DYNAMIC_VERTEX_SHADER( core_vs30 );
+			DECLARE_DYNAMIC_VERTEX_SHADER( core_vs20 );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( SKINNING,  pShaderAPI->GetCurrentNumBones() > 0 );
 			SET_DYNAMIC_VERTEX_SHADER_COMBO( COMPRESSED_VERTS, (int)vertexCompression );
-			SET_DYNAMIC_VERTEX_SHADER( core_vs30 );
+			SET_DYNAMIC_VERTEX_SHADER( core_vs20 );
 
-			/*if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 			{
 				DECLARE_DYNAMIC_PIXEL_SHADER( core_ps20b );
 				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
@@ -254,11 +248,7 @@ BEGIN_VS_SHADER( Core_DX90,
 				DECLARE_DYNAMIC_PIXEL_SHADER( core_ps20 );
 				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
 				SET_DYNAMIC_PIXEL_SHADER( core_ps20 );
-			}*/
-
-			DECLARE_DYNAMIC_PIXEL_SHADER( core_ps30 );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
-			SET_DYNAMIC_PIXEL_SHADER( core_ps30 );
+			}
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
 

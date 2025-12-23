@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -25,7 +25,7 @@
 #include "ifaceposerworkspace.h"
 #include "expclass.h"
 #include "PhonemeEditor.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "ExpressionTool.h"
 #include "ControlPanel.h"
 #include "choreowidgetdrawhelper.h"
@@ -67,6 +67,8 @@
 #include "vguiwnd.h"
 #include "vgui_controls/Frame.h"
 #include "vgui/ISurface.h"
+#include "p4lib/ip4.h"
+#include "tier2/p4helpers.h"
 #include "ProgressDialog.h"
 #include "scriplib.h"
 
@@ -274,14 +276,27 @@ int LoadFile (const char *filename, void **bufferptr)
 	return length;
 }
 
-char *ExpandPath (char *path)
+char *ExpandPath(char *path)
 {
 	static char full[1024];
 	if (path[0] == '/' || path[0] == '\\' || path[1] == ':')
 		return path;
 
-	Q_snprintf (full, 1024, "%s%s", gamedir, path);
+	V_sprintf_safe( full, "%s%s", gamedir, path );
 	return full;
+}
+
+
+//-----------------------------------------------------------------------------
+// This is here because scriplib.cpp is included in this project but cmdlib.cpp
+// is not, but scriplib.cpp uses some stuff from cmdlib.cpp, same with
+// LoadFile and ExpandPath above.  The only thing that currently uses this
+// is $include in scriptlib, if this function returns 0, $include will
+// behave the way it did before this change
+//-----------------------------------------------------------------------------
+int CmdLib_ExpandWithBasePaths( CUtlVector< CUtlString > &expandedPathList, const char *pszPath )
+{
+	return 0;
 }
 
 
@@ -752,7 +767,7 @@ public:
 					break;
 				case IDC_MODELTAB_LOAD:
 					{
-						if ( filesystem->IsSteam() )
+						if ( ! CommandLine()->FindParm( "-NoSteamDialog" ) )
 						{
 							g_MDLViewer->LoadModel_Steam();
 						}
@@ -1285,6 +1300,8 @@ MDLViewer::MDLViewer () :
 	menuChoreography->add( "Close", IDC_CHOREOSCENE_CLOSE );
 	menuChoreography->addSeparator();
 	menuChoreography->add( "Add Actor...", IDC_CHOREOSCENE_ADDACTOR );
+	menuChoreography->addSeparator();
+	menuChoreography->add( "Load Next", IDC_CHOREOSCENE_LOADNEXT );
 
 #ifdef WIN32
 	menuHelp->add ("Goto Homepage...", IDC_HELP_GOTOHOMEPAGE);
@@ -1712,7 +1729,7 @@ int MDLViewer::handleEvent (mxEvent *event)
 			
 			case IDC_FILE_LOADMODEL:
 				{
-					if ( filesystem->IsSteam() )
+					if ( ! CommandLine()->FindParm( "-NoSteamDialog" ) )
 					{
 						g_MDLViewer->LoadModel_Steam();
 					}
@@ -1891,6 +1908,7 @@ int MDLViewer::handleEvent (mxEvent *event)
 					{
 						g_pProgressDialog->Start( "Rebuild Bitmaps", "", true );
 
+						g_pMatSysWindow->EnableStickySnapshotMode( );
 						for ( int i = 0; i < active->GetNumExpressions() ; i++ )
 						{
 							CExpression *exp = active->GetExpression( i );
@@ -1912,6 +1930,7 @@ int MDLViewer::handleEvent (mxEvent *event)
 								g_pExpressionTrayTool->redraw();
 							}
 						}
+						g_pMatSysWindow->DisableStickySnapshotMode( );
 						
 						g_pProgressDialog->Finish();
 
@@ -1969,6 +1988,9 @@ int MDLViewer::handleEvent (mxEvent *event)
 				break;
 			case IDC_CHOREOSCENE_LOAD:
 				g_pChoreoView->Load();
+				break;
+			case IDC_CHOREOSCENE_LOADNEXT:
+				g_pChoreoView->LoadNext();
 				break;
 			case IDC_CHOREOSCENE_SAVE:
 				g_pChoreoView->Save();
@@ -2327,6 +2349,8 @@ void MDLViewer::OnRebuildScenesImage()
 
 	const char *pFilename = bLittleEndian ? "scenes/scenes.image" : "scenes/scenes.360.image";
 
+	CP4AutoEditAddFile checkout( CFmtStr( "%s%s", gamedir, pFilename ) );
+
 	bool bSuccess = g_pSceneImage->CreateSceneImageFile( targetBuffer, gamedir, bLittleEndian, false, this );
 	if ( bSuccess )
 	{
@@ -2471,6 +2495,13 @@ bool CHLFacePoserApp::Create()
 	if ( !AddSystems( appSystems ) ) 
 		return false;
 
+	// Add the P4 module separately so that if it is absent (say in the SDK) then the other system will initialize properly
+	AppModule_t p4Module = LoadModule( "p4lib.dll" );
+	if ( p4Module != APP_MODULE_INVALID )
+	{
+		AddSystem( p4Module, P4_INTERFACE_VERSION );
+	}
+
 	g_Factory = GetFactory();
 
 	IMaterialSystem* pMaterialSystem = (IMaterialSystem*)FindSystem( MATERIAL_SYSTEM_INTERFACE_VERSION );
@@ -2543,7 +2574,7 @@ bool CHLFacePoserApp::PreInit( )
 	g_pStudioDataCache = (IStudioDataCache*)FindSystem( STUDIO_DATA_CACHE_INTERFACE_VERSION ); 
 	physcollision = (IPhysicsCollision *)FindSystem( VPHYSICS_COLLISION_INTERFACE_VERSION );
 	physprop = (IPhysicsSurfaceProps *)FindSystem( VPHYSICS_SURFACEPROPS_INTERFACE_VERSION );
-	g_pLocalize = (vgui::ILocalize *)FindSystem( VGUI_LOCALIZE_INTERFACE_VERSION );
+	g_pLocalize = (vgui::ILocalize *)FindSystem(VGUI_LOCALIZE_INTERFACE_VERSION );
 	soundemitter = (ISoundEmitterSystemBase*)FindSystem(SOUNDEMITTERSYSTEM_INTERFACE_VERSION);
 
 	if ( !soundemitter || !g_pLocalize || !filesystem || !physprop || !physcollision || 
@@ -2599,6 +2630,15 @@ void CHLFacePoserApp::PostShutdown()
 //-----------------------------------------------------------------------------
 int CHLFacePoserApp::Main()
 {
+	// Do Perforce Stuff
+	g_p4factory->SetDummyMode( false );
+	if ( CommandLine()->FindParm( "-nop4" ) || !p4 )
+	{
+		g_p4factory->SetDummyMode( true );
+	}
+
+	g_p4factory->SetOpenFileChangeList( "FacePoser Auto Checkout" );
+
 	soundemitter->ModInit();
 	g_pMaterialSystem->ModInit();
 

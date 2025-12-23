@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -140,9 +140,9 @@ void CDispInfo::TestAddDecalTri( int iIndexStart, unsigned short decalHandle, CD
 	// If the decal is too far away from the plane of this triangle, reject it.
 	unsigned short tempIndices[3] = 
 	{
-		m_MeshReader.Index( iIndexStart+0 ) - m_iVertOffset,
-		m_MeshReader.Index( iIndexStart+1 ) - m_iVertOffset,
-		m_MeshReader.Index( iIndexStart+2 ) - m_iVertOffset
+		(unsigned short)(m_MeshReader.Index( iIndexStart+0 ) - m_iVertOffset),
+		(unsigned short)(m_MeshReader.Index( iIndexStart+1 ) - m_iVertOffset),
+		(unsigned short)(m_MeshReader.Index( iIndexStart+2 ) - m_iVertOffset)
 	};
 	
 	const Vector &v0 = m_MeshReader.Position( tempIndices[0] );
@@ -180,14 +180,14 @@ void CDispInfo::TestAddDecalTri( int iIndexStart, unsigned short decalHandle, CD
 	}
 
 	// Clip them.
-	int outCount;
 	CDecalVert *pClipped;
-
 	CDecalVert *pOutVerts = NULL;
-	pClipped = R_DoDecalSHClip( &verts[0], pOutVerts, pDecal, 3, vec3_origin, &outCount );
+	pClipped = R_DoDecalSHClip( &verts[0], pOutVerts, pDecal, 3, vec3_origin );
+	int outCount = pDecal->clippedVertCount;
+
 	if ( outCount > 2 ) 
 	{
-		outCount = min( outCount, CDispDecalFragment::MAX_VERTS );
+		outCount = min( outCount, (int)CDispDecalFragment::MAX_VERTS );
 
 		// Allocate a new fragment...
 		CDispDecalFragment* pFragment = AllocateDispDecalFragment( decalHandle, outCount );
@@ -234,9 +234,9 @@ void CDispInfo::TestAddDecalTri( int iIndexStart, unsigned short decalHandle, CD
 {
 	unsigned short tempIndices[3] = 
 	{
-		m_MeshReader.Index( iIndexStart+0 ) - m_iVertOffset,
-		m_MeshReader.Index( iIndexStart+1 ) - m_iVertOffset,
-		m_MeshReader.Index( iIndexStart+2 ) - m_iVertOffset
+		(unsigned short)(m_MeshReader.Index( iIndexStart+0 ) - m_iVertOffset),
+		(unsigned short)(m_MeshReader.Index( iIndexStart+1 ) - m_iVertOffset),
+		(unsigned short)(m_MeshReader.Index( iIndexStart+2 ) - m_iVertOffset)
 	};
 #ifndef SWDS
 	// Setup verts.
@@ -617,9 +617,9 @@ struct ProcessLightmapSampleData_t
 	ProcessLightmapSampleFunc_t *pProcessLightmapSampleDataFunc;
 };
 
+#ifndef DEDICATED
 static void	ProcessLightmapSample( const ProcessLightmapSampleData_t &data, const Vector &vPos, const Vector &vNormal, const Vector &vTangentS, const Vector &vTangentT, int t, int s, int tmax, int smax )
 {
-#if !defined( _LINUX )
 	float distSqr = data.m_vLightOrigin.DistToSqr( vPos );
 	if( distSqr < data.m_LightDistSqr )
 	{
@@ -636,12 +636,10 @@ static void	ProcessLightmapSample( const ProcessLightmapSampleData_t &data, cons
 			scale, data.m_Intensity,
 			blocklights[0][index].AsVector3D() );
 	}
-#endif
 }
 
 static void	ProcessLightmapSampleBumped( const ProcessLightmapSampleData_t &data, const Vector &vPos, const Vector &vNormal, const Vector &vTangentS, const Vector &vTangentT, int t, int s, int tmax, int smax )
 {
-#if !defined( _LINUX )
 	float distSqr = data.m_vLightOrigin.DistToSqr( vPos );
 	if( distSqr < data.m_LightDistSqr )
 	{
@@ -683,7 +681,6 @@ static void	ProcessLightmapSampleBumped( const ProcessLightmapSampleData_t &data
 			data.m_Intensity, 
 			blocklights[3][index].AsVector3D() );
 	}
-#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -691,7 +688,6 @@ static void	ProcessLightmapSampleBumped( const ProcessLightmapSampleData_t &data
 //-----------------------------------------------------------------------------
 static void	ProcessLightmapSampleAlpha( const ProcessLightmapSampleData_t &data, const Vector &vPos, const Vector &vNormal, const Vector &vTangentS, const Vector &vTangentT, int t, int s, int tmax, int smax )
 {
-#if !defined( _LINUX )
 	float distSqr = data.m_vLightOrigin.DistToSqr( vPos );
 	if( distSqr < data.m_LightDistSqr )
 	{
@@ -706,8 +702,8 @@ static void	ProcessLightmapSampleAlpha( const ProcessLightmapSampleData_t &data,
 		int index = t*smax + s;
 		blocklights[0][index][3] += scale * data.m_Intensity[0];
 	}
-#endif
 }
+#endif
 
 // This iterates over all the lightmap samples and for each one, calls:
 // T::ProcessLightmapSample( Vector const &vPos, int t, int s, int tmax, int smax );

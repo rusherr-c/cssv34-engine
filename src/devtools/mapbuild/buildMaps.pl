@@ -1,4 +1,4 @@
-#========= Copyright 1996-2007, Valve Corporation, All rights reserved. ==========
+#========= Copyright 1996-2008, Valve Corporation, All rights reserved. ==========
 #
 # Master script for performing automated compiles of bsp's with cubemaps, reslists,
 # and nodegraphs. Compiles can be triggered manually by adding the vmf's absolute
@@ -11,7 +11,7 @@ use strict;
 use warnings;
 use Net::SMTP;
 
-my $maxCompiles = 2; 		# Maximum number of simultaneous compiles.
+my $maxCompiles = 3; 		# Maximum number of simultaneous compiles.
 my $running = 0;
 my @g_CompileList;
 my @finalizeList;
@@ -233,12 +233,12 @@ for ( @finalizeList )
 
 		if ( $vradargs =~ /-hdr|-both/ )
 		{
-			$hdrResult = system( "$rootdir\\$maindir\\game\\hl2.exe -allowdebug -game $mod -window -w 1280 -h 1024 +mat_picmip 0 -dev +mat_hdr_level 2 +sv_cheats 1 +map $mapname -buildcubemaps" );
+			$hdrResult = system( "$rootdir\\$maindir\\game\\hl2.exe -allowdebug -game $mod -window -w 1152 -h 864 +mat_picmip 0 -dev +mat_hdr_level 2 +sv_cheats 1 +map $mapname -buildcubemaps" );
 		}
 
 		if ( $vradargs =~ /-ldr|-both/ )
 		{
-			$ldrResult = system( "$rootdir\\$maindir\\game\\hl2.exe -allowdebug -game $mod -window -w 1280 -h 1024 +mat_picmip 0 -dev +mat_hdr_level 0 +sv_cheats 1 +map $mapname -buildcubemaps" );
+			$ldrResult = system( "$rootdir\\$maindir\\game\\hl2.exe -allowdebug -game $mod -window -w 1152 -h 864 +mat_picmip 0 -dev +mat_hdr_level 0 +sv_cheats 1 +map $mapname -buildcubemaps" );
 		}
 	}
 
@@ -248,8 +248,11 @@ for ( @finalizeList )
 		system( "time /t >> $outfile" );
 		system( "echo Building reslists and nodegraph for $mapname. >> $outfile" );
 
+		system( "del /s $rootdir\\$maindir\\game\\$mod\\reslists_temp\\*.lst" );
+
 		system( "p4 edit $rootdir\\$maindir\\game\\$mod\\reslists_xbox\\$mapname.lst" );
 		system( "p4 add $rootdir\\$maindir\\game\\$mod\\reslists_xbox\\$mapname.lst" );
+		system( "del $rootdir\\$maindir\\game\\$mod\\reslists_xbox\\$mapname.lst" );
 		my $extraflags = "";
 #		if ( $mod =~ /portal/ )
 #		{
@@ -306,14 +309,13 @@ for ( @finalizeList )
 
 	system( "p4 changes -m 1 -s submitted -l $rootdir\\$maindir\\content\\$mod\\maps\\$mapname.vmf > comments.txt" );
 
-	print( OUTFILE "\tCheckin Comments: " );
-
 	open(INFILE, "comments.txt");
 	my @comments = <INFILE>;
 	close(INFILE);
 
 	if ( $buildbsp == 1 )
 	{
+		print( OUTFILE "\tCheckin Comments: " );
 		print( OUTFILE @comments,"\n\n" );
 		print( OUTFILE "\tRebuilt bsp\n" );
 	}
@@ -329,7 +331,7 @@ for ( @finalizeList )
 	print( OUTFILE "Files:\n" );
 	if ( $buildbsp == 1 )
 	{
-		print( OUTFILE "\t//ValveGames/main/game/$mod/maps/$mapname.bsp\n" );
+		print( OUTFILE "\t//ValveGames/staging/game/$mod/maps/$mapname.bsp\n" );
 	}
 	if ( $buildnodegraphs == 1 )
 	{
@@ -338,7 +340,7 @@ for ( @finalizeList )
 	}
 	if ( $buildreslists == 1 )
 	{
-		print( OUTFILE "\t//ValveGames/main/game/$mod/reslists_xbox/$mapname.lst\n" );
+		print( OUTFILE "\t//ValveGames/staging/game/$mod/reslists_xbox/$mapname.lst\n" );
 	}
 	close( OUTFILE );
 
@@ -391,20 +393,18 @@ for ( @finalizeList )
 #----------------------------------------
 sub StartCompiles
 {
-	if ( $buildbsp == 1 )
+	my $idx = 0;
+
+	print( "Current maplist:\n" );
+	for ( @g_CompileList )
 	{
-		my $idx = 0;
+		print( "$_\n" );
+	}
 
-		print( "Current maplist:\n" );
-		for ( @g_CompileList )
-		{
-			print( "$_\n" );
-		}
-
-		my $skipCt = 0;
-		while ( @g_CompileList > $skipCt && $running < $maxCompiles )
-		{
-			my $nextMap = splice( @g_CompileList, 0, 1 );
+	my $skipCt = 0;
+	while ( @g_CompileList > $skipCt && $running < $maxCompiles )
+	{
+		my $nextMap = splice( @g_CompileList, 0, 1 );
 
 			# Make sure this map isn't already compiling in another slot
 
@@ -434,7 +434,6 @@ sub StartCompiles
 				my $mapct = @g_CompileList;
 				system( "echo Maps waiting: $mapct >> log.txt" );
 			}
-		}
 	}
 
 	UpdateStats();
@@ -505,39 +504,40 @@ sub Compile
 	system( "p4 sync -f $rootdir\\$maindir\\content\\$mod\\maps\\$mapname.vmf >> log.txt" );
 	system( "p4 sync -f $rootdir\\$maindir\\game\\$mod\\maps\\$mapname.bsp >> log.txt" );
 
-	print "\nCompiling $mod\\$mapname.bsp\n";
-
-	# load the map compile args for this mod
-
-	if( !open( INFILE, "$rootdir\\$maindir\\game\\$mod\\scripts\\mapautocompile.txt") )
-	{
-		print( "Error opening autocompile.txt\n" );
-	}
-	my @lines = <INFILE>;
-	close (INFILE);
-	
-	my $tool;
-	my $rest;
-	my $toolmap;
-	for ( @lines )
-	{
-		if ( /map: (.*)/ )
-		{
-			$toolmap = $1;
-		}
-		elsif ( /\s+(.+)/ )
-		{
-			($tool, $rest) = split ( /:\s*/, $1, 2 );
-			$g_ToolArgs{$toolmap}{$tool} = $rest;
-		}
-	}
-
 	if ( $buildbsp == 1 )
 	{
+		print "\nCompiling $mod\\$mapname.bsp\n";
+
+		# load the map compile args for this mod
+
+		if( !open( INFILE, "$rootdir\\$maindir\\game\\$mod\\scripts\\mapautocompile.txt") )
+		{
+			print( "Error opening autocompile.txt\n" );
+		}
+		my @lines = <INFILE>;
+		close (INFILE);
+	
+		my $tool;
+		my $rest;
+		my $toolmap;
+		for ( @lines )
+		{
+			if ( /map: (.*)/ )
+			{
+				$toolmap = $1;
+			}
+			elsif ( /\s+(.+)/ )
+			{
+				($tool, $rest) = split ( /:\s*/, $1, 2 );
+				$g_ToolArgs{$toolmap}{$tool} = $rest;
+			}
+		}
+
 		# Open the bsp for edit
 
 		system( "p4 edit $rootdir\\$maindir\\game\\$mod\\maps\\$mapname.bsp" );
 		system( "p4 add $rootdir\\$maindir\\game\\$mod\\maps\\$mapname.bsp" );
+		system( "del $rootdir\\$maindir\\game\\$mod\\maps\\$mapname.bsp" );
 	}
 
 	chdir( "$rootdir\\main1\\src\\devtools\\mapbuild" );
@@ -589,12 +589,12 @@ sub Compile
 
 	while( !open( OUTFILE, ">>finalize.txt" ) ) {}
 	print OUTFILE "Finalize: $mod $mapname\n";
+	print OUTFILE "maindir: $maindir\n";
 
 	if ( $buildbsp == 1 )
 	{
 		# Output the compile args and time
 
-		print OUTFILE "maindir: $maindir\n";
 		print OUTFILE "vbspargs: $vbspargs\n";
 		print OUTFILE "vvisargs: $vvisargs\n";
 		print OUTFILE "vradargs: $vradargs\n";
@@ -670,7 +670,7 @@ sub compileTool
 sub syncChangedMaps
 {
 	# TODO: Get these mod names from a file?
-	my @mods = ( "ep2", "portal", "tf", "episodic", "hl2" );
+	my @mods = ( "ep2", "portal", "episodic", "hl2", "tf" );
 
 	# Query perforce for changed maps by doing a speculative sync. This generates a list
 	# of files that it WOULD sync, without actually doing the sync.
@@ -731,13 +731,6 @@ sub syncChangedMaps
 sub shouldBuild
 {
 	my $map = shift;
-
-	# if command line flag was set, build the map
-
-#	if ( $forceBuild == 1 )
-#	{
-#		return 1;
-#	}
 
 	# if the map line contains the force flag, build the map
 

@@ -7,20 +7,24 @@
 $macro SRCDIR		".."
 $Macro OUTBINDIR	"$SRCDIR\..\game\bin"
 
-$include "$SRCDIR\vpc_scripts\source_dll_win32_base.vpc"	[$WIN32||$LINUX]
-$include "$SRCDIR\vpc_scripts\source_dll_x360_base.vpc"		[$X360]
+$include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
+$Include "$SRCDIR\vpc_scripts\source_saxxyawards.vpc"
+$include "$SRCDIR\vpc_scripts\source_cryptlib_include.vpc"
 
 $Configuration
 {
 	$Compiler
 	{
-		$AdditionalIncludeDirectories	"$BASE;.\;$SRCDIR\vgui2\include;$SRCDIR\vgui2\controls"
-		$PreprocessorDefinitions		"$BASE;GAMEUI_EXPORTS"
+		$AdditionalIncludeDirectories	"$BASE;.\;$SRCDIR\vgui2\include;$SRCDIR\vgui2\controls;$SRCDIR\common\GameUI"
+		$PreprocessorDefinitions		"$BASE;GAMEUI_EXPORTS;VERSION_SAFE_STEAM_API_INTERFACES"
 	}
 
 	$Linker
 	{
 		$AdditionalDependencies			"$BASE Ws2_32.lib odbc32.lib odbccp32.lib Shlwapi.lib" [$WIN32]
+		$SystemLibraries				"iconv;z" [$OSXALL]	
+		$SystemLibraries				"rt" [$LINUXALL && !$DEDICATED]
+		$GCC_ExtraLinkerFlags			"-L/usr/lib32 -L/usr/lib" [$LINUXALL && !$DEDICATED]
 	}
 }
 
@@ -48,16 +52,16 @@ $Project "GameUI"
 		$File	"BasePanel.cpp"
 		$File	"GameConsole.cpp"
 		$File	"GameUI_Interface.cpp"
-		$File	"LogoFile.cpp"
+		$File	"LogoFile.cpp" [!$POSIX]
 		$File	"ModInfo.cpp"
 		$File	"MouseMessageForwardingPanel.cpp"
-		$File	"$SRCDIR\Tracker\common\msgbuffer.cpp"
-		$File	"$SRCDIR\Tracker\common\netapi.cpp"
+		$File	"$SRCDIR\Tracker\common\msgbuffer.cpp" [!$POSIX]
+		$File	"$SRCDIR\Tracker\common\netapi.cpp" [!$POSIX]
 		$File	"$SRCDIR\common\GameUI\ObjectList.cpp"
 		$File	"PanelListPanel.cpp"
 		$File	"RunGameEngine.cpp"
-		$File	"ScriptObject.cpp"
-		$File	"$SRCDIR\Tracker\common\Socket.cpp"
+		$File	"$SRCDIR\common\GameUI\scriptobject.cpp"
+		$File	"$SRCDIR\Tracker\common\Socket.cpp" [!$POSIX]
 		$File	"Sys_Utils.cpp"
 		$File	"TextEntryBox.cpp"
 		$File	"TGAImagePanel.cpp"
@@ -66,7 +70,10 @@ $Project "GameUI"
 		$File	"BonusMapsDatabase.cpp"
 		$File	"BonusMapsDatabase.h"
 		$File	"$SRCDIR\common\language.cpp"
+		$File	"$SRCDIR\common\imageutils.cpp"
 		$File	"SaveGameBrowserDialog.cpp"
+		$File	"gameui_util.cpp"
+		$File	"gameui_util.h"
 	}
 
 	$Folder	"Header Files"
@@ -88,7 +95,7 @@ $Project "GameUI"
 		$File	"ModInfo.h"
 		$File	"MouseMessageForwardingPanel.h"
 		$File	"PanelListPanel.h"
-		$File	"ScriptObject.h"
+		$File	"$SRCDIR\common\GameUI\scriptobject.h"
 		$File	"Sys_Utils.h"
 		$File	"TextEntryBox.h"
 		$File	"TGAImagePanel.h"
@@ -105,13 +112,14 @@ $Project "GameUI"
 		$File	"$SRCDIR\public\tier1\interface.h"
 		$File	"$SRCDIR\common\IObjectContainer.h"
 		$File	"$SRCDIR\common\IRunGameEngine.h"
-		$File	"$SRCDIR\common\IVGuiModule.h"
+		$File	"$SRCDIR\common\IVguiModule.h"
 		$File	"$SRCDIR\common\IVGuiModuleLoader.h"
 		$File	"$SRCDIR\common\GameUI\ObjectList.h"
-		$File	"$SRCDIR\Public\savegame_version.h"
+		$File	"$SRCDIR\public\savegame_version.h"
 		$File	"$SRCDIR\Tracker\common\TrackerMessageFlags.h"
 		$File	"$SRCDIR\common\ValveCDKeyGameAndTerritoryCodes.h"
 		$File	"$SRCDIR\common\language.h"		
+		$File	"$SRCDIR\common\imageutils.h"		
 	}
 
 	$Folder	"Controls"
@@ -122,12 +130,14 @@ $Project "GameUI"
 		$File	"CommandCheckButton.h"
 		$File	"CvarNegateCheckButton.cpp"
 		$File	"CvarNegateCheckButton.h"
-		$File	"CvarSlider.cpp"
-		$File	"CvarSlider.h"
+		$File	"$SRCDIR\common\GameUI\cvarslider.cpp"
+		$File	"$SRCDIR\common\GameUI\cvarslider.h"
 		$File	"CvarTextEntry.cpp"
 		$File	"CvarTextEntry.h"
 		$File	"CvarToggleCheckButton.cpp"
 		$File	"CvarToggleCheckButton.h"
+		$File	"HapticControlBox.cpp"
+		$File	"HapticControlBox.h"
 		$File	"KeyToggleCheckButton.cpp"
 		$File	"KeyToggleCheckButton.h"
 		$File	"LabeledCommandComboBox.cpp"
@@ -150,6 +160,8 @@ $Project "GameUI"
 		$File	"CommentaryExplanationDialog.h"
 		$File	"ContentControlDialog.cpp"
 		$File	"ContentControlDialog.h"
+		$File	"CustomTabExplanationDialog.cpp"
+		$File	"CustomTabExplanationDialog.h"
 		$File	"GameConsoleDialog.cpp"
 		$File	"GameConsoleDialog.h"
 		$File	"LoadGameDialog_Xbox.cpp"
@@ -167,7 +179,7 @@ $Project "GameUI"
 		$File	"LoadCommentaryDialog.cpp"
 		$File	"LoadingDialog.cpp"
 		$File	"BaseSaveGameDialog.cpp"
-		$File	"ChangeGameDialog.cpp"
+		$File	"ChangeGameDialog.cpp" [!$POSIX]
 		$File	"CreateMultiplayerGameBotPage.cpp"
 		$File	"CreateMultiplayerGameDialog.cpp"
 		$File	"CreateMultiplayerGameGameplayPage.cpp"
@@ -211,6 +223,8 @@ $Project "GameUI"
 		$File	"OptionsSubDifficulty.h"
 		$File	"OptionsSubGame.cpp"
 		$File	"OptionsSubGame.h"
+		$File	"OptionsSubHaptics.cpp"	[$WIN32]
+		$File	"OptionsSubHaptics.h"	[$WIN32]
 		$File	"OptionsSubKeyboard.cpp"
 		$File	"OptionsSubKeyboard.h"
 		$File	"OptionsSubMouse.cpp"
@@ -225,25 +239,20 @@ $Project "GameUI"
 		$File	"OptionsSubVoice.h"
 	}
 	
-	$Folder	"Link Libraries" [$WIN32]
+	$Folder	"Link Libraries"
 	{
-		$File	"$SRCDIR\lib\public\bitmap.lib"
-		$File	"$SRCDIR\lib\common\vc8\cryptlib.lib"
-		$File	"$SRCDIR\lib\common\jpeglib.lib"
-		$File	"$SRCDIR\lib\public\mathlib.lib"
-		$File	"$SRCDIR\lib\public\tier2.lib"
-		$File	"$SRCDIR\lib\public\tier3.lib"
-		$File	"$SRCDIR\lib\public\vgui_controls.lib"
-		$File	"$SRCDIR\lib\public\vtf.lib"
-	}
-
-	$Folder	"Link Libraries" [$X360]
-	{
-		$File	"$SRCDIR\lib\public\bitmap_360.lib"
-		$File	"$SRCDIR\lib\public\mathlib_360.lib"
-		$File	"$SRCDIR\lib\public\tier2_360.lib"
-		$File	"$SRCDIR\lib\public\tier3_360.lib"
-		$File	"$SRCDIR\lib\public\vgui_controls_360.lib"
-		$File	"$SRCDIR\lib\public\vtf_360.lib"
+		$Lib	bitmap
+		$Lib	mathlib
+		$Lib	matsys_controls
+		$Lib	tier2
+		$Lib	tier3
+		$Lib	vgui_controls
+		$Lib	vtf
+		$Lib  	"$LIBCOMMON/libjpeg"		[!$DEDICATED]
+		$ImpLib	steam_api
+		$Lib libpng [!$VS2015&&!$DEDICATED]
+		$Lib $LIBCOMMON/libpng [$VS2015&&!$DEDICATED]
+		$Lib libz [!$DEDICATED]
+		$ImpLib SDL2 [$SDL]
 	}
 }

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -184,13 +184,14 @@ void CFileSystemOpenDlg::OnOK()
 		if ( m_bFilterMdlAndJpgFiles )
 		{
 			char tempFilename[MAX_PATH];
-			Q_strncpy( tempFilename, fullFilename, sizeof( tempFilename ) );
+			V_strcpy_safe( tempFilename, fullFilename );
 			char *pPos = strrchr( tempFilename, '.' );
 			if ( pPos )
 			{
 				if ( Q_stricmp( pPos, ".jpeg" ) == 0 || Q_stricmp( pPos, ".jpg" ) == 0 )
 				{
-					Q_strncpy( pPos, ".mdl", 5 );
+					pPos[0] = 0;
+					V_strcat_safe( tempFilename, ".mdl" );
 					m_Filename = tempFilename;
 				}
 			}
@@ -334,7 +335,7 @@ public:
 
 	static void imp_skip_input_data(j_decompress_ptr cinfo, long num_bytes)
 	{
-		Assert( false ); // They should never need to call these functions since we give them all the data up front.
+		AssertOnce( false ); // They should never need to call these functions since we give them all the data up front.
 	}
 
 	static boolean imp_resync_to_restart(j_decompress_ptr cinfo, int desired)
@@ -347,13 +348,22 @@ public:
 	{
 	}
 
+	static void error_exit( j_common_ptr cptr )
+	{
+		CJpegSourceMgr *pInstance = (CJpegSourceMgr*)cptr->client_data;
+		longjmp( pInstance->m_JmpBuf, 1 );
+	}
+
 public:
+	jmp_buf m_JmpBuf;
 	CUtlVector<char> m_Data;
 };
 
 
 bool ReadJpeg( IFileSystem *pFileSystem, const char *pFilename, CUtlVector<unsigned char> &buf, int &width, int &height, const char *pPathID )
 {
+	width = height = 0;
+
 	// Read the data.
 	FileHandle_t fp = pFileSystem->Open( pFilename, "rb", pPathID );
 	if ( fp == FILESYSTEM_INVALID_HANDLE )
@@ -373,9 +383,17 @@ bool ReadJpeg( IFileSystem *pFileSystem, const char *pFilename, CUtlVector<unsig
 	struct jpeg_error_mgr jerr;
 
 	memset( &jpegInfo, 0, sizeof( jpegInfo ) );
+	jpegInfo.client_data = &sourceMgr;
 	jpegInfo.err = jpeg_std_error(&jerr);
+	jerr.error_exit = &CJpegSourceMgr::error_exit;
 	jpeg_create_decompress(&jpegInfo);
 	jpegInfo.src = &sourceMgr;
+
+	if ( setjmp( sourceMgr.m_JmpBuf ) == 1 )
+	{
+		jpeg_destroy_decompress(&jpegInfo);
+		return false;
+	}
 
 	if (jpeg_read_header(&jpegInfo, TRUE) != JPEG_HEADER_OK)
 	{
@@ -764,11 +782,11 @@ void CFileSystemOpenDlg::OnDblclkFileList(NMHDR* pNMHDR, LRESULT* pResult)
 void CFileSystemOpenDlg::OnUpButton() 
 {
 	char str[MAX_PATH];
-	Q_strncpy( str, m_CurrentDir, sizeof( str ) );
+	V_strcpy_safe( str, m_CurrentDir );
 	Q_StripLastDir( str, sizeof( str ) );
 
 	if ( str[0] == 0 )
-		Q_strncpy( str, ".", sizeof( str ) );
+		V_strcpy_safe( str, "." );
 	
 	if ( str[strlen(str)-1] == '\\' || str[strlen(str)-1] == '/' )
 		str[strlen(str)-1] = 0;
@@ -901,18 +919,18 @@ public:
 			CString ext = m_pDialog->m_FileMasks[m_pDialog->m_FileMasks.Count()-1].Right( 4 );
 			const char *pStr = ext;
 			if ( pStr[0] == '.' )
-				Q_strncpy( defExt, pStr+1, sizeof( defExt ) );
+				V_strcpy_safe( defExt, pStr+1 );
 		}
 
 		char pFileNameBuf[MAX_PATH];
 		const char *pFileName = m_pDialog->m_pFileSystem->RelativePathToFullPath( m_pDialog->m_CurrentDir, m_pDialog->m_PathIDString, pFileNameBuf, MAX_PATH );
-		Q_strcat( pFileNameBuf, "\\", sizeof(pFileNameBuf) );
+		V_strcat_safe( pFileNameBuf, "\\" );
 	
 		// Build the list of file filters.
 		char filters[1024];
 		if ( m_pDialog->m_FileMasks.Count() == 0 )
 		{
-			Q_strncpy( filters, "All Files (*.*)|*.*||", sizeof( filters ) );
+			V_strcpy_safe( filters, "All Files (*.*)|*.*||" );
 		}
 		else
 		{
@@ -920,19 +938,19 @@ public:
 			for ( int i=0; i < m_pDialog->m_FileMasks.Count(); i++ )
 			{
 				if ( i > 0 )
-					Q_strncat( filters, "|", sizeof( filters ), COPY_ALL_CHARACTERS );
+					V_strcat_safe( filters, "|" );
 
-				Q_strncat( filters, m_pDialog->m_FileMasks[i], sizeof( filters ), COPY_ALL_CHARACTERS );
-				Q_strncat( filters, "|", sizeof( filters ), COPY_ALL_CHARACTERS );
-				Q_strncat( filters, m_pDialog->m_FileMasks[i], sizeof( filters ), COPY_ALL_CHARACTERS );
+				V_strcat_safe( filters, m_pDialog->m_FileMasks[i] );
+				V_strcat_safe( filters, "|" );
+				V_strcat_safe( filters, m_pDialog->m_FileMasks[i] );
 				if ( pFileName )
 				{
-					Q_strncat( pFileNameBuf, m_pDialog->m_FileMasks[i], sizeof( filters ), COPY_ALL_CHARACTERS );
-					Q_strcat( pFileNameBuf, ";", sizeof(pFileNameBuf) );
+					V_strcat_safe( pFileNameBuf, m_pDialog->m_FileMasks[i] );
+					V_strcat_safe( pFileNameBuf, ";" );
 				}
 
 			}
-			Q_strncat( filters, "||", sizeof( filters ), COPY_ALL_CHARACTERS );
+			V_strcat_safe( filters, "||" );
 		}
 
 		CFileDialog dlg( 

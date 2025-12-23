@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =====//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Dme version of a joint of a skeletal model (gets compiled into a MDL)
 //
@@ -12,7 +12,7 @@
 #endif
 
 #include "movieobjects/dmedag.h"
-#include "materialsystem/materialsystemutil.h"
+#include "materialsystem/MaterialSystemUtil.h"
 
 class CDmeDrawSettings;
 

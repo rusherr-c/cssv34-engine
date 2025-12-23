@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Applicaton-level hooks for clients of the audio subsystem
 //
@@ -95,6 +95,9 @@ public:
 
 	// If the game is paused, certain audio will pause, too (anything with phoneme/sentence data for now)
 	virtual bool	IsGamePaused() = 0;
+
+	// If the game is not active, certain audio will pause
+	virtual bool	IsGameActive() = 0;
 
 	// restarts the sound system externally
 	virtual void	RestartSoundSystem() = 0;

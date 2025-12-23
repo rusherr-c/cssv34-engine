@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:		Player for SDK Game
 //
@@ -25,6 +25,7 @@ public:
 	DECLARE_CLASS( CSDKPlayer, CBasePlayer );
 	DECLARE_SERVERCLASS();
 	DECLARE_PREDICTABLE();
+	DECLARE_DATADESC();
 
 	CSDKPlayer();
 	~CSDKPlayer();

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,7 +19,7 @@
 #include "sv_main.h"
 #include "demo.h"
 #include <ctype.h>
-#ifdef _LINUX
+#ifdef POSIX
 #include <wctype.h>
 #endif
 
@@ -146,38 +146,32 @@ public:
 		bool repchild = child->IsFlagSet( FCVAR_REPLICATED );
 		bool repparent = parent->IsFlagSet( FCVAR_REPLICATED );
 
-		char sz[ 512 ];
-
 		if ( repchild && repparent )
 		{
 			// Never on protected vars
 			if ( child->IsFlagSet( FCVAR_PROTECTED ) || parent->IsFlagSet( FCVAR_PROTECTED ) )
 			{
-				Q_snprintf( sz, sizeof( sz ), "FCVAR_REPLICATED can't also be FCVAR_PROTECTED (%s)\n", child->GetName() );
-				ConMsg( sz );
+				ConMsg( "FCVAR_REPLICATED can't also be FCVAR_PROTECTED (%s)\n", child->GetName() );
 				return false;
 			}
 
 			// Only on ConVars
 			if ( child->IsCommand() || parent->IsCommand() )
 			{
-				Q_snprintf( sz, sizeof( sz ), "FCVAR_REPLICATED not valid on ConCommands (%s)\n", child->GetName() );
-				ConMsg( sz );
+				ConMsg( "FCVAR_REPLICATED not valid on ConCommands (%s)\n", child->GetName() );
 				return false;
 			}
 
 			// One must be in client .dll and the other in the game .dll, or both in the engine
 			if ( child->IsFlagSet( FCVAR_GAMEDLL ) && !parent->IsFlagSet( FCVAR_CLIENTDLL ) )
 			{
-				Q_snprintf( sz, sizeof( sz ), "For FCVAR_REPLICATED, ConVar must be defined in client and game .dlls (%s)\n", child->GetName() );
-				ConMsg( sz );
+				ConMsg( "For FCVAR_REPLICATED, ConVar must be defined in client and game .dlls (%s)\n", child->GetName() );
 				return false;
 			}
 
 			if ( child->IsFlagSet( FCVAR_CLIENTDLL ) && !parent->IsFlagSet( FCVAR_GAMEDLL ) )
 			{
-				Q_snprintf( sz, sizeof( sz ), "For FCVAR_REPLICATED, ConVar must be defined in client and game .dlls (%s)\n", child->GetName() );
-				ConMsg( sz );
+				ConMsg( "For FCVAR_REPLICATED, ConVar must be defined in client and game .dlls (%s)\n", child->GetName() );
 				return false;
 			}
 
@@ -188,22 +182,19 @@ public:
 		// Otherwise need both to allow linkage
 		if ( repchild || repparent )
 		{
-			Q_snprintf( sz, sizeof( sz ), "Both ConVars must be marked FCVAR_REPLICATED for linkage to work (%s)\n", child->GetName() );
-			ConMsg( sz );
+			ConMsg( "Both ConVars must be marked FCVAR_REPLICATED for linkage to work (%s)\n", child->GetName() );
 			return false;
 		}
 
 		if ( parent->IsFlagSet( FCVAR_CLIENTDLL ) )
 		{
-			Q_snprintf( sz, sizeof( sz ), "Parent cvar in client.dll not allowed (%s)\n", child->GetName() );
-			ConMsg( sz );
+			ConMsg( "Parent cvar in client.dll not allowed (%s)\n", child->GetName() );
 			return false;
 		}
 
 		if ( parent->IsFlagSet( FCVAR_GAMEDLL ) )
 		{
-			Q_snprintf( sz, sizeof( sz ), "Parent cvar in server.dll not allowed (%s)\n", child->GetName() );
-			ConMsg( sz );
+			ConMsg( "Parent cvar in server.dll not allowed (%s)\n", child->GetName() );
 			return false;
 		}
 
@@ -269,14 +260,14 @@ void CCvarUtilities::SetDirect( ConVar *var, const char *value )
 		if ( sv.IsDedicated() )
 		{
 			// Dedicated servers don't have g_pVGuiLocalize, so fall back
-			mbstowcs( unicode, pszValue, sizeof( unicode ) );
+			V_UTF8ToUnicode( pszValue, unicode, sizeof( unicode ) );
 		}
 		else
 		{
 			g_pVGuiLocalize->ConvertANSIToUnicode( pszValue, unicode, sizeof( unicode ) );
 		}
 #else
-		mbstowcs( unicode, pszValue, sizeof(unicode) );
+		V_UTF8ToUnicode( pszValue, unicode, sizeof( unicode ) );
 #endif
 		wchar_t newUnicode[ 512 ];
 
@@ -314,14 +305,14 @@ void CCvarUtilities::SetDirect( ConVar *var, const char *value )
 #ifndef SWDS
 		if ( sv.IsDedicated() )
 		{
-			wcstombs( szNew, newUnicode, sizeof( szNew ) );
+			V_UnicodeToUTF8( newUnicode, szNew, sizeof( szNew ) );
 		}
 		else
 		{
 			g_pVGuiLocalize->ConvertUnicodeToANSI( newUnicode, szNew, sizeof( szNew ) );
 		}
 #else
-		wcstombs( szNew, newUnicode, sizeof( szNew ) );
+		V_UnicodeToUTF8( newUnicode, szNew, sizeof( szNew ) );
 #endif
 		// Point the value here.
 		pszValue = szNew;
@@ -391,8 +382,16 @@ bool CCvarUtilities::IsCommand( const CCommand &args )
 		// Connected to server?
 		if ( cl.IsConnected() )
 		{
-			ConMsg( "Can't set %s when connected\n", v->GetName() );
-			return true;
+			extern IBaseClientDLL *g_ClientDLL;
+			if ( v->IsFlagSet( FCVAR_USERINFO ) && g_ClientDLL && g_ClientDLL->IsConnectedUserInfoChangeAllowed( v ) )
+			{
+				// Client.dll is allowing the convar change
+			}
+			else
+			{
+				ConMsg( "Can't change %s when playing, disconnect from the server or switch team to spectators\n", v->GetName() );
+				return true;
+			}
 		}
 #endif
 	}
@@ -403,6 +402,9 @@ bool CCvarUtilities::IsCommand( const CCommand &args )
 		if ( !Host_IsSinglePlayerGame() && !CanCheat() 
 #if !defined(SWDS)
 			&& !cl.ishltv
+#if defined( REPLAY_ENABLED )
+			&& !cl.isreplay
+#endif
 			&& !demoplayer->IsPlayingBack() 
 #endif
 			)
@@ -512,8 +514,16 @@ bool CCvarUtilities::IsValidToggleCommand( const char *cmd )
 		// Connected to server?
 		if ( cl.IsConnected() )
 		{
-			ConMsg( "Can't set %s when connected\n", v->GetName() );
-			return false;
+			extern IBaseClientDLL *g_ClientDLL;
+			if ( v->IsFlagSet( FCVAR_USERINFO ) && g_ClientDLL && g_ClientDLL->IsConnectedUserInfoChangeAllowed( v ) )
+			{
+				// Client.dll is allowing the convar change
+			}
+			else
+			{
+				ConMsg( "Can't change %s when playing, disconnect from the server or switch team to spectators\n", v->GetName() );
+				return false;
+			}
 		}
 #endif
 	}
@@ -561,7 +571,7 @@ bool CCvarUtilities::IsValidToggleCommand( const char *cmd )
 // Purpose: 
 // Input  : *f - 
 //-----------------------------------------------------------------------------
-void CCvarUtilities::WriteVariables( CUtlBuffer &buff )
+void CCvarUtilities::WriteVariables( CUtlBuffer &buff, bool bAllVars )
 {
 	const ConCommandBase	*var;
 
@@ -573,7 +583,12 @@ void CCvarUtilities::WriteVariables( CUtlBuffer &buff )
 		bool archive = var->IsFlagSet( IsX360() ? FCVAR_ARCHIVE_XBOX : FCVAR_ARCHIVE );
 		if ( archive )
 		{
-			buff.Printf( "%s \"%s\"\n", var->GetName(), ((ConVar *)var)->GetString() );
+			const ConVar *pConvar = assert_cast<const ConVar *>( var );
+			// Only write out values that differ from the defaults.
+			if ( bAllVars || Q_strcmp( pConvar->GetString(), pConvar->GetDefault() ) != 0 )
+			{
+				buff.Printf( "%s \"%s\"\n", var->GetName(), ((ConVar *)var)->GetString() );
+			}
 		}
 	}
 }
@@ -690,7 +705,7 @@ static void PrintListHeader( FileHandle_t& f )
 // Input  : *var - 
 //			*f - 
 //-----------------------------------------------------------------------------
-static void PrintCvar( const ConVar *var, bool logging, FileHandle_t& f )
+static void PrintCvar( const ConVar *var, bool logging, FileHandle_t& fh )
 {
 	char flagstr[ 128 ];
 	char csvflagstr[ 1024 ];
@@ -723,7 +738,7 @@ static void PrintCvar( const ConVar *var, bool logging, FileHandle_t& f )
 
 
 	char valstr[ 32 ];
-	char tempbuff[128];
+	char tempbuff[512] = { 0 };
 
 	// Clean up integers
 	if ( var->GetInt() == (int)var->GetFloat() )   
@@ -739,14 +754,14 @@ static void PrintCvar( const ConVar *var, bool logging, FileHandle_t& f )
 	ConMsg( "%-40s : %-8s : %-16s : %s\n", var->GetName(), valstr, flagstr, StripTabsAndReturns( var->GetHelpText(), tempbuff, sizeof(tempbuff) ) );
 	if ( logging )
 	{
-		g_pFileSystem->FPrintf( f,"\"%s\",\"%s\",%s,\"%s\"\n", var->GetName(), valstr, csvflagstr, StripQuotes( var->GetHelpText(), tempbuff, sizeof(tempbuff) ) );
+		g_pFileSystem->FPrintf( fh,"\"%s\",\"%s\",%s,\"%s\"\n", var->GetName(), valstr, csvflagstr, StripQuotes( var->GetHelpText(), tempbuff, sizeof(tempbuff) ) );
 	}
 }
 
 static void PrintCommand( const ConCommand *cmd, bool logging, FileHandle_t& f )
 {
 	// Print to console
-	char tempbuff[128];
+	char tempbuff[512] = { 0 };
 	ConMsg ("%-40s : %-8s : %-16s : %s\n",cmd->GetName(), "cmd", "", StripTabsAndReturns( cmd->GetHelpText(), tempbuff, sizeof(tempbuff) ) );
 	if ( logging )
 	{
@@ -768,7 +783,6 @@ static void PrintCommand( const ConCommand *cmd, bool logging, FileHandle_t& f )
 		{
 			Q_snprintf( name, sizeof( name ), "'%s'", cmd->GetName() );
 		}
-		char tempbuff[128];
 		g_pFileSystem->FPrintf( f, "\"%s\",\"%s\",%s,\"%s\"\n", name, "cmd", emptyflags, StripQuotes( cmd->GetHelpText(), tempbuff, sizeof(tempbuff) ) );
 	}
 }

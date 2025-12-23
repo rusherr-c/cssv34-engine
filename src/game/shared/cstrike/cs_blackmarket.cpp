@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -77,13 +77,7 @@ void BlackMarketAddWeapon( const char *pWeaponName, CCSPlayer *pBuyer )
 	if ( pBuyer && pBuyer->IsBot() )
 		return;
 
-	int iWeaponID = ClassnameToWeaponID( pWeaponName );
-
-	//Fix up the smoke grenade class name so we can get an ID for it.
-	if ( Q_stricmp( pWeaponName, "weapon_smokegrenade" ) == 0 )
-	{
-		iWeaponID = ClassnameToWeaponID( "weapon_sgren" );
-	}
+	CSWeaponID iWeaponID = AliasToWeaponID( pWeaponName );
 
 	TrackAutoBuyPurchases( pWeaponName, pBuyer );
 

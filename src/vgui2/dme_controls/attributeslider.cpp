@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -608,7 +608,7 @@ void CAttributeSlider::AcceptTextEntryValue()
 		float flLeftValue = flValue;
 
 		// Get the value in the text entry field
-		char buf[ 64 ];
+		buf[0] = 0;
 		m_pRightTextField->GetText( buf, sizeof( buf ) );
 		float flRightValue = Q_atof( buf );
 

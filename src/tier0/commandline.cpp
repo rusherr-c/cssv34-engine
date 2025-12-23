@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,7 +17,7 @@
 
 #include "tier0/memdbgon.h"
 
-#ifdef _LINUX
+#ifdef POSIX
 #include <limits.h>
 #define _MAX_PATH PATH_MAX
 #endif
@@ -43,6 +43,8 @@ public:
 	virtual void		CreateCmdLine( int argc, char **argv );
 	virtual const char	*GetCmdLine( void ) const;
 	virtual	const char	*CheckParm( const char *psz, const char **ppszValue = 0 ) const;
+	// A bool return of whether param exists, useful for just checking if param that is just a flag is set
+	virtual bool		HasParm( const char *psz ) const;
 
 	virtual void		RemoveParm( const char *parm );
 	virtual void		AppendParm( const char *pszParm, const char *pszValues );
@@ -51,13 +53,12 @@ public:
 	virtual int			FindParm( const char *psz ) const;
 	virtual const char* GetParm( int nIndex ) const;
 
-	virtual const char	*ParmValue( const char *psz, const char *pDefaultVal = NULL ) const;
-	virtual int			ParmValue( const char *psz, int nDefaultVal ) const;
-	virtual float		ParmValue( const char *psz, float flDefaultVal ) const;
+	virtual const char	*ParmValue( const char *psz, const char *pDefaultVal = NULL ) const OVERRIDE;
+	virtual int			ParmValue( const char *psz, int nDefaultVal ) const OVERRIDE;
+	virtual float		ParmValue( const char *psz, float flDefaultVal ) const OVERRIDE;
+	virtual const char *ParmValueByIndex( int nIndex, const char *pDefaultVal = 0 ) const OVERRIDE;
 
-	virtual void SetParm( int nIndex, char const *pNewParm );
-
-	virtual const char *ParmValueByIndex( int nIndex, const char *pDefaultVal = 0 ) const;
+	virtual void        SetParm( int nIndex, char const *pParm );
 
 private:
 	enum
@@ -190,16 +191,28 @@ void CCommandLine::LoadParametersFromFile( const char *&pSrc, char *&pDst, int m
 //-----------------------------------------------------------------------------
 void CCommandLine::CreateCmdLine( int argc, char **argv )
 {
-	char cmdline[2048];
-	cmdline[0] = 0;
-	const int MAX_CHARS = sizeof(cmdline) - 1;
-	cmdline[MAX_CHARS] = 0;
+	char cmdline[ 2048 ];
+	cmdline[ 0 ] = 0;
+
+	char *dest = cmdline;
+	size_t size = sizeof( cmdline );
+	const char *space = "";
+
 	for ( int i = 0; i < argc; ++i )
 	{
-		strncat( cmdline, "\"", MAX_CHARS );
-		strncat( cmdline, argv[i], MAX_CHARS );
-		strncat( cmdline, "\"", MAX_CHARS );
-		strncat( cmdline, " ", MAX_CHARS );
+		// We need room for: space, arg, 2 quotes, and a nil.
+		Assert( strlen( space ) + strlen( argv[ i ] ) + 2 + 1 <= size );
+
+		if ( size )
+		{
+			_snprintf( dest, size, "%s\"%s\"", space, argv[ i ] );
+			dest[ size - 1 ] = 0;
+		}
+
+		size_t len = strlen( dest );
+		size -= len;
+		dest += len;
+		space = " ";
 	}
 
 	CreateCmdLine( cmdline );
@@ -219,6 +232,7 @@ void CCommandLine::CreateCmdLine( const char *commandline )
 	}
 
 	char szFull[ 4096 ];
+	szFull[0] = '\0';
 
 	char *pDst = szFull;
 	const char *pSrc = commandline;
@@ -333,9 +347,13 @@ void CCommandLine::RemoveParm( const char *pszParm )
 		found = _stristr( p, pszParm );
 		if ( !found )
 			break;
-
+			
 		pnextparam = found + 1;
-		while ( pnextparam && *pnextparam && (*pnextparam != ' ') )
+		bool bHadQuote = false;
+		if ( found > m_pszCmdLine && found[-1] == '\"' )
+			bHadQuote = true;
+		
+		while ( pnextparam && *pnextparam && (*pnextparam != ' ') && (*pnextparam != '\"') )
 			pnextparam++;
 
 		if ( pnextparam && ( static_cast<size_t>( pnextparam - found ) > strlen( pszParm ) ) )
@@ -347,12 +365,16 @@ void CCommandLine::RemoveParm( const char *pszParm )
 		while ( pnextparam && *pnextparam && (*pnextparam != '-') && (*pnextparam != '+') )
 			pnextparam++;
 
+		if ( bHadQuote )
+		{
+			found--;
+		}
+
 		if ( pnextparam && *pnextparam )
 		{
 			// We are either at the end of the string, or at the next param.  Just chop out the current param.
 			n = curlen - ( pnextparam - p ); // # of characters after this param.
-		
-			memcpy( found, pnextparam, n );
+			memmove( found, pnextparam, n );
 
 			found[n] = '\0';
 		}
@@ -370,7 +392,7 @@ void CCommandLine::RemoveParm( const char *pszParm )
 		int len = strlen( m_pszCmdLine );
 		if ( len == 0 || m_pszCmdLine[ len - 1 ] != ' ' )
 			break;
-
+		
 		m_pszCmdLine[len - 1] = '\0';
 	}
 
@@ -480,13 +502,13 @@ const char *CCommandLine::CheckParm( const char *psz, const char **ppszValue ) c
 //-----------------------------------------------------------------------------
 void CCommandLine::AddArgument( const char *pFirst, const char *pLast )
 {
-	if ( pLast == pFirst )
+	if ( pLast <= pFirst )
 		return;
 
 	if ( m_nParmCount >= MAX_PARAMETERS )
 		Error( "CCommandLine::AddArgument: exceeded %d parameters", MAX_PARAMETERS );
 
-	int nLen = (int)pLast - (int)pFirst + 1;
+	size_t nLen = pLast - pFirst + 1;
 	m_ppParms[m_nParmCount] = new char[nLen];
 	memcpy( m_ppParms[m_nParmCount], pFirst, nLen - 1 );
 	m_ppParms[m_nParmCount][nLen - 1] = 0;
@@ -590,12 +612,32 @@ int CCommandLine::FindParm( const char *psz ) const
 	return 0;
 }
 
+bool CCommandLine::HasParm( const char *psz ) const
+{
+	return ( FindParm( psz ) != 0 );
+}
+
 const char* CCommandLine::GetParm( int nIndex ) const
 {
 	Assert( (nIndex >= 0) && (nIndex < m_nParmCount) );
 	if ( (nIndex < 0) || (nIndex >= m_nParmCount) )
 		return "";
 	return m_ppParms[nIndex];
+}
+void CCommandLine::SetParm( int nIndex, char const *pParm )
+{
+	if ( pParm )
+	{
+		Assert( (nIndex >= 0) && (nIndex < m_nParmCount) );
+		if ( (nIndex >= 0) && (nIndex < m_nParmCount) )
+		{
+			if ( m_ppParms[nIndex] )
+				delete[] m_ppParms[nIndex];
+			m_ppParms[nIndex] = strdup( pParm );
+		}
+
+	}
+
 }
 
 
@@ -640,20 +682,15 @@ float CCommandLine::ParmValue( const char *psz, float flDefaultVal ) const
 
 	return atof( m_ppParms[nIndex + 1] );
 }
-
-
-void CCommandLine::SetParm( int nIndex, char const *pNewParm )
+const char *CCommandLine::ParmValueByIndex( int nIndex, const char *pDefaultVal ) const
 {
-	if ( nIndex >= MAX_PARAMETERS )
-		Error( "CCommandLine::SetParm: invalid parameter index %d", nIndex );
+	if (( nIndex == 0 ) || (nIndex == m_nParmCount - 1))
+		return pDefaultVal;
 
-	int nLen = strlen( pNewParm );
-	m_ppParms[nIndex] = new char[nLen];
-	memcpy( m_ppParms[nIndex], pNewParm, nLen - 1 );
-	m_ppParms[nIndex][nLen - 1] = 0;
+	// Probably another cmdline parameter instead of a valid arg if it starts with '+' or '-'
+	if ( m_ppParms[nIndex + 1][0] == '-' || m_ppParms[nIndex + 1][0] == '+' )
+		return pDefaultVal;
+
+	return m_ppParms[nIndex + 1];
 }
 
-const char * CCommandLine::ParmValueByIndex( int nIndex, const char *pDefaultVal ) const
-{
-	return m_ppParms[nIndex] != NULL ? m_ppParms[nIndex] : pDefaultVal;
-}

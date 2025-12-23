@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -21,6 +21,7 @@ BEGIN_VS_SHADER_FLAGS( DepthWrite, "Help for Depth Write", SHADER_NOT_EDITABLE )
 
 	BEGIN_SHADER_PARAMS
 		SHADER_PARAM( ALPHATESTREFERENCE, SHADER_PARAM_TYPE_FLOAT, "", "Alpha reference value" )
+		SHADER_PARAM( COLOR_DEPTH, SHADER_PARAM_TYPE_BOOL, "0", "Write depth as color")
 	END_SHADER_PARAMS
 
 	SHADER_INIT_PARAMS()
@@ -44,6 +45,7 @@ BEGIN_VS_SHADER_FLAGS( DepthWrite, "Help for Depth Write", SHADER_NOT_EDITABLE )
 	SHADER_DRAW
 	{
 		bool bAlphaClip = IS_FLAG_SET( MATERIAL_VAR_ALPHATEST );
+		int nColorDepth = GetIntParam( COLOR_DEPTH, params, 0 );
 
 		SHADOW_STATE
 		{
@@ -53,13 +55,16 @@ BEGIN_VS_SHADER_FLAGS( DepthWrite, "Help for Depth Write", SHADER_NOT_EDITABLE )
 			int userDataSize = 0;
 			pShaderShadow->VertexShaderVertexFormat( flags, nTexCoordCount, NULL, userDataSize );
 
-			// Bias primitives when rendering into shadow map so we get slope-scaled depth bias
-			// rather than having to apply a constant bias in the filtering shader later
-			pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
+			if ( nColorDepth == 0 )
+			{
+				// Bias primitives when rendering into shadow map so we get slope-scaled depth bias
+				// rather than having to apply a constant bias in the filtering shader later
+				pShaderShadow->EnablePolyOffset( SHADER_POLYOFFSET_SHADOW_BIAS );
+			}
 
 			// Turn off writes to color buffer since we always sample shadows from the DEPTH texture later
 			// This gives us double-speed fill when rendering INTO the shadow map
-			pShaderShadow->EnableColorWrites( false );
+			pShaderShadow->EnableColorWrites( ( nColorDepth == 1 ) );
 			pShaderShadow->EnableAlphaWrites( false );
 
 			// Don't backface cull unless alpha clipping, since this can cause artifacts when the
@@ -72,21 +77,28 @@ BEGIN_VS_SHADER_FLAGS( DepthWrite, "Help for Depth Write", SHADER_NOT_EDITABLE )
 #endif
 			{
 				DECLARE_STATIC_VERTEX_SHADER( depthwrite_vs20 );
-				SET_STATIC_VERTEX_SHADER_COMBO( ONLY_PROJECT_POSITION, !bAlphaClip && IsX360() ); //360 needs to know if it *shouldn't* output texture coordinates to avoid shader patches
+				SET_STATIC_VERTEX_SHADER_COMBO( ONLY_PROJECT_POSITION, !bAlphaClip && IsX360() && !nColorDepth ); //360 needs to know if it *shouldn't* output texture coordinates to avoid shader patches
+				SET_STATIC_VERTEX_SHADER_COMBO( COLOR_DEPTH, nColorDepth );
 				SET_STATIC_VERTEX_SHADER( depthwrite_vs20 );
-
-				if( bAlphaClip )
+				
+				if ( bAlphaClip || g_pHardwareConfig->PlatformRequiresNonNullPixelShaders() || nColorDepth )
 				{
-					pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+					if( bAlphaClip )
+					{
+						pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+						pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
+					}
 
 					if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
 					{
 						DECLARE_STATIC_PIXEL_SHADER( depthwrite_ps20b );
+						SET_STATIC_PIXEL_SHADER_COMBO( COLOR_DEPTH, nColorDepth );
 						SET_STATIC_PIXEL_SHADER( depthwrite_ps20b );
 					}
 					else
 					{
 						DECLARE_STATIC_PIXEL_SHADER( depthwrite_ps20 );
+						SET_STATIC_PIXEL_SHADER_COMBO( COLOR_DEPTH, nColorDepth );
 						SET_STATIC_PIXEL_SHADER( depthwrite_ps20 );
 					}
 				}
@@ -98,12 +110,14 @@ BEGIN_VS_SHADER_FLAGS( DepthWrite, "Help for Depth Write", SHADER_NOT_EDITABLE )
 
 				DECLARE_STATIC_VERTEX_SHADER( depthwrite_vs30 );
 				SET_STATIC_VERTEX_SHADER_COMBO( ONLY_PROJECT_POSITION, 0 ); //360 only combo, and this is a PC path
+				SET_STATIC_VERTEX_SHADER_COMBO( COLOR_DEPTH, nColorDepth );
 				SET_STATIC_VERTEX_SHADER( depthwrite_vs30 );
 
 				pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
-				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );		// irrelevant, since we just need alpha
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
 
 				DECLARE_STATIC_PIXEL_SHADER( depthwrite_ps30 );
+				SET_STATIC_PIXEL_SHADER_COMBO( COLOR_DEPTH, nColorDepth );
 				SET_STATIC_PIXEL_SHADER( depthwrite_ps30 );
 			}
 #endif
@@ -175,6 +189,17 @@ BEGIN_VS_SHADER_FLAGS( DepthWrite, "Help for Depth Write", SHADER_NOT_EDITABLE )
 				SET_DYNAMIC_PIXEL_SHADER( depthwrite_ps30 );
 			}
 #endif
+
+			Vector4D vParms;
+
+			// set up arbitrary far planes, as the real ones are too far ( 30,000 )
+//			pShaderAPI->SetPSNearAndFarZ( 1 );
+			vParms.x = 7.0f;		// arbitrary near
+			vParms.y = 4000.0f;		// arbitrary far 
+			vParms.z = 0.0f;
+			vParms.w = 0.0f;
+			pShaderAPI->SetPixelShaderConstant( 1, vParms.Base(), 2 );
+
 		}	// DYNAMIC_STATE
 
 		Draw( );

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -27,7 +27,9 @@ extern bool g_bIsBlendingOrModulating;
 //-----------------------------------------------------------------------------
 inline const Vector &CurrentViewOrigin()
 {
+#ifdef DBGFLAG_ASSERT
 	extern bool g_bCanAccessCurrentView;
+#endif
 	extern Vector g_CurrentViewOrigin;
 	Assert( g_bCanAccessCurrentView );
 	return g_CurrentViewOrigin;
@@ -35,7 +37,9 @@ inline const Vector &CurrentViewOrigin()
 
 inline const Vector &CurrentViewForward()
 {
+#ifdef DBGFLAG_ASSERT
 	extern bool g_bCanAccessCurrentView;
+#endif
 	extern Vector g_CurrentViewForward;
 	Assert( g_bCanAccessCurrentView );
 	return g_CurrentViewForward;
@@ -43,7 +47,9 @@ inline const Vector &CurrentViewForward()
 
 inline const Vector &CurrentViewRight()
 {
+#ifdef DBGFLAG_ASSERT
 	extern bool g_bCanAccessCurrentView;
+#endif
 	extern Vector g_CurrentViewRight;
 	Assert( g_bCanAccessCurrentView );
 	return g_CurrentViewRight;
@@ -51,7 +57,9 @@ inline const Vector &CurrentViewRight()
 
 inline const Vector &CurrentViewUp()
 {
+#ifdef DBGFLAG_ASSERT
 	extern bool g_bCanAccessCurrentView;
+#endif
 	extern Vector g_CurrentViewUp;
 	Assert( g_bCanAccessCurrentView );
 	return g_CurrentViewUp;
@@ -133,9 +141,12 @@ public:
 	virtual float	GetFovY( void ) = 0;
 	virtual float	GetFovViewmodel( void ) = 0;
 
+
 	// Compute the clip-space coordinates of a point in 3D
 	// Clip-space is normalized screen coordinates (-1 to 1 in x and y)
 	// Returns true if the point is behind the camera
+	virtual bool	ClipTransformWithProjection ( const VMatrix& worldToScreen, const Vector& point, Vector* pClip ) = 0;
+	// Same, using the current engine's matrices.
 	virtual bool	ClipTransform( Vector const& point, Vector* pClip ) = 0;
 
 	// Compute the screen-space coordinates of a point in 3D

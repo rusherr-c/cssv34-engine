@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -36,7 +36,7 @@
 #include "PhonemeEditor.h"
 #include "iscenetokenprocessor.h"
 #include "InputProperties.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "ExpressionTool.h"
 #include "ControlPanel.h"
 #include "faceposer_models.h"
@@ -59,6 +59,7 @@
 #include "filesystem_init.h"
 #include "flexpanel.h"
 #include "tier3/choreoutils.h"
+#include "tier2/p4helpers.h"
 
 
 using namespace vgui;
@@ -5900,7 +5901,7 @@ void CChoreoView::RepositionHSlider( void )
 	}
 	m_pHorzScrollBar->setBounds( 0, h2() - m_nScrollbarHeight, w - m_nScrollbarHeight, m_nScrollbarHeight );
 
-	m_flLeftOffset = max( 0, m_flLeftOffset );
+	m_flLeftOffset = max( 0.f, m_flLeftOffset );
 	m_flLeftOffset = min( (float)pixelsneeded, m_flLeftOffset );
 
 	m_pHorzScrollBar->setRange( 0, pixelsneeded );
@@ -6011,6 +6012,8 @@ void CChoreoView::Save( void )
 	}
 
 	Con_Printf( "Saving changes to %s\n", GetChoreoFile() );
+
+	CP4AutoEditAddFile checkout( GetChoreoFile() );
 	if ( !m_pScene->SaveToFile( GetChoreoFile() ) )
 	{
   		mxMessageBox( this, va( "Unable to write \"%s\"", GetChoreoFile() ),
@@ -6048,6 +6051,7 @@ void CChoreoView::SaveAs( void )
 	SetChoreoFile( scenefile );
 
 	// Write it out baby
+	CP4AutoEditAddFile checkout( scenefile );
 	if (!m_pScene->SaveToFile( GetChoreoFile() ))
 	{
   		mxMessageBox( this, va( "Unable to write \"%s\"", GetChoreoFile() ),
@@ -6073,6 +6077,74 @@ void CChoreoView::Load( void )
 	Q_DefaultExtension( scenefile, ".vcd", sizeof( scenefile ) );
 
 	LoadSceneFromFile( scenefile );
+
+	m_nextFileList.RemoveAll();
+}
+
+void CChoreoView::LoadNext( void )
+{
+	if (GetChoreoFile() == NULL)
+		return;
+
+	char fixedupFile[ 512 ];
+	V_FixupPathName( fixedupFile, sizeof( fixedupFile ), GetChoreoFile() );
+
+	char relativeFile[ 512 ];
+	filesystem->FullPathToRelativePath( fixedupFile, relativeFile, sizeof( relativeFile ) );
+
+	char relativePath[ 512 ];
+	Q_ExtractFilePath( relativeFile, relativePath, sizeof( relativePath ) );
+
+	if (m_nextFileList.Count() == 0)
+	{
+		// iterate files in the local directory
+		char path[ 512 ];
+		strcpy( path, relativePath );
+		strcat( path, "/*.vcd" );
+
+		FileFindHandle_t hFindFile;
+		char const *fn = filesystem->FindFirstEx( path, "MOD", &hFindFile );
+		if ( fn )
+		{
+			while ( fn )
+			{
+				// Don't do anything with directories
+				if ( !filesystem->FindIsDirectory( hFindFile ) )
+				{
+					CUtlString s = fn;
+					m_nextFileList.AddToTail( s );
+				}
+
+				fn = filesystem->FindNext( hFindFile );
+			}
+
+			filesystem->FindClose( hFindFile );
+		}
+	}
+
+	// look for a match, then pick the next in the list
+	const char *fileBase;
+	fileBase = V_UnqualifiedFileName( fixedupFile );
+
+	for (int i = 0; i < m_nextFileList.Count(); i++)
+	{
+		if (!stricmp( fileBase, m_nextFileList[i] ))
+		{
+			char fileName[512];
+			strcpy( fileName, relativePath );
+			if (i < m_nextFileList.Count() - 1)
+			{
+				strcat( fileName, m_nextFileList[i+1] );
+			}
+			else
+			{
+				strcat( fileName, m_nextFileList[0] );
+			}
+
+			LoadSceneFromFile( fileName );
+			break;
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -6350,7 +6422,7 @@ void CChoreoView::EditChannel( CChoreoChannel *channel )
 	memset( &params, 0, sizeof( params ) );
 
 	strcpy( params.m_szDialogTitle, "Edit Channel" );
-	strcpy( params.m_szName, channel->GetName() );
+	V_strcpy_safe( params.m_szName, channel->GetName() );
 
 	if ( !ChannelProperties( &params ) )
 		return;
@@ -6516,7 +6588,7 @@ void CChoreoView::EditActor( CChoreoActor *actor )
 	memset( &params, 0, sizeof( params ) );
 
 	strcpy( params.m_szDialogTitle, "Edit Actor" );
-	strcpy( params.m_szName, actor->GetName() );
+	V_strcpy_safe( params.m_szName, actor->GetName() );
 
 	if ( !ActorProperties( &params ) )
 		return;
@@ -6943,7 +7015,7 @@ void CChoreoView::EditGlobalEvent( CChoreoEvent *event )
 	case CChoreoEvent::SECTION:
 		{
 			strcpy( params.m_szDialogTitle, "Edit Pause Point" );
-			strcpy( params.m_szAction, event->GetParameters() );
+			V_strcpy_safe( params.m_szAction, event->GetParameters() );
 		}
 		break;
 	case CChoreoEvent::LOOP:
@@ -7116,18 +7188,18 @@ void CChoreoView::EditEvent( CChoreoEvent *event )
 		case CChoreoEvent::INTERRUPT:
 		case CChoreoEvent::PERMIT_RESPONSES:
 		case CChoreoEvent::GENERIC:
-			strcpy( params.m_szParameters3, event->GetParameters3() );
-			strcpy( params.m_szParameters2, event->GetParameters2() );
-			strcpy( params.m_szParameters, event->GetParameters() );
-			strcpy( params.m_szName, event->GetName() );
+			V_strcpy_safe( params.m_szParameters3, event->GetParameters3() );
+			V_strcpy_safe( params.m_szParameters2, event->GetParameters2() );
+			V_strcpy_safe( params.m_szParameters, event->GetParameters() );
+			V_strcpy_safe( params.m_szName, event->GetName() );
 			break;
 		case CChoreoEvent::FACE:
 		case CChoreoEvent::LOOKAT:
 		case CChoreoEvent::FIRETRIGGER:
 		case CChoreoEvent::FLEXANIMATION:
 		case CChoreoEvent::SUBSCENE:
-			strcpy( params.m_szParameters, event->GetParameters() );
-			strcpy( params.m_szName, event->GetName() );
+			V_strcpy_safe( params.m_szParameters, event->GetParameters() );
+			V_strcpy_safe( params.m_szName, event->GetName() );
 
 			if ( params.m_nType == CChoreoEvent::LOOKAT || params.m_nType == CChoreoEvent::FACE )
 			{
@@ -7164,8 +7236,8 @@ void CChoreoView::EditEvent( CChoreoEvent *event )
 
 	if ( params.m_bUsesTag )
 	{
-		strcpy( params.m_szTagName, event->GetRelativeTagName() );
-		strcpy( params.m_szTagWav, event->GetRelativeWavName() );
+		V_strcpy_safe( params.m_szTagName, event->GetRelativeTagName() );
+		V_strcpy_safe( params.m_szTagWav, event->GetRelativeWavName() );
 	}
 
 	while (1)

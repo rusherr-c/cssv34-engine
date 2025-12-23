@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Item pickup history displayed onscreen when items are picked up.
 //
@@ -59,7 +59,6 @@ private:
 public:
 
 	CHudHistoryResource( const char *pElementName );
-	virtual ~CHudHistoryResource() {}
 
 	// CHudElement overrides
 	virtual void Init( void );

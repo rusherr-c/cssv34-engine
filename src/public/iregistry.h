@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -19,7 +19,9 @@
 abstract_class IRegistry
 {
 public:
-	virtual ~IRegistry() = default;
+	// We have to have a virtual destructor since otherwise the derived class destructors
+	// will not be called.
+	virtual ~IRegistry() {}
 
 	// Init/shutdown
 	virtual bool			Init( const char *platformName ) = 0;

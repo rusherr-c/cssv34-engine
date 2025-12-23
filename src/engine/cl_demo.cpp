@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,6 +16,7 @@
 #include "demofile/demoformat.h"
 #include "gl_matsysiface.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
+#include "tier0/etwprof.h"
 #include "tier0/icommandline.h"
 #include "vengineserver_impl.h"
 #include "console.h"
@@ -30,6 +31,7 @@
 #include "tier2/tier2.h"
 #include "vgui_baseui_interface.h"
 #include "con_nprint.h"
+#include "networkstringtableclient.h"
 
 #ifdef SWDS
 #include "server.h"
@@ -43,9 +45,10 @@ static ConVar demo_quitafterplayback( "demo_quitafterplayback", "0", 0, "Quits g
 static ConVar demo_debug( "demo_debug", "0", 0, "Demo debug info." );
 static ConVar demo_interpolateview( "demo_interpolateview", "1", 0, "Do view interpolation during dem playback." );
 static ConVar demo_pauseatservertick( "demo_pauseatservertick", "0", 0, "Pauses demo playback at server tick" );
+static ConVar timedemo_runcount( "timedemo_runcount", "0", 0, "Runs time demo X number of times." );
 
 // singeltons:
-static char g_pStatsFile[MAX_OSPATH] = { NULL };
+static char g_pStatsFile[MAX_OSPATH] = { 0 };
 static bool s_bBenchframe = false;
 
 static CDemoRecorder s_ClientDemoRecorder;
@@ -55,6 +58,8 @@ IDemoRecorder *demorecorder = g_pClientDemoRecorder;
 static CDemoPlayer s_ClientDemoPlayer;
 CDemoPlayer *g_pClientDemoPlayer = &s_ClientDemoPlayer;
 IDemoPlayer *demoplayer = g_pClientDemoPlayer;
+
+extern CNetworkStringTableContainer *networkStringTableContainerClient;
 
 // This is the number of units under which we are allowed to interpolate, otherwise pop.
 // This fixes problems with in-level transitions.
@@ -112,7 +117,8 @@ float scr_demo_override_fov = 0.0f;
 static bool IsControlCommand( unsigned char cmd )
 {
 	return ( (cmd == dem_signon) || (cmd == dem_stop) ||
-		     (cmd == dem_synctick) || (cmd == dem_datatables ) );
+		     (cmd == dem_synctick) || (cmd == dem_datatables ) ||
+			 (cmd == dem_stringtables) );
 }
 
 
@@ -402,6 +408,43 @@ void CDemoRecorder::RecordServerClasses( ServerClass *pClasses )
 	m_DemoFile.WriteNetworkDataTables( &buf, GetRecordingTick() );
 }
 
+void CDemoRecorder::RecordStringTables()
+{
+	MEM_ALLOC_CREDIT();
+
+	// !KLUDGE! It would be nice if the bit buffer could write into a stream
+	// with the power to grow itself.  But it can't.  Hence this really bad
+	// kludge
+	void *data = NULL;
+	int dataLen = 512 * 1024;
+	while ( dataLen <= DEMO_FILE_MAX_STRINGTABLE_SIZE )
+	{
+		data = realloc( data, dataLen );
+		bf_write buf( data, dataLen );
+		buf.SetDebugName("CDemoRecorder::RecordStringTables");
+		buf.SetAssertOnOverflow( false ); // Doesn't turn off all the spew / asserts, but turns off one
+		networkStringTableContainerClient->WriteStringTables( buf );
+
+		// Did we fit?
+		if ( !buf.IsOverflowed() )
+		{
+			// Now write the buffer into the demo file
+			m_DemoFile.WriteStringTables( &buf, GetRecordingTick() );
+			break;
+		}
+
+		// Didn't fit.  Try doubling the size of the buffer
+		dataLen *= 2;
+	}
+
+	if ( dataLen > DEMO_FILE_MAX_STRINGTABLE_SIZE )
+	{
+		Warning( "Failed to RecordStringTables. Trying to record string table that's bigger than max string table size\n" );
+	}
+
+	free(data);
+}
+
 void CDemoRecorder::RecordUserInput( int cmdnumber )
 {
 	char buffer[256];
@@ -430,15 +473,15 @@ void CDemoRecorder::WriteDemoCvars()
 		if ( var->IsCommand() )
 			continue;
 
-		const ConVar *cvar = ( const ConVar * )var;
+		const ConVar *pCvar = ( const ConVar * )var;
 
-		if ( !cvar->IsFlagSet( FCVAR_DEMO ) )
+		if ( !pCvar->IsFlagSet( FCVAR_DEMO ) )
 			continue;
 
 		char cvarcmd[MAX_OSPATH];
 
 		Q_snprintf( cvarcmd, sizeof(cvarcmd),"%s \"%s\"",
-			cvar->GetName(), Host_CleanupConVarStringValue( cvar->GetString() ) );
+			pCvar->GetName(), Host_CleanupConVarStringValue( pCvar->GetString() ) );
 
 		m_DemoFile.WriteConsoleCommand( cvarcmd, GetRecordingTick() );
 	}
@@ -503,11 +546,23 @@ void CDemoRecorder::StartupDemoFile( void )
 
 	if ( m_nDemoNumber <= 1 )
 	{
-		Q_snprintf( demoFileName, sizeof(demoFileName), "%s.dem", m_szDemoBaseName );
+		V_sprintf_safe( demoFileName, "%s.dem", m_szDemoBaseName );
 	}
 	else
 	{
-		Q_snprintf( demoFileName, sizeof(demoFileName), "%s_%i.dem", m_szDemoBaseName, m_nDemoNumber );
+		V_sprintf_safe( demoFileName, "%s_%i.dem", m_szDemoBaseName, m_nDemoNumber );
+	}
+
+	// strip any trailing whitespace
+	Q_StripPrecedingAndTrailingWhitespace( demoFileName );
+
+	// make sure the .dem extension is still present
+	char ext[10];
+	Q_ExtractFileExtension( demoFileName, ext, sizeof( ext ) );
+	if ( Q_strcasecmp( ext, "dem" ) )
+	{
+		ConMsg( "StartupDemoFile: invalid filename.\n" );
+		return;
 	}
 
 	if ( !m_DemoFile.Open( demoFileName, false ) )
@@ -545,12 +600,8 @@ void CDemoRecorder::StartupDemoFile( void )
 	Q_strncpy( dh->clientname, cl_name.GetString(), sizeof( dh->clientname ) );
 
 	
-	// goto end	of demo header 
-	g_pFileSystem->Seek(hDemoHeader, 0, FILESYSTEM_SEEK_TAIL);
 	// get size	signon data size
-	dh->signonlength = g_pFileSystem->Tell(hDemoHeader);
-	// go back to start
-	g_pFileSystem->Seek(hDemoHeader, 0, FILESYSTEM_SEEK_HEAD);
+	dh->signonlength = g_pFileSystem->Size(hDemoHeader);
 	
 	// write demo file header info
 	m_DemoFile.WriteDemoHeader();
@@ -569,6 +620,8 @@ void CDemoRecorder::StartupDemoFile( void )
 	// tell client to sync demo clock too 
 	m_DemoFile.WriteCmdHeader( dem_synctick, 0 );
 	
+	RecordStringTables();
+
 	// Demo playback should read this as an incoming message.
 	WriteDemoCvars(); // save all cvars marked with FCVAR_DEMO
 
@@ -580,6 +633,8 @@ void CDemoRecorder::StartupDemoFile( void )
 	cl.SendStringCmd( "demorestart" );
 
 	ConMsg ("Recording to %s...\n", demoFileName);
+
+	g_ClientDLL->OnDemoRecordStart( m_szDemoBaseName );
 }
 
 CDemoRecorder::CDemoRecorder()
@@ -634,6 +689,8 @@ void CDemoRecorder::CloseDemoFile()
 		}
 
 		m_DemoFile.Close();
+
+		g_ClientDLL->OnDemoRecordStop();
 	}
 
 	m_bCloseDemoFile = false;
@@ -786,8 +843,10 @@ void CDemoPlayer::StopPlayback( void )
 
 	m_DemoFile.Close();
 	m_bPlayingBack = false;
+	m_bLoading = false;
 	m_bPlaybackPaused = false;
 	m_flAutoResumeTime = 0.0f;
+	m_nEndTick = 0;
 
 	if ( m_bTimeDemo )
 	{
@@ -823,10 +882,18 @@ void CDemoPlayer::StopPlayback( void )
 
 	scr_demo_override_fov = 0.0f;
 
-	if ( demo_quitafterplayback.GetBool() )
+	if ( timedemo_runcount.GetInt() > 1 )
+	{
+		timedemo_runcount.SetValue( timedemo_runcount.GetInt() - 1 );
+
+		Cbuf_AddText( va( "timedemo %s", m_DemoFile.m_szFileName ) );
+	}
+	else if ( demo_quitafterplayback.GetBool() )
 	{
 		Cbuf_AddText( "quit\n" );
 	}
+
+	g_ClientDLL->OnDemoPlaybackStop();
 }
 
 CDemoFile *CDemoPlayer::GetDemoFile( void )
@@ -839,6 +906,11 @@ CDemoFile *CDemoPlayer::GetDemoFile( void )
 bool CDemoPlayer::IsSkipping( void )
 {
 	return m_bPlayingBack && ( m_nSkipToTick != -1 );
+}
+
+bool CDemoPlayer::IsLoading( void )
+{
+	return m_bLoading;
 }
 
 int CDemoPlayer::GetTotalTicks(void)
@@ -864,6 +936,7 @@ void CDemoPlayer::SkipToTick( int tick, bool bRelative, bool bPause )
 		Q_strncpy( fileName, m_DemoFile.m_szFileName, sizeof(fileName) );
 
 		// reload current demo file
+		ETWMarkPrintf( "DemoPlayer: Reloading demo file '%s'", fileName );
 		StartPlayback( fileName, m_bTimeDemo );
 
 		// Make sure the proper skipping occurs after reload
@@ -872,9 +945,18 @@ void CDemoPlayer::SkipToTick( int tick, bool bRelative, bool bPause )
 	}
 
 	m_nSkipToTick = tick;
+	ETWMark1I( "DemoPlayer: SkipToTick", tick );
 
 	if ( bPause )
 		PausePlayback( -1 );
+}
+
+void CDemoPlayer::SetEndTick( int tick )
+{
+	if ( tick < 0 )
+		return;
+
+	m_nEndTick = tick;
 }
 
 //-----------------------------------------------------------------------------
@@ -941,6 +1023,11 @@ bool CDemoPlayer::ParseAheadForInterval( int curtick, int intervalticks )
 					m_DemoFile.ReadUserCmd( NULL, dummy );
 				}
 				break;
+			case dem_stringtables:
+				{
+					m_DemoFile.ReadStringTables( NULL );
+				}
+				break;
 			default:
 				{
 					swallowmessages = false;
@@ -995,7 +1082,7 @@ bool CDemoPlayer::ParseAheadForInterval( int curtick, int intervalticks )
 
 //-----------------------------------------------------------------------------
 // Purpose: Read in next demo message and send to local client over network channel, if it's time.
-// Output : bool 
+// Output : netpacket_t* -- NULL if there is no packet available at this time.
 //-----------------------------------------------------------------------------
 netpacket_t *CDemoPlayer::ReadPacket( void )
 {
@@ -1018,6 +1105,23 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 
 	Assert( IsPlayingBack() );
 
+	if ( IsSkipping() )
+	{
+		// Every nMaxConsecutiveSkipPackets frames return NULL so that we don't build up an
+		// endless supply of unprocessed packets. This avoids causing overflows and excessive
+		// "highwater marks" in various Dota subsystems.
+		++m_nSkipPacketsPlayed;
+		if ( m_nSkipPacketsPlayed >= nMaxConsecutiveSkipPackets )
+		{
+			m_nSkipPacketsPlayed = 0;
+			return NULL;
+		}
+	}
+	else
+	{
+		m_nSkipPacketsPlayed = 0;
+	}
+
 	// External editor has paused playback
 	if ( CheckPausedPlayback() )
 		return NULL;
@@ -1034,6 +1138,17 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 		if ( !IsControlCommand( cmd ) )
 		{
 			int playbacktick = GetPlaybackTick();
+
+#if defined( RAD_TELEMETRY_ENABLED )
+			g_Telemetry.playbacktick = playbacktick;
+#endif
+
+			// If the end tick is set, check to see if we should bail
+			if ( m_nEndTick > 0 && playbacktick >= m_nEndTick )
+			{
+				m_nEndTick = 0;
+				return NULL;
+			}
 
 			if ( !m_bTimeDemo )
 			{
@@ -1093,7 +1208,8 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 					Msg( "%d dem_stop\n", tick );
 				}
 
-				cl.Disconnect(true);
+				OnStopCommand();
+
 				return NULL;
 			}
 			break;
@@ -1117,13 +1233,8 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 					Msg( "%d dem_datatables\n", tick );
 				}
 
-#if !defined( _X360 )
-				char data[256*1024];
-				bf_read buf( "dem_datatables", data, sizeof(data) );
-#else
 				void *data = malloc( 256*1024 ); // X360TBD: How much memory is really needed here?
 				bf_read buf( "dem_datatables", data, 256*1024 );
-#endif	
 				m_DemoFile.ReadNetworkDataTables( &buf );
 				buf.Seek( 0 );								// re-read data
 
@@ -1132,9 +1243,38 @@ netpacket_t *CDemoPlayer::ReadPacket( void )
 				{
 					Host_Error( "Error parsing network data tables during demo playback." );
 				}
-#if defined( _X360 )
 				free( data );
-#endif
+			}
+			break;
+		case dem_stringtables:
+			{
+				void *data = NULL;
+				int dataLen = 512 * 1024;
+				while ( dataLen <= DEMO_FILE_MAX_STRINGTABLE_SIZE )
+				{
+					data = realloc( data, dataLen );
+					bf_read buf( "dem_stringtables", data, dataLen );
+					// did we successfully read
+					if ( m_DemoFile.ReadStringTables( &buf ) > 0 )
+					{
+						buf.Seek( 0 );
+						if ( !networkStringTableContainerClient->ReadStringTables( buf ) )
+						{
+							Host_Error( "Error parsing string tables during demo playback." );
+						}
+						break;
+					}
+
+					// Didn't fit.  Try doubling the size of the buffer
+					dataLen *= 2;
+				}
+
+				if ( dataLen > DEMO_FILE_MAX_STRINGTABLE_SIZE )
+				{
+					Warning( "ReadPacket failed to read string tables. Trying to read string tables that's bigger than max string table size\n" );
+				}
+
+				free( data );
 			}
 			break;
 		case dem_usercmd:
@@ -1481,17 +1621,24 @@ CDemoPlayer::CDemoPlayer()
 	m_flTotalFPSVariability = 0.0f;
 	m_nTimeDemoCurrentFrame = -1; 
 	m_bPlayingBack = false;
+	m_bLoading = false;
 	m_bPlaybackPaused = false;
 	m_nSkipToTick = -1;
+	m_nSkipPacketsPlayed = 0;
 	m_nSnapshotTick = 0;
 	m_SnapshotFilename[0] = 0;
 	m_bResetInterpolation = false;
 	m_nPreviousTick = 0;
+	m_nEndTick = 0;
 }
 
 CDemoPlayer::~CDemoPlayer()
 {
 	StopPlayback();
+	if ( g_ClientDLL )
+	{
+		g_ClientDLL->OnDemoPlaybackStop();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1500,6 +1647,8 @@ CDemoPlayer::~CDemoPlayer()
 //-----------------------------------------------------------------------------
 bool CDemoPlayer::StartPlayback( const char *filename, bool bAsTimeDemo )
 {
+	m_bLoading = true;
+
 	SCR_BeginLoadingPlaque();
 
 	// Disconnect from server or stop running one
@@ -1534,7 +1683,7 @@ bool CDemoPlayer::StartPlayback( const char *filename, bool bAsTimeDemo )
 	ResyncDemoClock(); 
 
 	// create a fake channel with a NULL address
-	cl.m_NetChannel = NET_CreateNetChannel( NS_CLIENT, NULL, "DEMO", &cl );
+	cl.m_NetChannel = NET_CreateNetChannel( NS_CLIENT, NULL, "DEMO", &cl, false, dh->networkprotocol );
 
 	if ( !cl.m_NetChannel )
 	{
@@ -1573,6 +1722,8 @@ bool CDemoPlayer::StartPlayback( const char *filename, bool bAsTimeDemo )
 
 	scr_demo_override_fov = 0.0f;
 
+	m_bLoading = false;
+
 	return true;
 }
 
@@ -1602,63 +1753,82 @@ void CDemoPlayer::WriteTimeDemoResults( void )
 	int width, height;
 	CMatRenderContextPtr pRenderContext( materials );
 	pRenderContext->GetWindowSize( width, height );
-	ImageFormat backBufferFormat = materials->GetBackBufferFormat();
+
+	const MaterialSystem_Config_t &config = materials->GetCurrentConfigForVideoCard();
+
 	if( !bFileExists )
 	{
-		g_pFileSystem->FPrintf( fileHandle, "Half-Life 2 Benchmark Results\n\n" );
 		g_pFileSystem->FPrintf( fileHandle, "demofile," );
-		g_pFileSystem->FPrintf( fileHandle, "frame data spreadsheet," );
-		g_pFileSystem->FPrintf( fileHandle, "frames/sec," );
+		g_pFileSystem->FPrintf( fileHandle, "fps," );
 		g_pFileSystem->FPrintf( fileHandle, "framerate variability," );
-		g_pFileSystem->FPrintf( fileHandle, "totaltime (sec)," );
+		g_pFileSystem->FPrintf( fileHandle, "totaltime," );
+		g_pFileSystem->FPrintf( fileHandle, "numframes," );
 		g_pFileSystem->FPrintf( fileHandle, "width," );
 		g_pFileSystem->FPrintf( fileHandle, "height," );
-		g_pFileSystem->FPrintf( fileHandle, "numframes," );
+		g_pFileSystem->FPrintf( fileHandle, "windowed," );
+		g_pFileSystem->FPrintf( fileHandle, "vsync," );
+		g_pFileSystem->FPrintf( fileHandle, "MSAA," );
+		g_pFileSystem->FPrintf( fileHandle, "Aniso," );
 		g_pFileSystem->FPrintf( fileHandle, "dxlevel," );
-		g_pFileSystem->FPrintf( fileHandle, "backbuffer format," );
 		g_pFileSystem->FPrintf( fileHandle, "cmdline," );
 		g_pFileSystem->FPrintf( fileHandle, "driver name," );
-		g_pFileSystem->FPrintf( fileHandle, "driver desc," );
-		g_pFileSystem->FPrintf( fileHandle, "driver version," );
 		g_pFileSystem->FPrintf( fileHandle, "vendor id," );
 		g_pFileSystem->FPrintf( fileHandle, "device id," );
-		g_pFileSystem->FPrintf( fileHandle, "subsys id," );
-		g_pFileSystem->FPrintf( fileHandle, "revision," );
-		g_pFileSystem->FPrintf( fileHandle, "whqllevel," );
-		g_pFileSystem->FPrintf( fileHandle, "forcetrilinear," );
-		g_pFileSystem->FPrintf( fileHandle, "fastclip," );
-		g_pFileSystem->FPrintf( fileHandle, "shaderdll," );
-		g_pFileSystem->FPrintf( fileHandle, "sound," );
-		g_pFileSystem->FPrintf( fileHandle, "vsync," );
+
+//		g_pFileSystem->FPrintf( fileHandle, "sound," );
+		g_pFileSystem->FPrintf( fileHandle, "Reduce fillrate," );
+		g_pFileSystem->FPrintf( fileHandle, "reflect entities," );
+		g_pFileSystem->FPrintf( fileHandle, "motion blur," );
+		g_pFileSystem->FPrintf( fileHandle, "flashlight shadows," );
+		g_pFileSystem->FPrintf( fileHandle, "mat_reduceparticles," );
+		g_pFileSystem->FPrintf( fileHandle, "r_dopixelvisibility," );
+		g_pFileSystem->FPrintf( fileHandle, "nulldevice," );
+		g_pFileSystem->FPrintf( fileHandle, "timedemo_comment," );
 		g_pFileSystem->FPrintf( fileHandle, "\n" );
 	}
-	// HACK HACK HACK!
+
+	ConVarRef mat_vsync( "mat_vsync" );
+	ConVarRef mat_antialias( "mat_antialias" );
+	ConVarRef mat_forceaniso( "mat_forceaniso" );
+	ConVarRef r_waterforcereflectentities( "r_waterforcereflectentities" );
+	ConVarRef mat_motion_blur_enabled( "mat_motion_blur_enabled" );
+	ConVarRef r_flashlightdepthtexture( "r_flashlightdepthtexture" );
+	ConVarRef mat_reducefillrate( "mat_reducefillrate" );
+	ConVarRef mat_reduceparticles( "mat_reduceparticles" );
+	ConVarRef r_dopixelvisibility( "r_dopixelvisibility" );
 
 	g_pFileSystem->Seek( fileHandle, 0, FILESYSTEM_SEEK_TAIL );
 	MaterialAdapterInfo_t info;
 	materials->GetDisplayAdapterInfo( materials->GetCurrentAdapter(), info );
 	g_pFileSystem->FPrintf( fileHandle, "%s,", m_DemoFile.m_szFileName );
-	g_pFileSystem->FPrintf( fileHandle, "%s,", g_pStatsFile );
 	g_pFileSystem->FPrintf( fileHandle, "%5.1f,", frames/time );
 	g_pFileSystem->FPrintf( fileHandle, "%5.1f,", flVariability );
 	g_pFileSystem->FPrintf( fileHandle, "%5.1f,", time );
+	g_pFileSystem->FPrintf( fileHandle, "%i,", frames );
 	g_pFileSystem->FPrintf( fileHandle, "%i,", width );
 	g_pFileSystem->FPrintf( fileHandle, "%i,", height );
-	g_pFileSystem->FPrintf( fileHandle, "%i,", frames );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", config.Windowed() ? "windowed" : "fullscreen");
+	g_pFileSystem->FPrintf( fileHandle, "%s,", mat_vsync.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%d,", mat_antialias.GetInt() );
+	g_pFileSystem->FPrintf( fileHandle, "%d,", mat_forceaniso.GetInt() );
 	g_pFileSystem->FPrintf( fileHandle, "%s,", COM_DXLevelToString( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() ) );
-	g_pFileSystem->FPrintf( fileHandle, "%s,", ImageLoader::GetName( backBufferFormat ) );
 	g_pFileSystem->FPrintf( fileHandle, "%s,", CommandLine()->GetCmdLine() );
 	g_pFileSystem->FPrintf( fileHandle, "%s,", info.m_pDriverName );
 	g_pFileSystem->FPrintf( fileHandle, "0x%x,", info.m_VendorID );
 	g_pFileSystem->FPrintf( fileHandle, "0x%x,", info.m_DeviceID );
-	g_pFileSystem->FPrintf( fileHandle, "0x%x,", info.m_SubSysID );
-	g_pFileSystem->FPrintf( fileHandle, "0x%x,", info.m_Revision );
-	g_pFileSystem->FPrintf( fileHandle, "%s,", g_pMaterialSystemConfig->ForceTrilinear() ? "enabled" : "disabled" );
-	g_pFileSystem->FPrintf( fileHandle, "%s,", g_pMaterialSystemHardwareConfig->UseFastClipping() ? "enabled" : "disabled" );
 
-	g_pFileSystem->FPrintf( fileHandle, "%s,", g_pMaterialSystemHardwareConfig->GetShaderDLLName() );
-	g_pFileSystem->FPrintf( fileHandle, "%s,", CommandLine()->CheckParm( "-nosound" ) ? "disabled" : "enabled" );
-	g_pFileSystem->FPrintf( fileHandle, "%s,", !CommandLine()->CheckParm( "-mat_vsync" ) ? "disabled" : "enabled" );
+//	g_pFileSystem->FPrintf( fileHandle, "%s,", CommandLine()->CheckParm( "-nosound" ) ? "off" : "on" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", mat_reducefillrate.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", r_waterforcereflectentities.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", mat_motion_blur_enabled.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", r_flashlightdepthtexture.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", mat_reduceparticles.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", r_dopixelvisibility.GetBool() ? "on" : "off" );
+	g_pFileSystem->FPrintf( fileHandle, "%s,", CommandLine()->CheckParm( "-nulldevice" ) ? "yes" : "no" );
+
+	int itimedemo_comment = CommandLine()->FindParm( "-timedemo_comment" );
+	const char *timedemo_comment = itimedemo_comment ? CommandLine()->GetParm( itimedemo_comment + 1 ) : "";
+	g_pFileSystem->FPrintf( fileHandle, "%s,", timedemo_comment );
 	g_pFileSystem->FPrintf( fileHandle, "\n" );
 	g_pFileSystem->Close( fileHandle );
 }
@@ -1692,6 +1862,7 @@ bool CDemoPlayer::CheckPausedPlayback()
 		if ( cl.GetServerTickCount() >= demo_pauseatservertick.GetInt() )
 		{
 			PausePlayback( -1 );
+			ETWMark1I( "DemoPlayer: Reached pause tick", cl.GetServerTickCount() );
 			m_nSkipToTick = -1;
 			demo_pauseatservertick.SetValue( 0 );
 			Msg( "Demo paused at server tick %i\n", cl.GetServerTickCount() );
@@ -1709,6 +1880,7 @@ bool CDemoPlayer::CheckPausedPlayback()
 		else
 		{
 			// we can't skip back (or finished skipping), so disable skipping
+			ETWMark1I( "DemoPlayer: SkipToTick done", GetPlaybackTick() );
 			m_nSkipToTick = -1;
 		}
 	}
@@ -1743,6 +1915,11 @@ bool CDemoPlayer::IsPlaybackPaused()
 		return false;
 	
 	return m_bPlaybackPaused;
+}
+
+int CDemoPlayer::GetPlaybackStartTick( void )
+{
+	return m_nStartTick;
 }
 
 int CDemoPlayer::GetPlaybackTick( void )
@@ -1936,7 +2113,7 @@ CON_COMMAND_F( record, "Record a demo.", FCVAR_DONTRECORD )
 		return;
 	}
 
-	// remove .dem extentsion if user added it
+	// remove .dem extension if user added it
 	Q_StripExtension( args[1], name, sizeof( name ) );
 	
 	if ( incremental )
@@ -1965,24 +2142,29 @@ void CL_PlayDemo_f( const CCommand &args )
 		return;
 	}
 
-	// set current demo player to client demo player
+	// Get the demo filename
+	char name[ MAX_OSPATH ];
+	Q_strncpy( name, args[1], sizeof( name ) );
+	Q_DefaultExtension( name, ".dem", sizeof( name ) );
+
+	// set current demo player to replay demo player?
 	demoplayer = g_pClientDemoPlayer;
 
 	//
 	// open the demo file
 	//
-	char name[ MAX_OSPATH ];
-
-	Q_strncpy( name, args[1], sizeof( name ) );
-
-	Q_DefaultExtension( name, ".dem", sizeof( name ) );
-
-	if ( !demoplayer->StartPlayback( name, false ) )
+	if ( demoplayer->StartPlayback( name, false ) )
+	{
+		// Remove extension
+		char basename[ MAX_OSPATH ];
+		V_StripExtension( name, basename, sizeof( basename ) );
+		g_ClientDLL->OnDemoPlaybackStart( basename );
+	}
+	else
 	{
 		SCR_EndLoadingPlaque();
 	}
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -2106,7 +2288,6 @@ CON_COMMAND_AUTOCOMPLETEFILE( timedemoquit, CL_TimeDemoQuit_f, "Play a demo, rep
 CON_COMMAND_AUTOCOMPLETEFILE( listdemo, CL_ListDemo_f, "List demo file contents.", NULL, dem );
 CON_COMMAND_AUTOCOMPLETEFILE( benchframe, CL_BenchFrame_f, "Takes a snapshot of a particular frame in a time demo.", NULL, dem );
 
-
 CON_COMMAND( demo_pause, "Pauses demo playback." )
 {
 	float seconds = -1.0;
@@ -2165,6 +2346,19 @@ CON_COMMAND( demo_gototick, "Skips to a tick in demo." )
 	demoplayer->SkipToTick( nTick, bRelative, bPause );
 }
 
+CON_COMMAND( demo_setendtick, "Sets end demo playback tick. Set to 0 to disable." )
+{
+	if ( args.ArgC() != 2 )
+	{
+		Msg( "Syntax: demo_setendtick <tick>\n" );
+		return;
+	}
+
+	int nTick = atoi( args[1] );
+
+	demoplayer->SetEndTick( nTick );
+}
+
 CON_COMMAND( demo_timescale, "Sets demo replay speed." )
 {
 	float fScale = 1.0f;
@@ -2192,14 +2386,21 @@ bool CDemoPlayer::OverrideView( democmdinfo_t& info )
 	return false;
 }
 
+void CDemoPlayer::OnStopCommand()
+{
+	cl.Disconnect( "Demo stopped", true);
+}
 
 void CDemoPlayer::ResetDemoInterpolation( void )
 {
 	m_bResetInterpolation = true;
 }
 
+int CDemoPlayer::GetProtocolVersion()
+{
+	Assert( IsPlayingBack() );
+	if ( !IsPlayingBack() )
+		return PROTOCOL_VERSION;
 
-
-
-
-
+	return m_DemoFile.GetProtocolVersion();
+}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Client side C_CHostage class
 //
@@ -150,7 +150,7 @@ void C_LowViolenceHostageDeathModel::ClientThink( void )
 
 	int iAlpha = GetRenderColor().a;
 
-	iAlpha = max( iAlpha - ( g_ragdoll_fadespeed.GetInt() * gpGlobals->frametime ), 0 );
+	iAlpha = MAX( iAlpha - ( g_ragdoll_fadespeed.GetInt() * gpGlobals->frametime ), 0 );
 
 	SetRenderMode( kRenderTransAlpha );
 	SetRenderColorA( iAlpha );
@@ -470,7 +470,7 @@ void C_CHostage::ClientThink()
 	int speed = 2;
 	int a = m_clrRender->a;
 
-	a = max( 0, a - speed );
+	a = MAX( 0, a - speed );
 
 	SetRenderColorA( a );
 
@@ -507,7 +507,7 @@ void C_CHostage::OnDataChanged( DataUpdateType_t updateType )
 }
 
 //-----------------------------------------------------------------------------
-void C_CHostage::ImpactTrace( trace_t *pTrace, int iDamageType, char *pCustomImpactName )
+void C_CHostage::ImpactTrace( trace_t *pTrace, int iDamageType, const char *pCustomImpactName )
 {
 	static ConVar *violence_hblood = cvar->FindVar( "violence_hblood" );
 	if ( violence_hblood && !violence_hblood->GetBool() )

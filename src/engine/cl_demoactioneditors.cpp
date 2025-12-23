@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -437,11 +437,11 @@ void CBaseActionScreenFadeStartDialog::Init( void )
 	m_pDuration->SetText( va( "%.3f", duration ) );
 	m_pHoldTime->SetText( va( "%.3f", holdTime ) );
 	m_pColor->SetText( va( "%i %i %i %i", r, g, b, a ) );
-	m_pFFADE_IN->SetSelected( fadein );
-	m_pFFADE_OUT->SetSelected( fadeout );
-	m_pFFADE_MODULATE->SetSelected( fademodulate );
-	m_pFFADE_STAYOUT->SetSelected( fadestayout );
-	m_pFFADE_PURGE->SetSelected( fadepurge );
+	m_pFFADE_IN->SetSelected( fadein != 0 );
+	m_pFFADE_OUT->SetSelected( fadeout != 0 );
+	m_pFFADE_MODULATE->SetSelected( fademodulate != 0 );
+	m_pFFADE_STAYOUT->SetSelected( fadestayout != 0 );
+	m_pFFADE_PURGE->SetSelected( fadepurge != 0 );
 
 }
 
@@ -459,10 +459,10 @@ bool CBaseActionScreenFadeStartDialog::OnSaveChanges( void )
 	float duration = f->duration * (1.0f/(float)(1<<SCREENFADE_FRACBITS));
 	float holdTime = f->holdTime * (1.0f/(float)(1<<SCREENFADE_FRACBITS));
 	bool fadein = f->fadeFlags & FFADE_IN;
-	bool fadeout = f->fadeFlags & FFADE_OUT;
-	bool fademodulate = f->fadeFlags & FFADE_MODULATE;
-	bool fadestayout = f->fadeFlags & FFADE_STAYOUT;
-	bool fadepurge = f->fadeFlags & FFADE_PURGE;
+	bool fadeout = ( f->fadeFlags & FFADE_OUT ) != 0;
+	bool fademodulate = ( f->fadeFlags & FFADE_MODULATE ) != 0;
+	bool fadestayout = ( f->fadeFlags & FFADE_STAYOUT ) != 0;
+	bool fadepurge = ( f->fadeFlags & FFADE_PURGE ) != 0;
 	int r = f->r;
 	int g = f->g;
 	int b = f->b;

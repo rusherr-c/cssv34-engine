@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: To accomplish X360 TCR 22, we need to call present ever 66msec
 // at least during loading screens.	This amazing hack will do it
@@ -21,8 +21,19 @@
 //-----------------------------------------------------------------------------
 // Activate, deactivate loader updates
 //-----------------------------------------------------------------------------
+#ifdef _X360
+
 void BeginLoadingUpdates( MaterialNonInteractiveMode_t mode );
 void RefreshScreenIfNecessary();
 void EndLoadingUpdates();
+
+#else
+
+inline void BeginLoadingUpdates( MaterialNonInteractiveMode_t mode ) {}
+inline void RefreshScreenIfNecessary() {}
+inline void EndLoadingUpdates() {}
+
+#endif
+
 
 #endif /* LOAD_SCREEN_UPDATE_H */

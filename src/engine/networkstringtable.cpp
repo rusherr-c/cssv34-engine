@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,9 +14,14 @@
 #include "filesystem_engine.h"
 #include "baseclient.h"
 #include "vprof.h"
+#include <tier1/utlstring.h>
+#include <tier1/utlhashtable.h>
+#include <tier0/etwprof.h>
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+ConVar sv_dumpstringtables( "sv_dumpstringtables", "0", FCVAR_CHEAT );
+ConVar sv_compressstringtablebaselines_threshhold( "sv_compressstringtablebaselines_threshold", "2048", 0, "Minimum size (in bytes) for stringtablebaseline buffer to be compressed." );
 
 #define SUBSTRING_BITS	5
 struct StringHistoryEntry
@@ -90,14 +95,14 @@ public:
 
 	void Purge()
 	{
-		m_Items.RemoveAll();
+		m_Items.Purge();
 	}
 
 	const char *String( int index )
 	{
-		char szString[MAX_PATH];
-		g_pFileSystem->String( m_Items.Key( index ), szString, sizeof( szString ) );
-		return va( "%s", szString );
+		char* pString = tmpstr512();
+		g_pFileSystem->String( m_Items.Key( index ), pString, 512 );
+		return pString;
 	}
 
 	bool IsValidIndex( int index )
@@ -145,51 +150,50 @@ public:
 
 	virtual ~CNetworkStringDict() 
 	{ 
-		Purge();
 	}
 
 	unsigned int Count()
 	{
-		return m_Items.Count();
+		return m_Lookup.Count();
 	}
 
 	void Purge()
 	{
-		m_Items.Purge();
+		m_Lookup.Purge();
 	}
 
 	const char *String( int index )
 	{
-		return m_Items.GetElementName( index );
+		return m_Lookup.Key( index ).Get();
 	}
 
 	bool IsValidIndex( int index )
 	{
-		return m_Items.IsValidIndex( index );
+		return m_Lookup.IsValidHandle( index );
 	}
 
 	int Insert( const char *pString )
 	{
-		return m_Items.Insert( pString );
+		return m_Lookup.Insert( pString );
 	}
 
 	int Find( const char *pString )
 	{
-		return m_Items.Find( pString );
+		return pString ? m_Lookup.Find( pString ) : m_Lookup.InvalidHandle();
 	}
 
 	CNetworkStringTableItem	&Element( int index )
 	{
-		return m_Items.Element( index );
+		return m_Lookup.Element( index );
 	}
 
 	const CNetworkStringTableItem &Element( int index ) const
 	{
-		return m_Items.Element( index );
+		return m_Lookup.Element( index );
 	}
 
 private:
-	CUtlDict< CNetworkStringTableItem, int > m_Items;
+	CUtlStableHashtable< CUtlConstString, CNetworkStringTableItem, CaselessStringHashFunctor, UTLConstStringCaselessStringEqualFunctor<char> > m_Lookup;
 };
 
 //-----------------------------------------------------------------------------
@@ -205,8 +209,8 @@ CNetworkStringTable::CNetworkStringTable( TABLEID id, const char *tableName, int
 	m_id = id;
 	int len = strlen( tableName ) + 1;
 	m_pszTableName = new char[ len ];
-	assert( m_pszTableName );
-	assert( tableName );
+	Assert( m_pszTableName );
+	Assert( tableName );
 	Q_strncpy( m_pszTableName, tableName, len );
 
 	m_changeFunc = NULL;
@@ -326,10 +330,22 @@ CNetworkStringTable::~CNetworkStringTable( void )
 //-----------------------------------------------------------------------------
 void CNetworkStringTable::DeleteAllStrings( void )
 {
-	m_pItems->Purge();
+	delete m_pItems;
+	if ( m_bIsFilenames )
+	{
+		m_pItems = new CNetworkStringFilenameDict;
+	}
+	else
+	{
+		m_pItems = new CNetworkStringDict;
+	}
+
 	if ( m_pItemsClientSide )
 	{
-		m_pItemsClientSide->Purge();
+		delete m_pItemsClientSide;
+		m_pItemsClientSide = new CNetworkStringDict;
+		m_pItemsClientSide->Insert( "___clientsideitemsplaceholder0___" ); // 0 slot can't be used
+		m_pItemsClientSide->Insert( "___clientsideitemsplaceholder1___" ); // -1 can't be used since it looks like the "invalid" index from other string lookups
 	}
 }
 
@@ -489,6 +505,7 @@ int CNetworkStringTable::WriteUpdate( CBaseClient *client, bf_write &buf, int ti
 
 	int entriesUpdated = 0;
 	int lastEntry = -1;
+	int nTableStartBit = buf.GetNumBitsWritten();
 
 	int count = m_pItems->Count();
 
@@ -585,6 +602,8 @@ int CNetworkStringTable::WriteUpdate( CBaseClient *client, bf_write &buf, int ti
 		}
 	}
 
+	ETWMark2I( GetTableName(), entriesUpdated, buf.GetNumBitsWritten() - nTableStartBit );
+
 	return entriesUpdated;
 }
 
@@ -624,9 +643,14 @@ void CNetworkStringTable::ParseUpdate( bf_read &buf, int entries )
 
 			if ( substringcheck )
 			{
-				int index = buf.ReadUBitLong( 5 );
-				int bytestocopy = buf.ReadUBitLong( SUBSTRING_BITS );
-				Q_strncpy( entry, history[ index ].string, bytestocopy + 1 );
+				unsigned int index = buf.ReadUBitLong( 5 );
+				unsigned int bytestocopy = buf.ReadUBitLong( SUBSTRING_BITS );
+				if ( index >= (unsigned int)history.Count() )
+				{
+					Host_Error( "Server sent bogus substring index %i for table %s\n",
+					            entryIndex, GetTableName() );
+				}
+				Q_strncpy( entry, history[ index ].string, Min( sizeof( entry ), (size_t)bytestocopy + 1 ) );
 				buf.ReadString( substr, sizeof(substr) );
 				Q_strncat( entry, substr, sizeof(entry), COPY_ALL_CHARACTERS );
 			}
@@ -708,7 +732,7 @@ void CNetworkStringTable::CopyStringTable(CNetworkStringTable * table)
 {
 	Assert (m_pItems->Count() == 0); // table must be empty before coping
 
-	for ( unsigned int i = 0; i < table->m_pItems->Count(); i++)
+	for ( unsigned int i = 0; i < table->m_pItems->Count() ; ++i )
 	{
 		CNetworkStringTableItem	*item = &table->m_pItems->Element( i );
 
@@ -935,9 +959,9 @@ const char *CNetworkStringTable::GetString( int stringNumber )
 		stringNumber = -stringNumber;
 	}
 
-	Assert( stringNumber >= 0 && stringNumber < (int)dict->Count() );
+	Assert( dict->IsValidIndex( stringNumber ) );
 
-	if ( stringNumber >= 0 && stringNumber < (int)dict->Count() )
+	if ( dict->IsValidIndex( stringNumber ) )
 	{
 		return dict->String( stringNumber );
 	}
@@ -955,7 +979,7 @@ void CNetworkStringTable::SetStringUserData( int stringNumber, int length /*=0*/
 #ifdef _DEBUG
 	if ( m_bLocked )
 	{
-		DevMsg("Warning! CNetworkStringTable::SetStringUserData: changing entry %i while locked.\n", stringNumber );
+		DevMsg("Warning! CNetworkStringTable::SetStringUserData (%s): changing entry %i while locked.\n", GetTableName(), stringNumber );
 	}
 #endif
 
@@ -967,10 +991,10 @@ void CNetworkStringTable::SetStringUserData( int stringNumber, int length /*=0*/
 		stringNumber = -stringNumber;
 	}
 
-	assert( (length == 0 && userdata == NULL) || ( length > 0 && userdata != NULL) );
-	assert( stringNumber >= 0 && stringNumber < (int)dict->Count() );
+	Assert( (length == 0 && userdata == NULL) || ( length > 0 && userdata != NULL) );
+	Assert( dict->IsValidIndex( stringNumber ) );
 	CNetworkStringTableItem *p = &dict->Element( stringNumber );
-	assert( p );
+	Assert( p );
 
 	if ( p->SetUserData( m_nTickCount, length, userdata ) )
 	{
@@ -1009,48 +1033,76 @@ void CNetworkStringTable::DataChanged( int stringNumber, CNetworkStringTableItem
 
 #ifndef SHARED_NET_STRING_TABLES
 
-void CNetworkStringTable::WriteStringTable( CUtlBuffer& buf )
+void CNetworkStringTable::WriteStringTable( bf_write& buf )
 {
-	int numstrings = GetNumStrings();
-	buf.PutInt( numstrings );
+	int numstrings = m_pItems->Count();
+	buf.WriteWord( numstrings );
 	for ( int i = 0 ; i < numstrings; i++ )
 	{
-		buf.PutString( GetString( i ) );
+		buf.WriteString( GetString( i ) );
 		int userDataSize;
 		const void *pUserData = GetStringUserData( i, &userDataSize );
 		if ( userDataSize > 0 )
 		{
-			buf.PutChar( 1 );
-			buf.PutShort( (short)userDataSize );
-			buf.Put( pUserData, userDataSize );
+			buf.WriteOneBit( 1 );
+			buf.WriteWord( (short)userDataSize );
+			buf.WriteBytes( pUserData, userDataSize );
 		}
 		else
 		{
-			buf.PutChar( 0 );
+			buf.WriteOneBit( 0 );
 		}
-		
+	}
+
+	if ( m_pItemsClientSide )
+	{
+		buf.WriteOneBit( 1 );
+
+		numstrings = m_pItemsClientSide->Count();
+		buf.WriteWord( numstrings );
+		for ( int i = 0 ; i < numstrings; i++ )
+		{
+			buf.WriteString( m_pItemsClientSide->String( i ) );
+			int userDataSize;
+			const void *pUserData = m_pItemsClientSide->Element( i ).GetUserData( &userDataSize );
+			if ( userDataSize > 0 )
+			{
+				buf.WriteOneBit( 1 );
+				buf.WriteWord( (short)userDataSize );
+				buf.WriteBytes( pUserData, userDataSize );
+			}
+			else
+			{
+				buf.WriteOneBit( 0 );
+			}
+		}
+
+	}
+	else
+	{
+		buf.WriteOneBit( 0 );
 	}
 }
 
-bool CNetworkStringTable::ReadStringTable( CUtlBuffer& buf )
+bool CNetworkStringTable::ReadStringTable( bf_read& buf )
 {
 	DeleteAllStrings();
 
-	int numstrings = buf.GetInt();
+	int numstrings = buf.ReadWord();
 	for ( int i = 0 ; i < numstrings; i++ )
 	{
 		char stringname[4096];
 		
-		buf.GetStringManualCharCount( stringname, sizeof( stringname ) );
+		buf.ReadString( stringname, sizeof( stringname ) );
 
-		if ( buf.GetChar() == 1 )
+		if ( buf.ReadOneBit() == 1 )
 		{
-			int userDataSize = (int)buf.GetShort();
+			int userDataSize = (int)buf.ReadWord();
 			Assert( userDataSize > 0 );
 			byte *data = new byte[ userDataSize + 4 ];
 			Assert( data );
 
-			buf.Get( data, userDataSize );
+			buf.ReadBytes( data, userDataSize );
 
 			AddString( true, stringname, userDataSize, data );
 
@@ -1060,6 +1112,43 @@ bool CNetworkStringTable::ReadStringTable( CUtlBuffer& buf )
 		else
 		{
 			AddString( true, stringname );
+		}
+	}
+
+	// Client side stuff
+	if ( buf.ReadOneBit() == 1 )
+	{
+		numstrings = buf.ReadWord();
+		for ( int i = 0 ; i < numstrings; i++ )
+		{
+			char stringname[4096];
+
+			buf.ReadString( stringname, sizeof( stringname ) );
+
+			if ( buf.ReadOneBit() == 1 )
+			{
+				int userDataSize = (int)buf.ReadWord();
+				Assert( userDataSize > 0 );
+				byte *data = new byte[ userDataSize + 4 ];
+				Assert( data );
+
+				buf.ReadBytes( data, userDataSize );
+
+				if ( i >= 2 )
+				{
+					AddString( false, stringname, userDataSize, data );
+				}
+
+				delete[] data;
+
+			}
+			else
+			{
+				if ( i >= 2 )
+				{
+					AddString( false, stringname );
+				}
+			}
 		}
 	}
 
@@ -1085,9 +1174,9 @@ const void *CNetworkStringTable::GetStringUserData( int stringNumber, int *lengt
 
 	CNetworkStringTableItem *p;
 
-	assert( stringNumber >= 0 && stringNumber < (int)dict->Count() );
+	Assert( dict->IsValidIndex( stringNumber ) );
 	p = &dict->Element( stringNumber );
-	assert( p );
+	Assert( p );
 	return p->GetUserData( length );
 }
 
@@ -1108,6 +1197,8 @@ int CNetworkStringTable::GetNumStrings( void ) const
 //-----------------------------------------------------------------------------
 int CNetworkStringTable::FindStringIndex( char const *string )
 {
+	if ( !string )
+		return INVALID_STRING_INDEX;
 	int i = m_pItems->Find( string );
 	if ( m_pItems->IsValidIndex( i ) )
 		return i;
@@ -1129,7 +1220,7 @@ void CNetworkStringTable::Dump( void )
 	{
 		for ( int i = 0; i < (int)m_pItemsClientSide->Count() ; i++ )
 		{
-			ConMsg( "  %i : %s\n", i, m_pItemsClientSide->String( i ) );
+			ConMsg( "  (c)%i : %s\n", i, m_pItemsClientSide->String( i ) );
 		}
 	}
 	ConMsg( "\n" );
@@ -1139,6 +1230,7 @@ void CNetworkStringTable::Dump( void )
 
 bool CNetworkStringTable::WriteBaselines( SVC_CreateStringTable &msg, char *msg_buffer, int msg_buffer_size )
 {
+	VPROF_BUDGET( "CNetworkStringTable::WriteBaselines", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	msg.m_DataOut.StartWriting( msg_buffer, msg_buffer_size );
 
 	msg.m_bIsFilenames          = m_bIsFilenames;
@@ -1303,57 +1395,114 @@ int CNetworkStringTableContainer::GetNumTables( void ) const
 //-----------------------------------------------------------------------------
 void CNetworkStringTableContainer::WriteBaselines( bf_write &buf )
 {
+	VPROF_BUDGET( "CNetworkStringTableContainer::WriteBaselines", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 	SVC_CreateStringTable msg;
-	char msg_buffer[NET_MAX_PAYLOAD];
+
+	size_t msg_buffer_size = 2 * NET_MAX_PAYLOAD;
+	char *msg_buffer = new char[ msg_buffer_size ];
+	if ( !msg_buffer )
+	{
+		Host_Error( "Failed to allocate %llu bytes of memory in CNetworkStringTableContainer::WriteBaselines\n", (uint64)msg_buffer_size );
+	}
 
 	for ( int i = 0 ; i < m_Tables.Count() ; i++ )
 	{
 		CNetworkStringTable *table = (CNetworkStringTable*) GetTable( i );
 
-		if ( !table->WriteBaselines( msg, msg_buffer, sizeof( msg_buffer ) ) )
+		int before = buf.GetNumBytesWritten();
+		if ( !table->WriteBaselines( msg, msg_buffer, msg_buffer_size ) )
 		{
 			Host_Error( "Index error writing string table baseline %s\n", table->GetTableName() );
 		}
-			
+
+		if ( msg.m_DataOut.IsOverflowed() )
+		{
+			Warning( "Warning:  Overflowed writing uncompressed string table data for %s\n", table->GetTableName() );
+		}
+
+		msg.m_bDataCompressed = false;
+		if ( msg.m_DataOut.GetNumBytesWritten() >= sv_compressstringtablebaselines_threshhold.GetInt() )
+		{
+			CFastTimer compressTimer;
+			compressTimer.Start();
+
+			// TERROR: bzip-compress the stringtable before adding it to the packet.  Yes, the whole packet will be bzip'd,
+			// but the uncompressed data also has to be under the NET_MAX_PAYLOAD limit.
+			unsigned int numBytes = msg.m_DataOut.GetNumBytesWritten();
+			unsigned int compressedSize = (unsigned int)numBytes;
+			char *compressedData = new char[numBytes];
+
+			if ( COM_BufferToBufferCompress_Snappy( compressedData, &compressedSize, (char *)msg.m_DataOut.GetData(), numBytes ) )
+			{
+				msg.m_bDataCompressed = true;
+				msg.m_DataOut.Reset();
+				msg.m_DataOut.WriteLong( numBytes );	// uncompressed size
+				msg.m_DataOut.WriteLong( compressedSize );	// compressed size
+				msg.m_DataOut.WriteBits( compressedData, compressedSize * 8 );	// compressed data
+
+				// if ( compressstringtablbaselines > 1 )
+				{
+					compressTimer.End(); 
+					DevMsg( "Stringtable %s compression: %d -> %d bytes: %.2fms\n",
+							table->GetTableName(), numBytes, compressedSize, compressTimer.GetDuration().GetMillisecondsF() );
+				}
+			}
+
+			delete [] compressedData;
+		}
+
 		if ( !msg.WriteToBuffer( buf ) )
 		{
 			Host_Error( "Overflow error writing string table baseline %s\n", table->GetTableName() );
 		}
+
+		int after = buf.GetNumBytesWritten();
+		if ( sv_dumpstringtables.GetBool() )
+		{
+			DevMsg( "CNetworkStringTableContainer::WriteBaselines wrote %d bytes for table %s [space remaining %d bytes]\n", after - before, table->GetTableName(), buf.GetNumBytesLeft() );
+		}
 	}
+
+	delete[] msg_buffer;
 }
 
-void CNetworkStringTableContainer::WriteStringTables( CUtlBuffer& buf )
+void CNetworkStringTableContainer::WriteStringTables( bf_write& buf )
 {
 	int numTables = m_Tables.Size();
 
-	buf.PutInt( numTables );
+	buf.WriteByte( numTables );
 	for ( int i = 0; i < numTables; i++ )
 	{
 		CNetworkStringTable *table = m_Tables[ i ];
-		buf.PutString( table->GetTableName() );
+		buf.WriteString( table->GetTableName() );
 		table->WriteStringTable( buf );
 	}
 }
 
-bool CNetworkStringTableContainer::ReadStringTables( CUtlBuffer& buf )
+bool CNetworkStringTableContainer::ReadStringTables( bf_read& buf )
 {
-	int numTables = buf.GetInt();
+	int numTables = buf.ReadByte();
 	for ( int i = 0 ; i < numTables; i++ )
 	{
 		char tablename[ 256 ];
-		buf.GetStringManualCharCount( tablename, sizeof( tablename ) );
+		buf.ReadString( tablename, sizeof( tablename ) );
 
 		// Find this table by name
 		CNetworkStringTable *table = (CNetworkStringTable*)FindTable( tablename );
 		Assert( table );
 
 		// Now read the data for the table
-		if ( !table->ReadStringTable( buf ) )
+		if ( table && !table->ReadStringTable( buf ) )
 		{
 			Host_Error( "Error reading string table %s\n", tablename );
 		}
-
+		else
+		{
+			Warning( "Could not find table \"%s\"\n", tablename );
+		}
 	}
+
 	return true;
 }
 

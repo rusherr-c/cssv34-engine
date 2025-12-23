@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -57,6 +57,7 @@ extern	IMaterial*	g_pMaterialWaterSecondPass;
 extern	IMaterial*	g_pMaterialAmbientCube;
 extern	IMaterial*	g_pMaterialDebugFlat;
 extern	IMaterial*	g_pMaterialDepthWrite[2][2];
+extern	IMaterial*	g_pMaterialSSAODepthWrite[2][2];
 
 extern	ConVar	r_norefresh;
 extern  ConVar	r_lightmapcolorscale;

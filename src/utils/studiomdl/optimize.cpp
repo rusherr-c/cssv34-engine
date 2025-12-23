@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,11 +34,12 @@
 #include <malloc.h>
 #include <nvtristrip.h>
 #include "FileBuffer.h"
-#include "tier1/UtlVector.h"
-#include "materialsystem/IMaterial.h"
+#include "tier1/utlvector.h"
+#include "materialsystem/imaterial.h"
 #include "tier1/utllinkedlist.h"
 
 #include "tier1/smartptr.h"
+#include "tier2/p4helpers.h"
 
 bool g_bDumpGLViewFiles;
 extern bool g_IHVTest;
@@ -835,7 +836,7 @@ void COptimizedModel::BuildHWSkinnedStrips( TriangleList_t& triangles,
 	while( pSeedTri )
 	{
 		// Make sure we've got out transforms allocated
-#ifdef _DEBUG
+#ifdef DBGFLAG_ASSERT
 		bool ok = 
 #endif
 			AllocateHardwareBonesForTriangle( pSeedTri );
@@ -1807,9 +1808,9 @@ static void WriteSourceMesh( s_model_t *pSrcModel, s_mesh_t *pSrcMesh, int red_,
 	fp = fopen( "blah.glv", "a+" );
 	float red, grn, blu;
 
-	red = ( float )rand() / ( float )RAND_MAX;
-	grn = ( float )rand() / ( float )RAND_MAX;
-	blu = ( float )rand() / ( float )RAND_MAX;
+	red = ( float )rand() / ( float )VALVE_RAND_MAX;
+	grn = ( float )rand() / ( float )VALVE_RAND_MAX;
+	blu = ( float )rand() / ( float )VALVE_RAND_MAX;
 	float len = red * red + grn * grn + blu * blu;
 	len = sqrt( len );
 	red *= 255.0f / len;
@@ -1836,9 +1837,9 @@ static void WriteSourceMesh( s_model_t *pSrcModel, s_mesh_t *pSrcMesh, int red_,
 
 static void RandomColor( Vector& color )
 {
-	color[0] = ( ( float )rand() ) / ( float )RAND_MAX;
-	color[1] = ( ( float )rand() ) / ( float )RAND_MAX;
-	color[2] = ( ( float )rand() ) / ( float )RAND_MAX;
+	color[0] = ( ( float )rand() ) / ( float )VALVE_RAND_MAX;
+	color[1] = ( ( float )rand() ) / ( float )VALVE_RAND_MAX;
+	color[2] = ( ( float )rand() ) / ( float )VALVE_RAND_MAX;
 	VectorNormalize( color );
 }
 
@@ -2945,7 +2946,7 @@ static float RandomFloat( float min, float max )
 {
 	float ret;
 
-	ret = ( ( float )rand() ) / ( float )RAND_MAX;
+	ret = ( ( float )rand() ) / ( float )VALVE_RAND_MAX;
 	ret *= max - min;
 	ret += min;
 	return ret;
@@ -3241,6 +3242,8 @@ void COptimizedModel::WriteGLViewFile( studiohdr_t *phdr, const char *pFileName,
 				char tmp[256];
 				sprintf( tmp, "%s.lod%d", pFileName, lodID );
 				printf( "writing %s\n", tmp );
+				CPlainAutoPtr< CP4File > spFile( g_p4factory->AccessFile( tmp ) );
+				spFile->Edit();
 				FILE *fp = fopen( tmp, "w" );
 				if( !fp )
 				{
@@ -3371,6 +3374,7 @@ void COptimizedModel::WriteGLViewFile( studiohdr_t *phdr, const char *pFileName,
 					}
 				}
 				fclose( fp );
+				spFile->Add();
 			}
 		}
 	}
@@ -3941,9 +3945,9 @@ got_one:
 
 void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 {
-	char		filename[260];
-	char		tmpFileName[260];
-	char		glViewFilename[260];
+	char		filename[MAX_PATH];
+	char		tmpFileName[MAX_PATH];
+	char		glViewFilename[MAX_PATH];
 	
 	ValidateLODReplacements( phdr );
 	
@@ -3952,21 +3956,21 @@ void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 	// hack!  This should really go in the mdl file since it's common to all LODs.
 	AddMaterialReplacementsToStringTable();
 	
-	strcpy( filename, gamedir );
+	V_strcpy_safe( filename, gamedir );
 //	if( *g_pPlatformName )
 //	{
 //		strcat( filename, "platform_" );
 //		strcat( filename, g_pPlatformName );
 //		strcat( filename, "/" );	
 //	}
-	strcat( filename, "models/" );	
-	strcat( filename, outname );
+	V_strcat_safe( filename, "models/" );	
+	V_strcat_safe( filename, outname );
 	Q_StripExtension( filename, filename, sizeof( filename ) );
 
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".sw.vtx" );
-	strcpy( glViewFilename, filename );
-	strcat( glViewFilename, ".sw.glview" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".sw.vtx" );
+	V_strcpy_safe( glViewFilename, filename );
+	V_strcat_safe( glViewFilename, ".sw.glview" );
 	bool bForceSoftwareSkinning = phdr->numbones > 0 && !g_staticprop;
 	s_OptimizedModel.OptimizeFromStudioHdr( phdr, pSrcBodyParts,
 											512,	//vert cache size FIXME: figure out the correct size for L1
@@ -3978,10 +3982,10 @@ void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 											512,	// bones/strip
 											tmpFileName, glViewFilename );
 
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".dx80.vtx" );
-	strcpy( glViewFilename, filename );
-	strcat( glViewFilename, ".dx80.glview" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".dx80.vtx" );
+	V_strcpy_safe( glViewFilename, filename );
+	V_strcat_safe( glViewFilename, ".dx80.glview" );
 	s_OptimizedModel.OptimizeFromStudioHdr( phdr, pSrcBodyParts,
 											24 /* vert cache size (real size, not effective!)*/, 
 											false, /* doesn't use fixed function */
@@ -3992,10 +3996,10 @@ void WriteOptimizedFiles( studiohdr_t *phdr, s_bodypart_t *pSrcBodyParts )
 											16  /* bones/strip */,
 											tmpFileName, glViewFilename );
 
-	strcpy( tmpFileName, filename );
-	strcat( tmpFileName, ".dx90.vtx" );
-	strcpy( glViewFilename, filename );
-	strcat( glViewFilename, ".dx90.glview" );
+	V_strcpy_safe( tmpFileName, filename );
+	V_strcat_safe( tmpFileName, ".dx90.vtx" );
+	V_strcpy_safe( glViewFilename, filename );
+	V_strcat_safe( glViewFilename, ".dx90.glview" );
 	s_OptimizedModel.OptimizeFromStudioHdr( phdr, pSrcBodyParts,
 											24 /* vert cache size (real size, not effective!)*/, 
 											false, /* doesn't use fixed function */

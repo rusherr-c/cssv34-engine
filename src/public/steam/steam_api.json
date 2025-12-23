@@ -27,8 +27,6 @@
 ,{"typedef": "AccountID_t","type": "uint32"}
 ,{"typedef": "PartnerId_t","type": "uint32"}
 ,{"typedef": "ManifestId_t","type": "uint64"}
-,{"typedef": "SiteId_t","type": "uint64"}
-,{"typedef": "PartyBeaconID_t","type": "uint64"}
 ,{"typedef": "HAuthTicket","type": "uint32"}
 ,{"typedef": "PFNLegacyKeyRegistration","type": "void (*)(const char *, const char *)"}
 ,{"typedef": "PFNLegacyKeyInstalled","type": "_Bool (*)(void)"}
@@ -39,9 +37,9 @@
 ,{"typedef": "HSteamPipe","type": "int32"}
 ,{"typedef": "HSteamUser","type": "int32"}
 ,{"typedef": "SteamAPIWarningMessageHook_t","type": "void (*)(int, const char *) __attribute__((cdecl))"}
+,{"typedef": "SteamAPI_PostAPIResultInProcess_t","type": "void (*)(SteamAPICall_t, void *, uint32, int)"}
 ,{"typedef": "SteamAPI_CheckCallbackRegistered_t","type": "uint32 (*)(int)"}
-,{"typedef": "CCallResult::func_t","type": "void (T::*)(P *, _Bool)"}
-,{"typedef": "CCallback::func_t","type": "void (T::*)(P *)"}
+,{"typedef": "HSteamCall","type": "int32"}
 ,{"typedef": "FriendsGroupID_t","type": "int16"}
 ,{"typedef": "SteamAPIWarningMessageHook_t","type": "void (*)(int, const char *) __attribute__((cdecl))"}
 ,{"typedef": "HServerListRequest","type": "void *"}
@@ -58,10 +56,7 @@
 ,{"typedef": "ScreenshotHandle","type": "uint32"}
 ,{"typedef": "HTTPRequestHandle","type": "uint32"}
 ,{"typedef": "HTTPCookieContainerHandle","type": "uint32"}
-,{"typedef": "InputHandle_t","type": "uint64"}
-,{"typedef": "InputActionSetHandle_t","type": "uint64"}
-,{"typedef": "InputDigitalActionHandle_t","type": "uint64"}
-,{"typedef": "InputAnalogActionHandle_t","type": "uint64"}
+,{"typedef": "ClientUnifiedMessageHandle","type": "uint64"}
 ,{"typedef": "ControllerHandle_t","type": "uint64"}
 ,{"typedef": "ControllerActionSetHandle_t","type": "uint64"}
 ,{"typedef": "ControllerDigitalActionHandle_t","type": "uint64"}
@@ -72,7 +67,8 @@
 ,{"typedef": "SteamItemInstanceID_t","type": "uint64"}
 ,{"typedef": "SteamItemDef_t","type": "int32"}
 ,{"typedef": "SteamInventoryResult_t","type": "int32"}
-,{"typedef": "SteamInventoryUpdateHandle_t","type": "uint64"}
+,{"typedef": "CCallResult::func_t","type": "void (T::*)(P *, _Bool)"}
+,{"typedef": "CCallback::func_t","type": "void (T::*)(P *)"}
 ],
 "enums":[
 	{"enumname": "EUniverse","values": [ 
@@ -184,18 +180,6 @@
 	,{"name": "k_EResultEmailSendFailure","value": "99"}
 	,{"name": "k_EResultNotSettled","value": "100"}
 	,{"name": "k_EResultNeedCaptcha","value": "101"}
-	,{"name": "k_EResultGSLTDenied","value": "102"}
-	,{"name": "k_EResultGSOwnerDenied","value": "103"}
-	,{"name": "k_EResultInvalidItemType","value": "104"}
-	,{"name": "k_EResultIPBanned","value": "105"}
-	,{"name": "k_EResultGSLTExpired","value": "106"}
-	,{"name": "k_EResultInsufficientFunds","value": "107"}
-	,{"name": "k_EResultTooManyPending","value": "108"}
-	,{"name": "k_EResultNoSiteLicensesFound","value": "109"}
-	,{"name": "k_EResultWGNetworkSendExceeded","value": "110"}
-	,{"name": "k_EResultAccountNotFriends","value": "111"}
-	,{"name": "k_EResultLimitedUserAccount","value": "112"}
-	,{"name": "k_EResultCantRemoveItem","value": "113"}
 ]}
 ,	{"enumname": "EVoiceResult","values": [ 
 	{"name": "k_EVoiceResultOK","value": "0"}
@@ -291,9 +275,6 @@
 	,{"name": "k_EAppOwnershipFlags_LicenseCanceled","value": "8192"}
 	,{"name": "k_EAppOwnershipFlags_AutoGrant","value": "16384"}
 	,{"name": "k_EAppOwnershipFlags_PendingGift","value": "32768"}
-	,{"name": "k_EAppOwnershipFlags_RentalNotActivated","value": "65536"}
-	,{"name": "k_EAppOwnershipFlags_Rental","value": "131072"}
-	,{"name": "k_EAppOwnershipFlags_SiteLicense","value": "262144"}
 ]}
 ,	{"enumname": "EAppType","values": [ 
 	{"name": "k_EAppType_Invalid","value": "0"}
@@ -307,12 +288,9 @@
 	,{"name": "k_EAppType_Driver","value": "128"}
 	,{"name": "k_EAppType_Config","value": "256"}
 	,{"name": "k_EAppType_Hardware","value": "512"}
-	,{"name": "k_EAppType_Franchise","value": "1024"}
 	,{"name": "k_EAppType_Video","value": "2048"}
 	,{"name": "k_EAppType_Plugin","value": "4096"}
 	,{"name": "k_EAppType_Music","value": "8192"}
-	,{"name": "k_EAppType_Series","value": "16384"}
-	,{"name": "k_EAppType_Comic","value": "32768"}
 	,{"name": "k_EAppType_Shortcut","value": "1073741824"}
 	,{"name": "k_EAppType_DepotOnly","value": "-2147483648"}
 ]}
@@ -337,6 +315,8 @@
 	,{"name": "k_EChatEntryTypeWasBanned","value": "9"}
 	,{"name": "k_EChatEntryTypeDisconnected","value": "10"}
 	,{"name": "k_EChatEntryTypeHistoricalChat","value": "11"}
+	,{"name": "k_EChatEntryTypeReserved1","value": "12"}
+	,{"name": "k_EChatEntryTypeReserved2","value": "13"}
 	,{"name": "k_EChatEntryTypeLinkBlocked","value": "14"}
 ]}
 ,	{"enumname": "EChatRoomEnterResponse","values": [ 
@@ -351,7 +331,6 @@
 	,{"name": "k_EChatRoomEnterResponseCommunityBan","value": "9"}
 	,{"name": "k_EChatRoomEnterResponseMemberBlockedYou","value": "10"}
 	,{"name": "k_EChatRoomEnterResponseYouBlockedMember","value": "11"}
-	,{"name": "k_EChatRoomEnterResponseRatelimitExceeded","value": "15"}
 ]}
 ,	{"enumname": "EChatSteamIDInstanceFlags","values": [ 
 	{"name": "k_EChatAccountInstanceMask","value": "4095"}
@@ -388,16 +367,6 @@
 	,{"name": "k_EBroadcastUploadResultMissingAudio","value": "11"}
 	,{"name": "k_EBroadcastUploadResultTooFarBehind","value": "12"}
 	,{"name": "k_EBroadcastUploadResultTranscodeBehind","value": "13"}
-	,{"name": "k_EBroadcastUploadResultNotAllowedToPlay","value": "14"}
-	,{"name": "k_EBroadcastUploadResultBusy","value": "15"}
-	,{"name": "k_EBroadcastUploadResultBanned","value": "16"}
-	,{"name": "k_EBroadcastUploadResultAlreadyActive","value": "17"}
-	,{"name": "k_EBroadcastUploadResultForcedOff","value": "18"}
-	,{"name": "k_EBroadcastUploadResultAudioBehind","value": "19"}
-	,{"name": "k_EBroadcastUploadResultShutdown","value": "20"}
-	,{"name": "k_EBroadcastUploadResultDisconnect","value": "21"}
-	,{"name": "k_EBroadcastUploadResultVideoInitFailed","value": "22"}
-	,{"name": "k_EBroadcastUploadResultAudioInitFailed","value": "23"}
 ]}
 ,	{"enumname": "ELaunchOptionType","values": [ 
 	{"name": "k_ELaunchOptionType_None","value": "0"}
@@ -405,7 +374,7 @@
 	,{"name": "k_ELaunchOptionType_SafeMode","value": "2"}
 	,{"name": "k_ELaunchOptionType_Multiplayer","value": "3"}
 	,{"name": "k_ELaunchOptionType_Config","value": "4"}
-	,{"name": "k_ELaunchOptionType_OpenVR","value": "5"}
+	,{"name": "k_ELaunchOptionType_VR","value": "5"}
 	,{"name": "k_ELaunchOptionType_Server","value": "6"}
 	,{"name": "k_ELaunchOptionType_Editor","value": "7"}
 	,{"name": "k_ELaunchOptionType_Manual","value": "8"}
@@ -413,82 +382,13 @@
 	,{"name": "k_ELaunchOptionType_Option1","value": "10"}
 	,{"name": "k_ELaunchOptionType_Option2","value": "11"}
 	,{"name": "k_ELaunchOptionType_Option3","value": "12"}
-	,{"name": "k_ELaunchOptionType_OculusVR","value": "13"}
-	,{"name": "k_ELaunchOptionType_OpenVROverlay","value": "14"}
-	,{"name": "k_ELaunchOptionType_OSVR","value": "15"}
 	,{"name": "k_ELaunchOptionType_Dialog","value": "1000"}
-]}
-,	{"enumname": "EVRHMDType","values": [ 
-	{"name": "k_eEVRHMDType_None","value": "-1"}
-	,{"name": "k_eEVRHMDType_Unknown","value": "0"}
-	,{"name": "k_eEVRHMDType_HTC_Dev","value": "1"}
-	,{"name": "k_eEVRHMDType_HTC_VivePre","value": "2"}
-	,{"name": "k_eEVRHMDType_HTC_Vive","value": "3"}
-	,{"name": "k_eEVRHMDType_HTC_VivePro","value": "4"}
-	,{"name": "k_eEVRHMDType_HTC_Unknown","value": "20"}
-	,{"name": "k_eEVRHMDType_Oculus_DK1","value": "21"}
-	,{"name": "k_eEVRHMDType_Oculus_DK2","value": "22"}
-	,{"name": "k_eEVRHMDType_Oculus_Rift","value": "23"}
-	,{"name": "k_eEVRHMDType_Oculus_Unknown","value": "40"}
-	,{"name": "k_eEVRHMDType_Acer_Unknown","value": "50"}
-	,{"name": "k_eEVRHMDType_Acer_WindowsMR","value": "51"}
-	,{"name": "k_eEVRHMDType_Dell_Unknown","value": "60"}
-	,{"name": "k_eEVRHMDType_Dell_Visor","value": "61"}
-	,{"name": "k_eEVRHMDType_Lenovo_Unknown","value": "70"}
-	,{"name": "k_eEVRHMDType_Lenovo_Explorer","value": "71"}
-	,{"name": "k_eEVRHMDType_HP_Unknown","value": "80"}
-	,{"name": "k_eEVRHMDType_HP_WindowsMR","value": "81"}
-	,{"name": "k_eEVRHMDType_Samsung_Unknown","value": "90"}
-	,{"name": "k_eEVRHMDType_Samsung_Odyssey","value": "91"}
-	,{"name": "k_eEVRHMDType_Unannounced_Unknown","value": "100"}
-	,{"name": "k_eEVRHMDType_Unannounced_WindowsMR","value": "101"}
-	,{"name": "k_eEVRHMDType_vridge","value": "110"}
-	,{"name": "k_eEVRHMDType_Huawei_Unknown","value": "120"}
-	,{"name": "k_eEVRHMDType_Huawei_VR2","value": "121"}
-	,{"name": "k_eEVRHMDType_Huawei_Unannounced","value": "129"}
-]}
-,	{"enumname": "EMarketNotAllowedReasonFlags","values": [ 
-	{"name": "k_EMarketNotAllowedReason_None","value": "0"}
-	,{"name": "k_EMarketNotAllowedReason_TemporaryFailure","value": "1"}
-	,{"name": "k_EMarketNotAllowedReason_AccountDisabled","value": "2"}
-	,{"name": "k_EMarketNotAllowedReason_AccountLockedDown","value": "4"}
-	,{"name": "k_EMarketNotAllowedReason_AccountLimited","value": "8"}
-	,{"name": "k_EMarketNotAllowedReason_TradeBanned","value": "16"}
-	,{"name": "k_EMarketNotAllowedReason_AccountNotTrusted","value": "32"}
-	,{"name": "k_EMarketNotAllowedReason_SteamGuardNotEnabled","value": "64"}
-	,{"name": "k_EMarketNotAllowedReason_SteamGuardOnlyRecentlyEnabled","value": "128"}
-	,{"name": "k_EMarketNotAllowedReason_RecentPasswordReset","value": "256"}
-	,{"name": "k_EMarketNotAllowedReason_NewPaymentMethod","value": "512"}
-	,{"name": "k_EMarketNotAllowedReason_InvalidCookie","value": "1024"}
-	,{"name": "k_EMarketNotAllowedReason_UsingNewDevice","value": "2048"}
-	,{"name": "k_EMarketNotAllowedReason_RecentSelfRefund","value": "4096"}
-	,{"name": "k_EMarketNotAllowedReason_NewPaymentMethodCannotBeVerified","value": "8192"}
-	,{"name": "k_EMarketNotAllowedReason_NoRecentPurchases","value": "16384"}
-	,{"name": "k_EMarketNotAllowedReason_AcceptedWalletGift","value": "32768"}
 ]}
 ,	{"enumname": "CGameID::EGameIDType","values": [ 
 	{"name": "k_EGameIDTypeApp","value": "0"}
 	,{"name": "k_EGameIDTypeGameMod","value": "1"}
 	,{"name": "k_EGameIDTypeShortcut","value": "2"}
 	,{"name": "k_EGameIDTypeP2P","value": "3"}
-]}
-,	{"enumname": "EGameSearchErrorCode_t","values": [ 
-	{"name": "k_EGameSearchErrorCode_OK","value": "1"}
-	,{"name": "k_EGameSearchErrorCode_Failed_Search_Already_In_Progress","value": "2"}
-	,{"name": "k_EGameSearchErrorCode_Failed_No_Search_In_Progress","value": "3"}
-	,{"name": "k_EGameSearchErrorCode_Failed_Not_Lobby_Leader","value": "4"}
-	,{"name": "k_EGameSearchErrorCode_Failed_No_Host_Available","value": "5"}
-	,{"name": "k_EGameSearchErrorCode_Failed_Search_Params_Invalid","value": "6"}
-	,{"name": "k_EGameSearchErrorCode_Failed_Offline","value": "7"}
-	,{"name": "k_EGameSearchErrorCode_Failed_NotAuthorized","value": "8"}
-	,{"name": "k_EGameSearchErrorCode_Failed_Unknown_Error","value": "9"}
-]}
-,	{"enumname": "EPlayerResult_t","values": [ 
-	{"name": "k_EPlayerResultFailedToConnect","value": "1"}
-	,{"name": "k_EPlayerResultAbandoned","value": "2"}
-	,{"name": "k_EPlayerResultKicked","value": "3"}
-	,{"name": "k_EPlayerResultIncomplete","value": "4"}
-	,{"name": "k_EPlayerResultCompleted","value": "5"}
 ]}
 ,	{"enumname": "IPCFailure_t::EFailureType","values": [ 
 	{"name": "k_EFailureFlushedCallbackQueue","value": "0"}
@@ -502,7 +402,7 @@
 	,{"name": "k_EFriendRelationshipRequestInitiator","value": "4"}
 	,{"name": "k_EFriendRelationshipIgnored","value": "5"}
 	,{"name": "k_EFriendRelationshipIgnoredFriend","value": "6"}
-	,{"name": "k_EFriendRelationshipSuggested_DEPRECATED","value": "7"}
+	,{"name": "k_EFriendRelationshipSuggested","value": "7"}
 	,{"name": "k_EFriendRelationshipMax","value": "8"}
 ]}
 ,	{"enumname": "EPersonaState","values": [ 
@@ -513,8 +413,7 @@
 	,{"name": "k_EPersonaStateSnooze","value": "4"}
 	,{"name": "k_EPersonaStateLookingToTrade","value": "5"}
 	,{"name": "k_EPersonaStateLookingToPlay","value": "6"}
-	,{"name": "k_EPersonaStateInvisible","value": "7"}
-	,{"name": "k_EPersonaStateMax","value": "8"}
+	,{"name": "k_EPersonaStateMax","value": "7"}
 ]}
 ,	{"enumname": "EFriendFlags","values": [ 
 	{"name": "k_EFriendFlagNone","value": "0"}
@@ -527,7 +426,7 @@
 	,{"name": "k_EFriendFlagRequestingInfo","value": "256"}
 	,{"name": "k_EFriendFlagIgnored","value": "512"}
 	,{"name": "k_EFriendFlagIgnoredFriend","value": "1024"}
-	,{"name": "k_EFriendFlagChatMember","value": "4096"}
+	,{"name": "k_EFriendFlagSuggested","value": "2048"}
 	,{"name": "k_EFriendFlagAll","value": "65535"}
 ]}
 ,	{"enumname": "EUserRestriction","values": [ 
@@ -545,10 +444,6 @@
 	,{"name": "k_EOverlayToStoreFlag_AddToCart","value": "1"}
 	,{"name": "k_EOverlayToStoreFlag_AddToCartAndShow","value": "2"}
 ]}
-,	{"enumname": "EActivateGameOverlayToWebPageMode","values": [ 
-	{"name": "k_EActivateGameOverlayToWebPageMode_Default","value": "0"}
-	,{"name": "k_EActivateGameOverlayToWebPageMode_Modal","value": "1"}
-]}
 ,	{"enumname": "EPersonaChange","values": [ 
 	{"name": "k_EPersonaChangeName","value": "1"}
 	,{"name": "k_EPersonaChangeStatus","value": "2"}
@@ -561,10 +456,9 @@
 	,{"name": "k_EPersonaChangeLeftSource","value": "256"}
 	,{"name": "k_EPersonaChangeRelationshipChanged","value": "512"}
 	,{"name": "k_EPersonaChangeNameFirstSet","value": "1024"}
-	,{"name": "k_EPersonaChangeBroadcast","value": "2048"}
+	,{"name": "k_EPersonaChangeFacebookInfo","value": "2048"}
 	,{"name": "k_EPersonaChangeNickname","value": "4096"}
 	,{"name": "k_EPersonaChangeSteamLevel","value": "8192"}
-	,{"name": "k_EPersonaChangeRichPresence","value": "16384"}
 ]}
 ,	{"enumname": "ESteamAPICallFailure","values": [ 
 	{"name": "k_ESteamAPICallFailureNone","value": "-1"}
@@ -620,22 +514,9 @@
 	,{"name": "k_EChatMemberStateChangeKicked","value": "8"}
 	,{"name": "k_EChatMemberStateChangeBanned","value": "16"}
 ]}
-,	{"enumname": "ESteamPartyBeaconLocationType","values": [ 
-	{"name": "k_ESteamPartyBeaconLocationType_Invalid","value": "0"}
-	,{"name": "k_ESteamPartyBeaconLocationType_ChatGroup","value": "1"}
-	,{"name": "k_ESteamPartyBeaconLocationType_Max","value": "2"}
-]}
-,	{"enumname": "ESteamPartyBeaconLocationData","values": [ 
-	{"name": "k_ESteamPartyBeaconLocationDataInvalid","value": "0"}
-	,{"name": "k_ESteamPartyBeaconLocationDataName","value": "1"}
-	,{"name": "k_ESteamPartyBeaconLocationDataIconURLSmall","value": "2"}
-	,{"name": "k_ESteamPartyBeaconLocationDataIconURLMedium","value": "3"}
-	,{"name": "k_ESteamPartyBeaconLocationDataIconURLLarge","value": "4"}
-]}
-,	{"enumname": "RequestPlayersForGameResultCallback_t::PlayerAcceptState_t","values": [ 
-	{"name": "k_EStateUnknown","value": "0"}
-	,{"name": "k_EStatePlayerAccepted","value": "1"}
-	,{"name": "k_EStatePlayerDeclined","value": "2"}
+,	{"enumname": "EResolveConflict","values": [ 
+	{"name": "k_EResolveConflictKeepClient","value": "1"}
+	,{"name": "k_EResolveConflictKeepServer","value": "2"}
 ]}
 ,	{"enumname": "ERemoteStoragePlatform","values": [ 
 	{"name": "k_ERemoteStoragePlatformNone","value": "0"}
@@ -644,7 +525,6 @@
 	,{"name": "k_ERemoteStoragePlatformPS3","value": "4"}
 	,{"name": "k_ERemoteStoragePlatformLinux","value": "8"}
 	,{"name": "k_ERemoteStoragePlatformReserved2","value": "16"}
-	,{"name": "k_ERemoteStoragePlatformAndroid","value": "32"}
 	,{"name": "k_ERemoteStoragePlatformAll","value": "-1"}
 ]}
 ,	{"enumname": "ERemoteStoragePublishedFileVisibility","values": [ 
@@ -761,14 +641,6 @@
 	,{"name": "k_ESNetSocketConnectionTypeUDP","value": "1"}
 	,{"name": "k_ESNetSocketConnectionTypeUDPRelay","value": "2"}
 ]}
-,	{"enumname": "EVRScreenshotType","values": [ 
-	{"name": "k_EVRScreenshotType_None","value": "0"}
-	,{"name": "k_EVRScreenshotType_Mono","value": "1"}
-	,{"name": "k_EVRScreenshotType_Stereo","value": "2"}
-	,{"name": "k_EVRScreenshotType_MonoCubemap","value": "3"}
-	,{"name": "k_EVRScreenshotType_MonoPanorama","value": "4"}
-	,{"name": "k_EVRScreenshotType_StereoPanorama","value": "5"}
-]}
 ,	{"enumname": "AudioPlayback_Status","values": [ 
 	{"name": "AudioPlayback_Undefined","value": "0"}
 	,{"name": "AudioPlayback_Playing","value": "1"}
@@ -783,7 +655,6 @@
 	,{"name": "k_EHTTPMethodPUT","value": "4"}
 	,{"name": "k_EHTTPMethodDELETE","value": "5"}
 	,{"name": "k_EHTTPMethodOPTIONS","value": "6"}
-	,{"name": "k_EHTTPMethodPATCH","value": "7"}
 ]}
 ,	{"enumname": "EHTTPStatusCode","values": [ 
 	{"name": "k_EHTTPStatusCodeInvalid","value": "0"}
@@ -831,362 +702,9 @@
 	,{"name": "k_EHTTPStatusCode505HTTPVersionNotSupported","value": "505"}
 	,{"name": "k_EHTTPStatusCode5xxUnknown","value": "599"}
 ]}
-,	{"enumname": "EInputSource","values": [ 
-	{"name": "k_EInputSource_None","value": "0"}
-	,{"name": "k_EInputSource_LeftTrackpad","value": "1"}
-	,{"name": "k_EInputSource_RightTrackpad","value": "2"}
-	,{"name": "k_EInputSource_Joystick","value": "3"}
-	,{"name": "k_EInputSource_ABXY","value": "4"}
-	,{"name": "k_EInputSource_Switch","value": "5"}
-	,{"name": "k_EInputSource_LeftTrigger","value": "6"}
-	,{"name": "k_EInputSource_RightTrigger","value": "7"}
-	,{"name": "k_EInputSource_LeftBumper","value": "8"}
-	,{"name": "k_EInputSource_RightBumper","value": "9"}
-	,{"name": "k_EInputSource_Gyro","value": "10"}
-	,{"name": "k_EInputSource_CenterTrackpad","value": "11"}
-	,{"name": "k_EInputSource_RightJoystick","value": "12"}
-	,{"name": "k_EInputSource_DPad","value": "13"}
-	,{"name": "k_EInputSource_Key","value": "14"}
-	,{"name": "k_EInputSource_Mouse","value": "15"}
-	,{"name": "k_EInputSource_LeftGyro","value": "16"}
-	,{"name": "k_EInputSource_Count","value": "17"}
-]}
-,	{"enumname": "EInputSourceMode","values": [ 
-	{"name": "k_EInputSourceMode_None","value": "0"}
-	,{"name": "k_EInputSourceMode_Dpad","value": "1"}
-	,{"name": "k_EInputSourceMode_Buttons","value": "2"}
-	,{"name": "k_EInputSourceMode_FourButtons","value": "3"}
-	,{"name": "k_EInputSourceMode_AbsoluteMouse","value": "4"}
-	,{"name": "k_EInputSourceMode_RelativeMouse","value": "5"}
-	,{"name": "k_EInputSourceMode_JoystickMove","value": "6"}
-	,{"name": "k_EInputSourceMode_JoystickMouse","value": "7"}
-	,{"name": "k_EInputSourceMode_JoystickCamera","value": "8"}
-	,{"name": "k_EInputSourceMode_ScrollWheel","value": "9"}
-	,{"name": "k_EInputSourceMode_Trigger","value": "10"}
-	,{"name": "k_EInputSourceMode_TouchMenu","value": "11"}
-	,{"name": "k_EInputSourceMode_MouseJoystick","value": "12"}
-	,{"name": "k_EInputSourceMode_MouseRegion","value": "13"}
-	,{"name": "k_EInputSourceMode_RadialMenu","value": "14"}
-	,{"name": "k_EInputSourceMode_SingleButton","value": "15"}
-	,{"name": "k_EInputSourceMode_Switches","value": "16"}
-]}
-,	{"enumname": "EInputActionOrigin","values": [ 
-	{"name": "k_EInputActionOrigin_None","value": "0"}
-	,{"name": "k_EInputActionOrigin_SteamController_A","value": "1"}
-	,{"name": "k_EInputActionOrigin_SteamController_B","value": "2"}
-	,{"name": "k_EInputActionOrigin_SteamController_X","value": "3"}
-	,{"name": "k_EInputActionOrigin_SteamController_Y","value": "4"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftBumper","value": "5"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightBumper","value": "6"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftGrip","value": "7"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightGrip","value": "8"}
-	,{"name": "k_EInputActionOrigin_SteamController_Start","value": "9"}
-	,{"name": "k_EInputActionOrigin_SteamController_Back","value": "10"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_Touch","value": "11"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_Swipe","value": "12"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_Click","value": "13"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_DPadNorth","value": "14"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_DPadSouth","value": "15"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_DPadWest","value": "16"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftPad_DPadEast","value": "17"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_Touch","value": "18"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_Swipe","value": "19"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_Click","value": "20"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_DPadNorth","value": "21"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_DPadSouth","value": "22"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_DPadWest","value": "23"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightPad_DPadEast","value": "24"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftTrigger_Pull","value": "25"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftTrigger_Click","value": "26"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightTrigger_Pull","value": "27"}
-	,{"name": "k_EInputActionOrigin_SteamController_RightTrigger_Click","value": "28"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftStick_Move","value": "29"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftStick_Click","value": "30"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftStick_DPadNorth","value": "31"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftStick_DPadSouth","value": "32"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftStick_DPadWest","value": "33"}
-	,{"name": "k_EInputActionOrigin_SteamController_LeftStick_DPadEast","value": "34"}
-	,{"name": "k_EInputActionOrigin_SteamController_Gyro_Move","value": "35"}
-	,{"name": "k_EInputActionOrigin_SteamController_Gyro_Pitch","value": "36"}
-	,{"name": "k_EInputActionOrigin_SteamController_Gyro_Yaw","value": "37"}
-	,{"name": "k_EInputActionOrigin_SteamController_Gyro_Roll","value": "38"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved0","value": "39"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved1","value": "40"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved2","value": "41"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved3","value": "42"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved4","value": "43"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved5","value": "44"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved6","value": "45"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved7","value": "46"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved8","value": "47"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved9","value": "48"}
-	,{"name": "k_EInputActionOrigin_SteamController_Reserved10","value": "49"}
-	,{"name": "k_EInputActionOrigin_PS4_X","value": "50"}
-	,{"name": "k_EInputActionOrigin_PS4_Circle","value": "51"}
-	,{"name": "k_EInputActionOrigin_PS4_Triangle","value": "52"}
-	,{"name": "k_EInputActionOrigin_PS4_Square","value": "53"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftBumper","value": "54"}
-	,{"name": "k_EInputActionOrigin_PS4_RightBumper","value": "55"}
-	,{"name": "k_EInputActionOrigin_PS4_Options","value": "56"}
-	,{"name": "k_EInputActionOrigin_PS4_Share","value": "57"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_Touch","value": "58"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_Swipe","value": "59"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_Click","value": "60"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_DPadNorth","value": "61"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_DPadSouth","value": "62"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_DPadWest","value": "63"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftPad_DPadEast","value": "64"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_Touch","value": "65"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_Swipe","value": "66"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_Click","value": "67"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_DPadNorth","value": "68"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_DPadSouth","value": "69"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_DPadWest","value": "70"}
-	,{"name": "k_EInputActionOrigin_PS4_RightPad_DPadEast","value": "71"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_Touch","value": "72"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_Swipe","value": "73"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_Click","value": "74"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_DPadNorth","value": "75"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_DPadSouth","value": "76"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_DPadWest","value": "77"}
-	,{"name": "k_EInputActionOrigin_PS4_CenterPad_DPadEast","value": "78"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftTrigger_Pull","value": "79"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftTrigger_Click","value": "80"}
-	,{"name": "k_EInputActionOrigin_PS4_RightTrigger_Pull","value": "81"}
-	,{"name": "k_EInputActionOrigin_PS4_RightTrigger_Click","value": "82"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftStick_Move","value": "83"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftStick_Click","value": "84"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftStick_DPadNorth","value": "85"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftStick_DPadSouth","value": "86"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftStick_DPadWest","value": "87"}
-	,{"name": "k_EInputActionOrigin_PS4_LeftStick_DPadEast","value": "88"}
-	,{"name": "k_EInputActionOrigin_PS4_RightStick_Move","value": "89"}
-	,{"name": "k_EInputActionOrigin_PS4_RightStick_Click","value": "90"}
-	,{"name": "k_EInputActionOrigin_PS4_RightStick_DPadNorth","value": "91"}
-	,{"name": "k_EInputActionOrigin_PS4_RightStick_DPadSouth","value": "92"}
-	,{"name": "k_EInputActionOrigin_PS4_RightStick_DPadWest","value": "93"}
-	,{"name": "k_EInputActionOrigin_PS4_RightStick_DPadEast","value": "94"}
-	,{"name": "k_EInputActionOrigin_PS4_DPad_North","value": "95"}
-	,{"name": "k_EInputActionOrigin_PS4_DPad_South","value": "96"}
-	,{"name": "k_EInputActionOrigin_PS4_DPad_West","value": "97"}
-	,{"name": "k_EInputActionOrigin_PS4_DPad_East","value": "98"}
-	,{"name": "k_EInputActionOrigin_PS4_Gyro_Move","value": "99"}
-	,{"name": "k_EInputActionOrigin_PS4_Gyro_Pitch","value": "100"}
-	,{"name": "k_EInputActionOrigin_PS4_Gyro_Yaw","value": "101"}
-	,{"name": "k_EInputActionOrigin_PS4_Gyro_Roll","value": "102"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved0","value": "103"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved1","value": "104"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved2","value": "105"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved3","value": "106"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved4","value": "107"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved5","value": "108"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved6","value": "109"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved7","value": "110"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved8","value": "111"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved9","value": "112"}
-	,{"name": "k_EInputActionOrigin_PS4_Reserved10","value": "113"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_A","value": "114"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_B","value": "115"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_X","value": "116"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Y","value": "117"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftBumper","value": "118"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightBumper","value": "119"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Menu","value": "120"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_View","value": "121"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftTrigger_Pull","value": "122"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftTrigger_Click","value": "123"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightTrigger_Pull","value": "124"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightTrigger_Click","value": "125"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftStick_Move","value": "126"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftStick_Click","value": "127"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftStick_DPadNorth","value": "128"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftStick_DPadSouth","value": "129"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftStick_DPadWest","value": "130"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_LeftStick_DPadEast","value": "131"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightStick_Move","value": "132"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightStick_Click","value": "133"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightStick_DPadNorth","value": "134"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightStick_DPadSouth","value": "135"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightStick_DPadWest","value": "136"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_RightStick_DPadEast","value": "137"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_DPad_North","value": "138"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_DPad_South","value": "139"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_DPad_West","value": "140"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_DPad_East","value": "141"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved0","value": "142"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved1","value": "143"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved2","value": "144"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved3","value": "145"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved4","value": "146"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved5","value": "147"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved6","value": "148"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved7","value": "149"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved8","value": "150"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved9","value": "151"}
-	,{"name": "k_EInputActionOrigin_XBoxOne_Reserved10","value": "152"}
-	,{"name": "k_EInputActionOrigin_XBox360_A","value": "153"}
-	,{"name": "k_EInputActionOrigin_XBox360_B","value": "154"}
-	,{"name": "k_EInputActionOrigin_XBox360_X","value": "155"}
-	,{"name": "k_EInputActionOrigin_XBox360_Y","value": "156"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftBumper","value": "157"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightBumper","value": "158"}
-	,{"name": "k_EInputActionOrigin_XBox360_Start","value": "159"}
-	,{"name": "k_EInputActionOrigin_XBox360_Back","value": "160"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftTrigger_Pull","value": "161"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftTrigger_Click","value": "162"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightTrigger_Pull","value": "163"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightTrigger_Click","value": "164"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftStick_Move","value": "165"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftStick_Click","value": "166"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftStick_DPadNorth","value": "167"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftStick_DPadSouth","value": "168"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftStick_DPadWest","value": "169"}
-	,{"name": "k_EInputActionOrigin_XBox360_LeftStick_DPadEast","value": "170"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightStick_Move","value": "171"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightStick_Click","value": "172"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightStick_DPadNorth","value": "173"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightStick_DPadSouth","value": "174"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightStick_DPadWest","value": "175"}
-	,{"name": "k_EInputActionOrigin_XBox360_RightStick_DPadEast","value": "176"}
-	,{"name": "k_EInputActionOrigin_XBox360_DPad_North","value": "177"}
-	,{"name": "k_EInputActionOrigin_XBox360_DPad_South","value": "178"}
-	,{"name": "k_EInputActionOrigin_XBox360_DPad_West","value": "179"}
-	,{"name": "k_EInputActionOrigin_XBox360_DPad_East","value": "180"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved0","value": "181"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved1","value": "182"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved2","value": "183"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved3","value": "184"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved4","value": "185"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved5","value": "186"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved6","value": "187"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved7","value": "188"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved8","value": "189"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved9","value": "190"}
-	,{"name": "k_EInputActionOrigin_XBox360_Reserved10","value": "191"}
-	,{"name": "k_EInputActionOrigin_Switch_A","value": "192"}
-	,{"name": "k_EInputActionOrigin_Switch_B","value": "193"}
-	,{"name": "k_EInputActionOrigin_Switch_X","value": "194"}
-	,{"name": "k_EInputActionOrigin_Switch_Y","value": "195"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftBumper","value": "196"}
-	,{"name": "k_EInputActionOrigin_Switch_RightBumper","value": "197"}
-	,{"name": "k_EInputActionOrigin_Switch_Plus","value": "198"}
-	,{"name": "k_EInputActionOrigin_Switch_Minus","value": "199"}
-	,{"name": "k_EInputActionOrigin_Switch_Capture","value": "200"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftTrigger_Pull","value": "201"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftTrigger_Click","value": "202"}
-	,{"name": "k_EInputActionOrigin_Switch_RightTrigger_Pull","value": "203"}
-	,{"name": "k_EInputActionOrigin_Switch_RightTrigger_Click","value": "204"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftStick_Move","value": "205"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftStick_Click","value": "206"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftStick_DPadNorth","value": "207"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftStick_DPadSouth","value": "208"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftStick_DPadWest","value": "209"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftStick_DPadEast","value": "210"}
-	,{"name": "k_EInputActionOrigin_Switch_RightStick_Move","value": "211"}
-	,{"name": "k_EInputActionOrigin_Switch_RightStick_Click","value": "212"}
-	,{"name": "k_EInputActionOrigin_Switch_RightStick_DPadNorth","value": "213"}
-	,{"name": "k_EInputActionOrigin_Switch_RightStick_DPadSouth","value": "214"}
-	,{"name": "k_EInputActionOrigin_Switch_RightStick_DPadWest","value": "215"}
-	,{"name": "k_EInputActionOrigin_Switch_RightStick_DPadEast","value": "216"}
-	,{"name": "k_EInputActionOrigin_Switch_DPad_North","value": "217"}
-	,{"name": "k_EInputActionOrigin_Switch_DPad_South","value": "218"}
-	,{"name": "k_EInputActionOrigin_Switch_DPad_West","value": "219"}
-	,{"name": "k_EInputActionOrigin_Switch_DPad_East","value": "220"}
-	,{"name": "k_EInputActionOrigin_Switch_ProGyro_Move","value": "221"}
-	,{"name": "k_EInputActionOrigin_Switch_ProGyro_Pitch","value": "222"}
-	,{"name": "k_EInputActionOrigin_Switch_ProGyro_Yaw","value": "223"}
-	,{"name": "k_EInputActionOrigin_Switch_ProGyro_Roll","value": "224"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved0","value": "225"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved1","value": "226"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved2","value": "227"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved3","value": "228"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved4","value": "229"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved5","value": "230"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved6","value": "231"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved7","value": "232"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved8","value": "233"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved9","value": "234"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved10","value": "235"}
-	,{"name": "k_EInputActionOrigin_Switch_RightGyro_Move","value": "236"}
-	,{"name": "k_EInputActionOrigin_Switch_RightGyro_Pitch","value": "237"}
-	,{"name": "k_EInputActionOrigin_Switch_RightGyro_Yaw","value": "238"}
-	,{"name": "k_EInputActionOrigin_Switch_RightGyro_Roll","value": "239"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftGyro_Move","value": "240"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftGyro_Pitch","value": "241"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftGyro_Yaw","value": "242"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftGyro_Roll","value": "243"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftGrip_Lower","value": "244"}
-	,{"name": "k_EInputActionOrigin_Switch_LeftGrip_Upper","value": "245"}
-	,{"name": "k_EInputActionOrigin_Switch_RightGrip_Lower","value": "246"}
-	,{"name": "k_EInputActionOrigin_Switch_RightGrip_Upper","value": "247"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved11","value": "248"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved12","value": "249"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved13","value": "250"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved14","value": "251"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved15","value": "252"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved16","value": "253"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved17","value": "254"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved18","value": "255"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved19","value": "256"}
-	,{"name": "k_EInputActionOrigin_Switch_Reserved20","value": "257"}
-	,{"name": "k_EInputActionOrigin_Count","value": "258"}
-	,{"name": "k_EInputActionOrigin_MaximumPossibleValue","value": "32767"}
-]}
-,	{"enumname": "EXboxOrigin","values": [ 
-	{"name": "k_EXboxOrigin_A","value": "0"}
-	,{"name": "k_EXboxOrigin_B","value": "1"}
-	,{"name": "k_EXboxOrigin_X","value": "2"}
-	,{"name": "k_EXboxOrigin_Y","value": "3"}
-	,{"name": "k_EXboxOrigin_LeftBumper","value": "4"}
-	,{"name": "k_EXboxOrigin_RightBumper","value": "5"}
-	,{"name": "k_EXboxOrigin_Menu","value": "6"}
-	,{"name": "k_EXboxOrigin_View","value": "7"}
-	,{"name": "k_EXboxOrigin_LeftTrigger_Pull","value": "8"}
-	,{"name": "k_EXboxOrigin_LeftTrigger_Click","value": "9"}
-	,{"name": "k_EXboxOrigin_RightTrigger_Pull","value": "10"}
-	,{"name": "k_EXboxOrigin_RightTrigger_Click","value": "11"}
-	,{"name": "k_EXboxOrigin_LeftStick_Move","value": "12"}
-	,{"name": "k_EXboxOrigin_LeftStick_Click","value": "13"}
-	,{"name": "k_EXboxOrigin_LeftStick_DPadNorth","value": "14"}
-	,{"name": "k_EXboxOrigin_LeftStick_DPadSouth","value": "15"}
-	,{"name": "k_EXboxOrigin_LeftStick_DPadWest","value": "16"}
-	,{"name": "k_EXboxOrigin_LeftStick_DPadEast","value": "17"}
-	,{"name": "k_EXboxOrigin_RightStick_Move","value": "18"}
-	,{"name": "k_EXboxOrigin_RightStick_Click","value": "19"}
-	,{"name": "k_EXboxOrigin_RightStick_DPadNorth","value": "20"}
-	,{"name": "k_EXboxOrigin_RightStick_DPadSouth","value": "21"}
-	,{"name": "k_EXboxOrigin_RightStick_DPadWest","value": "22"}
-	,{"name": "k_EXboxOrigin_RightStick_DPadEast","value": "23"}
-	,{"name": "k_EXboxOrigin_DPad_North","value": "24"}
-	,{"name": "k_EXboxOrigin_DPad_South","value": "25"}
-	,{"name": "k_EXboxOrigin_DPad_West","value": "26"}
-	,{"name": "k_EXboxOrigin_DPad_East","value": "27"}
-	,{"name": "k_EXboxOrigin_Count","value": "28"}
-]}
 ,	{"enumname": "ESteamControllerPad","values": [ 
 	{"name": "k_ESteamControllerPad_Left","value": "0"}
 	,{"name": "k_ESteamControllerPad_Right","value": "1"}
-]}
-,	{"enumname": "ESteamInputType","values": [ 
-	{"name": "k_ESteamInputType_Unknown","value": "0"}
-	,{"name": "k_ESteamInputType_SteamController","value": "1"}
-	,{"name": "k_ESteamInputType_XBox360Controller","value": "2"}
-	,{"name": "k_ESteamInputType_XBoxOneController","value": "3"}
-	,{"name": "k_ESteamInputType_GenericGamepad","value": "4"}
-	,{"name": "k_ESteamInputType_PS4Controller","value": "5"}
-	,{"name": "k_ESteamInputType_AppleMFiController","value": "6"}
-	,{"name": "k_ESteamInputType_AndroidController","value": "7"}
-	,{"name": "k_ESteamInputType_SwitchJoyConPair","value": "8"}
-	,{"name": "k_ESteamInputType_SwitchJoyConSingle","value": "9"}
-	,{"name": "k_ESteamInputType_SwitchProController","value": "10"}
-	,{"name": "k_ESteamInputType_MobileTouch","value": "11"}
-	,{"name": "k_ESteamInputType_PS3Controller","value": "12"}
-	,{"name": "k_ESteamInputType_Count","value": "13"}
-	,{"name": "k_ESteamInputType_MaximumPossibleValue","value": "255"}
-]}
-,	{"enumname": "ESteamInputLEDFlag","values": [ 
-	{"name": "k_ESteamInputLEDFlag_SetColor","value": "0"}
-	,{"name": "k_ESteamInputLEDFlag_RestoreUserDefault","value": "1"}
 ]}
 ,	{"enumname": "EControllerSource","values": [ 
 	{"name": "k_EControllerSource_None","value": "0"}
@@ -1197,16 +715,7 @@
 	,{"name": "k_EControllerSource_Switch","value": "5"}
 	,{"name": "k_EControllerSource_LeftTrigger","value": "6"}
 	,{"name": "k_EControllerSource_RightTrigger","value": "7"}
-	,{"name": "k_EControllerSource_LeftBumper","value": "8"}
-	,{"name": "k_EControllerSource_RightBumper","value": "9"}
-	,{"name": "k_EControllerSource_Gyro","value": "10"}
-	,{"name": "k_EControllerSource_CenterTrackpad","value": "11"}
-	,{"name": "k_EControllerSource_RightJoystick","value": "12"}
-	,{"name": "k_EControllerSource_DPad","value": "13"}
-	,{"name": "k_EControllerSource_Key","value": "14"}
-	,{"name": "k_EControllerSource_Mouse","value": "15"}
-	,{"name": "k_EControllerSource_LeftGyro","value": "16"}
-	,{"name": "k_EControllerSource_Count","value": "17"}
+	,{"name": "k_EControllerSource_Gyro","value": "8"}
 ]}
 ,	{"enumname": "EControllerSourceMode","values": [ 
 	{"name": "k_EControllerSourceMode_None","value": "0"}
@@ -1216,16 +725,10 @@
 	,{"name": "k_EControllerSourceMode_AbsoluteMouse","value": "4"}
 	,{"name": "k_EControllerSourceMode_RelativeMouse","value": "5"}
 	,{"name": "k_EControllerSourceMode_JoystickMove","value": "6"}
-	,{"name": "k_EControllerSourceMode_JoystickMouse","value": "7"}
-	,{"name": "k_EControllerSourceMode_JoystickCamera","value": "8"}
-	,{"name": "k_EControllerSourceMode_ScrollWheel","value": "9"}
-	,{"name": "k_EControllerSourceMode_Trigger","value": "10"}
-	,{"name": "k_EControllerSourceMode_TouchMenu","value": "11"}
-	,{"name": "k_EControllerSourceMode_MouseJoystick","value": "12"}
-	,{"name": "k_EControllerSourceMode_MouseRegion","value": "13"}
-	,{"name": "k_EControllerSourceMode_RadialMenu","value": "14"}
-	,{"name": "k_EControllerSourceMode_SingleButton","value": "15"}
-	,{"name": "k_EControllerSourceMode_Switches","value": "16"}
+	,{"name": "k_EControllerSourceMode_JoystickCamera","value": "7"}
+	,{"name": "k_EControllerSourceMode_ScrollWheel","value": "8"}
+	,{"name": "k_EControllerSourceMode_Trigger","value": "9"}
+	,{"name": "k_EControllerSourceMode_TouchMenu","value": "10"}
 ]}
 ,	{"enumname": "EControllerActionOrigin","values": [ 
 	{"name": "k_EControllerActionOrigin_None","value": "0"}
@@ -1267,214 +770,7 @@
 	,{"name": "k_EControllerActionOrigin_Gyro_Pitch","value": "36"}
 	,{"name": "k_EControllerActionOrigin_Gyro_Yaw","value": "37"}
 	,{"name": "k_EControllerActionOrigin_Gyro_Roll","value": "38"}
-	,{"name": "k_EControllerActionOrigin_PS4_X","value": "39"}
-	,{"name": "k_EControllerActionOrigin_PS4_Circle","value": "40"}
-	,{"name": "k_EControllerActionOrigin_PS4_Triangle","value": "41"}
-	,{"name": "k_EControllerActionOrigin_PS4_Square","value": "42"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftBumper","value": "43"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightBumper","value": "44"}
-	,{"name": "k_EControllerActionOrigin_PS4_Options","value": "45"}
-	,{"name": "k_EControllerActionOrigin_PS4_Share","value": "46"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_Touch","value": "47"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_Swipe","value": "48"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_Click","value": "49"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_DPadNorth","value": "50"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_DPadSouth","value": "51"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_DPadWest","value": "52"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftPad_DPadEast","value": "53"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_Touch","value": "54"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_Swipe","value": "55"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_Click","value": "56"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_DPadNorth","value": "57"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_DPadSouth","value": "58"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_DPadWest","value": "59"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightPad_DPadEast","value": "60"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_Touch","value": "61"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_Swipe","value": "62"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_Click","value": "63"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_DPadNorth","value": "64"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_DPadSouth","value": "65"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_DPadWest","value": "66"}
-	,{"name": "k_EControllerActionOrigin_PS4_CenterPad_DPadEast","value": "67"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftTrigger_Pull","value": "68"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftTrigger_Click","value": "69"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightTrigger_Pull","value": "70"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightTrigger_Click","value": "71"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftStick_Move","value": "72"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftStick_Click","value": "73"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftStick_DPadNorth","value": "74"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftStick_DPadSouth","value": "75"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftStick_DPadWest","value": "76"}
-	,{"name": "k_EControllerActionOrigin_PS4_LeftStick_DPadEast","value": "77"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightStick_Move","value": "78"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightStick_Click","value": "79"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightStick_DPadNorth","value": "80"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightStick_DPadSouth","value": "81"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightStick_DPadWest","value": "82"}
-	,{"name": "k_EControllerActionOrigin_PS4_RightStick_DPadEast","value": "83"}
-	,{"name": "k_EControllerActionOrigin_PS4_DPad_North","value": "84"}
-	,{"name": "k_EControllerActionOrigin_PS4_DPad_South","value": "85"}
-	,{"name": "k_EControllerActionOrigin_PS4_DPad_West","value": "86"}
-	,{"name": "k_EControllerActionOrigin_PS4_DPad_East","value": "87"}
-	,{"name": "k_EControllerActionOrigin_PS4_Gyro_Move","value": "88"}
-	,{"name": "k_EControllerActionOrigin_PS4_Gyro_Pitch","value": "89"}
-	,{"name": "k_EControllerActionOrigin_PS4_Gyro_Yaw","value": "90"}
-	,{"name": "k_EControllerActionOrigin_PS4_Gyro_Roll","value": "91"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_A","value": "92"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_B","value": "93"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_X","value": "94"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_Y","value": "95"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftBumper","value": "96"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightBumper","value": "97"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_Menu","value": "98"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_View","value": "99"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftTrigger_Pull","value": "100"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftTrigger_Click","value": "101"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightTrigger_Pull","value": "102"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightTrigger_Click","value": "103"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftStick_Move","value": "104"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftStick_Click","value": "105"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftStick_DPadNorth","value": "106"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftStick_DPadSouth","value": "107"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftStick_DPadWest","value": "108"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_LeftStick_DPadEast","value": "109"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightStick_Move","value": "110"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightStick_Click","value": "111"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightStick_DPadNorth","value": "112"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightStick_DPadSouth","value": "113"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightStick_DPadWest","value": "114"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_RightStick_DPadEast","value": "115"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_DPad_North","value": "116"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_DPad_South","value": "117"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_DPad_West","value": "118"}
-	,{"name": "k_EControllerActionOrigin_XBoxOne_DPad_East","value": "119"}
-	,{"name": "k_EControllerActionOrigin_XBox360_A","value": "120"}
-	,{"name": "k_EControllerActionOrigin_XBox360_B","value": "121"}
-	,{"name": "k_EControllerActionOrigin_XBox360_X","value": "122"}
-	,{"name": "k_EControllerActionOrigin_XBox360_Y","value": "123"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftBumper","value": "124"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightBumper","value": "125"}
-	,{"name": "k_EControllerActionOrigin_XBox360_Start","value": "126"}
-	,{"name": "k_EControllerActionOrigin_XBox360_Back","value": "127"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftTrigger_Pull","value": "128"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftTrigger_Click","value": "129"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightTrigger_Pull","value": "130"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightTrigger_Click","value": "131"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftStick_Move","value": "132"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftStick_Click","value": "133"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftStick_DPadNorth","value": "134"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftStick_DPadSouth","value": "135"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftStick_DPadWest","value": "136"}
-	,{"name": "k_EControllerActionOrigin_XBox360_LeftStick_DPadEast","value": "137"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightStick_Move","value": "138"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightStick_Click","value": "139"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightStick_DPadNorth","value": "140"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightStick_DPadSouth","value": "141"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightStick_DPadWest","value": "142"}
-	,{"name": "k_EControllerActionOrigin_XBox360_RightStick_DPadEast","value": "143"}
-	,{"name": "k_EControllerActionOrigin_XBox360_DPad_North","value": "144"}
-	,{"name": "k_EControllerActionOrigin_XBox360_DPad_South","value": "145"}
-	,{"name": "k_EControllerActionOrigin_XBox360_DPad_West","value": "146"}
-	,{"name": "k_EControllerActionOrigin_XBox360_DPad_East","value": "147"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_A","value": "148"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_B","value": "149"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_X","value": "150"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Y","value": "151"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftBumper","value": "152"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightBumper","value": "153"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftGrip_Lower","value": "154"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftGrip_Upper","value": "155"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightGrip_Lower","value": "156"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightGrip_Upper","value": "157"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftBumper_Pressure","value": "158"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightBumper_Pressure","value": "159"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftGrip_Pressure","value": "160"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightGrip_Pressure","value": "161"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftGrip_Upper_Pressure","value": "162"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightGrip_Upper_Pressure","value": "163"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Start","value": "164"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Back","value": "165"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_Touch","value": "166"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_Swipe","value": "167"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_Click","value": "168"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_Pressure","value": "169"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_DPadNorth","value": "170"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_DPadSouth","value": "171"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_DPadWest","value": "172"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftPad_DPadEast","value": "173"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_Touch","value": "174"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_Swipe","value": "175"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_Click","value": "176"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_Pressure","value": "177"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_DPadNorth","value": "178"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_DPadSouth","value": "179"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_DPadWest","value": "180"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightPad_DPadEast","value": "181"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftTrigger_Pull","value": "182"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftTrigger_Click","value": "183"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightTrigger_Pull","value": "184"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_RightTrigger_Click","value": "185"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftStick_Move","value": "186"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftStick_Click","value": "187"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftStick_DPadNorth","value": "188"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftStick_DPadSouth","value": "189"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftStick_DPadWest","value": "190"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_LeftStick_DPadEast","value": "191"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Gyro_Move","value": "192"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Gyro_Pitch","value": "193"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Gyro_Yaw","value": "194"}
-	,{"name": "k_EControllerActionOrigin_SteamV2_Gyro_Roll","value": "195"}
-	,{"name": "k_EControllerActionOrigin_Switch_A","value": "196"}
-	,{"name": "k_EControllerActionOrigin_Switch_B","value": "197"}
-	,{"name": "k_EControllerActionOrigin_Switch_X","value": "198"}
-	,{"name": "k_EControllerActionOrigin_Switch_Y","value": "199"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftBumper","value": "200"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightBumper","value": "201"}
-	,{"name": "k_EControllerActionOrigin_Switch_Plus","value": "202"}
-	,{"name": "k_EControllerActionOrigin_Switch_Minus","value": "203"}
-	,{"name": "k_EControllerActionOrigin_Switch_Capture","value": "204"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftTrigger_Pull","value": "205"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftTrigger_Click","value": "206"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightTrigger_Pull","value": "207"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightTrigger_Click","value": "208"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftStick_Move","value": "209"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftStick_Click","value": "210"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftStick_DPadNorth","value": "211"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftStick_DPadSouth","value": "212"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftStick_DPadWest","value": "213"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftStick_DPadEast","value": "214"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightStick_Move","value": "215"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightStick_Click","value": "216"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightStick_DPadNorth","value": "217"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightStick_DPadSouth","value": "218"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightStick_DPadWest","value": "219"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightStick_DPadEast","value": "220"}
-	,{"name": "k_EControllerActionOrigin_Switch_DPad_North","value": "221"}
-	,{"name": "k_EControllerActionOrigin_Switch_DPad_South","value": "222"}
-	,{"name": "k_EControllerActionOrigin_Switch_DPad_West","value": "223"}
-	,{"name": "k_EControllerActionOrigin_Switch_DPad_East","value": "224"}
-	,{"name": "k_EControllerActionOrigin_Switch_ProGyro_Move","value": "225"}
-	,{"name": "k_EControllerActionOrigin_Switch_ProGyro_Pitch","value": "226"}
-	,{"name": "k_EControllerActionOrigin_Switch_ProGyro_Yaw","value": "227"}
-	,{"name": "k_EControllerActionOrigin_Switch_ProGyro_Roll","value": "228"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightGyro_Move","value": "229"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightGyro_Pitch","value": "230"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightGyro_Yaw","value": "231"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightGyro_Roll","value": "232"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftGyro_Move","value": "233"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftGyro_Pitch","value": "234"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftGyro_Yaw","value": "235"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftGyro_Roll","value": "236"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftGrip_Lower","value": "237"}
-	,{"name": "k_EControllerActionOrigin_Switch_LeftGrip_Upper","value": "238"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightGrip_Lower","value": "239"}
-	,{"name": "k_EControllerActionOrigin_Switch_RightGrip_Upper","value": "240"}
-	,{"name": "k_EControllerActionOrigin_Count","value": "241"}
-	,{"name": "k_EControllerActionOrigin_MaximumPossibleValue","value": "32767"}
-]}
-,	{"enumname": "ESteamControllerLEDFlag","values": [ 
-	{"name": "k_ESteamControllerLEDFlag_SetColor","value": "0"}
-	,{"name": "k_ESteamControllerLEDFlag_RestoreUserDefault","value": "1"}
+	,{"name": "k_EControllerActionOrigin_Count","value": "39"}
 ]}
 ,	{"enumname": "EUGCMatchingUGCType","values": [ 
 	{"name": "k_EUGCMatchingUGCType_Items","value": "0"}
@@ -1526,12 +822,6 @@
 	,{"name": "k_EUGCQuery_RankedByVotesUp","value": "10"}
 	,{"name": "k_EUGCQuery_RankedByTextSearch","value": "11"}
 	,{"name": "k_EUGCQuery_RankedByTotalUniqueSubscriptions","value": "12"}
-	,{"name": "k_EUGCQuery_RankedByPlaytimeTrend","value": "13"}
-	,{"name": "k_EUGCQuery_RankedByTotalPlaytime","value": "14"}
-	,{"name": "k_EUGCQuery_RankedByAveragePlaytimeTrend","value": "15"}
-	,{"name": "k_EUGCQuery_RankedByLifetimeAveragePlaytime","value": "16"}
-	,{"name": "k_EUGCQuery_RankedByPlaytimeSessionsTrend","value": "17"}
-	,{"name": "k_EUGCQuery_RankedByLifetimePlaytimeSessions","value": "18"}
 ]}
 ,	{"enumname": "EItemUpdateStatus","values": [ 
 	{"name": "k_EItemUpdateStatusInvalid","value": "0"}
@@ -1559,19 +849,6 @@
 	,{"name": "k_EItemStatistic_NumUniqueFollowers","value": "5"}
 	,{"name": "k_EItemStatistic_NumUniqueWebsiteViews","value": "6"}
 	,{"name": "k_EItemStatistic_ReportScore","value": "7"}
-	,{"name": "k_EItemStatistic_NumSecondsPlayed","value": "8"}
-	,{"name": "k_EItemStatistic_NumPlaytimeSessions","value": "9"}
-	,{"name": "k_EItemStatistic_NumComments","value": "10"}
-	,{"name": "k_EItemStatistic_NumSecondsPlayedDuringTimePeriod","value": "11"}
-	,{"name": "k_EItemStatistic_NumPlaytimeSessionsDuringTimePeriod","value": "12"}
-]}
-,	{"enumname": "EItemPreviewType","values": [ 
-	{"name": "k_EItemPreviewType_Image","value": "0"}
-	,{"name": "k_EItemPreviewType_YouTubeVideo","value": "1"}
-	,{"name": "k_EItemPreviewType_Sketchfab","value": "2"}
-	,{"name": "k_EItemPreviewType_EnvironmentMap_HorizontalCross","value": "3"}
-	,{"name": "k_EItemPreviewType_EnvironmentMap_LatLong","value": "4"}
-	,{"name": "k_EItemPreviewType_ReservedMax","value": "255"}
 ]}
 ,	{"enumname": "ISteamHTMLSurface::EHTMLMouseButton","values": [ 
 	{"name": "eHTMLMouseButton_Left","value": "0"}
@@ -1633,22 +910,6 @@
 	,{"name": "k_ESteamItemRemoved","value": "256"}
 	,{"name": "k_ESteamItemConsumed","value": "512"}
 ]}
-,	{"enumname": "EParentalFeature","values": [ 
-	{"name": "k_EFeatureInvalid","value": "0"}
-	,{"name": "k_EFeatureStore","value": "1"}
-	,{"name": "k_EFeatureCommunity","value": "2"}
-	,{"name": "k_EFeatureProfile","value": "3"}
-	,{"name": "k_EFeatureFriends","value": "4"}
-	,{"name": "k_EFeatureNews","value": "5"}
-	,{"name": "k_EFeatureTrading","value": "6"}
-	,{"name": "k_EFeatureSettings","value": "7"}
-	,{"name": "k_EFeatureConsole","value": "8"}
-	,{"name": "k_EFeatureBrowser","value": "9"}
-	,{"name": "k_EFeatureParentalSetup","value": "10"}
-	,{"name": "k_EFeatureLibrary","value": "11"}
-	,{"name": "k_EFeatureTest","value": "12"}
-	,{"name": "k_EFeatureMax","value": "13"}
-]}
 ],
 "consts":[{
 	"constname": "k_iSteamUserCallbacks","consttype": "int", "constval": "100"}
@@ -1674,10 +935,6 @@
 	"constname": "k_iSteamUserStatsCallbacks","consttype": "int", "constval": "1100"}
 ,{
 	"constname": "k_iSteamNetworkingCallbacks","consttype": "int", "constval": "1200"}
-,{
-	"constname": "k_iSteamNetworkingSocketsCallbacks","consttype": "int", "constval": "1220"}
-,{
-	"constname": "k_iSteamNetworkingMessagesCallbacks","consttype": "int", "constval": "1250"}
 ,{
 	"constname": "k_iClientRemoteStorageCallbacks","consttype": "int", "constval": "1300"}
 ,{
@@ -1739,9 +996,9 @@
 ,{
 	"constname": "k_iClientVRCallbacks","consttype": "int", "constval": "4200"}
 ,{
-	"constname": "k_iClientGameNotificationCallbacks","consttype": "int", "constval": "4300"}
+	"constname": "k_iClientReservedCallbacks","consttype": "int", "constval": "4300"}
 ,{
-	"constname": "k_iSteamGameNotificationCallbacks","consttype": "int", "constval": "4400"}
+	"constname": "k_iSteamReservedCallbacks","consttype": "int", "constval": "4400"}
 ,{
 	"constname": "k_iSteamHTMLSurfaceCallbacks","consttype": "int", "constval": "4500"}
 ,{
@@ -1749,25 +1006,11 @@
 ,{
 	"constname": "k_iClientInventoryCallbacks","consttype": "int", "constval": "4700"}
 ,{
-	"constname": "k_iClientBluetoothManagerCallbacks","consttype": "int", "constval": "4800"}
-,{
-	"constname": "k_iClientSharedConnectionCallbacks","consttype": "int", "constval": "4900"}
-,{
-	"constname": "k_ISteamParentalSettingsCallbacks","consttype": "int", "constval": "5000"}
-,{
-	"constname": "k_iClientShaderCallbacks","consttype": "int", "constval": "5100"}
-,{
-	"constname": "k_iSteamGameSearchCallbacks","consttype": "int", "constval": "5200"}
-,{
-	"constname": "k_iSteamPartiesCallbacks","consttype": "int", "constval": "5300"}
-,{
-	"constname": "k_iClientPartiesCallbacks","consttype": "int", "constval": "5400"}
-,{
 	"constname": "k_cchPersonaNameMax","consttype": "int", "constval": "128"}
 ,{
 	"constname": "k_cwchPersonaNameMax","consttype": "int", "constval": "32"}
 ,{
-	"constname": "k_cchMaxRichPresenceKeys","consttype": "int", "constval": "30"}
+	"constname": "k_cchMaxRichPresenceKeys","consttype": "int", "constval": "20"}
 ,{
 	"constname": "k_cchMaxRichPresenceKeyLength","consttype": "int", "constval": "64"}
 ,{
@@ -1778,6 +1021,8 @@
 	"constname": "k_cchLeaderboardNameMax","consttype": "int", "constval": "128"}
 ,{
 	"constname": "k_cLeaderboardDetailsMax","consttype": "int", "constval": "64"}
+,{
+	"constname": "k_InvalidUnifiedMessageHandle","consttype": "const ClientUnifiedMessageHandle", "constval": "0"}
 ,{
 	"constname": "k_SteamItemInstanceIDInvalid","consttype": "const SteamItemInstanceID_t", "constval": "18446744073709551615"}
 ,{
@@ -1805,50 +1050,6 @@
 { "fieldname": "m_u64", "fieldtype": "uint64"},
 { "fieldname": "m_u16", "fieldtype": "uint16"},
 { "fieldname": "m_d", "fieldtype": "double"}]}
-,{"struct": "CCallbackBase","fields": [
-{ "fieldname": "m_nCallbackFlags", "fieldtype": "uint8"},
-{ "fieldname": "m_iCallback", "fieldtype": "int"}]}
-,{"struct": "CCallResult","fields": [
-{ "fieldname": "m_hAPICall", "fieldtype": "SteamAPICall_t"},
-{ "fieldname": "m_pObj", "fieldtype": "T *"},
-{ "fieldname": "m_Func", "fieldtype": "func_t"}]}
-,{"struct": "CCallback","fields": [
-{ "fieldname": "m_pObj", "fieldtype": "T *"},
-{ "fieldname": "m_Func", "fieldtype": "func_t"}]}
-,{"struct": "CSteamAPIContext","fields": [
-{ "fieldname": "m_pSteamClient", "fieldtype": "class ISteamClient *"},
-{ "fieldname": "m_pSteamUser", "fieldtype": "class ISteamUser *"},
-{ "fieldname": "m_pSteamFriends", "fieldtype": "class ISteamFriends *"},
-{ "fieldname": "m_pSteamUtils", "fieldtype": "class ISteamUtils *"},
-{ "fieldname": "m_pSteamMatchmaking", "fieldtype": "class ISteamMatchmaking *"},
-{ "fieldname": "m_pSteamGameSearch", "fieldtype": "class ISteamGameSearch *"},
-{ "fieldname": "m_pSteamUserStats", "fieldtype": "class ISteamUserStats *"},
-{ "fieldname": "m_pSteamApps", "fieldtype": "class ISteamApps *"},
-{ "fieldname": "m_pSteamMatchmakingServers", "fieldtype": "class ISteamMatchmakingServers *"},
-{ "fieldname": "m_pSteamNetworking", "fieldtype": "class ISteamNetworking *"},
-{ "fieldname": "m_pSteamRemoteStorage", "fieldtype": "class ISteamRemoteStorage *"},
-{ "fieldname": "m_pSteamScreenshots", "fieldtype": "class ISteamScreenshots *"},
-{ "fieldname": "m_pSteamHTTP", "fieldtype": "class ISteamHTTP *"},
-{ "fieldname": "m_pController", "fieldtype": "class ISteamController *"},
-{ "fieldname": "m_pSteamUGC", "fieldtype": "class ISteamUGC *"},
-{ "fieldname": "m_pSteamAppList", "fieldtype": "class ISteamAppList *"},
-{ "fieldname": "m_pSteamMusic", "fieldtype": "class ISteamMusic *"},
-{ "fieldname": "m_pSteamMusicRemote", "fieldtype": "class ISteamMusicRemote *"},
-{ "fieldname": "m_pSteamHTMLSurface", "fieldtype": "class ISteamHTMLSurface *"},
-{ "fieldname": "m_pSteamInventory", "fieldtype": "class ISteamInventory *"},
-{ "fieldname": "m_pSteamVideo", "fieldtype": "class ISteamVideo *"},
-{ "fieldname": "m_pSteamParentalSettings", "fieldtype": "class ISteamParentalSettings *"},
-{ "fieldname": "m_pSteamInput", "fieldtype": "class ISteamInput *"}]}
-,{"struct": "CSteamGameServerAPIContext","fields": [
-{ "fieldname": "m_pSteamClient", "fieldtype": "class ISteamClient *"},
-{ "fieldname": "m_pSteamGameServer", "fieldtype": "class ISteamGameServer *"},
-{ "fieldname": "m_pSteamGameServerUtils", "fieldtype": "class ISteamUtils *"},
-{ "fieldname": "m_pSteamGameServerNetworking", "fieldtype": "class ISteamNetworking *"},
-{ "fieldname": "m_pSteamGameServerStats", "fieldtype": "class ISteamGameServerStats *"},
-{ "fieldname": "m_pSteamHTTP", "fieldtype": "class ISteamHTTP *"},
-{ "fieldname": "m_pSteamInventory", "fieldtype": "class ISteamInventory *"},
-{ "fieldname": "m_pSteamUGC", "fieldtype": "class ISteamUGC *"},
-{ "fieldname": "m_pSteamApps", "fieldtype": "class ISteamApps *"}]}
 ,{"struct": "CallbackMsg_t","fields": [
 { "fieldname": "m_hSteamUser", "fieldtype": "HSteamUser"},
 { "fieldname": "m_iCallback", "fieldtype": "int"},
@@ -1882,12 +1083,6 @@
 { "fieldname": "m_szURL", "fieldtype": "char [256]"}]}
 ,{"struct": "StoreAuthURLResponse_t","fields": [
 { "fieldname": "m_szURL", "fieldtype": "char [512]"}]}
-,{"struct": "MarketEligibilityResponse_t","fields": [
-{ "fieldname": "m_bAllowed", "fieldtype": "_Bool"},
-{ "fieldname": "m_eNotAllowedReason", "fieldtype": "enum EMarketNotAllowedReasonFlags"},
-{ "fieldname": "m_rtAllowedAtTime", "fieldtype": "RTime32"},
-{ "fieldname": "m_cdaySteamGuardRequiredDays", "fieldtype": "int"},
-{ "fieldname": "m_cdayNewDeviceCooldown", "fieldtype": "int"}]}
 ,{"struct": "FriendGameInfo_t","fields": [
 { "fieldname": "m_gameID", "fieldtype": "class CGameID"},
 { "fieldname": "m_unGameIP", "fieldtype": "uint32"},
@@ -1963,9 +1158,7 @@
 ,{"struct": "LowBatteryPower_t","fields": [
 { "fieldname": "m_nMinutesBatteryLeft", "fieldtype": "uint8"}]}
 ,{"struct": "SteamAPICallCompleted_t","fields": [
-{ "fieldname": "m_hAsyncCall", "fieldtype": "SteamAPICall_t"},
-{ "fieldname": "m_iCallback", "fieldtype": "int"},
-{ "fieldname": "m_cubParam", "fieldtype": "uint32"}]}
+{ "fieldname": "m_hAsyncCall", "fieldtype": "SteamAPICall_t"}]}
 ,{"struct": "CheckFileSignature_t","fields": [
 { "fieldname": "m_eCheckFileSignature", "fieldtype": "enum ECheckFileSignature"}]}
 ,{"struct": "GamepadTextInputDismissed_t","fields": [
@@ -1997,9 +1190,6 @@
 { "fieldname": "m_szServerName", "fieldtype": "char [64]"},
 { "fieldname": "m_szGameTags", "fieldtype": "char [128]"},
 { "fieldname": "m_steamID", "fieldtype": "class CSteamID"}]}
-,{"struct": "SteamPartyBeaconLocation_t","fields": [
-{ "fieldname": "m_eType", "fieldtype": "enum ESteamPartyBeaconLocationType"},
-{ "fieldname": "m_ulLocationID", "fieldtype": "uint64"}]}
 ,{"struct": "FavoritesListChanged_t","fields": [
 { "fieldname": "m_nIP", "fieldtype": "uint32"},
 { "fieldname": "m_nQueryPort", "fieldtype": "uint32"},
@@ -2050,58 +1240,6 @@
 { "fieldname": "m_steamIDLobby", "fieldtype": "class CSteamID"}]}
 ,{"struct": "FavoritesListAccountsUpdated_t","fields": [
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
-,{"struct": "SearchForGameProgressCallback_t","fields": [
-{ "fieldname": "m_ullSearchID", "fieldtype": "uint64"},
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_lobbyID", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_steamIDEndedSearch", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_nSecondsRemainingEstimate", "fieldtype": "int32"},
-{ "fieldname": "m_cPlayersSearching", "fieldtype": "int32"}]}
-,{"struct": "SearchForGameResultCallback_t","fields": [
-{ "fieldname": "m_ullSearchID", "fieldtype": "uint64"},
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nCountPlayersInGame", "fieldtype": "int32"},
-{ "fieldname": "m_nCountAcceptedGame", "fieldtype": "int32"},
-{ "fieldname": "m_steamIDHost", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_bFinalCallback", "fieldtype": "_Bool"}]}
-,{"struct": "RequestPlayersForGameProgressCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ullSearchID", "fieldtype": "uint64"}]}
-,{"struct": "RequestPlayersForGameResultCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ullSearchID", "fieldtype": "uint64"},
-{ "fieldname": "m_SteamIDPlayerFound", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_SteamIDLobby", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_ePlayerAcceptState", "fieldtype": "enum RequestPlayersForGameResultCallback_t::PlayerAcceptState_t"},
-{ "fieldname": "m_nPlayerIndex", "fieldtype": "int32"},
-{ "fieldname": "m_nTotalPlayersFound", "fieldtype": "int32"},
-{ "fieldname": "m_nTotalPlayersAcceptedGame", "fieldtype": "int32"},
-{ "fieldname": "m_nSuggestedTeamIndex", "fieldtype": "int32"},
-{ "fieldname": "m_ullUniqueGameID", "fieldtype": "uint64"}]}
-,{"struct": "RequestPlayersForGameFinalResultCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ullSearchID", "fieldtype": "uint64"},
-{ "fieldname": "m_ullUniqueGameID", "fieldtype": "uint64"}]}
-,{"struct": "SubmitPlayerResultResultCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "ullUniqueGameID", "fieldtype": "uint64"},
-{ "fieldname": "steamIDPlayer", "fieldtype": "class CSteamID"}]}
-,{"struct": "EndGameResultCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "ullUniqueGameID", "fieldtype": "uint64"}]}
-,{"struct": "JoinPartyCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ulBeaconID", "fieldtype": "PartyBeaconID_t"},
-{ "fieldname": "m_SteamIDBeaconOwner", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_rgchConnectString", "fieldtype": "char [256]"}]}
-,{"struct": "CreateBeaconCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ulBeaconID", "fieldtype": "PartyBeaconID_t"}]}
-,{"struct": "ReservationNotificationCallback_t","fields": [
-{ "fieldname": "m_ulBeaconID", "fieldtype": "PartyBeaconID_t"},
-{ "fieldname": "m_steamIDJoiner", "fieldtype": "class CSteamID"}]}
-,{"struct": "ChangeNumOpenSlotsCallback_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
 ,{"struct": "SteamParamStringArray_t","fields": [
 { "fieldname": "m_ppStrings", "fieldtype": "const char **"},
 { "fieldname": "m_nNumStrings", "fieldtype": "int32"}]}
@@ -2120,6 +1258,9 @@
 { "fieldname": "m_dAppPercentComplete", "fieldtype": "double"},
 { "fieldname": "m_bUploading", "fieldtype": "_Bool"}]}
 ,{"struct": "RemoteStorageAppSyncStatusCheck_t","fields": [
+{ "fieldname": "m_nAppID", "fieldtype": "AppId_t"},
+{ "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
+,{"struct": "RemoteStorageConflictResolution_t","fields": [
 { "fieldname": "m_nAppID", "fieldtype": "AppId_t"},
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
 ,{"struct": "RemoteStorageFileShareResult_t","fields": [
@@ -2236,7 +1377,7 @@
 ,{"struct": "RemoteStoragePublishedFileUpdated_t","fields": [
 { "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
 { "fieldname": "m_nAppID", "fieldtype": "AppId_t"},
-{ "fieldname": "m_ulUnused", "fieldtype": "uint64"}]}
+{ "fieldname": "m_hFile", "fieldtype": "UGCHandle_t"}]}
 ,{"struct": "RemoteStorageFileWriteAsyncComplete_t","fields": [
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
 ,{"struct": "RemoteStorageFileReadAsyncComplete_t","fields": [
@@ -2308,13 +1449,7 @@
 ,{"struct": "AppProofOfPurchaseKeyResponse_t","fields": [
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"},
 { "fieldname": "m_nAppID", "fieldtype": "uint32"},
-{ "fieldname": "m_cchKeyLength", "fieldtype": "uint32"},
-{ "fieldname": "m_rgchKey", "fieldtype": "char [240]"}]}
-,{"struct": "FileDetailsResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ulFileSize", "fieldtype": "uint64"},
-{ "fieldname": "m_FileSHA", "fieldtype": "uint8 [20]"},
-{ "fieldname": "m_unFlags", "fieldtype": "uint32"}]}
+{ "fieldname": "m_rgchKey", "fieldtype": "char [64]"}]}
 ,{"struct": "P2PSessionState_t","fields": [
 { "fieldname": "m_bConnectionActive", "fieldtype": "uint8"},
 { "fieldname": "m_bConnecting", "fieldtype": "uint8"},
@@ -2365,6 +1500,19 @@
 { "fieldname": "m_ulContextValue", "fieldtype": "uint64"},
 { "fieldname": "m_cOffset", "fieldtype": "uint32"},
 { "fieldname": "m_cBytesReceived", "fieldtype": "uint32"}]}
+,{"struct": "SteamUnifiedMessagesSendMethodResult_t","fields": [
+{ "fieldname": "m_hHandle", "fieldtype": "ClientUnifiedMessageHandle"},
+{ "fieldname": "m_unContext", "fieldtype": "uint64"},
+{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
+{ "fieldname": "m_unResponseSize", "fieldtype": "uint32"}]}
+,{"struct": "ControllerAnalogActionData_t","fields": [
+{ "fieldname": "eMode", "fieldtype": "enum EControllerSourceMode"},
+{ "fieldname": "x", "fieldtype": "float"},
+{ "fieldname": "y", "fieldtype": "float"},
+{ "fieldname": "bActive", "fieldtype": "_Bool"}]}
+,{"struct": "ControllerDigitalActionData_t","fields": [
+{ "fieldname": "bState", "fieldtype": "_Bool"},
+{ "fieldname": "bActive", "fieldtype": "_Bool"}]}
 ,{"struct": "SteamUGCDetails_t","fields": [
 { "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"},
@@ -2397,8 +1545,7 @@
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"},
 { "fieldname": "m_unNumResultsReturned", "fieldtype": "uint32"},
 { "fieldname": "m_unTotalMatchingResults", "fieldtype": "uint32"},
-{ "fieldname": "m_bCachedData", "fieldtype": "_Bool"},
-{ "fieldname": "m_rgchNextCursor", "fieldtype": "char [256]"}]}
+{ "fieldname": "m_bCachedData", "fieldtype": "_Bool"}]}
 ,{"struct": "SteamUGCRequestUGCDetailsResult_t","fields": [
 { "fieldname": "m_details", "fieldtype": "struct SteamUGCDetails_t"},
 { "fieldname": "m_bCachedData", "fieldtype": "_Bool"}]}
@@ -2408,8 +1555,7 @@
 { "fieldname": "m_bUserNeedsToAcceptWorkshopLegalAgreement", "fieldtype": "_Bool"}]}
 ,{"struct": "SubmitItemUpdateResult_t","fields": [
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_bUserNeedsToAcceptWorkshopLegalAgreement", "fieldtype": "_Bool"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"}]}
+{ "fieldname": "m_bUserNeedsToAcceptWorkshopLegalAgreement", "fieldtype": "_Bool"}]}
 ,{"struct": "DownloadItemResult_t","fields": [
 { "fieldname": "m_unAppID", "fieldtype": "AppId_t"},
 { "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
@@ -2428,35 +1574,6 @@
 { "fieldname": "m_bVotedUp", "fieldtype": "_Bool"},
 { "fieldname": "m_bVotedDown", "fieldtype": "_Bool"},
 { "fieldname": "m_bVoteSkipped", "fieldtype": "_Bool"}]}
-,{"struct": "StartPlaytimeTrackingResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
-,{"struct": "StopPlaytimeTrackingResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"}]}
-,{"struct": "AddUGCDependencyResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
-{ "fieldname": "m_nChildPublishedFileId", "fieldtype": "PublishedFileId_t"}]}
-,{"struct": "RemoveUGCDependencyResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
-{ "fieldname": "m_nChildPublishedFileId", "fieldtype": "PublishedFileId_t"}]}
-,{"struct": "AddAppDependencyResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
-{ "fieldname": "m_nAppID", "fieldtype": "AppId_t"}]}
-,{"struct": "RemoveAppDependencyResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
-{ "fieldname": "m_nAppID", "fieldtype": "AppId_t"}]}
-,{"struct": "GetAppDependenciesResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"},
-{ "fieldname": "m_rgAppIDs", "fieldtype": "AppId_t [32]"},
-{ "fieldname": "m_nNumAppDependencies", "fieldtype": "uint32"},
-{ "fieldname": "m_nTotalNumAppDependencies", "fieldtype": "uint32"}]}
-,{"struct": "DeleteItemResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_nPublishedFileId", "fieldtype": "PublishedFileId_t"}]}
 ,{"struct": "SteamAppInstalled_t","fields": [
 { "fieldname": "m_nAppID", "fieldtype": "AppId_t"}]}
 ,{"struct": "SteamAppUninstalled_t","fields": [
@@ -2547,7 +1664,7 @@
 { "fieldname": "unY", "fieldtype": "uint32"},
 { "fieldname": "unWide", "fieldtype": "uint32"},
 { "fieldname": "unTall", "fieldtype": "uint32"},
-{ "fieldname": "unNewWindow_BrowserHandle_IGNORE", "fieldtype": "HHTMLBrowser"}]}
+{ "fieldname": "unNewWindow_BrowserHandle", "fieldtype": "HHTMLBrowser"}]}
 ,{"struct": "HTML_SetCursor_t","fields": [
 { "fieldname": "unBrowserHandle", "fieldtype": "HHTMLBrowser"},
 { "fieldname": "eMouseCursor", "fieldtype": "uint32"}]}
@@ -2562,9 +1679,6 @@
 { "fieldname": "pchMsg", "fieldtype": "const char *"}]}
 ,{"struct": "HTML_HideToolTip_t","fields": [
 { "fieldname": "unBrowserHandle", "fieldtype": "HHTMLBrowser"}]}
-,{"struct": "HTML_BrowserRestarted_t","fields": [
-{ "fieldname": "unBrowserHandle", "fieldtype": "HHTMLBrowser"},
-{ "fieldname": "unOldBrowserHandle", "fieldtype": "HHTMLBrowser"}]}
 ,{"struct": "SteamItemDetails_t","fields": [
 { "fieldname": "m_itemId", "fieldtype": "SteamItemInstanceID_t"},
 { "fieldname": "m_iDefinition", "fieldtype": "SteamItemDef_t"},
@@ -2575,27 +1689,43 @@
 { "fieldname": "m_result", "fieldtype": "enum EResult"}]}
 ,{"struct": "SteamInventoryFullUpdate_t","fields": [
 { "fieldname": "m_handle", "fieldtype": "SteamInventoryResult_t"}]}
-,{"struct": "SteamInventoryEligiblePromoItemDefIDs_t","fields": [
-{ "fieldname": "m_result", "fieldtype": "enum EResult"},
-{ "fieldname": "m_steamID", "fieldtype": "class CSteamID"},
-{ "fieldname": "m_numEligiblePromoItemDefs", "fieldtype": "int"},
-{ "fieldname": "m_bCachedData", "fieldtype": "_Bool"}]}
-,{"struct": "SteamInventoryStartPurchaseResult_t","fields": [
-{ "fieldname": "m_result", "fieldtype": "enum EResult"},
-{ "fieldname": "m_ulOrderID", "fieldtype": "uint64"},
-{ "fieldname": "m_ulTransID", "fieldtype": "uint64"}]}
-,{"struct": "SteamInventoryRequestPricesResult_t","fields": [
-{ "fieldname": "m_result", "fieldtype": "enum EResult"},
-{ "fieldname": "m_rgchCurrency", "fieldtype": "char [4]"}]}
 ,{"struct": "BroadcastUploadStop_t","fields": [
 { "fieldname": "m_eResult", "fieldtype": "enum EBroadcastUploadResult"}]}
 ,{"struct": "GetVideoURLResult_t","fields": [
 { "fieldname": "m_eResult", "fieldtype": "enum EResult"},
 { "fieldname": "m_unVideoAppID", "fieldtype": "AppId_t"},
 { "fieldname": "m_rgchURL", "fieldtype": "char [256]"}]}
-,{"struct": "GetOPFSettingsResult_t","fields": [
-{ "fieldname": "m_eResult", "fieldtype": "enum EResult"},
-{ "fieldname": "m_unVideoAppID", "fieldtype": "AppId_t"}]}
+,{"struct": "CCallbackBase","fields": [
+{ "fieldname": "m_nCallbackFlags", "fieldtype": "uint8"},
+{ "fieldname": "m_iCallback", "fieldtype": "int"}]}
+,{"struct": "CCallResult","fields": [
+{ "fieldname": "m_hAPICall", "fieldtype": "SteamAPICall_t"},
+{ "fieldname": "m_pObj", "fieldtype": "T *"},
+{ "fieldname": "m_Func", "fieldtype": "func_t"}]}
+,{"struct": "CCallback","fields": [
+{ "fieldname": "m_pObj", "fieldtype": "T *"},
+{ "fieldname": "m_Func", "fieldtype": "func_t"}]}
+,{"struct": "CSteamAPIContext","fields": [
+{ "fieldname": "m_pSteamUser", "fieldtype": "class ISteamUser *"},
+{ "fieldname": "m_pSteamFriends", "fieldtype": "class ISteamFriends *"},
+{ "fieldname": "m_pSteamUtils", "fieldtype": "class ISteamUtils *"},
+{ "fieldname": "m_pSteamMatchmaking", "fieldtype": "class ISteamMatchmaking *"},
+{ "fieldname": "m_pSteamUserStats", "fieldtype": "class ISteamUserStats *"},
+{ "fieldname": "m_pSteamApps", "fieldtype": "class ISteamApps *"},
+{ "fieldname": "m_pSteamMatchmakingServers", "fieldtype": "class ISteamMatchmakingServers *"},
+{ "fieldname": "m_pSteamNetworking", "fieldtype": "class ISteamNetworking *"},
+{ "fieldname": "m_pSteamRemoteStorage", "fieldtype": "class ISteamRemoteStorage *"},
+{ "fieldname": "m_pSteamScreenshots", "fieldtype": "class ISteamScreenshots *"},
+{ "fieldname": "m_pSteamHTTP", "fieldtype": "class ISteamHTTP *"},
+{ "fieldname": "m_pSteamUnifiedMessages", "fieldtype": "class ISteamUnifiedMessages *"},
+{ "fieldname": "m_pController", "fieldtype": "class ISteamController *"},
+{ "fieldname": "m_pSteamUGC", "fieldtype": "class ISteamUGC *"},
+{ "fieldname": "m_pSteamAppList", "fieldtype": "class ISteamAppList *"},
+{ "fieldname": "m_pSteamMusic", "fieldtype": "class ISteamMusic *"},
+{ "fieldname": "m_pSteamMusicRemote", "fieldtype": "class ISteamMusicRemote *"},
+{ "fieldname": "m_pSteamHTMLSurface", "fieldtype": "class ISteamHTMLSurface *"},
+{ "fieldname": "m_pSteamInventory", "fieldtype": "class ISteamInventory *"},
+{ "fieldname": "m_pSteamVideo", "fieldtype": "class ISteamVideo *"}]}
 ,{"struct": "GSClientApprove_t","fields": [
 { "fieldname": "m_SteamID", "fieldtype": "class CSteamID"},
 { "fieldname": "m_OwnerSteamID", "fieldtype": "class CSteamID"}]}
@@ -2826,13 +1956,8 @@
 }
 ,{
 	"classname": "ISteamClient",
-	"methodname": "GetISteamGameSearch",
-	"returntype": "class ISteamGameSearch *",
-	"params": [ 
-{	"paramname": "hSteamuser" ,"paramtype": "HSteamUser"},
-{	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
-{	"paramname": "pchVersion" ,"paramtype": "const char *"}
-	 ]
+	"methodname": "RunFrame",
+	"returntype": "void"
 }
 ,{
 	"classname": "ISteamClient",
@@ -2856,6 +1981,16 @@
 	"classname": "ISteamClient",
 	"methodname": "GetISteamHTTP",
 	"returntype": "class ISteamHTTP *",
+	"params": [ 
+{	"paramname": "hSteamuser" ,"paramtype": "HSteamUser"},
+{	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
+{	"paramname": "pchVersion" ,"paramtype": "const char *"}
+	 ]
+}
+,{
+	"classname": "ISteamClient",
+	"methodname": "GetISteamUnifiedMessages",
+	"returntype": "class ISteamUnifiedMessages *",
 	"params": [ 
 {	"paramname": "hSteamuser" ,"paramtype": "HSteamUser"},
 {	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
@@ -2924,6 +2059,30 @@
 }
 ,{
 	"classname": "ISteamClient",
+	"methodname": "Set_SteamAPI_CPostAPIResultInProcess",
+	"returntype": "void",
+	"params": [ 
+{	"paramname": "func" ,"paramtype": "SteamAPI_PostAPIResultInProcess_t"}
+	 ]
+}
+,{
+	"classname": "ISteamClient",
+	"methodname": "Remove_SteamAPI_CPostAPIResultInProcess",
+	"returntype": "void",
+	"params": [ 
+{	"paramname": "func" ,"paramtype": "SteamAPI_PostAPIResultInProcess_t"}
+	 ]
+}
+,{
+	"classname": "ISteamClient",
+	"methodname": "Set_SteamAPI_CCheckCallbackRegisteredInProcess",
+	"returntype": "void",
+	"params": [ 
+{	"paramname": "func" ,"paramtype": "SteamAPI_CheckCallbackRegistered_t"}
+	 ]
+}
+,{
+	"classname": "ISteamClient",
 	"methodname": "GetISteamInventory",
 	"returntype": "class ISteamInventory *",
 	"params": [ 
@@ -2938,36 +2097,6 @@
 	"returntype": "class ISteamVideo *",
 	"params": [ 
 {	"paramname": "hSteamuser" ,"paramtype": "HSteamUser"},
-{	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
-{	"paramname": "pchVersion" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamClient",
-	"methodname": "GetISteamParentalSettings",
-	"returntype": "class ISteamParentalSettings *",
-	"params": [ 
-{	"paramname": "hSteamuser" ,"paramtype": "HSteamUser"},
-{	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
-{	"paramname": "pchVersion" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamClient",
-	"methodname": "GetISteamInput",
-	"returntype": "class ISteamInput *",
-	"params": [ 
-{	"paramname": "hSteamUser" ,"paramtype": "HSteamUser"},
-{	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
-{	"paramname": "pchVersion" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamClient",
-	"methodname": "GetISteamParties",
-	"returntype": "class ISteamParties *",
-	"params": [ 
-{	"paramname": "hSteamUser" ,"paramtype": "HSteamUser"},
 {	"paramname": "hSteamPipe" ,"paramtype": "HSteamPipe"},
 {	"paramname": "pchVersion" ,"paramtype": "const char *"}
 	 ]
@@ -3044,8 +2173,8 @@
 	"returntype": "EVoiceResult",
 	"params": [ 
 {	"paramname": "pcbCompressed" ,"paramtype": "uint32 *"},
-{	"paramname": "pcbUncompressed_Deprecated" ,"paramtype": "uint32 *"},
-{	"paramname": "nUncompressedVoiceDesiredSampleRate_Deprecated" ,"paramtype": "uint32"}
+{	"paramname": "pcbUncompressed" ,"paramtype": "uint32 *"},
+{	"paramname": "nUncompressedVoiceDesiredSampleRate" ,"paramtype": "uint32"}
 	 ]
 }
 ,{
@@ -3057,11 +2186,11 @@
 {	"paramname": "pDestBuffer" ,"paramtype": "void *"},
 {	"paramname": "cbDestBufferSize" ,"paramtype": "uint32"},
 {	"paramname": "nBytesWritten" ,"paramtype": "uint32 *"},
-{	"paramname": "bWantUncompressed_Deprecated" ,"paramtype": "bool"},
-{	"paramname": "pUncompressedDestBuffer_Deprecated" ,"paramtype": "void *"},
-{	"paramname": "cbUncompressedDestBufferSize_Deprecated" ,"paramtype": "uint32"},
-{	"paramname": "nUncompressBytesWritten_Deprecated" ,"paramtype": "uint32 *"},
-{	"paramname": "nUncompressedVoiceDesiredSampleRate_Deprecated" ,"paramtype": "uint32"}
+{	"paramname": "bWantUncompressed" ,"paramtype": "bool"},
+{	"paramname": "pUncompressedDestBuffer" ,"paramtype": "void *"},
+{	"paramname": "cbUncompressedDestBufferSize" ,"paramtype": "uint32"},
+{	"paramname": "nUncompressBytesWritten" ,"paramtype": "uint32 *"},
+{	"paramname": "nUncompressedVoiceDesiredSampleRate" ,"paramtype": "uint32"}
 	 ]
 }
 ,{
@@ -3144,7 +2273,7 @@
 }
 ,{
 	"classname": "ISteamUser",
-	"methodname": "RequestEncryptedAppTicket", "callresult": "EncryptedAppTicketResponse_t",
+	"methodname": "RequestEncryptedAppTicket",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pDataToInclude" ,"paramtype": "void *"},
@@ -3177,36 +2306,11 @@
 }
 ,{
 	"classname": "ISteamUser",
-	"methodname": "RequestStoreAuthURL", "callresult": "StoreAuthURLResponse_t",
+	"methodname": "RequestStoreAuthURL",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchRedirectURL" ,"paramtype": "const char *"}
 	 ]
-}
-,{
-	"classname": "ISteamUser",
-	"methodname": "BIsPhoneVerified",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamUser",
-	"methodname": "BIsTwoFactorEnabled",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamUser",
-	"methodname": "BIsPhoneIdentifying",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamUser",
-	"methodname": "BIsPhoneRequiringVerification",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamUser",
-	"methodname": "GetMarketEligibility", "callresult": "MarketEligibilityResponse_t",
-	"returntype": "SteamAPICall_t"
 }
 ,{
 	"classname": "ISteamFriends",
@@ -3215,7 +2319,7 @@
 }
 ,{
 	"classname": "ISteamFriends",
-	"methodname": "SetPersonaName", "callresult": "SetPersonaNameResponse_t",
+	"methodname": "SetPersonaName",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchPersonaName" ,"paramtype": "const char *"}
@@ -3455,8 +2559,7 @@
 	"methodname": "ActivateGameOverlayToWebPage",
 	"returntype": "void",
 	"params": [ 
-{	"paramname": "pchURL" ,"paramtype": "const char *"},
-{	"paramname": "eMode" ,"paramtype": "EActivateGameOverlayToWebPageMode"}
+{	"paramname": "pchURL" ,"paramtype": "const char *"}
 	 ]
 }
 ,{
@@ -3519,7 +2622,7 @@
 }
 ,{
 	"classname": "ISteamFriends",
-	"methodname": "RequestClanOfficerList", "callresult": "ClanOfficerListResponse_t",
+	"methodname": "RequestClanOfficerList",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDClan" ,"paramtype": "class CSteamID"}
@@ -3643,7 +2746,7 @@
 }
 ,{
 	"classname": "ISteamFriends",
-	"methodname": "JoinClanChatRoom", "callresult": "JoinClanChatRoomCompletionResult_t",
+	"methodname": "JoinClanChatRoom",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDClan" ,"paramtype": "class CSteamID"}
@@ -3760,7 +2863,7 @@
 }
 ,{
 	"classname": "ISteamFriends",
-	"methodname": "GetFollowerCount", "callresult": "FriendsGetFollowerCount_t",
+	"methodname": "GetFollowerCount",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamID" ,"paramtype": "class CSteamID"}
@@ -3768,7 +2871,7 @@
 }
 ,{
 	"classname": "ISteamFriends",
-	"methodname": "IsFollowing", "callresult": "FriendsIsFollowing_t",
+	"methodname": "IsFollowing",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamID" ,"paramtype": "class CSteamID"}
@@ -3776,32 +2879,11 @@
 }
 ,{
 	"classname": "ISteamFriends",
-	"methodname": "EnumerateFollowingList", "callresult": "FriendsEnumerateFollowingList_t",
+	"methodname": "EnumerateFollowingList",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unStartIndex" ,"paramtype": "uint32"}
 	 ]
-}
-,{
-	"classname": "ISteamFriends",
-	"methodname": "IsClanPublic",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "steamIDClan" ,"paramtype": "class CSteamID"}
-	 ]
-}
-,{
-	"classname": "ISteamFriends",
-	"methodname": "IsClanOfficialGameGroup",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "steamIDClan" ,"paramtype": "class CSteamID"}
-	 ]
-}
-,{
-	"classname": "ISteamFriends",
-	"methodname": "GetNumChatsWithUnreadPriorityMessages",
-	"returntype": "int"
 }
 ,{
 	"classname": "ISteamUtils",
@@ -3906,6 +2988,11 @@
 }
 ,{
 	"classname": "ISteamUtils",
+	"methodname": "RunFrame",
+	"returntype": "void"
+}
+,{
+	"classname": "ISteamUtils",
 	"methodname": "GetIPCCallCount",
 	"returntype": "uint32"
 }
@@ -3929,7 +3016,7 @@
 }
 ,{
 	"classname": "ISteamUtils",
-	"methodname": "CheckFileSignature", "callresult": "CheckFileSignature_t",
+	"methodname": "CheckFileSignature",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "szFileName" ,"paramtype": "const char *"}
@@ -3981,29 +3068,6 @@
 	 ]
 }
 ,{
-	"classname": "ISteamUtils",
-	"methodname": "IsSteamInBigPictureMode",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamUtils",
-	"methodname": "StartVRDashboard",
-	"returntype": "void"
-}
-,{
-	"classname": "ISteamUtils",
-	"methodname": "IsVRHeadsetStreamingEnabled",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamUtils",
-	"methodname": "SetVRHeadsetStreamingEnabled",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "bEnabled" ,"paramtype": "bool"}
-	 ]
-}
-,{
 	"classname": "ISteamMatchmaking",
 	"methodname": "GetFavoriteGameCount",
 	"returntype": "int"
@@ -4049,7 +3113,7 @@
 }
 ,{
 	"classname": "ISteamMatchmaking",
-	"methodname": "RequestLobbyList", "callresult": "LobbyMatchList_t",
+	"methodname": "RequestLobbyList",
 	"returntype": "SteamAPICall_t"
 }
 ,{
@@ -4123,7 +3187,7 @@
 }
 ,{
 	"classname": "ISteamMatchmaking",
-	"methodname": "CreateLobby", "callresult": "LobbyCreated_t",
+	"methodname": "CreateLobby",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "eLobbyType" ,"paramtype": "ELobbyType"},
@@ -4132,7 +3196,7 @@
 }
 ,{
 	"classname": "ISteamMatchmaking",
-	"methodname": "JoinLobby", "callresult": "LobbyEnter_t",
+	"methodname": "JoinLobby",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDLobby" ,"paramtype": "class CSteamID"}
@@ -4595,225 +3659,6 @@
 	 ]
 }
 ,{
-	"classname": "ISteamGameSearch",
-	"methodname": "AddGameSearchParams",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "pchKeyToFind" ,"paramtype": "const char *"},
-{	"paramname": "pchValuesToFind" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "SearchForGameWithLobby",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "steamIDLobby" ,"paramtype": "class CSteamID"},
-{	"paramname": "nPlayerMin" ,"paramtype": "int"},
-{	"paramname": "nPlayerMax" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "SearchForGameSolo",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "nPlayerMin" ,"paramtype": "int"},
-{	"paramname": "nPlayerMax" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "AcceptGame",
-	"returntype": "EGameSearchErrorCode_t"
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "DeclineGame",
-	"returntype": "EGameSearchErrorCode_t"
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "RetrieveConnectionDetails",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "steamIDHost" ,"paramtype": "class CSteamID"},
-{	"paramname": "pchConnectionDetails" ,"paramtype": "char *"},
-{	"paramname": "cubConnectionDetails" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "EndGameSearch",
-	"returntype": "EGameSearchErrorCode_t"
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "SetGameHostParams",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "pchKey" ,"paramtype": "const char *"},
-{	"paramname": "pchValue" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "SetConnectionDetails",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "pchConnectionDetails" ,"paramtype": "const char *"},
-{	"paramname": "cubConnectionDetails" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "RequestPlayersForGame",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "nPlayerMin" ,"paramtype": "int"},
-{	"paramname": "nPlayerMax" ,"paramtype": "int"},
-{	"paramname": "nMaxTeamSize" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "HostConfirmGameStart",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "ullUniqueGameID" ,"paramtype": "uint64"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "CancelRequestPlayersForGame",
-	"returntype": "EGameSearchErrorCode_t"
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "SubmitPlayerResult",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "ullUniqueGameID" ,"paramtype": "uint64"},
-{	"paramname": "steamIDPlayer" ,"paramtype": "class CSteamID"},
-{	"paramname": "EPlayerResult" ,"paramtype": "EPlayerResult_t"}
-	 ]
-}
-,{
-	"classname": "ISteamGameSearch",
-	"methodname": "EndGame",
-	"returntype": "EGameSearchErrorCode_t",
-	"params": [ 
-{	"paramname": "ullUniqueGameID" ,"paramtype": "uint64"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "GetNumActiveBeacons",
-	"returntype": "uint32"
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "GetBeaconByIndex",
-	"returntype": "PartyBeaconID_t",
-	"params": [ 
-{	"paramname": "unIndex" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "GetBeaconDetails",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "ulBeaconID" ,"paramtype": "PartyBeaconID_t"},
-{	"paramname": "pSteamIDBeaconOwner" ,"paramtype": "class CSteamID *"},
-{	"paramname": "pLocation" ,"out_struct": " " ,"paramtype": "struct SteamPartyBeaconLocation_t *"},
-{	"paramname": "pchMetadata" ,"out_string_count": "cchMetadata" ,"paramtype": "char *"},
-{	"paramname": "cchMetadata" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "JoinParty", "callresult": "JoinPartyCallback_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "ulBeaconID" ,"paramtype": "PartyBeaconID_t"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "GetNumAvailableBeaconLocations",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "puNumLocations" ,"paramtype": "uint32 *"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "GetAvailableBeaconLocations",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "pLocationList" ,"paramtype": "struct SteamPartyBeaconLocation_t *"},
-{	"paramname": "uMaxNumLocations" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "CreateBeacon", "callresult": "CreateBeaconCallback_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "unOpenSlots" ,"paramtype": "uint32"},
-{	"paramname": "pBeaconLocation" ,"paramtype": "struct SteamPartyBeaconLocation_t *"},
-{	"paramname": "pchConnectString" ,"paramtype": "const char *"},
-{	"paramname": "pchMetadata" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "OnReservationCompleted",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "ulBeacon" ,"paramtype": "PartyBeaconID_t"},
-{	"paramname": "steamIDUser" ,"paramtype": "class CSteamID"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "CancelReservation",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "ulBeacon" ,"paramtype": "PartyBeaconID_t"},
-{	"paramname": "steamIDUser" ,"paramtype": "class CSteamID"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "ChangeNumOpenSlots", "callresult": "ChangeNumOpenSlotsCallback_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "ulBeacon" ,"paramtype": "PartyBeaconID_t"},
-{	"paramname": "unOpenSlots" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "DestroyBeacon",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "ulBeacon" ,"paramtype": "PartyBeaconID_t"}
-	 ]
-}
-,{
-	"classname": "ISteamParties",
-	"methodname": "GetBeaconLocationData",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "BeaconLocation" ,"paramtype": "struct SteamPartyBeaconLocation_t"},
-{	"paramname": "eData" ,"paramtype": "ESteamPartyBeaconLocationData"},
-{	"paramname": "pchDataStringOut" ,"out_string_count": "cchDataStringOut" ,"paramtype": "char *"},
-{	"paramname": "cchDataStringOut" ,"paramtype": "int"}
-	 ]
-}
-,{
 	"classname": "ISteamRemoteStorage",
 	"methodname": "FileWrite",
 	"returntype": "bool",
@@ -4835,7 +3680,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "FileWriteAsync", "callresult": "RemoteStorageFileWriteAsyncComplete_t",
+	"methodname": "FileWriteAsync",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchFile" ,"paramtype": "const char *"},
@@ -4845,7 +3690,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "FileReadAsync", "callresult": "RemoteStorageFileReadAsyncComplete_t",
+	"methodname": "FileReadAsync",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchFile" ,"paramtype": "const char *"},
@@ -4881,7 +3726,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "FileShare", "callresult": "RemoteStorageFileShareResult_t",
+	"methodname": "FileShare",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchFile" ,"paramtype": "const char *"}
@@ -4989,8 +3834,8 @@
 	"methodname": "GetQuota",
 	"returntype": "bool",
 	"params": [ 
-{	"paramname": "pnTotalBytes" ,"paramtype": "uint64 *"},
-{	"paramname": "puAvailableBytes" ,"paramtype": "uint64 *"}
+{	"paramname": "pnTotalBytes" ,"paramtype": "int32 *"},
+{	"paramname": "puAvailableBytes" ,"paramtype": "int32 *"}
 	 ]
 }
 ,{
@@ -5013,7 +3858,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "UGCDownload", "callresult": "RemoteStorageDownloadUGCResult_t",
+	"methodname": "UGCDownload",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "hContent" ,"paramtype": "UGCHandle_t"},
@@ -5037,7 +3882,7 @@
 	"params": [ 
 {	"paramname": "hContent" ,"paramtype": "UGCHandle_t"},
 {	"paramname": "pnAppID" ,"paramtype": "AppId_t *"},
-{	"paramname": "ppchName" ,"out_string": " " ,"paramtype": "char **"},
+{	"paramname": "ppchName" ,"paramtype": "char **"},
 {	"paramname": "pnFileSizeInBytes" ,"paramtype": "int32 *"},
 {	"paramname": "pSteamIDOwner" ,"out_struct": " " ,"paramtype": "class CSteamID *"}
 	 ]
@@ -5069,7 +3914,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "PublishWorkshopFile", "callresult": "RemoteStoragePublishFileProgress_t",
+	"methodname": "PublishWorkshopFile",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchFile" ,"paramtype": "const char *"},
@@ -5146,7 +3991,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "CommitPublishedFileUpdate", "callresult": "RemoteStorageUpdatePublishedFileResult_t",
+	"methodname": "CommitPublishedFileUpdate",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "updateHandle" ,"paramtype": "PublishedFileUpdateHandle_t"}
@@ -5154,7 +3999,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "GetPublishedFileDetails", "callresult": "RemoteStorageGetPublishedFileDetailsResult_t",
+	"methodname": "GetPublishedFileDetails",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"},
@@ -5163,7 +4008,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "DeletePublishedFile", "callresult": "RemoteStorageDeletePublishedFileResult_t",
+	"methodname": "DeletePublishedFile",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"}
@@ -5171,7 +4016,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "EnumerateUserPublishedFiles", "callresult": "RemoteStorageEnumerateUserPublishedFilesResult_t",
+	"methodname": "EnumerateUserPublishedFiles",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unStartIndex" ,"paramtype": "uint32"}
@@ -5179,7 +4024,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "SubscribePublishedFile", "callresult": "RemoteStorageSubscribePublishedFileResult_t",
+	"methodname": "SubscribePublishedFile",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"}
@@ -5187,7 +4032,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "EnumerateUserSubscribedFiles", "callresult": "RemoteStorageEnumerateUserSubscribedFilesResult_t",
+	"methodname": "EnumerateUserSubscribedFiles",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unStartIndex" ,"paramtype": "uint32"}
@@ -5195,7 +4040,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "UnsubscribePublishedFile", "callresult": "RemoteStorageUnsubscribePublishedFileResult_t",
+	"methodname": "UnsubscribePublishedFile",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"}
@@ -5212,7 +4057,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "GetPublishedItemVoteDetails", "callresult": "RemoteStorageGetPublishedItemVoteDetailsResult_t",
+	"methodname": "GetPublishedItemVoteDetails",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"}
@@ -5220,7 +4065,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "UpdateUserPublishedItemVote", "callresult": "RemoteStorageUpdateUserPublishedItemVoteResult_t",
+	"methodname": "UpdateUserPublishedItemVote",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"},
@@ -5229,7 +4074,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "GetUserPublishedItemVoteDetails", "callresult": "RemoteStorageGetPublishedItemVoteDetailsResult_t",
+	"methodname": "GetUserPublishedItemVoteDetails",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"}
@@ -5237,7 +4082,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "EnumerateUserSharedWorkshopFiles", "callresult": "RemoteStorageEnumerateUserPublishedFilesResult_t",
+	"methodname": "EnumerateUserSharedWorkshopFiles",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamId" ,"paramtype": "class CSteamID"},
@@ -5248,7 +4093,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "PublishVideo", "callresult": "RemoteStoragePublishFileProgress_t",
+	"methodname": "PublishVideo",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "eVideoProvider" ,"paramtype": "EWorkshopVideoProvider"},
@@ -5264,7 +4109,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "SetUserPublishedFileAction", "callresult": "RemoteStorageSetUserPublishedFileActionResult_t",
+	"methodname": "SetUserPublishedFileAction",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "unPublishedFileId" ,"paramtype": "PublishedFileId_t"},
@@ -5273,7 +4118,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "EnumeratePublishedFilesByUserAction", "callresult": "RemoteStorageEnumeratePublishedFilesByUserActionResult_t",
+	"methodname": "EnumeratePublishedFilesByUserAction",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "eAction" ,"paramtype": "EWorkshopFileAction"},
@@ -5282,7 +4127,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "EnumeratePublishedWorkshopFiles", "callresult": "RemoteStorageEnumerateWorkshopFilesResult_t",
+	"methodname": "EnumeratePublishedWorkshopFiles",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "eEnumerationType" ,"paramtype": "EWorkshopEnumerationType"},
@@ -5295,7 +4140,7 @@
 }
 ,{
 	"classname": "ISteamRemoteStorage",
-	"methodname": "UGCDownloadToLocation", "callresult": "RemoteStorageDownloadUGCResult_t",
+	"methodname": "UGCDownloadToLocation",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "hContent" ,"paramtype": "UGCHandle_t"},
@@ -5305,7 +4150,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "RequestCurrentStats", "callback": "UserStatsReceived_t",
+	"methodname": "RequestCurrentStats",
 	"returntype": "bool"
 }
 ,{
@@ -5436,7 +4281,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "RequestUserStats", "callresult": "UserStatsReceived_t",
+	"methodname": "RequestUserStats",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDUser" ,"paramtype": "class CSteamID"}
@@ -5493,7 +4338,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "FindOrCreateLeaderboard", "callresult": "LeaderboardFindResult_t",
+	"methodname": "FindOrCreateLeaderboard",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchLeaderboardName" ,"paramtype": "const char *"},
@@ -5503,7 +4348,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "FindLeaderboard", "callresult": "LeaderboardFindResult_t",
+	"methodname": "FindLeaderboard",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchLeaderboardName" ,"paramtype": "const char *"}
@@ -5543,7 +4388,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "DownloadLeaderboardEntries", "callresult": "LeaderboardScoresDownloaded_t",
+	"methodname": "DownloadLeaderboardEntries",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "hSteamLeaderboard" ,"paramtype": "SteamLeaderboard_t"},
@@ -5554,7 +4399,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "DownloadLeaderboardEntriesForUsers", "callresult": "LeaderboardScoresDownloaded_t",
+	"methodname": "DownloadLeaderboardEntriesForUsers", "desc": "Downloads leaderboard entries for an arbitrary set of users - ELeaderboardDataRequest is k_ELeaderboardDataRequestUsers",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "hSteamLeaderboard" ,"paramtype": "SteamLeaderboard_t"},
@@ -5576,7 +4421,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "UploadLeaderboardScore", "callresult": "LeaderboardScoreUploaded_t",
+	"methodname": "UploadLeaderboardScore",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "hSteamLeaderboard" ,"paramtype": "SteamLeaderboard_t"},
@@ -5588,7 +4433,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "AttachLeaderboardUGC", "callresult": "LeaderboardUGCSet_t",
+	"methodname": "AttachLeaderboardUGC",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "hSteamLeaderboard" ,"paramtype": "SteamLeaderboard_t"},
@@ -5597,12 +4442,12 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "GetNumberOfCurrentPlayers", "callresult": "NumberOfCurrentPlayers_t",
+	"methodname": "GetNumberOfCurrentPlayers",
 	"returntype": "SteamAPICall_t"
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "RequestGlobalAchievementPercentages", "callresult": "GlobalAchievementPercentagesReady_t",
+	"methodname": "RequestGlobalAchievementPercentages",
 	"returntype": "SteamAPICall_t"
 }
 ,{
@@ -5639,7 +4484,7 @@
 }
 ,{
 	"classname": "ISteamUserStats",
-	"methodname": "RequestGlobalStats", "callresult": "GlobalStatsReceived_t",
+	"methodname": "RequestGlobalStats",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nHistoryDays" ,"paramtype": "int"}
@@ -5855,33 +4700,6 @@
 	"classname": "ISteamApps",
 	"methodname": "GetAppBuildId",
 	"returntype": "int"
-}
-,{
-	"classname": "ISteamApps",
-	"methodname": "RequestAllProofOfPurchaseKeys",
-	"returntype": "void"
-}
-,{
-	"classname": "ISteamApps",
-	"methodname": "GetFileDetails", "callresult": "FileDetailsResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "pszFileName" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamApps",
-	"methodname": "GetLaunchCommandLine",
-	"returntype": "int",
-	"params": [ 
-{	"paramname": "pszCommandLine" ,"paramtype": "char *"},
-{	"paramname": "cubCommandLine" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamApps",
-	"methodname": "BIsSubscribedFromFamilySharing",
-	"returntype": "bool"
 }
 ,{
 	"classname": "ISteamNetworking",
@@ -6159,21 +4977,6 @@
 	"params": [ 
 {	"paramname": "hScreenshot" ,"paramtype": "ScreenshotHandle"},
 {	"paramname": "unPublishedFileID" ,"paramtype": "PublishedFileId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamScreenshots",
-	"methodname": "IsScreenshotsHooked",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamScreenshots",
-	"methodname": "AddVRScreenshotToLibrary",
-	"returntype": "ScreenshotHandle",
-	"params": [ 
-{	"paramname": "eType" ,"paramtype": "EVRScreenshotType"},
-{	"paramname": "pchFilename" ,"paramtype": "const char *"},
-{	"paramname": "pchVRFilename" ,"paramtype": "const char *"}
 	 ]
 }
 ,{
@@ -6689,286 +5492,53 @@
 	 ]
 }
 ,{
-	"classname": "ISteamInput",
-	"methodname": "Init",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "Shutdown",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "RunFrame",
-	"returntype": "void"
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetConnectedControllers",
-	"returntype": "int",
+	"classname": "ISteamUnifiedMessages",
+	"methodname": "SendMethod",
+	"returntype": "ClientUnifiedMessageHandle",
 	"params": [ 
-{	"paramname": "handlesOut" ,"paramtype": "InputHandle_t *"}
+{	"paramname": "pchServiceMethod" ,"paramtype": "const char *"},
+{	"paramname": "pRequestBuffer" ,"paramtype": "const void *"},
+{	"paramname": "unRequestBufferSize" ,"paramtype": "uint32"},
+{	"paramname": "unContext" ,"paramtype": "uint64"}
 	 ]
 }
 ,{
-	"classname": "ISteamInput",
-	"methodname": "GetActionSetHandle",
-	"returntype": "InputActionSetHandle_t",
-	"params": [ 
-{	"paramname": "pszActionSetName" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "ActivateActionSet",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "actionSetHandle" ,"paramtype": "InputActionSetHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetCurrentActionSet",
-	"returntype": "InputActionSetHandle_t",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "ActivateActionSetLayer",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "actionSetLayerHandle" ,"paramtype": "InputActionSetHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "DeactivateActionSetLayer",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "actionSetLayerHandle" ,"paramtype": "InputActionSetHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "DeactivateAllActionSetLayers",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetActiveActionSetLayers",
-	"returntype": "int",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "handlesOut" ,"paramtype": "InputActionSetHandle_t *"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetDigitalActionHandle",
-	"returntype": "InputDigitalActionHandle_t",
-	"params": [ 
-{	"paramname": "pszActionName" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetDigitalActionData",
-	"returntype": "struct InputDigitalActionData_t",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "digitalActionHandle" ,"paramtype": "InputDigitalActionHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetDigitalActionOrigins",
-	"returntype": "int",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "actionSetHandle" ,"paramtype": "InputActionSetHandle_t"},
-{	"paramname": "digitalActionHandle" ,"paramtype": "InputDigitalActionHandle_t"},
-{	"paramname": "originsOut" ,"paramtype": "EInputActionOrigin *"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetAnalogActionHandle",
-	"returntype": "InputAnalogActionHandle_t",
-	"params": [ 
-{	"paramname": "pszActionName" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetAnalogActionData",
-	"returntype": "struct InputAnalogActionData_t",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "analogActionHandle" ,"paramtype": "InputAnalogActionHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetAnalogActionOrigins",
-	"returntype": "int",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "actionSetHandle" ,"paramtype": "InputActionSetHandle_t"},
-{	"paramname": "analogActionHandle" ,"paramtype": "InputAnalogActionHandle_t"},
-{	"paramname": "originsOut" ,"paramtype": "EInputActionOrigin *"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetGlyphForActionOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EInputActionOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetStringForActionOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EInputActionOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "StopAnalogActionMomentum",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "eAction" ,"paramtype": "InputAnalogActionHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetMotionData",
-	"returntype": "struct InputMotionData_t",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "TriggerVibration",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "usLeftSpeed" ,"paramtype": "unsigned short"},
-{	"paramname": "usRightSpeed" ,"paramtype": "unsigned short"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "SetLEDColor",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "nColorR" ,"paramtype": "uint8"},
-{	"paramname": "nColorG" ,"paramtype": "uint8"},
-{	"paramname": "nColorB" ,"paramtype": "uint8"},
-{	"paramname": "nFlags" ,"paramtype": "unsigned int"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "TriggerHapticPulse",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "eTargetPad" ,"paramtype": "ESteamControllerPad"},
-{	"paramname": "usDurationMicroSec" ,"paramtype": "unsigned short"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "TriggerRepeatedHapticPulse",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "eTargetPad" ,"paramtype": "ESteamControllerPad"},
-{	"paramname": "usDurationMicroSec" ,"paramtype": "unsigned short"},
-{	"paramname": "usOffMicroSec" ,"paramtype": "unsigned short"},
-{	"paramname": "unRepeat" ,"paramtype": "unsigned short"},
-{	"paramname": "nFlags" ,"paramtype": "unsigned int"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "ShowBindingPanel",
+	"classname": "ISteamUnifiedMessages",
+	"methodname": "GetMethodResponseInfo",
 	"returntype": "bool",
 	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"}
+{	"paramname": "hHandle" ,"paramtype": "ClientUnifiedMessageHandle"},
+{	"paramname": "punResponseSize" ,"paramtype": "uint32 *"},
+{	"paramname": "peResult" ,"paramtype": "EResult *"}
 	 ]
 }
 ,{
-	"classname": "ISteamInput",
-	"methodname": "GetInputTypeForHandle",
-	"returntype": "ESteamInputType",
+	"classname": "ISteamUnifiedMessages",
+	"methodname": "GetMethodResponseData",
+	"returntype": "bool",
 	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"}
+{	"paramname": "hHandle" ,"paramtype": "ClientUnifiedMessageHandle"},
+{	"paramname": "pResponseBuffer" ,"paramtype": "void *"},
+{	"paramname": "unResponseBufferSize" ,"paramtype": "uint32"},
+{	"paramname": "bAutoRelease" ,"paramtype": "bool"}
 	 ]
 }
 ,{
-	"classname": "ISteamInput",
-	"methodname": "GetControllerForGamepadIndex",
-	"returntype": "InputHandle_t",
+	"classname": "ISteamUnifiedMessages",
+	"methodname": "ReleaseMethod",
+	"returntype": "bool",
 	"params": [ 
-{	"paramname": "nIndex" ,"paramtype": "int"}
+{	"paramname": "hHandle" ,"paramtype": "ClientUnifiedMessageHandle"}
 	 ]
 }
 ,{
-	"classname": "ISteamInput",
-	"methodname": "GetGamepadIndexForController",
-	"returntype": "int",
+	"classname": "ISteamUnifiedMessages",
+	"methodname": "SendNotification",
+	"returntype": "bool",
 	"params": [ 
-{	"paramname": "ulinputHandle" ,"paramtype": "InputHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetStringForXboxOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EXboxOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetGlyphForXboxOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EXboxOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "GetActionOriginFromXboxOrigin",
-	"returntype": "EInputActionOrigin",
-	"params": [ 
-{	"paramname": "inputHandle" ,"paramtype": "InputHandle_t"},
-{	"paramname": "eOrigin" ,"paramtype": "EXboxOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamInput",
-	"methodname": "TranslateActionOrigin",
-	"returntype": "EInputActionOrigin",
-	"params": [ 
-{	"paramname": "eDestinationInputType" ,"paramtype": "ESteamInputType"},
-{	"paramname": "eSourceOrigin" ,"paramtype": "EInputActionOrigin"}
+{	"paramname": "pchServiceNotification" ,"paramtype": "const char *"},
+{	"paramname": "pNotificationBuffer" ,"paramtype": "const void *"},
+{	"paramname": "unNotificationBufferSize" ,"paramtype": "uint32"}
 	 ]
 }
 ,{
@@ -6992,6 +5562,14 @@
 	"returntype": "int",
 	"params": [ 
 {	"paramname": "handlesOut" ,"paramtype": "ControllerHandle_t *"}
+	 ]
+}
+,{
+	"classname": "ISteamController",
+	"methodname": "ShowBindingPanel",
+	"returntype": "bool",
+	"params": [ 
+{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"}
 	 ]
 }
 ,{
@@ -7021,41 +5599,6 @@
 }
 ,{
 	"classname": "ISteamController",
-	"methodname": "ActivateActionSetLayer",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "actionSetLayerHandle" ,"paramtype": "ControllerActionSetHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "DeactivateActionSetLayer",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "actionSetLayerHandle" ,"paramtype": "ControllerActionSetHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "DeactivateAllActionSetLayers",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetActiveActionSetLayers",
-	"returntype": "int",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "handlesOut" ,"paramtype": "ControllerActionSetHandle_t *"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
 	"methodname": "GetDigitalActionHandle",
 	"returntype": "ControllerDigitalActionHandle_t",
 	"params": [ 
@@ -7065,7 +5608,7 @@
 ,{
 	"classname": "ISteamController",
 	"methodname": "GetDigitalActionData",
-	"returntype": "struct InputDigitalActionData_t",
+	"returntype": "struct ControllerDigitalActionData_t",
 	"params": [ 
 {	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
 {	"paramname": "digitalActionHandle" ,"paramtype": "ControllerDigitalActionHandle_t"}
@@ -7093,7 +5636,7 @@
 ,{
 	"classname": "ISteamController",
 	"methodname": "GetAnalogActionData",
-	"returntype": "struct InputAnalogActionData_t",
+	"returntype": "struct ControllerAnalogActionData_t",
 	"params": [ 
 {	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
 {	"paramname": "analogActionHandle" ,"paramtype": "ControllerAnalogActionHandle_t"}
@@ -7112,35 +5655,11 @@
 }
 ,{
 	"classname": "ISteamController",
-	"methodname": "GetGlyphForActionOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EControllerActionOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetStringForActionOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EControllerActionOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
 	"methodname": "StopAnalogActionMomentum",
 	"returntype": "void",
 	"params": [ 
 {	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
 {	"paramname": "eAction" ,"paramtype": "ControllerAnalogActionHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetMotionData",
-	"returntype": "struct InputMotionData_t",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"}
 	 ]
 }
 ,{
@@ -7151,107 +5670,6 @@
 {	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
 {	"paramname": "eTargetPad" ,"paramtype": "ESteamControllerPad"},
 {	"paramname": "usDurationMicroSec" ,"paramtype": "unsigned short"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "TriggerRepeatedHapticPulse",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "eTargetPad" ,"paramtype": "ESteamControllerPad"},
-{	"paramname": "usDurationMicroSec" ,"paramtype": "unsigned short"},
-{	"paramname": "usOffMicroSec" ,"paramtype": "unsigned short"},
-{	"paramname": "unRepeat" ,"paramtype": "unsigned short"},
-{	"paramname": "nFlags" ,"paramtype": "unsigned int"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "TriggerVibration",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "usLeftSpeed" ,"paramtype": "unsigned short"},
-{	"paramname": "usRightSpeed" ,"paramtype": "unsigned short"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "SetLEDColor",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "nColorR" ,"paramtype": "uint8"},
-{	"paramname": "nColorG" ,"paramtype": "uint8"},
-{	"paramname": "nColorB" ,"paramtype": "uint8"},
-{	"paramname": "nFlags" ,"paramtype": "unsigned int"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "ShowBindingPanel",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetInputTypeForHandle",
-	"returntype": "ESteamInputType",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetControllerForGamepadIndex",
-	"returntype": "ControllerHandle_t",
-	"params": [ 
-{	"paramname": "nIndex" ,"paramtype": "int"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetGamepadIndexForController",
-	"returntype": "int",
-	"params": [ 
-{	"paramname": "ulControllerHandle" ,"paramtype": "ControllerHandle_t"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetStringForXboxOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EXboxOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetGlyphForXboxOrigin",
-	"returntype": "const char *",
-	"params": [ 
-{	"paramname": "eOrigin" ,"paramtype": "EXboxOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "GetActionOriginFromXboxOrigin",
-	"returntype": "EControllerActionOrigin",
-	"params": [ 
-{	"paramname": "controllerHandle" ,"paramtype": "ControllerHandle_t"},
-{	"paramname": "eOrigin" ,"paramtype": "EXboxOrigin"}
-	 ]
-}
-,{
-	"classname": "ISteamController",
-	"methodname": "TranslateActionOrigin",
-	"returntype": "EControllerActionOrigin",
-	"params": [ 
-{	"paramname": "eDestinationInputType" ,"paramtype": "ESteamInputType"},
-{	"paramname": "eSourceOrigin" ,"paramtype": "EControllerActionOrigin"}
 	 ]
 }
 ,{
@@ -7282,18 +5700,6 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "CreateQueryAllUGCRequest",
-	"returntype": "UGCQueryHandle_t",
-	"params": [ 
-{	"paramname": "eQueryType" ,"paramtype": "EUGCQuery"},
-{	"paramname": "eMatchingeMatchingUGCTypeFileType" ,"paramtype": "EUGCMatchingUGCType"},
-{	"paramname": "nCreatorAppID" ,"paramtype": "AppId_t"},
-{	"paramname": "nConsumerAppID" ,"paramtype": "AppId_t"},
-{	"paramname": "pchCursor" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
 	"methodname": "CreateQueryUGCDetailsRequest",
 	"returntype": "UGCQueryHandle_t",
 	"params": [ 
@@ -7303,7 +5709,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "SendQueryUGCRequest", "callresult": "SteamUGCQueryCompleted_t",
+	"methodname": "SendQueryUGCRequest",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"}
@@ -7326,7 +5732,7 @@
 	"params": [ 
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "index" ,"paramtype": "uint32"},
-{	"paramname": "pchURL" ,"out_string_count": "cchURLSize" ,"paramtype": "char *"},
+{	"paramname": "pchURL" ,"paramtype": "char *"},
 {	"paramname": "cchURLSize" ,"paramtype": "uint32"}
 	 ]
 }
@@ -7337,7 +5743,7 @@
 	"params": [ 
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "index" ,"paramtype": "uint32"},
-{	"paramname": "pchMetadata" ,"out_string_count": "cchMetadatasize" ,"paramtype": "char *"},
+{	"paramname": "pchMetadata" ,"paramtype": "char *"},
 {	"paramname": "cchMetadatasize" ,"paramtype": "uint32"}
 	 ]
 }
@@ -7360,7 +5766,7 @@
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "index" ,"paramtype": "uint32"},
 {	"paramname": "eStatType" ,"paramtype": "EItemStatistic"},
-{	"paramname": "pStatValue" ,"paramtype": "uint64 *"}
+{	"paramname": "pStatValue" ,"paramtype": "uint32 *"}
 	 ]
 }
 ,{
@@ -7380,11 +5786,9 @@
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "index" ,"paramtype": "uint32"},
 {	"paramname": "previewIndex" ,"paramtype": "uint32"},
-{	"paramname": "pchURLOrVideoID" ,"out_string_count": "cchURLSize" ,"paramtype": "char *"},
+{	"paramname": "pchURLOrVideoID" ,"paramtype": "char *"},
 {	"paramname": "cchURLSize" ,"paramtype": "uint32"},
-{	"paramname": "pchOriginalFileName" ,"out_string_count": "cchURLSize" ,"paramtype": "char *"},
-{	"paramname": "cchOriginalFileNameSize" ,"paramtype": "uint32"},
-{	"paramname": "pPreviewType" ,"paramtype": "EItemPreviewType *"}
+{	"paramname": "pbIsImage" ,"paramtype": "bool *"}
 	 ]
 }
 ,{
@@ -7404,9 +5808,9 @@
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "index" ,"paramtype": "uint32"},
 {	"paramname": "keyValueTagIndex" ,"paramtype": "uint32"},
-{	"paramname": "pchKey" ,"out_string_count": "cchKeySize" ,"paramtype": "char *"},
+{	"paramname": "pchKey" ,"paramtype": "char *"},
 {	"paramname": "cchKeySize" ,"paramtype": "uint32"},
-{	"paramname": "pchValue" ,"out_string_count": "cchValueSize" ,"paramtype": "char *"},
+{	"paramname": "pchValue" ,"paramtype": "char *"},
 {	"paramname": "cchValueSize" ,"paramtype": "uint32"}
 	 ]
 }
@@ -7434,15 +5838,6 @@
 	"params": [ 
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "pTagName" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "SetReturnOnlyIDs",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
-{	"paramname": "bReturnOnlyIDs" ,"paramtype": "bool"}
 	 ]
 }
 ,{
@@ -7497,15 +5892,6 @@
 	"params": [ 
 {	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
 {	"paramname": "bReturnTotalOnly" ,"paramtype": "bool"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "SetReturnPlaytimeStats",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCQueryHandle_t"},
-{	"paramname": "unDays" ,"paramtype": "uint32"}
 	 ]
 }
 ,{
@@ -7583,7 +5969,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "CreateItem", "callresult": "CreateItemResult_t",
+	"methodname": "CreateItem",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nConsumerAppId" ,"paramtype": "AppId_t"},
@@ -7673,15 +6059,6 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "SetAllowLegacyUpload",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
-{	"paramname": "bAllowLegacyUpload" ,"paramtype": "bool"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
 	"methodname": "RemoveItemKeyValueTags",
 	"returntype": "bool",
 	"params": [ 
@@ -7701,55 +6078,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "AddItemPreviewFile",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
-{	"paramname": "pszPreviewFile" ,"paramtype": "const char *"},
-{	"paramname": "type" ,"paramtype": "EItemPreviewType"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "AddItemPreviewVideo",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
-{	"paramname": "pszVideoID" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "UpdateItemPreviewFile",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
-{	"paramname": "index" ,"paramtype": "uint32"},
-{	"paramname": "pszPreviewFile" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "UpdateItemPreviewVideo",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
-{	"paramname": "index" ,"paramtype": "uint32"},
-{	"paramname": "pszVideoID" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "RemoveItemPreview",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
-{	"paramname": "index" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "SubmitItemUpdate", "callresult": "SubmitItemUpdateResult_t",
+	"methodname": "SubmitItemUpdate",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "handle" ,"paramtype": "UGCUpdateHandle_t"},
@@ -7768,7 +6097,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "SetUserItemVote", "callresult": "SetUserItemVoteResult_t",
+	"methodname": "SetUserItemVote",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"},
@@ -7777,7 +6106,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "GetUserItemVote", "callresult": "GetUserItemVoteResult_t",
+	"methodname": "GetUserItemVote",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
@@ -7785,16 +6114,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "AddItemToFavorites", "callresult": "UserFavoriteItemsListChanged_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nAppId" ,"paramtype": "AppId_t"},
-{	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "RemoveItemFromFavorites", "callresult": "UserFavoriteItemsListChanged_t",
+	"methodname": "AddItemToFavorites",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nAppId" ,"paramtype": "AppId_t"},
@@ -7803,7 +6123,16 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "SubscribeItem", "callresult": "RemoteStorageSubscribePublishedFileResult_t",
+	"methodname": "RemoveItemFromFavorites",
+	"returntype": "SteamAPICall_t",
+	"params": [ 
+{	"paramname": "nAppId" ,"paramtype": "AppId_t"},
+{	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
+	 ]
+}
+,{
+	"classname": "ISteamUGC",
+	"methodname": "SubscribeItem",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
@@ -7811,7 +6140,7 @@
 }
 ,{
 	"classname": "ISteamUGC",
-	"methodname": "UnsubscribeItem", "callresult": "RemoteStorageUnsubscribePublishedFileResult_t",
+	"methodname": "UnsubscribeItem",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
@@ -7846,7 +6175,7 @@
 	"params": [ 
 {	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"},
 {	"paramname": "punSizeOnDisk" ,"paramtype": "uint64 *"},
-{	"paramname": "pchFolder" ,"out_string_count": "cchFolderSize" ,"paramtype": "char *"},
+{	"paramname": "pchFolder" ,"paramtype": "char *"},
 {	"paramname": "cchFolderSize" ,"paramtype": "uint32"},
 {	"paramname": "punTimeStamp" ,"paramtype": "uint32 *"}
 	 ]
@@ -7888,81 +6217,6 @@
 	 ]
 }
 ,{
-	"classname": "ISteamUGC",
-	"methodname": "StartPlaytimeTracking", "callresult": "StartPlaytimeTrackingResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "pvecPublishedFileID" ,"paramtype": "PublishedFileId_t *"},
-{	"paramname": "unNumPublishedFileIDs" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "StopPlaytimeTracking", "callresult": "StopPlaytimeTrackingResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "pvecPublishedFileID" ,"paramtype": "PublishedFileId_t *"},
-{	"paramname": "unNumPublishedFileIDs" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "StopPlaytimeTrackingForAllItems", "callresult": "StopPlaytimeTrackingResult_t",
-	"returntype": "SteamAPICall_t"
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "AddDependency", "callresult": "AddUGCDependencyResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nParentPublishedFileID" ,"paramtype": "PublishedFileId_t"},
-{	"paramname": "nChildPublishedFileID" ,"paramtype": "PublishedFileId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "RemoveDependency", "callresult": "RemoveUGCDependencyResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nParentPublishedFileID" ,"paramtype": "PublishedFileId_t"},
-{	"paramname": "nChildPublishedFileID" ,"paramtype": "PublishedFileId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "AddAppDependency", "callresult": "AddAppDependencyResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"},
-{	"paramname": "nAppID" ,"paramtype": "AppId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "RemoveAppDependency", "callresult": "RemoveAppDependencyResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"},
-{	"paramname": "nAppID" ,"paramtype": "AppId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "GetAppDependencies", "callresult": "GetAppDependenciesResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamUGC",
-	"methodname": "DeleteItem", "callresult": "DeleteItemResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "nPublishedFileID" ,"paramtype": "PublishedFileId_t"}
-	 ]
-}
-,{
 	"classname": "ISteamAppList",
 	"methodname": "GetNumInstalledApps",
 	"returntype": "uint32"
@@ -7982,7 +6236,7 @@
 	"returntype": "int",
 	"params": [ 
 {	"paramname": "nAppID" ,"paramtype": "AppId_t"},
-{	"paramname": "pchName" ,"out_string": " " ,"paramtype": "char *"},
+{	"paramname": "pchName" ,"paramtype": "char *"},
 {	"paramname": "cchNameMax" ,"paramtype": "int"}
 	 ]
 }
@@ -8021,7 +6275,7 @@
 }
 ,{
 	"classname": "ISteamHTMLSurface",
-	"methodname": "CreateBrowser", "callresult": "HTML_BrowserReady_t",
+	"methodname": "CreateBrowser",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "pchUserAgent" ,"paramtype": "const char *"},
@@ -8160,8 +6414,7 @@
 	"params": [ 
 {	"paramname": "unBrowserHandle" ,"paramtype": "HHTMLBrowser"},
 {	"paramname": "nNativeKeyCode" ,"paramtype": "uint32"},
-{	"paramname": "eHTMLKeyModifiers" ,"paramtype": "ISteamHTMLSurface::EHTMLKeyModifiers"},
-{	"paramname": "bIsSystemKey" ,"paramtype": "bool"}
+{	"paramname": "eHTMLKeyModifiers" ,"paramtype": "ISteamHTMLSurface::EHTMLKeyModifiers"}
 	 ]
 }
 ,{
@@ -8300,23 +6553,6 @@
 }
 ,{
 	"classname": "ISteamHTMLSurface",
-	"methodname": "SetDPIScalingFactor",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "unBrowserHandle" ,"paramtype": "HHTMLBrowser"},
-{	"paramname": "flDPIScaling" ,"paramtype": "float"}
-	 ]
-}
-,{
-	"classname": "ISteamHTMLSurface",
-	"methodname": "OpenDeveloperTools",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "unBrowserHandle" ,"paramtype": "HHTMLBrowser"}
-	 ]
-}
-,{
-	"classname": "ISteamHTMLSurface",
 	"methodname": "AllowStartRequest",
 	"returntype": "void",
 	"params": [ 
@@ -8331,6 +6567,15 @@
 	"params": [ 
 {	"paramname": "unBrowserHandle" ,"paramtype": "HHTMLBrowser"},
 {	"paramname": "bResult" ,"paramtype": "bool"}
+	 ]
+}
+,{
+	"classname": "ISteamHTMLSurface",
+	"methodname": "FileLoadDialogResponse",
+	"returntype": "void",
+	"params": [ 
+{	"paramname": "unBrowserHandle" ,"paramtype": "HHTMLBrowser"},
+{	"paramname": "pchSelectedFiles" ,"paramtype": "const char **"}
 	 ]
 }
 ,{
@@ -8349,18 +6594,6 @@
 {	"paramname": "resultHandle" ,"paramtype": "SteamInventoryResult_t"},
 {	"paramname": "pOutItemsArray" ,"out_array_count": "punOutItemsArraySize" ,"desc": "Output array" ,"paramtype": "struct SteamItemDetails_t *"},
 {	"paramname": "punOutItemsArraySize" ,"paramtype": "uint32 *"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "GetResultItemProperty",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "resultHandle" ,"paramtype": "SteamInventoryResult_t"},
-{	"paramname": "unItemIndex" ,"paramtype": "uint32"},
-{	"paramname": "pchPropertyName" ,"paramtype": "const char *"},
-{	"paramname": "pchValueBuffer" ,"out_string_count": "punValueBufferSizeOut" ,"paramtype": "char *"},
-{	"paramname": "punValueBufferSizeOut" ,"paramtype": "uint32 *"}
 	 ]
 }
 ,{
@@ -8502,7 +6735,7 @@
 }
 ,{
 	"classname": "ISteamInventory",
-	"methodname": "SendItemDropHeartbeat", "desc": "Deprecated method. Playtime accounting is performed on the Steam servers.",
+	"methodname": "SendItemDropHeartbeat", "desc": "Applications which use timed-drop mechanics should call SendItemDropHeartbeat() when active gameplay begins and at least once every two minutes afterwards.",
 	"returntype": "void"
 }
 ,{
@@ -8550,135 +6783,8 @@
 	"params": [ 
 {	"paramname": "iDefinition" ,"paramtype": "SteamItemDef_t"},
 {	"paramname": "pchPropertyName" ,"paramtype": "const char *"},
-{	"paramname": "pchValueBuffer" ,"out_string_count": "punValueBufferSizeOut" ,"paramtype": "char *"},
-{	"paramname": "punValueBufferSizeOut" ,"paramtype": "uint32 *"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "RequestEligiblePromoItemDefinitionsIDs", "callresult": "SteamInventoryEligiblePromoItemDefIDs_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "steamID" ,"paramtype": "class CSteamID"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "GetEligiblePromoItemDefinitionIDs",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "steamID" ,"paramtype": "class CSteamID"},
-{	"paramname": "pItemDefIDs" ,"out_array_count": "punItemDefIDsArraySize" ,"desc": "List of item definition IDs" ,"paramtype": "SteamItemDef_t *"},
-{	"paramname": "punItemDefIDsArraySize" ,"desc": "Size of array is passed in and actual size used is returned in this param" ,"paramtype": "uint32 *"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "StartPurchase", "callresult": "SteamInventoryStartPurchaseResult_t",
-	"returntype": "SteamAPICall_t",
-	"params": [ 
-{	"paramname": "pArrayItemDefs" ,"array_count": "unArrayLength" ,"paramtype": "const SteamItemDef_t *"},
-{	"paramname": "punArrayQuantity" ,"array_count": "unArrayLength" ,"paramtype": "const uint32 *"},
-{	"paramname": "unArrayLength" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "RequestPrices", "callresult": "SteamInventoryRequestPricesResult_t",
-	"returntype": "SteamAPICall_t"
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "GetNumItemsWithPrices",
-	"returntype": "uint32"
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "GetItemsWithPrices",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "pArrayItemDefs" ,"out_array_count": "pArrayItemDefs" ,"desc": "Items with prices" ,"paramtype": "SteamItemDef_t *"},
-{	"paramname": "pCurrentPrices" ,"out_array_count": "pPrices" ,"desc": "List of prices for the given item defs" ,"paramtype": "uint64 *"},
-{	"paramname": "pBasePrices" ,"out_array_count": "pPrices" ,"desc": "List of prices for the given item defs" ,"paramtype": "uint64 *"},
-{	"paramname": "unArrayLength" ,"paramtype": "uint32"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "GetItemPrice",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "iDefinition" ,"paramtype": "SteamItemDef_t"},
-{	"paramname": "pCurrentPrice" ,"paramtype": "uint64 *"},
-{	"paramname": "pBasePrice" ,"paramtype": "uint64 *"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "StartUpdateProperties",
-	"returntype": "SteamInventoryUpdateHandle_t"
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "RemoveProperty",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "SteamInventoryUpdateHandle_t"},
-{	"paramname": "nItemID" ,"paramtype": "SteamItemInstanceID_t"},
-{	"paramname": "pchPropertyName" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "SetProperty",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "SteamInventoryUpdateHandle_t"},
-{	"paramname": "nItemID" ,"paramtype": "SteamItemInstanceID_t"},
-{	"paramname": "pchPropertyName" ,"paramtype": "const char *"},
-{	"paramname": "pchPropertyValue" ,"paramtype": "const char *"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "SetProperty",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "SteamInventoryUpdateHandle_t"},
-{	"paramname": "nItemID" ,"paramtype": "SteamItemInstanceID_t"},
-{	"paramname": "pchPropertyName" ,"paramtype": "const char *"},
-{	"paramname": "bValue" ,"paramtype": "bool"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "SetProperty",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "SteamInventoryUpdateHandle_t"},
-{	"paramname": "nItemID" ,"paramtype": "SteamItemInstanceID_t"},
-{	"paramname": "pchPropertyName" ,"paramtype": "const char *"},
-{	"paramname": "nValue" ,"paramtype": "int64"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "SetProperty",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "SteamInventoryUpdateHandle_t"},
-{	"paramname": "nItemID" ,"paramtype": "SteamItemInstanceID_t"},
-{	"paramname": "pchPropertyName" ,"paramtype": "const char *"},
-{	"paramname": "flValue" ,"paramtype": "float"}
-	 ]
-}
-,{
-	"classname": "ISteamInventory",
-	"methodname": "SubmitUpdateProperties",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "handle" ,"paramtype": "SteamInventoryUpdateHandle_t"},
-{	"paramname": "pResultHandle" ,"paramtype": "SteamInventoryResult_t *"}
+{	"paramname": "pchValueBuffer" ,"out_string_count": "punValueBufferSize" ,"paramtype": "char *"},
+{	"paramname": "punValueBufferSize" ,"paramtype": "uint32 *"}
 	 ]
 }
 ,{
@@ -8695,66 +6801,6 @@
 	"returntype": "bool",
 	"params": [ 
 {	"paramname": "pnNumViewers" ,"paramtype": "int *"}
-	 ]
-}
-,{
-	"classname": "ISteamVideo",
-	"methodname": "GetOPFSettings", "callback": "GetOPFSettingsResult_t",
-	"returntype": "void",
-	"params": [ 
-{	"paramname": "unVideoAppID" ,"paramtype": "AppId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamVideo",
-	"methodname": "GetOPFStringForApp",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "unVideoAppID" ,"paramtype": "AppId_t"},
-{	"paramname": "pchBuffer" ,"paramtype": "char *"},
-{	"paramname": "pnBufferSize" ,"paramtype": "int32 *"}
-	 ]
-}
-,{
-	"classname": "ISteamParentalSettings",
-	"methodname": "BIsParentalLockEnabled",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamParentalSettings",
-	"methodname": "BIsParentalLockLocked",
-	"returntype": "bool"
-}
-,{
-	"classname": "ISteamParentalSettings",
-	"methodname": "BIsAppBlocked",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "nAppID" ,"paramtype": "AppId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamParentalSettings",
-	"methodname": "BIsAppInBlockList",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "nAppID" ,"paramtype": "AppId_t"}
-	 ]
-}
-,{
-	"classname": "ISteamParentalSettings",
-	"methodname": "BIsFeatureBlocked",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "eFeature" ,"paramtype": "EParentalFeature"}
-	 ]
-}
-,{
-	"classname": "ISteamParentalSettings",
-	"methodname": "BIsFeatureInBlockList",
-	"returntype": "bool",
-	"params": [ 
-{	"paramname": "eFeature" ,"paramtype": "EParentalFeature"}
 	 ]
 }
 ,{
@@ -9029,7 +7075,7 @@
 }
 ,{
 	"classname": "ISteamGameServer",
-	"methodname": "GetServerReputation", "callresult": "GSReputation_t",
+	"methodname": "GetServerReputation",
 	"returntype": "SteamAPICall_t"
 }
 ,{
@@ -9082,7 +7128,7 @@
 }
 ,{
 	"classname": "ISteamGameServer",
-	"methodname": "AssociateWithClan", "callresult": "AssociateWithClanResult_t",
+	"methodname": "AssociateWithClan",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDClan" ,"paramtype": "class CSteamID"}
@@ -9090,7 +7136,7 @@
 }
 ,{
 	"classname": "ISteamGameServer",
-	"methodname": "ComputeNewPlayerCompatibility", "callresult": "ComputeNewPlayerCompatibilityResult_t",
+	"methodname": "ComputeNewPlayerCompatibility",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDNewPlayer" ,"paramtype": "class CSteamID"}
@@ -9098,7 +7144,7 @@
 }
 ,{
 	"classname": "ISteamGameServerStats",
-	"methodname": "RequestUserStats", "callresult": "GSStatsReceived_t",
+	"methodname": "RequestUserStats",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDUser" ,"paramtype": "class CSteamID"}
@@ -9185,7 +7231,7 @@
 }
 ,{
 	"classname": "ISteamGameServerStats",
-	"methodname": "StoreUserStats", "callresult": "GSStatsStored_t",
+	"methodname": "StoreUserStats",
 	"returntype": "SteamAPICall_t",
 	"params": [ 
 {	"paramname": "steamIDUser" ,"paramtype": "class CSteamID"}

@@ -485,7 +485,7 @@ sub GetCRCFromVCSFile
 	# unpack arguments
 	my $sInt = "i";
 	my $uInt = "I";
-	if( $filename =~ m/360/ )
+	if( $filename =~ m/\.360\./ )
 	{
 		# Change arguments to "big endian long"
 		$sInt = "N";

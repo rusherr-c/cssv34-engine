@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -380,7 +380,7 @@ void CResListGenerator::LoadMapList( char const *pchGameDir, CUtlVector< CUtlStr
 
 			// Strip trailing CR/LF chars
 			int len = Q_strlen( szMap );
-			while ( len >= 1 && szMap[ len - 1 ] == '\n' || szMap[ len - 1 ] == '\r' )
+			while ( len >= 1 && ( szMap[ len - 1 ] == '\n' || szMap[ len - 1 ] == '\r' ) )
 			{
 				szMap[ len - 1 ] = 0;
 				len = Q_strlen( szMap );

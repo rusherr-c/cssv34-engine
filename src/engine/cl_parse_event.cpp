@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -50,13 +50,13 @@ void CL_DescribeEvent( int slot, CEventInfo *event, const char *eventname )
 //			*pToData - 
 //			*pRecvTable - 
 //-----------------------------------------------------------------------------
-void CL_ParseEventDelta( void *RawData, void *pToData, RecvTable *pRecvTable )
+void CL_ParseEventDelta( void *RawData, void *pToData, RecvTable *pRecvTable, unsigned int uReadBufferSize )
 {
 	// Make sure we have a decoder
 	assert(pRecvTable->m_pDecoder);
 
 	// Only so much data allowed
-	bf_read fromBuf( "CL_ParseEventDelta->fromBuf", RawData, CEventInfo::MAX_EVENT_DATA );
+	bf_read fromBuf( "CL_ParseEventDelta->fromBuf", RawData, uReadBufferSize );
 
 	// First, decode all properties as zeros since temp ents are delta'd from zeros.
 	RecvTable_DecodeZeros( pRecvTable, pToData, -1 );
@@ -112,7 +112,8 @@ void CL_FireEvents( void )
 				pCE->PreDataUpdate( DATA_UPDATE_CREATED );
 
 				// Decode data into client event object
-				CL_ParseEventDelta( ei->pData, pCE->GetDataTableBasePtr(), ei->pClientClass->m_pRecvTable );
+				unsigned int buffer_size = PAD_NUMBER( Bits2Bytes( ei->bits ), 4 );
+				CL_ParseEventDelta( ei->pData, pCE->GetDataTableBasePtr(), ei->pClientClass->m_pRecvTable, buffer_size );
 
 				// Fire the event!!!
 				pCE->PostDataUpdate( DATA_UPDATE_CREATED );

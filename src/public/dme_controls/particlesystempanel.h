@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,7 +12,7 @@
 #pragma once
 #endif
 
-#include "dme_controls/SimplePotteryWheelPanel.h"
+#include "matsys_controls/PotteryWheelPanel.h"
 #include "datamodel/dmattributetypes.h"
 #include "particles/particles.h"
 
@@ -44,9 +44,9 @@ namespace vgui
 //-----------------------------------------------------------------------------
 // Particle System Viewer Panel
 //-----------------------------------------------------------------------------
-class CParticleSystemPanel : public CSimplePotteryWheelPanel
+class CParticleSystemPanel : public CPotteryWheelPanel
 {
-	DECLARE_CLASS_SIMPLE( CParticleSystemPanel, CSimplePotteryWheelPanel );
+	DECLARE_CLASS_SIMPLE( CParticleSystemPanel, CPotteryWheelPanel );
 
 public:
 	// constructor, destructor

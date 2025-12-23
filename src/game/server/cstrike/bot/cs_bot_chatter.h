@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Bot radio chatter system
 //
@@ -41,6 +41,10 @@ class BotMeme
 {
 public:
 	void Transmit( CCSBot *sender ) const;									///< transmit meme to other bots
+	// It is a best practice to always have a virtual destructor in an interface
+	// class. Otherwise if the derived classes have destructors they will not be
+	// called.
+	virtual ~BotMeme() {}
 	virtual void Interpret( CCSBot *sender, CCSBot *receiver ) const = 0;	///< cause the given bot to act on this meme
 };
 

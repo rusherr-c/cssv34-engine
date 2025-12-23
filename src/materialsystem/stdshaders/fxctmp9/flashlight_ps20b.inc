@@ -148,27 +148,6 @@ public:
 		m_bFLASHLIGHTDEPTHFILTERMODE = true;
 #endif
 	}
-private:
-	int m_nDOPIXELFOG;
-#ifdef _DEBUG
-	bool m_bDOPIXELFOG;
-#endif
-public:
-	void SetDOPIXELFOG( int i )
-	{
-		Assert( i >= 0 && i <= 1 );
-		m_nDOPIXELFOG = i;
-#ifdef _DEBUG
-		m_bDOPIXELFOG = true;
-#endif
-	}
-	void SetDOPIXELFOG( bool i )
-	{
-		m_nDOPIXELFOG = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bDOPIXELFOG = true;
-#endif
-	}
 public:
 	flashlight_ps20b_Static_Index( )
 	{
@@ -200,67 +179,21 @@ public:
 		m_bFLASHLIGHTDEPTHFILTERMODE = false;
 #endif // _DEBUG
 		m_nFLASHLIGHTDEPTHFILTERMODE = 0;
-#ifdef _DEBUG
-		m_bDOPIXELFOG = false;
-#endif // _DEBUG
-		m_nDOPIXELFOG = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllStaticVarsDefined = m_bNORMALMAP && m_bNORMALMAP2 && m_bWORLDVERTEXTRANSITION && m_bSEAMLESS && m_bDETAILTEXTURE && m_bDETAIL_BLEND_MODE && m_bFLASHLIGHTDEPTHFILTERMODE && m_bDOPIXELFOG;
+		bool bAllStaticVarsDefined = m_bNORMALMAP && m_bNORMALMAP2 && m_bWORLDVERTEXTRANSITION && m_bSEAMLESS && m_bDETAILTEXTURE && m_bDETAIL_BLEND_MODE && m_bFLASHLIGHTDEPTHFILTERMODE;
 		Assert( bAllStaticVarsDefined );
 #endif // _DEBUG
-		return ( 8 * m_nNORMALMAP ) + ( 24 * m_nNORMALMAP2 ) + ( 48 * m_nWORLDVERTEXTRANSITION ) + ( 96 * m_nSEAMLESS ) + ( 192 * m_nDETAILTEXTURE ) + ( 384 * m_nDETAIL_BLEND_MODE ) + ( 768 * m_nFLASHLIGHTDEPTHFILTERMODE ) + ( 2304 * m_nDOPIXELFOG ) + 0;
+		return ( 4 * m_nNORMALMAP ) + ( 12 * m_nNORMALMAP2 ) + ( 24 * m_nWORLDVERTEXTRANSITION ) + ( 48 * m_nSEAMLESS ) + ( 96 * m_nDETAILTEXTURE ) + ( 192 * m_nDETAIL_BLEND_MODE ) + ( 384 * m_nFLASHLIGHTDEPTHFILTERMODE ) + 0;
 	}
 };
-#define shaderStaticTest_flashlight_ps20b psh_forgot_to_set_static_NORMALMAP + psh_forgot_to_set_static_NORMALMAP2 + psh_forgot_to_set_static_WORLDVERTEXTRANSITION + psh_forgot_to_set_static_SEAMLESS + psh_forgot_to_set_static_DETAILTEXTURE + psh_forgot_to_set_static_DETAIL_BLEND_MODE + psh_forgot_to_set_static_FLASHLIGHTDEPTHFILTERMODE + psh_forgot_to_set_static_DOPIXELFOG + 0
+#define shaderStaticTest_flashlight_ps20b psh_forgot_to_set_static_NORMALMAP + psh_forgot_to_set_static_NORMALMAP2 + psh_forgot_to_set_static_WORLDVERTEXTRANSITION + psh_forgot_to_set_static_SEAMLESS + psh_forgot_to_set_static_DETAILTEXTURE + psh_forgot_to_set_static_DETAIL_BLEND_MODE + psh_forgot_to_set_static_FLASHLIGHTDEPTHFILTERMODE + 0
 class flashlight_ps20b_Dynamic_Index
 {
-private:
-	int m_nFLASHLIGHTSHADOWS;
-#ifdef _DEBUG
-	bool m_bFLASHLIGHTSHADOWS;
-#endif
-public:
-	void SetFLASHLIGHTSHADOWS( int i )
-	{
-		Assert( i >= 0 && i <= 1 );
-		m_nFLASHLIGHTSHADOWS = i;
-#ifdef _DEBUG
-		m_bFLASHLIGHTSHADOWS = true;
-#endif
-	}
-	void SetFLASHLIGHTSHADOWS( bool i )
-	{
-		m_nFLASHLIGHTSHADOWS = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bFLASHLIGHTSHADOWS = true;
-#endif
-	}
-private:
-	int m_nUBERLIGHT;
-#ifdef _DEBUG
-	bool m_bUBERLIGHT;
-#endif
-public:
-	void SetUBERLIGHT( int i )
-	{
-		Assert( i >= 0 && i <= 1 );
-		m_nUBERLIGHT = i;
-#ifdef _DEBUG
-		m_bUBERLIGHT = true;
-#endif
-	}
-	void SetUBERLIGHT( bool i )
-	{
-		m_nUBERLIGHT = i ? 1 : 0;
-#ifdef _DEBUG
-		m_bUBERLIGHT = true;
-#endif
-	}
 private:
 	int m_nPIXELFOGTYPE;
 #ifdef _DEBUG
@@ -282,31 +215,48 @@ public:
 		m_bPIXELFOGTYPE = true;
 #endif
 	}
+private:
+	int m_nFLASHLIGHTSHADOWS;
+#ifdef _DEBUG
+	bool m_bFLASHLIGHTSHADOWS;
+#endif
+public:
+	void SetFLASHLIGHTSHADOWS( int i )
+	{
+		Assert( i >= 0 && i <= 1 );
+		m_nFLASHLIGHTSHADOWS = i;
+#ifdef _DEBUG
+		m_bFLASHLIGHTSHADOWS = true;
+#endif
+	}
+	void SetFLASHLIGHTSHADOWS( bool i )
+	{
+		m_nFLASHLIGHTSHADOWS = i ? 1 : 0;
+#ifdef _DEBUG
+		m_bFLASHLIGHTSHADOWS = true;
+#endif
+	}
 public:
 	flashlight_ps20b_Dynamic_Index()
 	{
 #ifdef _DEBUG
-		m_bFLASHLIGHTSHADOWS = false;
-#endif // _DEBUG
-		m_nFLASHLIGHTSHADOWS = 0;
-#ifdef _DEBUG
-		m_bUBERLIGHT = false;
-#endif // _DEBUG
-		m_nUBERLIGHT = 0;
-#ifdef _DEBUG
 		m_bPIXELFOGTYPE = false;
 #endif // _DEBUG
 		m_nPIXELFOGTYPE = 0;
+#ifdef _DEBUG
+		m_bFLASHLIGHTSHADOWS = false;
+#endif // _DEBUG
+		m_nFLASHLIGHTSHADOWS = 0;
 	}
 	int GetIndex()
 	{
 		// Asserts to make sure that we aren't using any skipped combinations.
 		// Asserts to make sure that we are setting all of the combination vars.
 #ifdef _DEBUG
-		bool bAllDynamicVarsDefined = m_bFLASHLIGHTSHADOWS && m_bUBERLIGHT && m_bPIXELFOGTYPE;
+		bool bAllDynamicVarsDefined = m_bPIXELFOGTYPE && m_bFLASHLIGHTSHADOWS;
 		Assert( bAllDynamicVarsDefined );
 #endif // _DEBUG
-		return ( 1 * m_nFLASHLIGHTSHADOWS ) + ( 2 * m_nUBERLIGHT ) + ( 4 * m_nPIXELFOGTYPE ) + 0;
+		return ( 1 * m_nPIXELFOGTYPE ) + ( 2 * m_nFLASHLIGHTSHADOWS ) + 0;
 	}
 };
-#define shaderDynamicTest_flashlight_ps20b psh_forgot_to_set_dynamic_FLASHLIGHTSHADOWS + psh_forgot_to_set_dynamic_UBERLIGHT + psh_forgot_to_set_dynamic_PIXELFOGTYPE + 0
+#define shaderDynamicTest_flashlight_ps20b psh_forgot_to_set_dynamic_PIXELFOGTYPE + psh_forgot_to_set_dynamic_FLASHLIGHTSHADOWS + 0

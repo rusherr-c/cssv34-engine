@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -49,7 +49,7 @@ void CFontAmalgam::SetName(const char *name)
 //-----------------------------------------------------------------------------
 // Purpose: adds a font to the amalgam
 //-----------------------------------------------------------------------------
-void CFontAmalgam::AddFont(CWin32Font *font, int lowRange, int highRange)
+void CFontAmalgam::AddFont(font_t *font, int lowRange, int highRange)
 {
 	int i = m_Fonts.AddToTail();
 
@@ -75,11 +75,15 @@ void CFontAmalgam::RemoveAll()
 //-----------------------------------------------------------------------------
 // Purpose: returns the font for the given character
 //-----------------------------------------------------------------------------
-CWin32Font *CFontAmalgam::GetFontForChar(int ch)
+font_t *CFontAmalgam::GetFontForChar(int ch)
 {
 	for (int i = 0; i < m_Fonts.Count(); i++)
 	{
-		if ( ch >= m_Fonts[i].lowRange && ch <= m_Fonts[i].highRange )
+#if defined(LINUX)
+        if ( ch >= m_Fonts[i].lowRange && ch <= m_Fonts[i].highRange && m_Fonts[i].font->HasChar(ch))
+#else
+		if (ch >= m_Fonts[i].lowRange && ch <= m_Fonts[i].highRange)
+#endif
 		{
 			Assert( m_Fonts[i].font->IsValid() );
 			return m_Fonts[i].font;
@@ -121,6 +125,18 @@ int CFontAmalgam::GetFontHeight()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: returns requested height of the font
+//-----------------------------------------------------------------------------
+int CFontAmalgam::GetFontHeightRequested()
+{
+	if (!m_Fonts.Count())
+	{
+		return m_iMaxHeight;
+	}
+	return m_Fonts[0].font->GetHeightRequested();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: returns the maximum width of a character in a font
 //-----------------------------------------------------------------------------
 int CFontAmalgam::GetFontMaxWidth()
@@ -133,14 +149,27 @@ int CFontAmalgam::GetFontMaxWidth()
 //-----------------------------------------------------------------------------
 const char *CFontAmalgam::GetFontName(int i)
 {	
-	if (m_Fonts[i].font)
+	if ( m_Fonts.IsValidIndex( i ) && m_Fonts[ i ].font )
 	{
-		return m_Fonts[i].font->GetName();
+		return m_Fonts[ i ].font->GetName();
 	}
 	else
 	{
 		return NULL;
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns the family name of the font that is loaded
+//-----------------------------------------------------------------------------
+const char *CFontAmalgam::GetFontFamilyName( int i )
+{	
+	if ( m_Fonts.IsValidIndex( i ) && m_Fonts[ i ].font )
+	{
+		return m_Fonts[ i ].font->GetFamilyName();
+	}
+	
+	return "";
 }
 
 //-----------------------------------------------------------------------------

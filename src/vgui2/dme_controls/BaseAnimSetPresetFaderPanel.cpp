@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -871,7 +871,7 @@ void CPresetSlider::PaintBackground()
 		int minAlpha = 15;
 		float alphaTarget = 255.0f;
 
-		int curAlpha = max( GetCurrent() * alphaTarget, minAlpha );
+		int curAlpha = max( (int)(GetCurrent() * alphaTarget), minAlpha );
 		 
 		if ( _dragging )
 		{

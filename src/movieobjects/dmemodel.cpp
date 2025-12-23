@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Dme version of a skeletal model (gets compiled into a MDL)
 //
@@ -309,4 +309,27 @@ void CDmeModel::Draw( CDmeDrawSettings *pDrawSettings /* = NULL */ )
 	s_ModelStack.Push( this );
 	BaseClass::Draw( pDrawSettings );
 	s_ModelStack.Pop( );
+}
+
+
+//-----------------------------------------------------------------------------
+// Set if Z is the up axis of the model
+//-----------------------------------------------------------------------------
+void CDmeModel::ZUp( bool bZUp )
+{
+	SetValue( "upAxis", bZUp ? "Z" : "Y" );
+}
+
+
+//-----------------------------------------------------------------------------
+// Returns true if the DmeModel is Z Up.
+// NOTE: Since Y & Z are the only supported modes and Y is the default
+//       because that's how DmeModel data was originally defined,
+//       assume Y is up if the m_UpAxis attribute is not "Z"
+//-----------------------------------------------------------------------------
+bool CDmeModel::IsZUp() const
+{
+	const char *pszZUp = this->GetValueString( "upAxis" );
+
+	return ( pszZUp && *pszZUp ) ? StringHasPrefix( pszZUp, "Z" ) : false;
 }

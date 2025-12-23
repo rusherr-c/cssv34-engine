@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -17,6 +17,7 @@
 #include "convar.h"
 
 #include "tier0/vprof.h"
+#include "tier0/minidump.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -178,7 +179,7 @@ inline bool CStudioRender::IsFrontFacing( const Vector * pnorm, const mstudiobon
 	float z;
 	if (pboneweight->numbones == 1)
 	{
-		z = DotProduct( pnorm->Base(), m_PoseToDecal[pboneweight->bone[0]][2] );
+		z = DotProduct( pnorm->Base(), m_PoseToDecal[(unsigned)pboneweight->bone[0]][2] );
 	}
 	else
 	{
@@ -187,7 +188,7 @@ inline bool CStudioRender::IsFrontFacing( const Vector * pnorm, const mstudiobon
 		z = 0;
 		for (int i = 0; i < pboneweight->numbones; i++)
 		{
-			zbone = DotProduct( pnorm->Base(), m_PoseToDecal[pboneweight->bone[i]][2] );
+			zbone = DotProduct( pnorm->Base(), m_PoseToDecal[(unsigned)pboneweight->bone[i]][2] );
 			z += zbone * pboneweight->weight[i];
 		}
 	}
@@ -204,10 +205,10 @@ inline bool CStudioRender::TransformToDecalSpace( DecalBuildInfo_t& build, const
 
 	if (pboneweight->numbones == 1)
 	{
-		uv.x = DotProduct( pos.Base(), m_PoseToDecal[pboneweight->bone[0]][0] ) + 
-			m_PoseToDecal[pboneweight->bone[0]][0][3];
-		uv.y = DotProduct( pos.Base(), m_PoseToDecal[pboneweight->bone[0]][1] ) + 
-			m_PoseToDecal[pboneweight->bone[0]][1][3];
+		uv.x = DotProduct( pos.Base(), m_PoseToDecal[(unsigned)pboneweight->bone[0]][0] ) + 
+			m_PoseToDecal[(unsigned)pboneweight->bone[0]][0][3];
+		uv.y = DotProduct( pos.Base(), m_PoseToDecal[(unsigned)pboneweight->bone[0]][1] ) + 
+			m_PoseToDecal[(unsigned)pboneweight->bone[0]][1][3];
 	}
 	else
 	{
@@ -215,10 +216,10 @@ inline bool CStudioRender::TransformToDecalSpace( DecalBuildInfo_t& build, const
 		float ubone, vbone;
 		for (int i = 0; i < pboneweight->numbones; i++)
 		{
-			ubone = DotProduct( pos.Base(), m_PoseToDecal[pboneweight->bone[i]][0] ) + 
-				m_PoseToDecal[pboneweight->bone[i]][0][3];
-			vbone = DotProduct( pos.Base(), m_PoseToDecal[pboneweight->bone[i]][1] ) + 
-				m_PoseToDecal[pboneweight->bone[i]][1][3];
+			ubone = DotProduct( pos.Base(), m_PoseToDecal[(unsigned)pboneweight->bone[i]][0] ) + 
+				m_PoseToDecal[(unsigned)pboneweight->bone[i]][0][3];
+			vbone = DotProduct( pos.Base(), m_PoseToDecal[(unsigned)pboneweight->bone[i]][1] ) + 
+				m_PoseToDecal[(unsigned)pboneweight->bone[i]][1][3];
 
 			uv.x += ubone * pboneweight->weight[i];
 			uv.y += vbone * pboneweight->weight[i];
@@ -232,8 +233,8 @@ inline bool CStudioRender::TransformToDecalSpace( DecalBuildInfo_t& build, const
 	float z;
 	if (pboneweight->numbones == 1)
 	{
-		z = DotProduct( pos.Base(), m_PoseToDecal[pboneweight->bone[0]][2] ) + 
-			m_PoseToDecal[pboneweight->bone[0]][2][3];
+		z = DotProduct( pos.Base(), m_PoseToDecal[(unsigned)pboneweight->bone[0]][2] ) + 
+			m_PoseToDecal[(unsigned)pboneweight->bone[0]][2][3];
 	}
 	else
 	{
@@ -241,8 +242,8 @@ inline bool CStudioRender::TransformToDecalSpace( DecalBuildInfo_t& build, const
 		float zbone;
 		for (int i = 0; i < pboneweight->numbones; i++)
 		{
-			zbone = DotProduct( pos.Base(), m_PoseToDecal[pboneweight->bone[i]][2] ) + 
-				m_PoseToDecal[pboneweight->bone[i]][2][3];
+			zbone = DotProduct( pos.Base(), m_PoseToDecal[(unsigned)pboneweight->bone[i]][2] ) + 
+				m_PoseToDecal[(unsigned)pboneweight->bone[i]][2][3];
 			z += zbone * pboneweight->weight[i];
 		}
 	}
@@ -1152,40 +1153,10 @@ void CStudioRender::AddDecal( StudioDecalHandle_t hDecal, const StudioRenderCont
 		return;
 	}
 
-	// Since we're adding this to a studio model, check the decal to see if 
-	// there's an alternate form used for static props...
-	bool found;
-	IMaterialVar* pModelMaterialVar = pDecalMaterial->FindVar( "$modelmaterial", &found, false );
-	if (found)
-	{
-		IMaterial* pModelMaterial = g_pMaterialSystem->FindMaterial( pModelMaterialVar->GetStringValue(), TEXTURE_GROUP_DECAL, false );
-		if ( !IsErrorMaterial( pModelMaterial ) )
-		{
-			pDecalMaterial = pModelMaterial;
-		}
-	}
-
 	// Get dynamic information from the material (fade start, fade time)
 	float fadeStartTime	= 0.0f;
 	float fadeDuration = 0.0f;
 	int flags = 0;
-
-	/*
-	IMaterialVar* decalVar = pDecalMaterial->FindVar( "$decalFadeDuration", &found, false );
-	if ( found  )
-	{
-		flags |= DECAL_DYNAMIC;
-		fadeDuration = decalVar->GetFloatValue();
-		decalVar = pDecalMaterial->FindVar( "$decalFadeTime", &found, false );
-		fadeStartTime = found ? decalVar->GetFloatValue() : 0.0f;
-		fadeStartTime += cl.time;
-	}
-
-	// Is this a second-pass decal?
-	decalVar = pDecalMaterial->FindVar( "$decalSecondPass", &found, false );
-	if ( found  )
-		flags |= DECAL_SECONDPASS;
-	*/
 
 	// This sucker is state needed only when building decals
 	DecalBuildInfo_t buildInfo;
@@ -1412,10 +1383,14 @@ void CStudioRender::DrawSingleBoneDecals( CMeshBuilder& meshBuilder, DecalMateri
 		}
 		meshBuilder.Color4ub( 255, 255, 255, 255 );
 
-		meshBuilder.BoneWeight( 0, 1.0f );
-		meshBuilder.BoneWeight( 1, 0.0f );
-		meshBuilder.BoneWeight( 2, 0.0f );
-		meshBuilder.BoneWeight( 3, 0.0f );
+		if ( meshBuilder.NumBoneWeights() > 0 )	// bone weight of 0 will not write anything, so these calls would be wasted
+		{	
+			meshBuilder.BoneWeight( 0, 1.0f );
+			meshBuilder.BoneWeight( 1, 0.0f );
+			meshBuilder.BoneWeight( 2, 0.0f );
+			meshBuilder.BoneWeight( 3, 0.0f );
+		}
+
 		meshBuilder.BoneMatrix( 0, 0 );
 		meshBuilder.BoneMatrix( 1, 0 );
 		meshBuilder.BoneMatrix( 2, 0 );
@@ -1472,10 +1447,14 @@ void CStudioRender::DrawSingleBoneFlexedDecals( IMatRenderContext *pRenderContex
 
 		meshBuilder.Color4ub( 255, 255, 255, 255 );
 
-		meshBuilder.BoneWeight( 0, 1.0f );
-		meshBuilder.BoneWeight( 1, 0.0f );
-		meshBuilder.BoneWeight( 2, 0.0f );
-		meshBuilder.BoneWeight( 3, 0.0f );
+		if ( meshBuilder.NumBoneWeights() > 0 )	// bone weight of 0 will not write anything, so these calls would be wasted
+		{	
+			meshBuilder.BoneWeight( 0, 1.0f );
+			meshBuilder.BoneWeight( 1, 0.0f );
+			meshBuilder.BoneWeight( 2, 0.0f );
+			meshBuilder.BoneWeight( 3, 0.0f );
+		}
+		
 		meshBuilder.BoneMatrix( 0, 0 );
 		meshBuilder.BoneMatrix( 1, 0 );
 		meshBuilder.BoneMatrix( 2, 0 );
@@ -1584,10 +1563,14 @@ bool CStudioRender::DrawMultiBoneDecals( CMeshBuilder& meshBuilder, DecalMateria
 
 		meshBuilder.Color4ub( 255, 255, 255, 255 );
 
-		meshBuilder.BoneWeight( 0, 1.0f );
-		meshBuilder.BoneWeight( 1, 0.0f );
-		meshBuilder.BoneWeight( 2, 0.0f );
-		meshBuilder.BoneWeight( 3, 0.0f );
+		if ( meshBuilder.NumBoneWeights() > 0 )	// bone weight of 0 will not write anything, so these calls would be wasted
+		{	
+			meshBuilder.BoneWeight( 0, 1.0f );
+			meshBuilder.BoneWeight( 1, 0.0f );
+			meshBuilder.BoneWeight( 2, 0.0f );
+			meshBuilder.BoneWeight( 3, 0.0f );
+		}
+		
 		meshBuilder.BoneMatrix( 0, 0 );
 		meshBuilder.BoneMatrix( 1, 0 );
 		meshBuilder.BoneMatrix( 2, 0 );
@@ -1691,10 +1674,14 @@ bool CStudioRender::DrawMultiBoneFlexedDecals( IMatRenderContext *pRenderContext
 			meshBuilder.TexCoord3f( 2, 0.0f, 0.0f, 0.0f );
 
 			// NOTE: Even if HW morphing is active, since we're using bone 0, it will multiply by identity in the shader
-			meshBuilder.BoneWeight( 0, 1.0f );	
-			meshBuilder.BoneWeight( 1, 0.0f );
-			meshBuilder.BoneWeight( 2, 0.0f );
-			meshBuilder.BoneWeight( 3, 0.0f );
+			if ( meshBuilder.NumBoneWeights() > 0 )	// bone weight of 0 will not write anything, so these calls would be wasted
+			{	
+				meshBuilder.BoneWeight( 0, 1.0f );	
+				meshBuilder.BoneWeight( 1, 0.0f );
+				meshBuilder.BoneWeight( 2, 0.0f );
+				meshBuilder.BoneWeight( 3, 0.0f );
+			}
+			
 			meshBuilder.BoneMatrix( 0, 0 );
 			meshBuilder.BoneMatrix( 1, 0 );
 			meshBuilder.BoneMatrix( 2, 0 );
@@ -1716,9 +1703,9 @@ bool CStudioRender::DrawMultiBoneFlexedDecals( IMatRenderContext *pRenderContext
 			meshBuilder.BoneWeight( 1, pBoneWeights->weight[ 1 ] );
 			meshBuilder.BoneWeight( 2, 1.0f - pBoneWeights->weight[ 1 ] - pBoneWeights->weight[ 0 ] );
 			meshBuilder.BoneWeight( 3, 0.0f );
-			meshBuilder.BoneMatrix( 0, pBoneRemap[ pBoneWeights->bone[0] ] );
-			meshBuilder.BoneMatrix( 1, pBoneRemap[ pBoneWeights->bone[1] ] );
-			meshBuilder.BoneMatrix( 2, pBoneRemap[ pBoneWeights->bone[2] ] );
+			meshBuilder.BoneMatrix( 0, pBoneRemap[ (unsigned)pBoneWeights->bone[0] ] );
+			meshBuilder.BoneMatrix( 1, pBoneRemap[ (unsigned)pBoneWeights->bone[1] ] );
+			meshBuilder.BoneMatrix( 2, pBoneRemap[ (unsigned)pBoneWeights->bone[2] ] );
 			meshBuilder.BoneMatrix( 3, BONE_MATRIX_INDEX_INVALID );
 		}
 

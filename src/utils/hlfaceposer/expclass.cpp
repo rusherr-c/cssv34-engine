@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,12 +10,12 @@
 #include "expclass.h"
 #include "hlfaceposer.h"
 #include "StudioModel.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "FlexPanel.h"
 #include "ControlPanel.h"
 #include "mxExpressionTray.h"
 #include "UtlBuffer.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "ExpressionTool.h"
 #include "faceposer_models.h"
 #include "mdlviewer.h"
@@ -26,6 +26,7 @@
 #include "tier1/utlvector.h"
 
 
+#undef ALIGN4
 #undef ALIGN16
 #define ALIGN4( a ) a = (byte *)((int)((byte *)a + 3) & ~ 3)
 #define ALIGN16( a ) a = (byte *)((int)((byte *)a + 15) & ~ 15)

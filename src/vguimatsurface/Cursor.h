@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Methods associated with the cursor
 //
@@ -13,7 +13,7 @@
 #pragma once
 #endif
 
-#include "vguimatsurface/IMatSystemSurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include <vgui/Cursor.h>
 
 //-----------------------------------------------------------------------------
@@ -33,6 +33,13 @@ void CursorSelect(vgui::HCursor hCursor);
 //-----------------------------------------------------------------------------
 void ActivateCurrentCursor();
 
+
+//-----------------------------------------------------------------------------
+// Handles software cursors
+//-----------------------------------------------------------------------------
+void EnableSoftwareCursor( bool bEnable );
+bool ShouldDrawSoftwareCursor();
+int  GetSoftwareCursorTexture( float *px, float *py );
 
 //-----------------------------------------------------------------------------
 // handles mouse movement

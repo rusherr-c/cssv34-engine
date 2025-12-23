@@ -7,12 +7,8 @@
 $Macro SRCDIR		"..\.."
 $Macro OUTBINDIR	"$SRCDIR\..\game\bin"
 
-$Include "$SRCDIR\vpc_scripts\source_dll_win32_base.vpc"
+$Include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
 
-$Linux
-{
-	$BuildForLinux 1
-}
 $Configuration
 {
 	$Compiler
@@ -23,7 +19,8 @@ $Configuration
 
 	$Linker
 	{
-		$AdditionalDependencies				"odbc32.lib odbccp32.lib"
+		$AdditionalDependencies				"$BASE odbc32.lib odbccp32.lib"
+		$SystemLibraries                                                        "iconv" [$OSXALL]
 	}
 }
 
@@ -31,7 +28,7 @@ $Project "shaderapiempty"
 {
 	$Folder	"Source Files"
 	{
-		$File	"ShaderAPIEmpty.cpp"
+		$File	"shaderapiempty.cpp"
 	}
 
 	$Folder	"Header Files"

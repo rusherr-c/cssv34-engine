@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Basic BOT handling.
 //
@@ -371,9 +371,6 @@ void Bot_Think( CPluginBot *pBot )
 		}
 
 		Bot_FlipOut( pBot, cmd );
-
-		// Fix up the m_fEffects flags
-		pBot->m_BotInterface->PostClientMessagesSent();
 
 		cmd.viewangles = pBot->m_BotInterface->GetLocalAngles();
 		cmd.upmove = 0;

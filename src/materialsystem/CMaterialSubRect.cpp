@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -77,7 +77,7 @@ public:
 	void				Precache();
 	void				Uncache( bool bPreserveVars = false );
 	// If provided, pKeyValues and pPatchKeyValues should come from LoadVMTFile()
-	bool				PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL );
+	bool				PrecacheVars( KeyValues *pKeyValues = NULL, KeyValues *pPatchKeyValues = NULL, CUtlVector<FileNameHandle_t> *pIncludes = NULL, int nFindContext = MATERIAL_FINDCONTEXT_NONE );
 	bool				IsPrecached() const;
 	bool				IsPrecachedVars( ) const;
 	bool				IsManuallyCreated() const;
@@ -100,8 +100,14 @@ public:
 	ShaderRenderState_t *GetRenderState()								{ return m_pMaterialPage->GetRenderState(); }
 	int					GetNumAnimationFrames()							{ return m_pMaterialPage->GetNumAnimationFrames(); }
 
-	void				GetLowResColorSample( float s, float t, float *color ) const { m_pMaterialPage->GetLowResColorSample( s, t, color ); }
-	
+	void				GetLowResColorSample( float s, float t, float *color ) const
+	{
+		if ( m_pMaterialPage ) 
+			m_pMaterialPage->GetLowResColorSample( s, t, color );
+		else
+			color[ 0 ] = color[ 1 ] = color[ 2 ] = 0.0f;
+	}
+
 	bool				UsesEnvCubemap( void )							{ return m_pMaterialPage->UsesEnvCubemap(); }
 	bool				NeedsSoftwareSkinning( void )					{ return m_pMaterialPage->NeedsSoftwareSkinning(); }
 	bool				NeedsSoftwareLighting( void )					{ return m_pMaterialPage->NeedsSoftwareLighting(); }
@@ -155,6 +161,7 @@ public:
 	
 	IShader *			GetShader() const								{ return m_pMaterialPage->GetShader(); }
 	void				CallBindProxy( void *proxyData )				{ m_pMaterialPage->CallBindProxy( proxyData ); }
+	IMaterial			*CheckProxyReplacement( void *proxyData )		{ return m_pMaterialPage->CheckProxyReplacement( proxyData ); }
 	bool				HasProxy( void ) const							{ return m_pMaterialPage->HasProxy(); }
 
 	// Sets the shader associated with the material
@@ -374,7 +381,7 @@ CMaterialSubRect::~CMaterialSubRect()
 	Uncache( );
 	if( m_nRefCount != 0 )
 	{
-		DevWarning( 1, "Reference Count for Material %s (%d) != 0\n", GetName(), m_nRefCount );
+		DevWarning( 2, "Reference Count for Material %s (%d) != 0\n", GetName(), m_nRefCount );
 	}
 
 	if ( m_pMaterialPage )
@@ -389,7 +396,7 @@ CMaterialSubRect::~CMaterialSubRect()
 		m_pVMTKeyValues = NULL;
 	}
 
-	m_aMaterialVars.Purge();
+	// m_aMaterialVars is freed, purged, and lit on fire in Uncache() above.
 
 #ifdef _DEBUG
 	if ( m_pDebugName )
@@ -447,7 +454,7 @@ const char *CMaterialSubRect::GetTextureGroupName() const
 //-----------------------------------------------------------------------------
 int CMaterialSubRect::GetMappingWidth()
 {
-	return m_vecSize.x;
+	return int( m_vecSize.x );
 }
 
 //-----------------------------------------------------------------------------
@@ -455,7 +462,7 @@ int CMaterialSubRect::GetMappingWidth()
 //-----------------------------------------------------------------------------
 int CMaterialSubRect::GetMappingHeight()
 {
-	return m_vecSize.y;
+	return int( m_vecSize.y );
 }
 
 //-----------------------------------------------------------------------------
@@ -560,7 +567,7 @@ void CMaterialSubRect::Precache()
 //-----------------------------------------------------------------------------
 // Purpose:
 //-----------------------------------------------------------------------------
-bool CMaterialSubRect::PrecacheVars( KeyValues * pVMTKeyValues, KeyValues * pPatchKeyValues, CUtlVector<FileNameHandle_t> *pIncludes )
+bool CMaterialSubRect::PrecacheVars( KeyValues * pVMTKeyValues, KeyValues * pPatchKeyValues, CUtlVector<FileNameHandle_t> *pIncludes, int nFindContext )
 {
 	// FIXME:  Should call through to the parent material for all of this???
 	// We should get both parameters or neither
@@ -638,32 +645,31 @@ void CMaterialSubRect::ParseMaterialVars( KeyValues &keyValues )
 	{
 		DevWarning( 1, "CMaterialSubRect::InitializeShader: Shader not specified in material %s.\n", GetName() );
 		Assert( 0 );
-		pShaderName = IsPC() ? "Wireframe_DX6" : "Wireframe_DX9";
+		pShaderName = IsPC() && !IsEmulatingGL() ? "Wireframe_DX6" : "Wireframe_DX9";
 	}
 
 	// Verify we have the correct "shader."  There is only one type.
-	if ( !Q_strcmp( pShaderName, "Subrect" ) )
+	// Needs to be case insensitive because we can't guarantee case specified in VMTs
+	if ( !Q_stricmp( pShaderName, "Subrect" ) )
 	{
 		KeyValues *pVar = pKeyValues->GetFirstSubKey();
 		while ( pVar )
 		{
-			if ( !Q_strcmp( pVar->GetName(), "$Pos" ) )
+			if ( !Q_stricmp( pVar->GetName(), "$Pos" ) )
 			{
 				sscanf( pVar->GetString(), "%f %f", &m_vecOffset.x, &m_vecOffset.y );
 			}
-
-			if ( !Q_strcmp( pVar->GetName(), "$Size" ) )
+			else if ( !Q_stricmp( pVar->GetName(), "$Size" ) )
 			{
 				sscanf( pVar->GetString(), "%f %f", &m_vecSize.x, &m_vecSize.y );
 			}
-
-			if ( !Q_strcmp( pVar->GetName(), "$Material" ) )
+			else if ( !Q_stricmp( pVar->GetName(), "$Material" ) )
 			{
 				m_pMaterialPage = static_cast<IMaterialInternal*>( MaterialSystem()->FindMaterial( pVar->GetString(), TEXTURE_GROUP_DECAL ) );
 				m_pMaterialPage = m_pMaterialPage->GetRealTimeVersion(); //always work with the realtime material internally
 			}
 
-//			if ( !Q_strcmp( pVar->GetName(), "$decalscale" ) )
+//			else if ( !Q_stricmp( pVar->GetName(), "$decalscale" ) )
 //			{
 //				m_flDecalScale = pVar->GetFloat();
 //			}
@@ -802,19 +808,29 @@ void CMaterialSubRect::SetEnumerationID( int id )
 //-----------------------------------------------------------------------------
 void CMaterialSubRect::Uncache( bool bPreserveVars )
 {
+	MaterialLock_t hMaterialLock = MaterialSystem()->Lock();
+
 	// Don't bother if we're not cached
-	if( IsPrecached() )
-	{		
+	if ( IsPrecached() )
+	{
 		m_fLocal &= ~MATERIALSUBRECT_IS_PRECACHED;
 	}
 
 	if ( !bPreserveVars )
 	{
-		if( IsPrecachedVars() )
+		if ( IsPrecachedVars() )
 		{
+			for ( int i = 0; i < m_aMaterialVars.Count(); ++i )
+			{
+				IMaterialVar::Destroy( m_aMaterialVars[i] );
+			}
+			m_aMaterialVars.Purge();
+
 			m_fLocal &= ~MATERIALSUBRECT_VARS_IS_PRECACHED;
 		}
 	}
+
+	MaterialSystem()->Unlock( hMaterialLock );
 }
 
 //-----------------------------------------------------------------------------

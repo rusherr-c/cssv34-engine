@@ -1,3 +1,4 @@
+//========= Copyright Valve Corporation, All rights reserved. ============//
 #include "tier0/platform.h"
 #include "tier0/progressbar.h"
 #include "bitmap/float_bm.h"
@@ -86,7 +87,7 @@ int main( int argc, char ** argv )
 							}
 						}
 					// done
-					float dnum = min( 0.5, FLerp( 0, .5, 0, max_rad, closest_dist ));
+					float dnum = min( 0.5f, FLerp( 0, .5, 0, max_rad, closest_dist ));
 					if ( !inside_test )
 						dnum =- dnum;
 					lores.Pixel( x, y, comp ) = 0.5 + dnum;

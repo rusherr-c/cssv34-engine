@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,9 +10,8 @@
 #pragma once
 #endif
 
-//#ifdef _X360
 #define DEMO_FILE_UTLBUFFER 1
-//#endif
+#define DEMO_FILE_MAX_STRINGTABLE_SIZE 5000000 // 5 mb
 
 #include "demo.h"
 
@@ -25,6 +24,10 @@
 
 #include "tier1/bitbuf.h"
 
+//-----------------------------------------------------------------------------
+// Forward declarations
+//-----------------------------------------------------------------------------
+class IDemoBuffer;
 
 //-----------------------------------------------------------------------------
 // Demo file 
@@ -35,7 +38,7 @@ public:
 	CDemoFile();
 	~CDemoFile();
 
-	bool	Open(const char *name, bool bReadOnly);
+	bool	Open(const char *name, bool bReadOnly, bool bMemoryBuffer = false, int nBufferSize = 0, bool bAllowHeaderWrite = true);
 	bool	IsOpen();
 	void	Close();
 
@@ -61,6 +64,9 @@ public:
 	void	WriteNetworkDataTables( bf_write *buf, int tick );
 	int		ReadNetworkDataTables( bf_read *buf );
 	
+	void	WriteStringTables( bf_write *buf, int tick );
+	int		ReadStringTables( bf_read *buf );
+
 	void	WriteUserCmd( int cmdnumber, const char *buffer, unsigned char bytes, int tick );
 	int		ReadUserCmd( char *buffer, int &size );
 
@@ -69,16 +75,14 @@ public:
 
 	void	WriteFileBytes( FileHandle_t fh, int length );
 
+	// Returns the PROTOCOL_VERSION used when .dem was recorded
+	int		GetProtocolVersion();
 public:
 	char			m_szFileName[MAX_PATH];	//name of current demo file
 	demoheader_t    m_DemoHeader;  //general demo info
-
-private:
-#ifdef DEMO_FILE_UTLBUFFER
-	CUtlStreamBuffer m_Buffer;
-#else
-	FileHandle_t	m_hDemoFile;	// filesystem handle
-#endif
+	CUtlBuffer		*m_pBuffer;
+	bool			m_bAllowHeaderWrite;
+	bool			m_bIsStreamBuffer;
 };
 
 #endif // DEMOFILE_H

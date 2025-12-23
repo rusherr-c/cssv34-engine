@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -6,7 +6,7 @@
 #define PROTECTED_THINGS_DISABLE
 #undef PROTECT_FILEIO_FUNCTIONS
 #undef fopen
-#include <windows.h>
+#include "winlite.h"
 #include "basetypes.h"
 
 #include "utlvector.h"
@@ -17,12 +17,13 @@
 
 #include "bugreporter/bugreporter.h"
 #include "filesystem_tools.h"
-#include "keyvalues.h"
+#include "KeyValues.h"
 #include "netadr.h"
+#include "steam/steamclientpublic.h"
 
 bool UploadBugReport(
 	const netadr_t& cserIP,
-	const TSteamGlobalUserID& userid,
+	const CSteamID& userid,
 	int build,
 	char const *title,
 	char const *body,
@@ -243,7 +244,7 @@ private:
 
 	CBug						*m_pBug;
 	netadr_t					m_cserIP;
-	TSteamGlobalUserID			m_SteamID;
+	CSteamID			m_SteamID;
 };
 
 CBugReporter::CBugReporter()
@@ -690,11 +691,11 @@ void CBugReporter::SetExeName( char const *exename )
 	Q_strncpy( m_pBug->exename, exename, sizeof( m_pBug->exename ) );
 }
 
-void CBugReporter::SetGameDirectory( char const *gamedir )
+void CBugReporter::SetGameDirectory( char const *pchGamedir )
 {
 	Assert( m_pBug );
 
-	Q_FileBase( gamedir, m_pBug->gamedir, sizeof( m_pBug->gamedir ) );
+	Q_FileBase( pchGamedir, m_pBug->gamedir, sizeof( m_pBug->gamedir ) );
 }
 
 void CBugReporter::SetRAM( int ram )
@@ -737,8 +738,8 @@ void CBugReporter::SetCSERAddress( const struct netadr_s& adr )
 
 void CBugReporter::SetSteamUserID( void *steamid, int idsize )
 {
-	Assert( idsize == sizeof( TSteamGlobalUserID ) );
-	m_SteamID = *( TSteamGlobalUserID * )steamid;
+	Assert( idsize == sizeof( uint64 ) );
+	m_SteamID.SetFromUint64( *((uint64*)steamid) );
 }
 
 EXPOSE_SINGLE_INTERFACE( CBugReporter, IBugReporter, INTERFACEVERSION_BUGREPORTER );

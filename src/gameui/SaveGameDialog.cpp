@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -18,7 +18,7 @@
 #include "vgui_controls/QueryBox.h"
 
 #include "KeyValues.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,7 +92,7 @@ void CSaveGameDialog::OnCommand( const char *command )
 			// save to a new name
 			char saveName[128];
 			FindSaveSlot( saveName, sizeof(saveName) );
-			if ( saveName && saveName[ 0 ] )
+			if ( saveName[ 0 ] )
 			{
 				// Load the game, return to top and switch to engine
 				char sz[ 256 ];
@@ -142,7 +142,7 @@ void CSaveGameDialog::FindSaveSlot( char *buffer, int bufsize )
 	char szFileName[512];
 	for (int i = 0; i < 1000; i++)
 	{
-		Q_snprintf(szFileName, sizeof( szFileName ), "save/Half-Life-%03i.sav", i );
+		Q_snprintf(szFileName, sizeof( szFileName ), "save/half-life-%03i.sav", i );
 
 		FileHandle_t fp = g_pFullFileSystem->Open( szFileName, "rb" );
 		if (!fp)

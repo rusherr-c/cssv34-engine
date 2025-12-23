@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -145,19 +145,9 @@ int SV_FindOrAddDecal(const char *name, bool preload )
 // Purpose: 
 // Input  : *name - 
 //-----------------------------------------------------------------------------
-void SV_ForceExactFile( const char *name )
-{
-	DownloadListGenerator().ForceExactFile( name, CONSISTENCY_EXACT );
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *name - 
-//-----------------------------------------------------------------------------
 void SV_ForceSimpleMaterial( const char *name )
 {
-	DownloadListGenerator().ForceExactFile( name, CONSISTENCY_SIMPLE_MATERIAL );
+	DownloadListGenerator().ForceSimpleMaterial( name );
 }
 
 
@@ -489,7 +479,6 @@ INetworkStringTable *CGameServer::GetDecalPrecacheTable( void ) const
 {
 	return m_pDecalPrecacheTable;
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 

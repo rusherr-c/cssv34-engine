@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,14 +34,13 @@ public:
 	virtual bool Deploy();
 	virtual bool Reload();
 
+ 	virtual float GetInaccuracy() const;
+
 	virtual CSWeaponID GetWeaponID( void ) const		{ return WEAPON_MP5NAVY; }
 
 
 private:
-
 	CWeaponMP5Navy( const CWeaponMP5Navy & );
-
-	void MP5NFire( float flSpread );
 };
 
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponMP5Navy, DT_WeaponMP5Navy )
@@ -87,26 +86,34 @@ bool CWeaponMP5Navy::Reload( )
 	return ret;
 }
 
+float CWeaponMP5Navy::GetInaccuracy() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+	{
+		CCSPlayer *pPlayer = GetPlayerOwner();
+		if ( !pPlayer )
+			return 0.0f;
+	
+		if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+			return 0.2f * m_flAccuracy;
+		else
+			return 0.04f * m_flAccuracy;
+	}
+	else
+		return BaseClass::GetInaccuracy();
+}
+
 void CWeaponMP5Navy::PrimaryAttack( void )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
-	if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
-		MP5NFire( 0.2f * m_flAccuracy );
-	else
-		MP5NFire( 0.04f * m_flAccuracy );
-}
-
-void CWeaponMP5Navy::MP5NFire( float flSpread )
-{
-	if ( !CSBaseGunFire( flSpread, GetCSWpnData().m_flCycleTime, true ) )
+	if ( !CSBaseGunFire( GetCSWpnData().m_flCycleTime, Primary_Mode ) )
 		return;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
-
 	// CSBaseGunFire can kill us, forcing us to drop our weapon, if we shoot something that explodes
+	pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return;
 
@@ -120,5 +127,3 @@ void CWeaponMP5Navy::MP5NFire( float flSpread )
 	else
 		pPlayer->KickBack (0.25, 0.175, 0.125, 0.02, 2.25, 1.25, 10);
 }
-
-

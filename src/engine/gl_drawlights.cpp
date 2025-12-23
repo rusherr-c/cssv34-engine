@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -280,18 +280,18 @@ void DrawSpotLight( dworldlight_t *pLight )
 		
 		float flRadius = flDist * flTanAngle;
 
-		float flAngle = 0;
+		float flTempAngle = 0;
 		for ( int j = 0; j < SPOT_RADIAL_GRID; ++j )
 		{
-			float flSin = sin(DEG2RAD(flAngle));
-			float flCos = cos(DEG2RAD(flAngle));
+			float flSin = sin( DEG2RAD( flTempAngle ) );
+			float flCos = cos( DEG2RAD( flTempAngle ) );
 			VectorMA( vecCenter, flRadius * flCos, xaxis, pt );
 			VectorMA( pt, flRadius * flSin, yaxis, pt );
 
 			meshBuilder.Position3fv( pt.Base() );
 			meshBuilder.AdvanceVertex();
 
-			flAngle += dTheta;
+			flTempAngle += dTheta;
 		}
 
 		flDist += SPOT_GRID_LINE_DISTANCE;

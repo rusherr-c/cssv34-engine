@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -31,10 +31,10 @@ bool SceneManager_SaveSentenceToWavFile( char const *wavfile, CSentence& sentenc
 void SceneManager_AddWindowStyle( mxWindow *w, int addbits );
 void SceneManager_MakeToolWindow( mxWindow *w, bool smallcaption );
 
-char *va( const char *fmt, ... );
-void Con_Printf( const char *fmt, ... );
-void Con_Overprintf( const char *fmt, ... );
-void Con_ColorPrintf( int r, int g, int b, const char *fmt, ... );
+char *va( PRINTF_FORMAT_STRING const char *fmt, ... );
+void Con_Printf( PRINTF_FORMAT_STRING const char *fmt, ... );
+void Con_Overprintf( PRINTF_FORMAT_STRING const char *fmt, ... );
+void Con_ColorPrintf( int r, int g, int b, PRINTF_FORMAT_STRING const char *fmt, ... );
 
 char *SceneManager_MakeWindowsSlashes( char *pname );
 const char *SceneManager_GetGameDirectory( void );

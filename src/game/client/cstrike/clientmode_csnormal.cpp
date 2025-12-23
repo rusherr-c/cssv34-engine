@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,13 +10,13 @@
 #include "clientmode_csnormal.h"
 #include "cdll_client_int.h"
 #include "iinput.h"
-#include "vgui/isurface.h"
-#include "vgui/ipanel.h"
+#include "vgui/ISurface.h"
+#include "vgui/IPanel.h"
 #include <vgui_controls/AnimationController.h>
 #include "ivmodemanager.h"
-#include "BuyMenu.h"
+#include "buymenu.h"
 #include "filesystem.h"
-#include "vgui/ivgui.h"
+#include "vgui/IVGui.h"
 #include "hud_basechat.h"
 #include "view_shared.h"
 #include "view.h"
@@ -28,7 +28,7 @@
 #include <imapoverview.h>
 #include "c_playerresource.h"
 #include "c_soundscape.h"
-#include <keyvalues.h>
+#include <KeyValues.h>
 #include "text_message.h"
 #include "panelmetaclassmgr.h"
 #include "vguicenterprint.h"
@@ -41,6 +41,28 @@
 #include "usermessages.h"
 #include "prediction.h"
 #include "datacache/imdlcache.h"
+//=============================================================================
+// HPE_BEGIN:
+// [tj] Needed to retrieve achievement text
+// [menglish] Need access to message macros
+//=============================================================================
+ 
+#include "achievementmgr.h"
+#include "hud_macros.h"
+#include "c_plantedc4.h"
+#include "tier1/fmtstr.h"
+#include "history_resource.h"
+#include "cs_client_gamestats.h"
+
+// [tj] We need to forward declare this, since the definition is all inside the implementation file 
+class CHudHintDisplay;
+ 
+//=============================================================================
+// HPE_END
+//=============================================================================
+
+
+void __MsgFunc_MatchEndConditions( bf_read &msg );
 
 class CHudChat;
 
@@ -85,18 +107,57 @@ void SetBuyData( const ConVar &buyVar, const char *filename )
 	if ( *buyVar.GetString() )
 		return;
 
-	// read in the auto buy string file and construct the string we will send to the mp.dll.
-	const char *pfile = (char*)UTIL_LoadFileForMe( filename, NULL );
-	if (pfile == NULL)
+	// First, look for a mapcycle file in the cfg directory, which is preferred
+	char szRecommendedName[ 256 ];
+	char szResolvedName[ 256 ];
+	V_sprintf_safe( szRecommendedName, "cfg/%s", filename );
+	V_strcpy_safe( szResolvedName, szRecommendedName );
+	if ( filesystem->FileExists( szResolvedName, "GAME" ) )
 	{
+		Msg( "Loading '%s'.\n", szResolvedName );
+	}
+	else
+	{
+		// Check the root
+		V_strcpy_safe( szResolvedName, filename );
+		if ( filesystem->FileExists( szResolvedName, "GAME" ) )
+		{
+			Msg( "Loading '%s'  ('%s' was not found.)\n", szResolvedName, szRecommendedName );
+		}
+		else
+		{
+
+			// Try cfg/xxx_default.txt
+			V_strcpy_safe( szResolvedName, szRecommendedName );
+			char *dotTxt = V_stristr( szResolvedName, ".txt" );
+			Assert( dotTxt );
+			if ( dotTxt )
+			{
+				V_strcpy( dotTxt, "_default.txt" );
+			}
+			if ( !filesystem->FileExists( szResolvedName, "GAME" ) )
+			{
+				Warning( "Not loading buy data.  Neither '%s' nor %s were found.\n", szResolvedName, szRecommendedName );
+				return;
+			}
+			Msg( "Loading '%s'\n", szResolvedName );
+		}
+	}
+
+	CUtlBuffer buf;
+	if ( !filesystem->ReadFile( szResolvedName, "GAME", buf ) )
+	{
+		// WAT
+		Warning( "Failed to load '%s'.\n", szResolvedName );
 		return;
 	}
+	buf.PutChar('\0');
 
 	char token[256];
 	char buystring[256];
-	Q_snprintf( buystring, sizeof(buystring), "setinfo %s \"", buyVar.GetName() );
+	V_sprintf_safe( buystring, "setinfo %s \"", buyVar.GetName() );
 
-	pfile = engine->ParseFile( pfile, token, sizeof(token) );
+	const char *pfile = engine->ParseFile( (const char *)buf.Base(), token, sizeof(token) );
 
 	bool first = true;
 
@@ -115,8 +176,6 @@ void SetBuyData( const ConVar &buyVar, const char *filename )
 
 		pfile = engine->ParseFile( pfile, token, sizeof(token) );
 	}
-
-	UTIL_FreeFile((byte *)pfile);
 
 	Q_strncat(buystring, "\"", sizeof(buystring), COPY_ALL_CHARACTERS);
 
@@ -225,6 +284,7 @@ void CCSModeManager::LevelShutdown( void )
 //-----------------------------------------------------------------------------
 ClientModeCSNormal::ClientModeCSNormal()
 {
+	HOOK_MESSAGE( MatchEndConditions );
 }
 
 void ClientModeCSNormal::Init()
@@ -236,12 +296,34 @@ void ClientModeCSNormal::Init()
 	ListenForGameEvent( "player_team" );
 	ListenForGameEvent( "player_death" );
 	ListenForGameEvent( "bomb_planted" );
+	ListenForGameEvent( "bomb_exploded" );
 	ListenForGameEvent( "bomb_defused" );
 	ListenForGameEvent( "hostage_killed" );
-	ListenForGameEvent( "hostage_hurt" );
-	ListenForGameEvent( "round_end_message" );
+	ListenForGameEvent( "hostage_hurt" );	
 
 	usermessages->HookMessage( "KillCam", MsgFunc_KillCam );
+
+	//=============================================================================
+	// HPE_BEGIN:
+	// [tj] Add the shared HUD elements to the render groups responsible for hiding 
+	//		conflicting UI
+	//=============================================================================
+	CHudElement* hintBox = (CHudElement*)GET_HUDELEMENT( CHudHintDisplay );
+	if (hintBox)
+	{
+		hintBox->RegisterForRenderGroup("hide_for_scoreboard");
+		hintBox->RegisterForRenderGroup("hide_for_round_panel");
+	}
+
+
+	CHudElement* historyResource = (CHudElement*)GET_HUDELEMENT( CHudHistoryResource );
+	if (historyResource)
+	{
+		historyResource->RegisterForRenderGroup("hide_for_scoreboard");		
+	}
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 }
 
 void ClientModeCSNormal::InitViewport()
@@ -340,10 +422,10 @@ int	ClientModeCSNormal::KeyInput( int down, ButtonCode_t keynum, const char *psz
 }
 
 
-ClientModeCSNormal g_ClientModeNormal;
 
 IClientMode *GetClientModeNormal()
 {
+	static ClientModeCSNormal g_ClientModeNormal;
 	return &g_ClientModeNormal;
 }
 
@@ -431,38 +513,25 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 			C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "Event.RoundDraw");
 		}
 		
-		// show centerprint message 
-		internalCenterPrint->Print( hudtextmessage->LookupString( event->GetString("message") ) );
-	}
-
-	else if ( Q_strcmp( "round_end_message", eventname ) == 0 )
-	{
-		int winningTeam = event->GetInt("winner");
-		int reason = event->GetInt("reason");
-
-		// play endround announcer sound
-		if ( winningTeam == TEAM_CT )
+		//=============================================================================
+		// HPE_BEGIN:
+		// [pfreese] Only show centerprint message for game commencing; the rest of 
+		// these messages are handled by the end-of-round panel.
+		// [Forrest] Show all centerprint messages if the end-of-round panel is disabled.
+		//=============================================================================
+		static ConVarRef sv_nowinpanel( "sv_nowinpanel" );
+		static ConVarRef cl_nowinpanel( "cl_nowinpanel" );
+		if ( reason == Game_Commencing || sv_nowinpanel.GetBool() || cl_nowinpanel.GetBool() )
 		{
-			if ( reason == Bomb_Defused )
-			{
-				C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "Event.BombDefused");
-			}
-			else
-			{
-				C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "Event.CTWin");
-			}
-		}
-		else if ( winningTeam == TEAM_TERRORIST )
-		{
-			C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "Event.TERWin");
-		}
-		else
-		{
-			C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "Event.RoundDraw");
-		}
+			internalCenterPrint->Print( hudtextmessage->LookupString( event->GetString("message") ) );
 
-		// show centerprint message 
-		internalCenterPrint->Print( hudtextmessage->LookupString( event->GetString("message") ) );
+			// we are starting a new round; clear the current match stats
+			g_CSClientGameStats.ResetMatchStats();
+		}
+		
+		//=============================================================================
+		// HPE_END
+		//=============================================================================
 	}
 
 	else if ( Q_strcmp( "player_team", eventname ) == 0 )
@@ -496,7 +565,7 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 
 	else if ( Q_strcmp( "bomb_planted", eventname ) == 0 )
 	{
-		// C_BasePlayer *pPlayer = USERID2PLAYER( event->GetInt("userid") );
+		//C_BasePlayer *pPlayer = USERID2PLAYER( event->GetInt("userid") );
 
 		// show centerprint message
 		internalCenterPrint->Print( "#Cstrike_TitlesTXT_Bomb_Planted" );
@@ -509,6 +578,24 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 	{
 		// C_BasePlayer *pPlayer = USERID2PLAYER( event->GetInt("userid") );
 	}
+	//=============================================================================
+	// HPE_BEGIN:
+	// [menglish] Tell the client side bomb that the bomb has exploding here creating the explosion particle effect
+	//=============================================================================
+	 
+	else if ( Q_strcmp( "bomb_exploded", eventname ) == 0 )
+	{
+		if ( g_PlantedC4s.Count() > 0 )
+		{
+			// bomb is planted
+			C_PlantedC4 *pC4 = g_PlantedC4s[0];
+			pC4->Explode();
+		}
+	}
+	 
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 
 	else if ( Q_strcmp( "hostage_killed", eventname ) == 0 )
 	{
@@ -537,7 +624,13 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 	else if ( Q_strcmp( "player_death", eventname ) == 0 )
 	{
 		C_BasePlayer *pPlayer = USERID2PLAYER( event->GetInt("userid") );
-		
+
+		C_CSPlayer* csPlayer = ToCSPlayer(pPlayer);
+		if (csPlayer)
+		{
+			csPlayer->ClearSoundEvents();
+		}
+
 		if ( pPlayer == C_BasePlayer::GetLocalPlayer() )
 		{
 			// we just died, hide any buy panels
@@ -553,6 +646,84 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 	{
 		return; // server sends a colorized text string for this
 	}
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj] We handle this here instead of in the base class 
+    //      The reason is that we don't use string tables to localize.
+    //      Instead, we use the steam localization mechanism.
+    //
+    // [dwenger] Remove dependency on stats system for name of achievement.
+    //=============================================================================
+     
+    else if ( Q_strcmp( "achievement_earned", eventname ) == 0 )
+    {
+        CBaseHudChat *hudChat = (CBaseHudChat *)GET_HUDELEMENT( CHudChat );
+        int iPlayerIndex = event->GetInt( "player" );
+        C_BasePlayer *pPlayer = UTIL_PlayerByIndex( iPlayerIndex );
+        int iAchievement = event->GetInt( "achievement" );
+
+        if ( !hudChat || !pPlayer )
+            return;
+
+
+        CAchievementMgr *pAchievementMgr = dynamic_cast<CAchievementMgr *>( engine->GetAchievementMgr() );
+        if ( !pAchievementMgr )
+            return;
+
+        IAchievement *pAchievement = pAchievementMgr->GetAchievementByID( iAchievement );
+        if ( pAchievement )
+        {
+            if ( !pPlayer->IsDormant() && pPlayer->ShouldAnnounceAchievement() )
+            {
+                pPlayer->SetNextAchievementAnnounceTime( gpGlobals->curtime + ACHIEVEMENT_ANNOUNCEMENT_MIN_TIME );
+
+                //Do something for the player - Actually we should probably do this client-side when the achievement is first earned.
+                if (pPlayer->IsLocalPlayer()) 
+                {
+                }
+                pPlayer->OnAchievementAchieved( iAchievement );
+            }
+
+            if ( g_PR )
+            {
+                wchar_t wszPlayerName[MAX_PLAYER_NAME_LENGTH];
+                g_pVGuiLocalize->ConvertANSIToUnicode( g_PR->GetPlayerName( iPlayerIndex ), wszPlayerName, sizeof( wszPlayerName ) );
+
+                wchar_t achievementName[1024];
+                const wchar_t* constAchievementName = &achievementName[0];
+
+                constAchievementName = ACHIEVEMENT_LOCALIZED_NAME( pAchievement );
+
+                if (constAchievementName)
+                {
+                    wchar_t wszLocalizedString[128];
+                    g_pVGuiLocalize->ConstructString( wszLocalizedString, sizeof( wszLocalizedString ), g_pVGuiLocalize->Find( "#Achievement_Earned" ), 2, wszPlayerName, constAchievementName/*wszAchievementString*/ );
+
+                    char szLocalized[128];
+                    g_pVGuiLocalize->ConvertUnicodeToANSI( wszLocalizedString, szLocalized, sizeof( szLocalized ) );
+
+                    hudChat->ChatPrintf( iPlayerIndex, CHAT_FILTER_ACHIEVEMENT, "%s", szLocalized );
+
+					/*
+                    if (pPlayer->IsLocalPlayer()) 
+                    {
+                        char achievementDescription[1024];
+                        const char* constAchievementDescription = &achievementDescription[0];
+
+                        constAchievementDescription = pUserStats->GetAchievementDisplayAttribute( pAchievement->GetName(), "desc" );  
+                        hudChat->ChatPrintf( iPlayerIndex, CHAT_FILTER_ACHIEVEMENT, "(%s)", constAchievementDescription );
+                    }
+					*/
+                }
+            }
+        }
+    }
+     
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
+    
 
 	else
 	{
@@ -701,22 +872,6 @@ void UpdateClassImageEntity(
 		origin = tr.endpos;
 	}
 
-	float ambient = engine->GetLightForPoint( origin, true ).Length();
-
-	// Make a light so the model is well lit.
-	dlight_t *dl = effects->CL_AllocDlight( LIGHT_INDEX_TE_DYNAMIC+1 );	// use a non-zero number so we cannibalize ourselves next frame
-
-	dl->flags = DLIGHT_NO_WORLD_ILLUMINATION;
-	dl->origin = lightOrigin;
-	dl->die = gpGlobals->curtime + 0.1f; // Go away immediately so it doesn't light the world too.
-
-	dl->color.r = dl->color.g = dl->color.b = 250;
-	if ( ambient < 1.0f )
-	{
-        dl->color.exponent = 1 + (1 - ambient) * 2;
-	}
-	dl->radius	= 400;
-
 	// move player model in front of our view
 	pPlayerModel->SetAbsOrigin( origin );
 	pPlayerModel->SetAbsAngles( QAngle( 0, 210, 0 ) );
@@ -779,12 +934,44 @@ void UpdateClassImageEntity(
 	Frustum dummyFrustum;
 	render->Push3DView( view, 0, NULL, dummyFrustum );
 
+	//=============================================================================
+	// HPE_BEGIN:
+	// [mhansen] We don't want to light the model in the world.  We want it to 
+	// always be lit normal like even if you are standing in a dark (or green) area
+	// in the world.
+	//=============================================================================
+	CMatRenderContextPtr pRenderContext( materials );
+	pRenderContext->SetLightingOrigin( vec3_origin );
+	pRenderContext->SetAmbientLight( 0.4, 0.4, 0.4 );
+
+	static Vector white[6] = 
+	{
+		Vector( 0.4, 0.4, 0.4 ),
+		Vector( 0.4, 0.4, 0.4 ),
+		Vector( 0.4, 0.4, 0.4 ),
+		Vector( 0.4, 0.4, 0.4 ),
+		Vector( 0.4, 0.4, 0.4 ),
+		Vector( 0.4, 0.4, 0.4 ),
+	};
+
+	g_pStudioRender->SetAmbientLightColors( white );
+	g_pStudioRender->SetLocalLights( 0, NULL );
+
+	modelrender->SuppressEngineLighting( true );
+	float color[3] = { 1.0f, 1.0f, 1.0f };
+	render->SetColorModulation( color );
+	render->SetBlend( 1.0f );
 	pPlayerModel->DrawModel( STUDIO_RENDER );
 
 	if ( pWeaponModel )
 	{
 		pWeaponModel->DrawModel( STUDIO_RENDER );
 	}
+
+	modelrender->SuppressEngineLighting( false );
+	//=============================================================================
+	// HPE_END
+	//=============================================================================
 
 	render->PopView( dummyFrustum );
 }
@@ -882,3 +1069,40 @@ bool ClientModeCSNormal::CanRecordDemo( char *errorMsg, int length ) const
 	return true;
 }
 
+//=============================================================================
+// HPE_BEGIN:
+// [menglish] Save server information shown to the client in a persistent place
+//=============================================================================
+ 
+void ClientModeCSNormal::SetServerName(wchar_t* name)
+{
+	V_wcsncpy(m_pServerName, name, sizeof( m_pServerName ) );
+}
+
+void ClientModeCSNormal::SetMapName(wchar_t* name)
+{
+	V_wcsncpy(m_pMapName, name, sizeof( m_pMapName ) );
+}
+
+//=============================================================================
+// HPE_END
+//=============================================================================
+
+// Receive the PlayerIgnited user message and send out a clientside event for achievements to hook.
+void __MsgFunc_MatchEndConditions( bf_read &msg )
+{
+	int iFragLimit = (int) msg.ReadLong();
+	int iMaxRounds = (int) msg.ReadLong();
+	int iWinRounds = (int) msg.ReadLong();
+	int iTimeLimit = (int) msg.ReadLong();
+
+	IGameEvent *event = gameeventmanager->CreateEvent( "match_end_conditions" );
+	if ( event )
+	{
+		event->SetInt( "frags", iFragLimit );
+		event->SetInt( "max_rounds", iMaxRounds );
+		event->SetInt( "win_rounds", iWinRounds );
+		event->SetInt( "time", iTimeLimit );
+		gameeventmanager->FireEventClientSide( event );
+	}
+}

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,9 +12,9 @@
 #endif
 
 #include "vgui_surfacelib/FontManager.h"
-#include "UtlRBTree.h"
+#include "utlrbtree.h"
 #include <vgui/ISurface.h>
-#include "UtlMap.h"
+#include "utlmap.h"
 
 class ITexture;
 
@@ -47,6 +47,7 @@ private:
 		FONT_PAGE_SIZE_32,
 		FONT_PAGE_SIZE_64,
 		FONT_PAGE_SIZE_128,
+		FONT_PAGE_SIZE_256,
 		FONT_PAGE_SIZE_COUNT,
 	};
 

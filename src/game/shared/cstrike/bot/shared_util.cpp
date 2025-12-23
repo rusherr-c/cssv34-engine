@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: dll-agnostic routines (no dll dependencies here)
 //
@@ -19,7 +19,7 @@ static char s_shared_token[ 1500 ];
 static char s_shared_quote = '\"';
 
 //--------------------------------------------------------------------------------------------------------------
-char * SharedVarArgs(char *format, ...)
+char * SharedVarArgs(const char *format, ...)
 {
 	va_list argptr;
 	const int BufLen = 1024;
@@ -30,7 +30,7 @@ char * SharedVarArgs(char *format, ...)
 	curstring = ( curstring + 1 ) % NumBuffers;
 
 	va_start (argptr, format);
-	_vsnprintf( string[curstring], BufLen, format, argptr );
+	V_vsprintf_safe( string[curstring], format, argptr );
 	va_end (argptr);
 
 	return string[curstring];  
@@ -46,13 +46,13 @@ char * BufPrintf(char *buf, int& len, const char *fmt, ...)
 
 	va_start(argptr, fmt);
 	_vsnprintf(buf, len, fmt, argptr);
+	buf[ len - 1 ] = 0;
 	va_end(argptr);
 
 	len -= strlen(buf);
 	return buf + strlen(buf);
 }
 
-#ifdef _WIN32
 //--------------------------------------------------------------------------------------------------------------
 wchar_t * BufWPrintf(wchar_t *buf, int& len, const wchar_t *fmt, ...)
 {
@@ -62,16 +62,19 @@ wchar_t * BufWPrintf(wchar_t *buf, int& len, const wchar_t *fmt, ...)
 	va_list argptr;
 
 	va_start(argptr, fmt);
+#ifdef WIN32
 	_vsnwprintf(buf, len, fmt, argptr);
+#else
+	vswprintf( buf, len, fmt, argptr );
+#endif
+	buf[ len - 1 ] = 0;
 	va_end(argptr);
 
 	len -= wcslen(buf);
 	return buf + wcslen(buf);
 }
-#endif
 
 //--------------------------------------------------------------------------------------------------------------
-#ifdef _WIN32
 const wchar_t * NumAsWString( int val )
 {
 	const int BufLen = 16;
@@ -80,7 +83,6 @@ const wchar_t * NumAsWString( int val )
 	BufWPrintf( buf, len, L"%d", val );
 	return buf;
 }
-#endif
 
 //--------------------------------------------------------------------------------------------------------------
 const char * NumAsString( int val )

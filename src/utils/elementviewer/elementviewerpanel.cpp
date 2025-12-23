@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,7 +20,7 @@
 #include "datamodel/dmelement.h"
 #include "datamodel/idatamodel.h"
 #include "vgui_controls/FileOpenDialog.h"
-#include "FileSystem.h"
+#include "filesystem.h"
 #include "vgui/IVGui.h"
 #include "movieobjects/movieobjects.h"
 //#include "view.h"
@@ -269,23 +269,25 @@ void CElementViewerPanel::OnSaveAs()
 		return;
 
 	DmFileId_t fileid = m_Docs[ 0 ].m_fileid;
-	const char *pFileFormat = g_pDataModel->GetFileFormat( fileid );
-
 	// Save As file
 	KeyValues *pContextKeyValues = new KeyValues( "OnSaveAs" );
 	FileOpenDialog *pFileOpenDialog = new FileOpenDialog( this, "Save .dmx File As", false, pContextKeyValues );
 
-	// if this app ever has its dependency upon movieobjects removed, change the default format to "dmx", the generic dmx format
-	pFileOpenDialog->AddFilter( "*.dmx", "Generic MovieObjects File (*.dmx)", false, "movieobjects" );
-	if ( V_strcmp( pFileFormat, "movieobjects" ) != 0 )
+	const char *pFileFormat = g_pDataModel->GetFileFormat( fileid );
+	const char *pDescription = ( pFileFormat && *pFileFormat ) ? g_pDataModel->GetFormatDescription( pFileFormat ) : NULL;
+
+	if ( pDescription && *pDescription )
 	{
 		char description[ 256 ];
 		V_snprintf( description, sizeof( description ), "%s (*.dmx)", g_pDataModel->GetFormatDescription( pFileFormat ) );
 		pFileOpenDialog->AddFilter( "*.dmx", description, true, pFileFormat );
 	}
+	else
+	{
+		pFileOpenDialog->AddFilter( "*.dmx", "DMX File (*.dmx)", true, "dmx" );
+	}
 
 	pFileOpenDialog->AddActionSignalTarget( this );
-	pFileOpenDialog->SetDeleteSelfOnClose( true );
 	pFileOpenDialog->DoModal( false );
 }
 
@@ -336,10 +338,21 @@ void CElementViewerPanel::OnOpen()
 	// Open file
 	FileOpenDialog *pFileOpenDialog = new FileOpenDialog( this, "Choose .dmx file", true );
 	pFileOpenDialog->AddFilter( "*.*", "All Files (*.*)", false );
-	pFileOpenDialog->AddFilter( "*.xml", "DmElement XML Files (*.xml)", false );
 	pFileOpenDialog->AddFilter( "*.dmx", "DmElement Files (*.dmx)", true );
+	for ( int i = 0; i < g_pDataModel->GetFormatCount(); ++i )
+	{
+		const char *pFormatName = g_pDataModel->GetFormatName(i);
+		const char *pDesc = g_pDataModel->GetFormatDescription(pFormatName);
+		const char *pExt = g_pDataModel->GetFormatExtension(pFormatName);
+
+		char pExtBuf[512];
+		char pDescBuf[512];
+		Q_snprintf( pExtBuf, sizeof(pExtBuf), "*.%s", pExt );
+		Q_snprintf( pDescBuf, sizeof(pDescBuf), "%s (*.%s)", pDesc, pExt );
+
+		pFileOpenDialog->AddFilter( pExtBuf, pDescBuf, false );
+	}
 	pFileOpenDialog->AddActionSignalTarget( this );
-	pFileOpenDialog->SetDeleteSelfOnClose( true );
 	pFileOpenDialog->DoModal( false );
 }
 

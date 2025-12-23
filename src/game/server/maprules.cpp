@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Contains entities for implementing/changing game rules dynamically within each BSP.
 //
@@ -349,14 +349,23 @@ void CGameText::Display( CBaseEntity *pActivator )
 	if ( !CanFireForActivator( pActivator ) )
 		return;
 
-	if ( MessageToAll() || !pActivator || !pActivator->IsPlayer() )
+	if ( MessageToAll() )
 	{
 		UTIL_HudMessageAll( m_textParms, MessageGet() );
 	}
-	// show the message to the player that triggered us.
-	else // if ( pActivator && pActivator->IsNetClient() )
+	else
 	{
-		UTIL_HudMessage( ToBasePlayer( pActivator ), m_textParms, MessageGet() );
+		// If we're in singleplayer, show the message to the player.
+		if ( gpGlobals->maxClients == 1 )
+		{
+			CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+			UTIL_HudMessage( pPlayer, m_textParms, MessageGet() );
+		}
+		// Otherwise show the message to the player that triggered us.
+		else if ( pActivator && pActivator->IsNetClient() )
+		{
+			UTIL_HudMessage( ToBasePlayer( pActivator ), m_textParms, MessageGet() );
+		}
 	}
 }
 
@@ -610,12 +619,11 @@ bool CGamePlayerEquip::KeyValue( const char *szKeyName, const char *szValue )
 			if ( !m_weaponNames[i] )
 			{
 				char tmp[128];
-
-				UTIL_StripToken( szKeyName, tmp );
+				UTIL_StripToken( szKeyName, tmp, Q_ARRAYSIZE( tmp ) );
 
 				m_weaponNames[i] = AllocPooledString(tmp);
 				m_weaponCount[i] = atoi(szValue);
-				m_weaponCount[i] = max(1,m_weaponCount[i]);
+				m_weaponCount[i] = MAX(1,m_weaponCount[i]);
 				return true;
 			}
 		}
@@ -638,12 +646,7 @@ void CGamePlayerEquip::Touch( CBaseEntity *pOther )
 
 void CGamePlayerEquip::EquipPlayer( CBaseEntity *pEntity )
 {
-	CBasePlayer *pPlayer = NULL;
-
-	if ( pEntity->IsPlayer() )
-	{
-		pPlayer = (CBasePlayer *)pEntity;
-	}
+	CBasePlayer *pPlayer = ToBasePlayer(pEntity);
 
 	if ( !pPlayer )
 		return;

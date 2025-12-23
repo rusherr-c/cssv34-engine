@@ -1,11 +1,11 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: An application framework 
 //
 //=============================================================================//
 
-#ifdef _LINUX
-#include "linuxapp.cpp"
+#ifdef POSIX
+#error
 #else
 #if defined( _WIN32 ) && !defined( _X360 )
 #include <windows.h>
@@ -18,55 +18,20 @@
 #include "appframework/iappsystemgroup.h"
 #include "filesystem_init.h"
 #include "vstdlib/cvar.h"
+#include "xbox/xbox_console.h"
+
+// NOTE: This has to be the last file included!
+#include "tier0/memdbgon.h"
+
 
 //-----------------------------------------------------------------------------
 // Globals...
 //-----------------------------------------------------------------------------
 HINSTANCE s_HInstance;
 
-
-//-----------------------------------------------------------------------------
-// default spec function
-//-----------------------------------------------------------------------------
-SpewRetval_t WinAppDefaultSpewFunc( SpewType_t spewType, char const *pMsg )
-{
-	Plat_DebugString( pMsg );
-	switch( spewType )
-	{
-	case SPEW_MESSAGE:
-	case SPEW_WARNING:
-	case SPEW_LOG:
-		return SPEW_CONTINUE;
-
-	case SPEW_ASSERT:
-	case SPEW_ERROR:
-	default:
-		return SPEW_DEBUGGER;
-	}
-}
-
-SpewRetval_t ConsoleAppDefaultSpewFunc( SpewType_t spewType, char const *pMsg )
-{
-#if !defined( _X360 )
-	printf( pMsg );
-#endif
-	Plat_DebugString( pMsg );
-	switch( spewType )
-	{
-	case SPEW_MESSAGE:
-	case SPEW_WARNING:
-	case SPEW_LOG:
-		return SPEW_CONTINUE;
-
-	case SPEW_ASSERT:
-	case SPEW_ERROR:
-	default:
-		return SPEW_DEBUGGER;
-	}
-}
-
-SpewOutputFunc_t g_DefaultSpewFunc = WinAppDefaultSpewFunc;
-
+//static CSimpleWindowsLoggingListener s_SimpleWindowsLoggingListener;
+//static CSimpleLoggingListener s_SimpleLoggingListener;
+//ILoggingListener *g_pDefaultLoggingListener = &s_SimpleLoggingListener;
 
 //-----------------------------------------------------------------------------
 // HACK: Since I don't want to refit vgui yet...
@@ -93,39 +58,6 @@ bool SetupEnvironment360()
 {
 	CommandLine()->CreateCmdLine( GetCommandLine() );
 
-#if !defined( _CERT )
-	bool bUseRFS = ( CommandLine()->FindParm( "-norfs" ) == 0 );
-	if ( bUseRFS )
-	{
-		const char *pHostName = CommandLine()->ParmValue( "-host" );
-		if ( !pHostName )
-		{
-			// the 360 machine name must be <HostPC>_360
-			char hostName[128];
-			unsigned length = sizeof( hostName );
-			if ( !XBX_GetXboxName( hostName, &length ) )
-			{
-				Msg( "FATAL: could not get xbox name\n" );
-				return false;
-			}
-			char *p = strstr( hostName, "_360" );
-			if ( !p )
-			{
-				Msg( "FATAL: xbox name must be <HostPC>_360\n" );
-				return false;
-			}
-			*p = '\0';
-
-			pHostName = hostName;
-		}
-
-		// add the remote share name
-		char remotePath[MAX_PATH];
-		sprintf( remotePath, "net:\\smb\\%s\\game", pHostName );
-		CommandLine()->AppendParm( "-basedir", remotePath );
-	}
-#endif
-
 	if ( !CommandLine()->FindParm( "-game" ) && !CommandLine()->FindParm( "-vproject" ) )
 	{
 		// add the default game name due to lack of vproject environment
@@ -144,7 +76,7 @@ int AppMain( void* hInstance, void* hPrevInstance, const char* lpCmdLine, int nC
 {
 	Assert( pAppSystemGroup );
 
-	g_DefaultSpewFunc = WinAppDefaultSpewFunc;
+//	g_pDefaultLoggingListener = &s_SimpleWindowsLoggingListener;
 	s_HInstance = (HINSTANCE)hInstance;
 #if !defined( _X360 )
 	CommandLine()->CreateCmdLine( ::GetCommandLine() );
@@ -162,7 +94,7 @@ int AppMain( int argc, char **argv, CAppSystemGroup *pAppSystemGroup )
 {
 	Assert( pAppSystemGroup );
 
-	g_DefaultSpewFunc = ConsoleAppDefaultSpewFunc;
+//	g_pDefaultLoggingListener = &s_SimpleLoggingListener;
 	s_HInstance = NULL;
 #if !defined( _X360 )
 	CommandLine()->CreateCmdLine( argc, argv );
@@ -180,7 +112,7 @@ int AppStartup( void* hInstance, void* hPrevInstance, const char* lpCmdLine, int
 {
 	Assert( pAppSystemGroup );
 
-	g_DefaultSpewFunc = WinAppDefaultSpewFunc;
+//	g_pDefaultLoggingListener = &s_SimpleWindowsLoggingListener;
 	s_HInstance = (HINSTANCE)hInstance;
 #if !defined( _X360 )
 	CommandLine()->CreateCmdLine( ::GetCommandLine() );
@@ -195,7 +127,7 @@ int AppStartup( int argc, char **argv, CAppSystemGroup *pAppSystemGroup )
 {
 	Assert( pAppSystemGroup );
 
-	g_DefaultSpewFunc = ConsoleAppDefaultSpewFunc;
+//	g_pDefaultLoggingListener = &s_SimpleLoggingListener;
 	s_HInstance = NULL;
 #if !defined( _X360 )
 	CommandLine()->CreateCmdLine( argc, argv );
@@ -240,7 +172,7 @@ bool CSteamApplication::Create()
 	char pFileSystemDLL[MAX_PATH];
 	if ( FileSystem_GetFileSystemDLLName( pFileSystemDLL, MAX_PATH, m_bSteam ) != FS_OK )
 		return false;
-
+	
 	// Add in the cvar factory
 	AppModule_t cvarModule = LoadModule( VStdLib_GetICVarFactory() );
 	AddSystem( cvarModule, CVAR_INTERFACE_VERSION );

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -407,7 +407,7 @@ typedef void (*RandomlyChangeElementFn)(DTTestServer *pServer);
 
 float FRand(double minVal, double maxVal)
 {
-	return (float)(((double)rand() / RAND_MAX) * (maxVal - minVal) + minVal);
+	return (float)(((double)rand() / VALVE_RAND_MAX) * (maxVal - minVal) + minVal);
 }
 
 void RandomlyChangeStringGeneric(char *str, int size)
@@ -837,6 +837,18 @@ void RunDataTableTest()
 	SendTable *pSendTable = &REFERENCE_SEND_TABLE(DT_DTTest);
 
 
+	ALIGN4 unsigned char buf[4096] ALIGN4_POST;
+	bf_write x = bf_write(buf, 4096);
+	bf_read y = bf_read(buf, 4096);
+	x.WriteUBitLong(1, 1);
+	x.WriteUBitLong(3, 2);
+	x.WriteUBitLong(7, 3);
+	x.WriteUBitLong(0x31415926, 32);
+	Verify( y.ReadOneBit() == 1 );
+	Verify( y.ReadUBitLong(5) == 7*4+3 );
+	Verify( y.ReadUBitLong(32) == 0x31415926 );
+
+
 	// Initialize the send and receive modules.
 	SendTable_Init( &pSendTable, 1 );
 	RecvTable_Init( &pRecvTable, 1 );
@@ -844,7 +856,7 @@ void RunDataTableTest()
 	pSendTable->SetWriteFlag( false );
 	
 	// Send DataTable info to the client.
-	unsigned char commBuf[8192];
+	ALIGN4 unsigned char commBuf[8192] ALIGN4_POST;
 	bf_write bfWrite( "RunDataTableTest->commBuf", commBuf, sizeof(commBuf) );
 	if( !WriteSendTable_R( pSendTable, bfWrite, true ) )
 	{
@@ -867,7 +879,7 @@ void RunDataTableTest()
 	}
 
 	// Register our receive table.
-	if( !RecvTable_CreateDecoders( NULL ) )
+	if( !RecvTable_CreateDecoders( NULL, false ) )
 	{
 		Assert(false);
 	}
@@ -877,8 +889,8 @@ void RunDataTableTest()
 	DTTestServer dtServer;
 	DTTestClient dtClient;
 
-	unsigned char prevEncoded[4096];
-	unsigned char fullEncoded[4096];
+	ALIGN4 unsigned char prevEncoded[4096] ALIGN4_POST;
+	ALIGN4 unsigned char fullEncoded[4096] ALIGN4_POST;
 
 	memset(&dtServer, 0, sizeof(dtServer));
 	memset(&dtClient, 0, sizeof(dtClient));
@@ -921,7 +933,7 @@ void RunDataTableTest()
 		}
 
 
-		unsigned char deltaEncoded[4096];
+		ALIGN4 unsigned char deltaEncoded[4096] ALIGN4_POST;
 		bf_write bfDeltaEncoded( "RunDataTableTest->bfDeltaEncoded", deltaEncoded, sizeof(deltaEncoded) );
 		
 		if ( iIteration == 0 )
@@ -935,7 +947,7 @@ void RunDataTableTest()
 		else
 		{
 			// Figure out the delta between the newly encoded one and the previously encoded one.
-			int deltaProps[MAX_DATATABLE_PROPS];
+			ALIGN4 int deltaProps[MAX_DATATABLE_PROPS] ALIGN4_POST;
 
 			bf_read fullEncodedRead( "RunDataTableTest->fullEncodedRead", fullEncoded, sizeof( fullEncoded ), bfFullEncoded.GetNumBitsWritten() );
 			bf_read prevEncodedRead( "RunDataTableTest->prevEncodedRead", prevEncoded, sizeof( prevEncoded ) );
@@ -968,7 +980,7 @@ void RunDataTableTest()
 		// This step isn't necessary to have the client decode the data but it's here to test
 		// RecvTable_CopyEncoding (and RecvTable_MergeDeltas). This call should just make an exact
 		// copy of the encoded data.
-		unsigned char copyEncoded[4096];
+		ALIGN4 unsigned char copyEncoded[4096] ALIGN4_POST;
 		bf_read bfReadDeltaEncoded( "RunDataTableTest->bfReadDeltaEncoded", deltaEncoded, sizeof( deltaEncoded ) );
 		bf_write bfCopyEncoded( "RunDataTableTest->bfCopyEncoded", copyEncoded, sizeof(copyEncoded) );
 

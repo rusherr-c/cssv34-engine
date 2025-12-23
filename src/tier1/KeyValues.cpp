@@ -19,7 +19,7 @@
 #include "filesystem.h"
 #include <vstdlib/IKeyValuesSystem.h>
 #include "tier0/icommandline.h"
-
+#include "tier0/vprof_telemetry.h"
 #include <Color.h>
 #include <stdlib.h>
 #include "tier0/dbg.h"
@@ -645,6 +645,9 @@ void KeyValues::UsesConditionals(bool state)
 //-----------------------------------------------------------------------------
 bool KeyValues::LoadFromFile( IBaseFileSystem *filesystem, const char *resourceName, const char *pathID, bool refreshCache )
 {
+	TM_ZONE_DEFAULT( TELEMETRY_LEVEL0 );
+	TM_ZONE_DEFAULT_PARAM( TELEMETRY_LEVEL0, resourceName );
+
 	Assert(filesystem);
 #ifdef WIN32
 	Assert( IsX360() || ( IsPC() && _heapchk() == _HEAPOK ) );
@@ -687,6 +690,12 @@ bool KeyValues::LoadFromFile( IBaseFileSystem *filesystem, const char *resourceN
 
 	COM_TimestampedLog( "KeyValues::LoadFromFile(%s%s%s): Begin", pathID ? pathID : "", pathID && resourceName ? "/" : "", resourceName ? resourceName : "" );
 
+	// Keep a cache of keyvalues, try to load it here.
+	if ( bUseCacheForRead && KeyValuesSystem()->LoadFileKeyValuesFromCache( this, resourceName, pathID, filesystem ) ) {
+		COM_TimestampedLog( "KeyValues::LoadFromFile(%s%s%s): End / CacheHit", pathID ? pathID : "", pathID && resourceName ? "/" : "", resourceName ? resourceName : "" );
+		return true;
+	}
+
 	FileHandle_t f = filesystem->Open(resourceName, "rb", pathID);
 	if ( !f )
 	{
@@ -714,6 +723,13 @@ bool KeyValues::LoadFromFile( IBaseFileSystem *filesystem, const char *resourceN
 		buffer[fileSize+1] = 0; // double NULL terminating in case this is a unicode file
 		bRetOK = LoadFromBuffer( resourceName, buffer, filesystem );
 	}
+	
+	// The cache relies on the KeyValuesSystem string table, which will only be valid if we're
+	// using classic mode. 
+	if ( bUseCacheForWrite && bRetOK )
+	{
+		KeyValuesSystem()->AddFileKeyValuesToCache( this, resourceName, pathID );
+	}
 
 	( (IFileSystem *)filesystem )->FreeOptimalReadBuffer( buffer );
 
@@ -738,6 +754,10 @@ bool KeyValues::SaveToFile( IBaseFileSystem *filesystem, const char *resourceNam
 		return false;
 	}
 
+	KeyValuesSystem()->InvalidateCacheForFile( resourceName, pathID );
+	if ( bCacheResult ) {
+		KeyValuesSystem()->AddFileKeyValuesToCache( this, resourceName, pathID );
+	}
 	RecursiveSaveToFile(filesystem, f, NULL, 0, sortKeys, bAllowEmptyString );
 	filesystem->Close(f);
 
@@ -2971,23 +2991,58 @@ bool KeyValues::ProcessResolutionKeys( const char *pResString )
 //
 // KeyValues dumping implementation
 //
-bool KeyValues::Dump( IKeyValuesDumpContext *pDump, int nIndentLevel /* = 0 */ )
+bool KeyValues::Dump( IKeyValuesDumpContext *pDump, int nIndentLevel /* = 0 */,  bool bSorted /*= false*/ )
 {
 	if ( !pDump->KvBeginKey( this, nIndentLevel ) )
 		return false;
-	
-	// Dump values
-	for ( KeyValues *val = this ? GetFirstValue() : NULL; val; val = val->GetNextValue() )
-	{
-		if ( !pDump->KvWriteValue( val, nIndentLevel + 1 ) )
-			return false;
-	}
 
-	// Dump subkeys
-	for ( KeyValues *sub = this ? GetFirstTrueSubKey() : NULL; sub; sub = sub->GetNextTrueSubKey() )
+	if ( bSorted )
 	{
-		if ( !sub->Dump( pDump, nIndentLevel + 1 ) )
-			return false;
+		CUtlSortVector< KeyValues*, CUtlSortVectorKeyValuesByName > vecSortedKeys;
+	
+		// Dump values
+		for ( KeyValues *val = this ? GetFirstValue() : NULL; val; val = val->GetNextValue() )
+		{
+			vecSortedKeys.InsertNoSort( val );
+		}
+		vecSortedKeys.RedoSort();
+
+		FOR_EACH_VEC( vecSortedKeys, i )
+		{
+			if ( !pDump->KvWriteValue( vecSortedKeys[i], nIndentLevel + 1 ) )
+				return false;
+		}
+		
+		vecSortedKeys.Purge();
+
+		// Dump subkeys
+		for ( KeyValues *sub = this ? GetFirstTrueSubKey() : NULL; sub; sub = sub->GetNextTrueSubKey() )
+		{
+			vecSortedKeys.InsertNoSort( sub );
+		}
+		vecSortedKeys.RedoSort();
+
+		FOR_EACH_VEC( vecSortedKeys, i )
+		{
+			if ( !vecSortedKeys[i]->Dump( pDump, nIndentLevel + 1, bSorted ) )
+				return false;
+		}
+	}
+	else
+	{
+		// Dump values
+		for ( KeyValues *val = this ? GetFirstValue() : NULL; val; val = val->GetNextValue() )
+		{
+			if ( !pDump->KvWriteValue( val, nIndentLevel + 1 ) )
+				return false;
+		}
+
+		// Dump subkeys
+		for ( KeyValues *sub = this ? GetFirstTrueSubKey() : NULL; sub; sub = sub->GetNextTrueSubKey() )
+		{
+			if ( !sub->Dump( pDump, nIndentLevel + 1 ) )
+				return false;
+		}
 	}
 
 	return pDump->KvEndKey( this, nIndentLevel );
@@ -3000,7 +3055,9 @@ bool IKeyValuesDumpContextAsText::KvBeginKey( KeyValues *pKey, int nIndentLevel 
 		return
 			KvWriteIndent( nIndentLevel ) &&
 			KvWriteText( pKey->GetName() ) &&
-			KvWriteText( " {\n" );
+			KvWriteText( "\n" ) &&
+			KvWriteIndent( nIndentLevel ) &&
+			KvWriteText( "{\n" );
 	}
 	else
 	{

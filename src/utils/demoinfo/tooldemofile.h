@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,8 +12,8 @@
 
 #include "mathlib/vector.h"
 #include "tier0/platform.h"
-#include "UtlVector.h"
-#include "FileSystem.h"
+#include "utlvector.h"
+#include "filesystem.h"
 #include "demofile/demoformat.h"
 
 class CUtlBuffer;

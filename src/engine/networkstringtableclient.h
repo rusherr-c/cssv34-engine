@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,7 +14,5 @@
 class CUtlBuffer;
 
 void CL_PrintStringTables( void );
-void CL_WriteStringTables( CUtlBuffer& buf );
-bool CL_ReadStringTables( CUtlBuffer& buf );
 
 #endif // NETWORKSTRINGTABLECLIENT_H

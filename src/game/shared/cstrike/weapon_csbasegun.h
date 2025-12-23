@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -39,9 +39,8 @@ public:
 	virtual bool Reload();
 	virtual void WeaponIdle();
 
-
 	// Derived classes call this to fire a bullet.
-	bool CSBaseGunFire( float flSpread, float flCycleTime, bool bPrimaryMode );
+	bool CSBaseGunFire( float flCycleTime, CSWeaponMode weaponMode );
 
 	// Usually plays the shot sound. Guns with silencers can play different sounds.
 	virtual void DoFireEffects();

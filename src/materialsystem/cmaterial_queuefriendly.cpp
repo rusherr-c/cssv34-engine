@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -8,6 +8,7 @@
 
 #include "cmaterial_queuefriendly.h"
 #include "tier1/callqueue.h"
+#include "materialsystem_global.h"
 
 
 #define USE_QUEUED_MATERIAL_CALLS //uncomment to queue up material changing calls. Comment out to always use instant calls.
@@ -92,6 +93,8 @@ IMaterial *CMaterial_QueueFriendly::GetMaterialPage( void )
 
 void CMaterial_QueueFriendly::IncrementReferenceCount( void )
 {
+	Assert( ThreadInMainThread() );
+	++m_nReferenceCount;
 	m_pRealTimeVersion->IncrementReferenceCount();
 }
 
@@ -195,7 +198,10 @@ MorphFormat_t CMaterial_QueueFriendly::GetMorphFormat() const
 
 void CMaterial_QueueFriendly::GetLowResColorSample( float s, float t, float *color ) const
 {
-	m_pRealTimeVersion->GetLowResColorSample( s, t, color );
+	if ( m_pRealTimeVersion )
+		m_pRealTimeVersion->GetLowResColorSample( s, t, color );
+	else
+		color[ 0 ] = color[ 1 ] = color[ 2 ] = 0.0f;
 }
 
 
@@ -220,11 +226,18 @@ IMaterialVar **CMaterial_QueueFriendly::GetShaderParams( void )
 
 void CMaterial_QueueFriendly::DecrementReferenceCount( void )
 {
+	Assert( ThreadInMainThread() );
+	--m_nReferenceCount;
 	QUEUE_MATERIAL_CALL( DecrementReferenceCount );
 }
 
 void CMaterial_QueueFriendly::DeleteIfUnreferenced()
 {
+	Assert( ThreadInMainThread() );
+	if ( m_nReferenceCount > 0 )
+		return;
+		
+	MaterialSystem()->RemoveMaterial( GetRealTimeVersion() );
 	QUEUE_MATERIAL_CALL( DeleteIfUnreferenced );
 }
 
@@ -237,7 +250,7 @@ void CMaterial_QueueFriendly::RecomputeStateSnapshots()
 bool CMaterial_QueueFriendly::IsTranslucent()
 {
 	//TODO: need to base this as if the queued state is 100% up to date
-	return m_pRealTimeVersion->IsTranslucentInternal( m_fAlphaModulationOnQueueCompletion );
+	return m_pRealTimeVersion->IsTranslucentInternal( GetMaterialVarFlag( MATERIAL_VAR_IGNORE_ALPHA_MODULATION ) ? 1.0f : m_fAlphaModulationOnQueueCompletion );
 }
 
 bool CMaterial_QueueFriendly::NeedsPowerOfTwoFrameBufferTexture( bool bCheckSpecificToThisFrame )
@@ -337,6 +350,11 @@ void CMaterial_QueueFriendly::CallBindProxy( void *proxyData )
 	return m_pRealTimeVersion->CallBindProxy( proxyData );
 }
 
+IMaterial *CMaterial_QueueFriendly::CheckProxyReplacement( void *proxyData )
+{
+	return m_pRealTimeVersion->CheckProxyReplacement( proxyData );
+}
+
 void CMaterial_QueueFriendly::PrecacheMappingDimensions()
 {
 	return m_pRealTimeVersion->PrecacheMappingDimensions();
@@ -369,6 +387,8 @@ void CMaterial_QueueFriendly::UpdateToRealTime( void )
 	m_pRealTimeVersion->GetColorModulation( &m_vColorModulationOnQueueCompletion.x,
 											&m_vColorModulationOnQueueCompletion.y,
 											&m_vColorModulationOnQueueCompletion.z );
+	
+	m_nReferenceCount = m_pRealTimeVersion->GetReferenceCount();
 }
 
 

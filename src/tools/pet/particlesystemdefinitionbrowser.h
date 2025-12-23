@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -12,6 +12,7 @@
 
 #include "vgui_controls/editablepanel.h"
 #include "tier1/utlstring.h"
+#include "particles/particles.h"
 
 
 //-----------------------------------------------------------------------------
@@ -45,7 +46,7 @@ public:
 	// Inherited from Panel
 	virtual void OnCommand( const char *pCommand );
 	virtual void OnKeyCodeTyped( vgui::KeyCode code );
-
+	MESSAGE_FUNC_CHARPTR( OnFileSelected, "FileSelected", fullpath );
 	// Methods related to updating the listpanel
 	void UpdateParticleSystemList();
 
@@ -72,6 +73,11 @@ private:
 
 	// Deletes selected particle systems
 	void DeleteParticleSystems();
+
+	// Create from KV
+	void LoadKVSection( CDmeParticleSystemDefinition *pNew, KeyValues *pOverridesKv, ParticleFunctionType_t eType );
+	CDmeParticleSystemDefinition* CreateParticleFromKV( KeyValues *pKeyValue );
+	void CreateParticleSystemsFromKV( const char *pFilepath );
 
 	// Shows the most recent selected object in properties window
 	void OnProperties();

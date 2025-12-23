@@ -1,4 +1,4 @@
-//======== (C) Copyright 1999, 2000 Valve, L.L.C. All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -27,7 +27,7 @@
 #include <VGUI_IScheme.h>
 #include <VGUI_IVGui.h>
 #include <VGUI_MouseCode.h>
-#include "FileSystem.h"
+#include "filesystem.h"
 
 
 // vgui controls

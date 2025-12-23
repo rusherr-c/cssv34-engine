@@ -1,4 +1,4 @@
-//=========== (C) Copyright 2007 Valve, L.L.C. All rights reserved. ===========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // The copyright to the contents herein is the property of Valve, L.L.C.
 // The contents may be used and/or copied only with the written permission of
@@ -19,6 +19,8 @@
 #include "materialsystem/imaterialsystem.h"
 #include "istudiorender.h"
 #include "mathlib/mathlib.h"
+#include "tier2/p4helpers.h"
+#include "p4lib/ip4.h"
 #include "sfmobjects/sfmsession.h"
 #include "datacache/idatacache.h"
 #include "datacache/imdlcache.h"
@@ -103,6 +105,7 @@ bool CVcdUpdateApp::Create()
 	AppSystemInfo_t appSystems[] = 
 	{
 		{ "materialsystem.dll",		MATERIAL_SYSTEM_INTERFACE_VERSION },
+		{ "p4lib.dll",				P4_INTERFACE_VERSION },
 		{ "datacache.dll",			DATACACHE_INTERFACE_VERSION },
 		{ "datacache.dll",			MDLCACHE_INTERFACE_VERSION },
 		{ "studiorender.dll",		STUDIO_RENDER_INTERFACE_VERSION },
@@ -325,6 +328,7 @@ void CVcdUpdateApp::UpdateVcd( const char *pFullPath, const VcdUpdateInfo_t& inf
 	if ( UpdateVcd( pScene, info, pStudioHdr, flWavDuration ) )
 	{
 		Warning( "*** VCD %s requires update.\n", pFullPath );
+		CP4AutoEditAddFile checkout( pFullPath ); 
 		pScene->SaveToFile( pFullPath );
 	}
 }
@@ -431,6 +435,14 @@ int CVcdUpdateApp::Main()
 		}
 		info.m_pChangedWAVFile = pFullWAVPath;
 	}
+
+	// Do Perforce Stuff
+	if ( CommandLine()->FindParm( "-nop4" ) )
+	{
+		g_p4factory->SetDummyMode( true );
+	}
+
+	g_p4factory->SetOpenFileChangeList( "Automatically Updated VCD files" );
 
 	g_pSoundEmitterSystem->ModInit();
 	UpdateVcdFiles( info );

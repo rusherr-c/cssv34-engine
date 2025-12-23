@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -49,6 +49,7 @@
 #define IDC_CHOREOSCENE_CLOSE		1034
 #define IDC_CHOREOSCENE_ADDACTOR	1035
 #define IDC_FILE_LOADMODEL_STEAM	1036
+#define IDC_CHOREOSCENE_LOADNEXT	1038
 
 #define IDC_OPTIONS_COLORBACKGROUND	1101
 #define IDC_OPTIONS_COLORGROUND		1102

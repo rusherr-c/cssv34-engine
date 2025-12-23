@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: This module implements the subset of MPI that VRAD and VVIS use.
 //
@@ -2115,7 +2115,7 @@ inline bool VMPI_FilterPacketsForServiceDownloader( CVMPIConnection *pConnection
 			if ( pChunkLengths[i] > 0 )
 			{
 				unsigned char cPacketID = *((unsigned char*)pChunks[i]);
-				if ( cPacketID == VMPI_SHARED_PACKET_ID || cPacketID == VMPI_PACKETID_FILESYSTEM )
+				if ( cPacketID == VMPI_INTERNAL_PACKET_ID || cPacketID == VMPI_SHARED_PACKET_ID || cPacketID == VMPI_PACKETID_FILESYSTEM )
 					return false;
 				else
 					return true;

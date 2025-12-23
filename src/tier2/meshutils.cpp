@@ -1,4 +1,4 @@
-//===== Copyright © 2005-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: A set of utilities to render standard shapes
 //
@@ -53,9 +53,8 @@ void GeneratePolygonIndexBuffer( unsigned short* pIndices, int nIndexCount, int 
 	if ( !pIndices )
 		return;
 
-	int i, baseVertex;
+	int i;
 	int numPolygons = nIndexCount / 3;
-	baseVertex = nFirstVertex;
 	for ( i = 0; i < numPolygons; ++i)
 	{
 		// Triangle 1
@@ -72,9 +71,8 @@ void GenerateLineStripIndexBuffer( unsigned short* pIndices, int nIndexCount, in
 	if ( !pIndices )
 		return;
 
-	int i, baseVertex;
+	int i;
 	int numLines = nIndexCount / 2;
-	baseVertex = nFirstVertex;
 	for ( i = 0; i < numLines; ++i)
 	{
 		pIndices[0] = (unsigned short)( nFirstVertex + i );
@@ -90,9 +88,8 @@ void GenerateLineLoopIndexBuffer( unsigned short* pIndices, int nIndexCount, int
 		return;
 	}
 
-	int i, baseVertex;
+	int i;
 	int numLines = nIndexCount / 2;
-	baseVertex = nFirstVertex;
 
 	pIndices[0] = (unsigned short)( nFirstVertex + numLines - 1 );
 	pIndices[1] = (unsigned short)( nFirstVertex );

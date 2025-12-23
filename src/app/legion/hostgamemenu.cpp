@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: The menu that allows a player to start a game  
 //
@@ -11,7 +11,7 @@
 #include "vgui_controls/listpanel.h"
 #include "vgui_controls/textentry.h"
 #include "vgui_controls/Button.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "networkmanager.h"
 #include "legion.h"
 #include "inetworkmessagelistener.h"

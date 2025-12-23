@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -46,6 +46,20 @@ PRECACHE_WEAPON_REGISTER( weapon_hegrenade );
 
 	void CHEGrenade::EmitGrenade( Vector vecSrc, QAngle vecAngles, Vector vecVel, AngularImpulse angImpulse, CBasePlayer *pPlayer )
 	{
+		//=============================================================================
+		// HPE_BEGIN:
+		// [Forrest] Start a new bullet group so that damage dealt by the grenade will be counted as a separate hit from damage previously dealt.
+		//=============================================================================
+#ifdef GAME_DLL
+		CCSPlayer *pCSPlayer = ToCSPlayer( pPlayer );
+		if ( pCSPlayer )
+		{
+			pCSPlayer->StartNewBulletGroup();
+		}
+#endif
+		//=============================================================================
+		// HPE_END
+		//=============================================================================
 		CHEGrenadeProjectile::Create( vecSrc, vecAngles, vecVel, angImpulse, pPlayer, GRENADE_TIMER );
 	}
 	

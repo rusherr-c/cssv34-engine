@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // A class representing a Dag (directed acyclic graph) node used for holding transforms, lights, cameras and shapes
 //
@@ -12,6 +12,8 @@
 
 #include "tier1/utlstack.h"
 #include "datamodel/dmelement.h"
+#include "datamodel/dmattribute.h"
+#include "datamodel/dmattributevar.h"
 #include "movieobjects/dmeshape.h"
 #include "movieobjects/dmetransform.h"
 
@@ -71,6 +73,12 @@ public:
 
 	void GetParentWorldMatrix( matrix3x4_t &mat );
 
+	static void DrawUsingEngineCoordinates( bool bEnable );
+
+	// Transform from DME to engine coordinates
+	static void DmeToEngineMatrix( matrix3x4_t& dmeToEngine );
+	static void EngineToDmeMatrix( matrix3x4_t& engineToDme );
+
 protected:
 	void GetBoundingSphere( Vector &center, float &radius, const matrix3x4_t &pMat ) const;
 
@@ -92,6 +100,7 @@ private:
 	};
 	
 	static CUtlStack<TransformInfo_t> s_TransformStack;
+	static bool s_bDrawUsingEngineCoordinates;
 };
 
 

@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,7 @@
 
 #include "vgui_controls/Frame.h"
 #include "vgui_controls/KeyRepeat.h"
-#include "UtlVector.h"
+#include "utlvector.h"
 
 class CGameChapterPanel;
 class CSkillSelectionDialog;
@@ -26,6 +26,41 @@ class CSkillSelectionDialog;
 #define SLOT_RIGHT		3
 #define SLOT_OFFRIGHT	4
 #define	NUM_SLOTS		5
+
+
+class CNewGamePlayButton : public vgui::Button
+{
+	DECLARE_CLASS_SIMPLE( CNewGamePlayButton, vgui::Button );
+
+public:
+
+	CNewGamePlayButton( Panel *parent, const char *panelName, const char *text, Panel *pActionSignalTarget=NULL, const char *pCmd=NULL )
+		: vgui::Button( parent, panelName, text, pActionSignalTarget, pCmd )
+	{
+	}
+
+	void OnKeyCodePressed( vgui::KeyCode code )
+	{
+		if ( code == KEY_XBUTTON_A || code == STEAMCONTROLLER_A )
+		{
+			ConVarRef var( "joystick" );
+			if ( var.IsValid() && !var.GetBool() )
+			{
+				var.SetValue( true );
+			}
+
+			ConVarRef var2( "hud_fastswitch" );
+			if ( var2.IsValid() && var2.GetInt() != 2 )
+			{
+				var2.SetValue( 2 );
+			}
+			DoClick();
+			return;
+		}
+
+		BaseClass::OnKeyCodePressed( code );
+	}
+};
 
 //-----------------------------------------------------------------------------
 // Purpose: Handles starting a new game, skill and chapter selection

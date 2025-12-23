@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -34,6 +34,9 @@ public:
 
 	virtual void ApplySchemeSettings( vgui::IScheme *pScheme );
 	virtual void OnCommand( const char *command );
+
+	void OnKeyCodeTyped( vgui::KeyCode code );
+	void OnKeyCodePressed( vgui::KeyCode code );
 
 private:
 	bool ImportZippedBonusMaps( const char *pchZippedFileName );

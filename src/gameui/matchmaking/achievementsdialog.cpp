@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Display a list of achievements for the current game
 //
@@ -9,19 +9,27 @@
 #include "vgui/ILocalize.h"
 #include "ixboxsystem.h"
 #include "iachievementmgr.h"
-#include "engineinterface.h"
+#include "EngineInterface.h"
 #include "GameUI_Interface.h"
 #include "MouseMessageForwardingPanel.h"
-#include "FileSystem.h"
-#include "vgui_controls\ImagePanel.h"
-#include "vgui_controls\ComboBox.h"
+#include "filesystem.h"
+#include "vgui_controls/ImagePanel.h"
+#include "vgui_controls/ComboBox.h"
+#include "vgui_controls/CheckButton.h"
+#include "vgui_controls/ScrollBar.h"
 #include "BasePanel.h"
 #include "fmtstr.h"
+#include "UtlSortVector.h"
 
 using namespace vgui;
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+KeyValues *g_pPreloadedAchievementItemLayout = NULL;
+
+#define NUM_COMBO_BOX_LINES_DEFAULT	10
+#define NUM_COMBO_BOX_LINES_MAX		16
 
 // Shared helper functions so xbox and pc can share as much code as possible while coming from different bases.
 
@@ -99,7 +107,7 @@ void UpdateProgressBar( vgui::EditablePanel* pPanel, IAchievement *pAchievement,
 			flCompletion = ( ((float)pAchievement->GetCount()) / ((float)pAchievement->GetGoal()) );
 			// In rare cases count can exceed goal and not be achieved (switch local storage on X360, take saved game from different user on PC).
 			// These will self-correct with continued play, but if we're in that state don't show more than 100% achieved.
-			flCompletion = min( flCompletion, 1.0 );
+			flCompletion = min( flCompletion, 1.f );
 		}
 
 		char szPercentageText[ 256 ] = "";
@@ -126,7 +134,15 @@ void UpdateProgressBar( vgui::EditablePanel* pPanel, IAchievement *pAchievement,
 	}
 }
 
+// TODO: revisit this once other games are rebuilt using the updated IAchievement interface
+bool GameSupportsAchievementTracker()
+{
+	const char *pGame = Q_UnqualifiedFileName( engine->GetGameDirectory() );
+	if ( ( Q_stricmp( pGame, "tf" ) == 0 ) || ( Q_stricmp( pGame, "tf_beta" ) == 0 ) )
+		return true;
 
+	return false;
+}
 
 
 //----------------------------------------------------------
@@ -185,7 +201,11 @@ void CAchievementsDialog_XBox::PerformLayout( void )
 		m_pProgressBar->SetBounds( iBarX, y, iBarWide, tall );
 
 		wchar_t wszProgressText[64];
-		swprintf( wszProgressText, L"%d%% %s", (m_nUnlocked * 100) / m_nTotalAchievements, g_pVGuiLocalize->Find( "#GameUI_Achievement_Unlocked" ) );
+#ifdef WIN32
+		V_snwprintf( wszProgressText, ARRAYSIZE(wszProgressText), L"%d%% %s", (m_nUnlocked * 100) / m_nTotalAchievements, g_pVGuiLocalize->Find( "#GameUI_Achievement_Unlocked" ) );
+#else
+		V_snwprintf( wszProgressText, ARRAYSIZE(wszProgressText), L"%d%% %S", (m_nUnlocked * 100) / m_nTotalAchievements, g_pVGuiLocalize->Find( "#GameUI_Achievement_Unlocked" ) );		
+#endif
 		m_pProgressPercent->SetText( wszProgressText );
 		m_pProgressPercent->SizeToContents();
 		m_pProgressPercent->SetPos( GetWide() - m_pProgressPercent->GetWide() - m_nBorderWidth, y + tall + 3 );
@@ -210,8 +230,8 @@ void CAchievementsDialog_XBox::PerformLayout( void )
 		wchar_t *wzNumberingFmt = g_pVGuiLocalize->Find( "#GameUI_Achievement_Menu_Range" );
 		wchar_t wzActiveItem[8];
 		wchar_t wzTotal[8];
-		_itow_s( m_Menu.GetActiveItemIndex()+1, wzActiveItem, ARRAYSIZE( wzActiveItem ), 10 );
-		_itow_s( m_nTotalAchievements, wzTotal, ARRAYSIZE( wzTotal ), 10 );
+		V_snwprintf( wzActiveItem, ARRAYSIZE( wzActiveItem ), L"%d", m_Menu.GetActiveItemIndex()+1 );
+		V_snwprintf( wzTotal, ARRAYSIZE( wzTotal ), L"%d", m_nTotalAchievements );
 		g_pVGuiLocalize->ConstructString( wszNumbering, sizeof( wszNumbering ), wzNumberingFmt, 2, wzActiveItem, wzTotal );
 		m_pNumbering->SetText( wszNumbering );
 		m_pNumbering->SetWide( GetWide() );
@@ -304,7 +324,7 @@ void CAchievementsDialog_XBox::ApplySchemeSettings( vgui::IScheme *pScheme )
 void CAchievementsDialog_XBox::OnKeyCodePressed( vgui::KeyCode code )
 {
 	// Handle close here, CBasePanel parent doesn't support "DialogClosing" command
-	if ( code == KEY_XBUTTON_B )
+	if ( GetBaseButtonCode( code ) == KEY_XBUTTON_B )
 	{
 		OnCommand( "AchievementsDialogClosing" );
 		SetDeleteSelfOnClose( true );
@@ -350,7 +370,11 @@ CAchievementsDialog::CAchievementsDialog(vgui::Panel *parent) : BaseClass(parent
 	SetMinimumSize( 256, 300 );
 	SetSizeable( true );
 
+	m_nOldScrollItem = -1;
+	m_nScrollItem = -1;
+
 	m_nUnlocked = 0;
+	m_nTotalAchievements = 0;
 
 	m_pAchievementsList = new vgui::PanelListPanel( this, "listpanel_achievements" );
 	m_pAchievementsList->SetFirstColumnWidth( 0 );
@@ -359,8 +383,13 @@ CAchievementsDialog::CAchievementsDialog(vgui::Panel *parent) : BaseClass(parent
 
 	m_pPercentageBarBackground = SETUP_PANEL( new ImagePanel( this, "PercentageBarBackground" ) );
 	m_pPercentageBar = SETUP_PANEL( new ImagePanel( this, "PercentageBar" ) );
+	
+	m_pSelectionHighlight = new ImagePanel( m_pAchievementsList->FindChildByName( "PanelListEmbedded" ), "SelectionHighlight" );
+	m_pSelectionHighlight->SetVisible( false );
+	m_pSelectionHighlight->SetZPos( 100 );
 
-	m_pAchievementPackCombo = new ComboBox(this, "achievement_pack_combo", 10, false);
+	m_pAchievementPackCombo = new ComboBox(this, "achievement_pack_combo", NUM_COMBO_BOX_LINES_DEFAULT, false);
+	m_pHideAchievedCheck = new vgui::CheckButton( this, "HideAchieved", "" );
 
 	// int that holds the highest number achievement id we've found
 	int iHighestAchievementIDSeen = -1;
@@ -370,7 +399,7 @@ CAchievementsDialog::CAchievementsDialog(vgui::Panel *parent) : BaseClass(parent
 	m_iNumAchievementGroups = 0;
 
 	// Base groups
-	CreateNewAchievementGroup( 0, 16000 );
+//	CreateNewAchievementGroup( 0, 16000 );
 	CreateNewAchievementGroup( 0, 999 );
 
 	Assert ( achievementmgr );
@@ -404,6 +433,11 @@ CAchievementsDialog::CAchievementsDialog(vgui::Panel *parent) : BaseClass(parent
 			if ( pCur->ShouldHideUntilAchieved() && !pCur->IsAchieved() )
 				continue;
 
+			m_nTotalAchievements++;
+			
+			if ( m_pHideAchievedCheck->IsSelected() && pCur->IsAchieved() )
+				continue;
+
 			bool bAchieved = pCur->IsAchieved();
 
 			if ( bAchieved )
@@ -424,69 +458,47 @@ CAchievementsDialog::CAchievementsDialog(vgui::Panel *parent) : BaseClass(parent
 					m_AchievementGroups[j].m_iNumAchievements++;
 				}
 			}
-			
-			CAchievementDialogItemPanel *achievementItemPanel = new CAchievementDialogItemPanel( m_pAchievementsList, "AchievementDialogItemPanel", i );
-			achievementItemPanel->SetAchievementInfo( pCur );
-			m_pAchievementsList->AddItem( NULL, achievementItemPanel );
 		}
 	}
 
-
-	for ( int i=0;i<m_iNumAchievementGroups;i++ )
-	{
-		char buf[128];
-
-		if ( i == 0 )
-		{
-			Q_snprintf( buf, sizeof(buf), "#Achievement_Group_All" );
-		}
-		else
-		{
-			Q_snprintf( buf, sizeof(buf), "#Achievement_Group_%d", m_AchievementGroups[i].m_iMinRange );
-		}		
-
-		wchar_t *wzGroupName = g_pVGuiLocalize->Find( buf );
-
-		if ( !wzGroupName )
-		{
-			wzGroupName = L"Need Title ( %s1 of %s2 )";
-		}
-
-		wchar_t wzGroupTitle[128];
-
-		if ( wzGroupName )
-		{
-			wchar_t wzNumUnlocked[8];
-			_itow_s( m_AchievementGroups[i].m_iNumUnlocked, wzNumUnlocked, ARRAYSIZE( wzNumUnlocked ), 10 );
-
-			wchar_t wzNumAchievements[8];
-			_itow_s( m_AchievementGroups[i].m_iNumAchievements, wzNumAchievements, ARRAYSIZE( wzNumAchievements ), 10 );
-
-			g_pVGuiLocalize->ConstructString( wzGroupTitle, sizeof( wzGroupTitle ), wzGroupName, 2, wzNumUnlocked, wzNumAchievements );
-		}
-
-		KeyValues *pKV = new KeyValues( "grp" );
-		pKV->SetInt( "minrange", m_AchievementGroups[i].m_iMinRange );
-		pKV->SetInt( "maxrange", m_AchievementGroups[i].m_iMaxRange );
-		m_pAchievementPackCombo->AddItem( wzGroupTitle, pKV );
-	}
+	CreateOrUpdateComboItems( true );
 
 	m_pAchievementPackCombo->ActivateItemByRow( 0 );
 }
 
 CAchievementsDialog::~CAchievementsDialog()
 {
+	if ( achievementmgr )
+	{
+		achievementmgr->SaveGlobalStateIfDirty( false );		// check for saving here to store achievements we want pinned to HUD
+	}
+	
 	m_pAchievementsList->DeleteAllItems();
 	delete m_pAchievementsList;
 	delete m_pPercentageBarBackground;
 	delete m_pPercentageBar;
 }
 
+void CAchievementsDialog::OnCheckButtonChecked(Panel *panel)
+{
+	if ( panel == m_pHideAchievedCheck )
+	{
+		UpdateAchievementList();
+	}
+}
+
 void CAchievementsDialog::CreateNewAchievementGroup( int iMinRange, int iMaxRange )
 {
-	m_AchievementGroups[m_iNumAchievementGroups].m_iMinRange = iMinRange;
-	m_AchievementGroups[m_iNumAchievementGroups].m_iMaxRange = iMaxRange;
-	m_iNumAchievementGroups++;
+	if ( m_iNumAchievementGroups < MAX_ACHIEVEMENT_GROUPS )
+	{
+		m_AchievementGroups[m_iNumAchievementGroups].m_iMinRange = iMinRange;
+		m_AchievementGroups[m_iNumAchievementGroups].m_iMaxRange = iMaxRange;
+		m_iNumAchievementGroups++;
+	}
+	else
+	{
+		AssertMsg( false, "CAchievementsDialog: Too many achievement groups" );
+	}
 }
 
 //----------------------------------------------------------
@@ -524,43 +536,90 @@ void CAchievementsDialog::OnTextChanged(KeyValues *data)
 	// first check which control had its text changed!
 	if ( pPanel == m_pAchievementPackCombo )
 	{
-		// Re-populate the achievement list with the selected group
+		UpdateAchievementList();
+	}
+}
 
-		m_pAchievementsList->DeleteAllItems();
+class CAchievementsLess
+{
+public:
+	bool Less( const IAchievement* src1, const IAchievement* src2, void *pCtx )
+	{
+		IAchievement* _src1 = const_cast<IAchievement*>(src1);
+		IAchievement* _src2 = const_cast<IAchievement*>(src2);
 
-		KeyValues *pData = m_pAchievementPackCombo->GetActiveItemUserData();
+		if ( _src1->IsAchieved() && !_src2->IsAchieved() )
+			return false;
+		if ( !_src1->IsAchieved() && _src2->IsAchieved() )
+			return true;
 
-		if ( pData )
+		const char* name1 = _src1->GetName();
+		const char* name2 = _src2->GetName();
+		if ( wcscoll( ACHIEVEMENT_LOCALIZED_NAME_FROM_STR( name1 ), ACHIEVEMENT_LOCALIZED_NAME_FROM_STR( name2 ) ) < 0 )
+			return true;
+		return false;
+	}
+};
+
+//----------------------------------------------------------
+// Re-populate the achievement list with the selected group
+//----------------------------------------------------------
+void CAchievementsDialog::UpdateAchievementList()
+{	
+	m_pAchievementsList->DeleteAllItems();
+
+	KeyValues *pData = m_pAchievementPackCombo->GetActiveItemUserData();
+
+	if ( pData )
+	{
+		int iMinRange = pData->GetInt( "minrange" );
+		int iMaxRange = pData->GetInt( "maxrange" );
+
+		if ( achievementmgr )
 		{
-			int iMinRange = pData->GetInt( "minrange" );
-			int iMaxRange = pData->GetInt( "maxrange" );
+			CUtlSortVector<IAchievement*, CAchievementsLess> achievements;
 
-			if ( achievementmgr )
+			int iCount = achievementmgr->GetAchievementCount();
+			for ( int i = 0; i < iCount; ++i )
+			{		
+				IAchievement* pCur = achievementmgr->GetAchievementByIndex( i );
+
+				if ( !pCur )
+					continue;
+
+				int iAchievementID = pCur->GetAchievementID();
+
+				if ( iAchievementID < iMinRange || iAchievementID > iMaxRange )
+					continue;
+
+				// don't show hidden achievements if not achieved
+				if ( pCur->ShouldHideUntilAchieved() && !pCur->IsAchieved() )
+					continue;
+
+				if ( m_pHideAchievedCheck->IsSelected() && pCur->IsAchieved() )
+					continue;
+
+				// if we don't have a localized name, don't add it to the list
+				if ( pCur->GetName() == NULL || ACHIEVEMENT_LOCALIZED_NAME_FROM_STR( pCur->GetName() ) == NULL )
+					continue;
+
+				achievements.Insert( pCur );
+			}
+
+			for ( int i=0; i<achievements.Count(); i++ )
 			{
-				int iCount = achievementmgr->GetAchievementCount();
-				for ( int i = 0; i < iCount; ++i )
-				{		
-					IAchievement* pCur = achievementmgr->GetAchievementByIndex( i );
-
-					if ( !pCur )
-						continue;
-					
-					int iAchievementID = pCur->GetAchievementID();
-
-					if ( iAchievementID < iMinRange || iAchievementID > iMaxRange )
-						continue;
-
-					// don't show hidden achievements if not achieved
-					if ( pCur->ShouldHideUntilAchieved() && !pCur->IsAchieved() )
-						continue;
-
-					CAchievementDialogItemPanel *achievementItemPanel = new CAchievementDialogItemPanel( m_pAchievementsList, "AchievementDialogItemPanel", i );
-					achievementItemPanel->SetAchievementInfo( pCur );
-					m_pAchievementsList->AddItem( NULL, achievementItemPanel );
-				}
+				CAchievementDialogItemPanel *achievementItemPanel = new CAchievementDialogItemPanel( m_pAchievementsList, "AchievementDialogItemPanel", i );
+				achievementItemPanel->SetAchievementInfo( achievements[i] );
+				m_pAchievementsList->AddItem( NULL, achievementItemPanel );
 			}
 		}
+	}
 
+	if ( m_pAchievementsList->GetItemCount() > 0 )
+	{
+		m_nOldScrollItem = -1;
+		m_nScrollItem = -1;
+		m_pSelectionHighlight->SetVisible( false );
 		m_pAchievementsList->ScrollToItem( 0 );
 	}
 }
@@ -584,12 +643,12 @@ void CAchievementsDialog::ApplySchemeSettings( IScheme *pScheme )
 	float flCompletion = 0.0f;
 	if ( achievementmgr->GetAchievementCount() > 0 )
 	{
-		flCompletion = (((float)m_nUnlocked) / ((float)achievementmgr->GetAchievementCount()));
+		flCompletion = (((float)m_nUnlocked) / ((float)m_nTotalAchievements));
 	}
 
 	char szPercentageText[64];
-	Q_snprintf( szPercentageText, 256, "%d / %d ( %d%% )",
-		m_nUnlocked, achievementmgr->GetAchievementCount(), (int)( flCompletion * 100.0f ) );
+	V_sprintf_safe( szPercentageText, "%d / %d ( %d%% )",
+		m_nUnlocked, m_nTotalAchievements, (int)( flCompletion * 100.0f ) );
 
 	SetControlString( "PercentageText", szPercentageText );
 	SetControlVisible( "PercentageText", true );
@@ -608,6 +667,8 @@ void CAchievementsDialog::ApplySchemeSettings( IScheme *pScheme )
 
 	SetControlVisible( "PercentageBarBackground", true );
 	SetControlVisible( "PercentageBar", true );
+
+	m_pSelectionHighlight->SetFillColor( Color( clrHighlight.r(), clrHighlight.g(), clrHighlight.b(), 32 ) );
 
 	if ( m_iNumAchievementGroups <= 2 )
 	{
@@ -640,17 +701,206 @@ void CAchievementsDialog::ApplySchemeSettings( IScheme *pScheme )
 	MoveToCenterOfScreen();
 }
 
+void CAchievementsDialog::ScrollToItem( int nDirection )
+{
+	if ( m_pAchievementsList->GetItemCount() > 0 )
+	{
+		m_nScrollItem = clamp( m_nScrollItem + nDirection, 0, m_pAchievementsList->GetItemCount() - 1 );
+
+		if ( m_nOldScrollItem != m_nScrollItem )
+		{
+			m_nOldScrollItem = m_nScrollItem;
+			m_pAchievementsList->ScrollToItem( m_nScrollItem );
+
+			Panel *pItem = m_pAchievementsList->GetItemPanel( m_nScrollItem );
+			if ( pItem )
+			{
+				int nX, nY, nWide, nTall;
+				pItem->GetBounds( nX, nY, nWide, nTall );
+
+				m_pSelectionHighlight->SetVisible( true );
+				m_pSelectionHighlight->SetBounds( nX, nY, nWide, nTall );
+			}
+		}
+	}
+}
+
+void CAchievementsDialog::OnKeyCodePressed( vgui::KeyCode code )
+{
+	// Handle close here, CBasePanel parent doesn't support "DialogClosing" command
+	ButtonCode_t nButtonCode = GetBaseButtonCode( code );
+
+	if ( nButtonCode == KEY_XBUTTON_B || nButtonCode == STEAMCONTROLLER_B )
+	{
+		OnCommand( "Close" );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_X || nButtonCode == STEAMCONTROLLER_X )
+	{
+		if ( m_pHideAchievedCheck && m_pHideAchievedCheck->IsVisible() )
+		{
+			m_pHideAchievedCheck->SetSelected( !m_pHideAchievedCheck->IsSelected() );
+		}
+	}
+	else if ( nButtonCode == KEY_XBUTTON_A || nButtonCode == STEAMCONTROLLER_A )
+	{
+		if ( GameSupportsAchievementTracker() && m_nScrollItem >= 0 && m_nScrollItem < m_pAchievementsList->GetItemCount() )
+		{
+			CAchievementDialogItemPanel *pItem = dynamic_cast< CAchievementDialogItemPanel* >( m_pAchievementsList->GetItemPanel( m_nScrollItem) );
+			if ( pItem && pItem->IsVisible() )
+			{
+				pItem->ToggleShowOnHUD();
+			}
+		}
+	}
+	else if ( nButtonCode == KEY_XBUTTON_UP || 
+			  nButtonCode == KEY_XSTICK1_UP ||
+			  nButtonCode == KEY_XSTICK2_UP ||
+			  nButtonCode == STEAMCONTROLLER_DPAD_UP ||
+			  nButtonCode == KEY_UP )
+	{
+		ScrollToItem( -1 );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_DOWN || 
+			  nButtonCode == KEY_XSTICK1_DOWN ||
+			  nButtonCode == KEY_XSTICK2_DOWN || 
+			  nButtonCode == STEAMCONTROLLER_DPAD_DOWN ||
+			  nButtonCode == KEY_DOWN )
+	{
+		ScrollToItem( 1 );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_LEFT || 
+			  nButtonCode == KEY_XSTICK1_LEFT ||
+			  nButtonCode == KEY_XSTICK2_LEFT || 
+			  nButtonCode == STEAMCONTROLLER_DPAD_LEFT ||
+			  nButtonCode == KEY_LEFT )
+	{
+		m_pAchievementPackCombo->ActivateItemByRow( m_pAchievementPackCombo->GetActiveItem() - 1 );
+	}
+	else if ( nButtonCode == KEY_XBUTTON_RIGHT || 
+			  nButtonCode == KEY_XSTICK1_RIGHT ||
+			  nButtonCode == KEY_XSTICK2_RIGHT || 
+			  nButtonCode == STEAMCONTROLLER_DPAD_RIGHT ||
+			  nButtonCode == KEY_RIGHT )
+	{
+		m_pAchievementPackCombo->ActivateItemByRow( m_pAchievementPackCombo->GetActiveItem() + 1 );
+	}
+	else
+	{
+		BaseClass::OnKeyCodePressed( code );
+	}
+	InvalidateLayout();
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Each sub-panel gets its data updated
 //-----------------------------------------------------------------------------
 void CAchievementsDialog::UpdateAchievementDialogInfo( void )
 {
-	for ( int i = 0; i < m_pAchievementsList->GetItemCount(); i++ )
+	int iCount = m_pAchievementsList->GetItemCount();
+	IScheme *pScheme = scheme()->GetIScheme( GetScheme() );
+
+	for ( int i = 0; i < iCount; i++ )
 	{
 		CAchievementDialogItemPanel *pPanel = (CAchievementDialogItemPanel*)m_pAchievementsList->GetItemPanel(i);
 		if ( pPanel )
 		{
-			pPanel->UpdateAchievementInfo();
+			pPanel->UpdateAchievementInfo( pScheme );
+		}
+	}
+
+	// update the groups and overall progress bar
+	if ( achievementmgr )
+	{
+		int i;
+
+		// reset group completed counts
+		for ( i=0;i<m_iNumAchievementGroups;i++ )
+		{
+			m_AchievementGroups[i].m_iNumUnlocked = 0;
+		}
+
+		int iAchievementCount = achievementmgr->GetAchievementCount();
+
+		// update counts for each achieved achievement
+		for ( i=0;i<iAchievementCount;i++ )
+		{
+			IAchievement* pCurAchievement = achievementmgr->GetAchievementByIndex( i );
+
+			if ( !pCurAchievement || !pCurAchievement->IsAchieved() )
+				continue;
+			
+			int iAchievementID = pCurAchievement->GetAchievementID();
+
+			for ( int j=0;j<m_iNumAchievementGroups;j++ )
+			{
+				if ( iAchievementID >= m_AchievementGroups[j].m_iMinRange &&
+					 iAchievementID <= m_AchievementGroups[j].m_iMaxRange )
+				{
+					m_AchievementGroups[j].m_iNumUnlocked++;
+				}
+			}
+		}
+
+		// update the global progress bar label
+		char szPercentageText[64];
+		float flCompletion = (((float)m_AchievementGroups[0].m_iNumUnlocked) / ((float)iAchievementCount));
+		V_sprintf_safe( szPercentageText, "%d / %d ( %d%% )",
+			m_AchievementGroups[0].m_iNumUnlocked, m_nTotalAchievements, (int)( flCompletion * 100.0f ) );
+
+		// and the progress bar
+		m_pPercentageBar->SetWide( m_pPercentageBarBackground->GetWide() * flCompletion );
+
+		SetControlString( "PercentageText", szPercentageText );
+	}
+
+	CreateOrUpdateComboItems( false );	// update them with new achieved counts	
+
+	m_pAchievementPackCombo->ActivateItemByRow( m_pAchievementPackCombo->GetActiveItem() );
+}
+
+void CAchievementsDialog::CreateOrUpdateComboItems( bool bCreate )
+{
+	for ( int i=0;i<m_iNumAchievementGroups;i++ )
+	{
+		char buf[128];
+
+		Q_snprintf( buf, sizeof(buf), "#Achievement_Group_%d", m_AchievementGroups[i].m_iMinRange );
+
+		const wchar_t *wzGroupName = g_pVGuiLocalize->Find( buf );
+
+		if ( !wzGroupName )
+		{
+			wzGroupName = L"Need Title ( %s1 of %s2 )";
+		}
+
+		wchar_t wzGroupTitle[128];
+
+		if ( wzGroupName )
+		{
+			wchar_t wzNumUnlocked[8];
+			V_snwprintf( wzNumUnlocked, ARRAYSIZE( wzNumUnlocked ), L"%d", m_AchievementGroups[i].m_iNumUnlocked );
+
+			wchar_t wzNumAchievements[8];
+			V_snwprintf( wzNumAchievements, ARRAYSIZE( wzNumAchievements ), L"%d", m_AchievementGroups[i].m_iNumAchievements );
+
+			g_pVGuiLocalize->ConstructString( wzGroupTitle, sizeof( wzGroupTitle ), wzGroupName, 2, wzNumUnlocked, wzNumAchievements );
+		}
+
+		KeyValues *pKV = new KeyValues( "grp" );
+		pKV->SetInt( "minrange", m_AchievementGroups[i].m_iMinRange );
+		pKV->SetInt( "maxrange", m_AchievementGroups[i].m_iMaxRange );
+
+		if ( bCreate )
+			m_AchievementGroups[i].m_iDropDownGroupID = m_pAchievementPackCombo->AddItem( wzGroupTitle, pKV );
+		else
+			m_pAchievementPackCombo->UpdateItem( m_AchievementGroups[i].m_iDropDownGroupID, wzGroupTitle, pKV );
+	}
+
+	if ( bCreate && ( m_iNumAchievementGroups > NUM_COMBO_BOX_LINES_DEFAULT ) )
+	{
+		if ( m_pAchievementPackCombo )
+		{
+			m_pAchievementPackCombo->SetNumberOfEditLines( ( m_iNumAchievementGroups <= NUM_COMBO_BOX_LINES_MAX ) ? m_iNumAchievementGroups : NUM_COMBO_BOX_LINES_MAX );
 		}
 	}
 }
@@ -659,7 +909,6 @@ void CAchievementsDialog::OnCommand( const char *command )
 {
 	if ( !Q_strcasecmp( command, "ongameuiactivated" ) )
 	{
-		Msg( "Updating achievement info\n" );
 		UpdateAchievementDialogInfo();
 	}
 
@@ -675,29 +924,29 @@ CAchievementDialogItemPanel::CAchievementDialogItemPanel( vgui::PanelListPanel *
 	m_pParent = parent;
 	m_pSchemeSettings = NULL;
 
-	m_pAchievementIcon = SETUP_PANEL(new vgui::ImagePanel( this, "AchievementIcon" ));
-	m_pAchievementNameLabel = new vgui::Label( this, "AchievementName", "name" );
-	m_pAchievementDescLabel = new vgui::Label( this, "AchievementDesc", "desc" );
-	m_pPercentageBar = SETUP_PANEL( new ImagePanel( this, "PercentageBar" ) );
-	m_pPercentageText = new vgui::Label( this, "PercentageText", "" );
+	SetMouseInputEnabled( true );
+	parent->SetMouseInputEnabled( true );
 
-	CMouseMessageForwardingPanel *panel = new CMouseMessageForwardingPanel(this, NULL);
-	panel->SetZPos(2);
+	//CMouseMessageForwardingPanel *panel = new CMouseMessageForwardingPanel(this, NULL);
+	//panel->SetZPos(2);
 }
 
 CAchievementDialogItemPanel::~CAchievementDialogItemPanel()
 {
+	/*
 	delete m_pAchievementIcon;
 	delete m_pAchievementNameLabel;
 	delete m_pAchievementDescLabel;
 	delete m_pPercentageBar;
 	delete m_pPercentageText;
+	delete m_pShowOnHUDCheck;
+	*/
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: Updates displayed achievement data. In applyschemesettings, and when gameui activates.
 //-----------------------------------------------------------------------------
-void CAchievementDialogItemPanel::UpdateAchievementInfo()
+void CAchievementDialogItemPanel::UpdateAchievementInfo( IScheme* pScheme )
 {
 	if ( m_pSourceAchievement && m_pSchemeSettings )
 	{
@@ -715,10 +964,36 @@ void CAchievementDialogItemPanel::UpdateAchievementInfo()
 		if ( m_pSourceAchievement->IsAchieved() )
 		{
 			LoadAchievementIcon( m_pAchievementIcon, m_pSourceAchievement );
+
+			SetBgColor( pScheme->GetColor( "AchievementsLightGrey", Color(255, 0, 0, 255) ) );
+
+			m_pAchievementNameLabel->SetFgColor( pScheme->GetColor( "SteamLightGreen", Color(255, 255, 255, 255) ) );
+
+			Color fgColor = pScheme->GetColor( "Label.TextBrightColor", Color(255, 255, 255, 255) );
+			m_pAchievementDescLabel->SetFgColor( fgColor );
+			m_pPercentageText->SetFgColor( fgColor );
+			m_pShowOnHUDCheck->SetVisible( false );
+			m_pShowOnHUDCheck->SetSelected( false );
 		}
 		else
 		{
 			LoadAchievementIcon( m_pAchievementIcon, m_pSourceAchievement, "_bw" );
+
+			SetBgColor( pScheme->GetColor( "AchievementsDarkGrey", Color(255, 0, 0, 255) ) );
+
+			Color fgColor = pScheme->GetColor( "AchievementsInactiveFG", Color(255, 255, 255, 255) );
+			m_pAchievementNameLabel->SetFgColor( fgColor );
+			m_pAchievementDescLabel->SetFgColor( fgColor );
+			m_pPercentageText->SetFgColor( fgColor );
+			if ( GameSupportsAchievementTracker() )
+			{
+				m_pShowOnHUDCheck->SetVisible( !m_pSourceAchievement->ShouldHideUntilAchieved() );	// m_pSourceAchievement->GetGoal() > 1 && 
+				m_pShowOnHUDCheck->SetSelected( m_pSourceAchievement->ShouldShowOnHUD() );
+			}
+			else
+			{
+				m_pShowOnHUDCheck->SetVisible( false );
+			}
 		}
 	}
 }
@@ -739,12 +1014,28 @@ void CAchievementDialogItemPanel::SetAchievementInfo( IAchievement* pAchievement
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CAchievementDialogItemPanel::PreloadResourceFile( void )
+{
+	const char *controlResourceName = "resource/ui/AchievementItem.res";
+
+	g_pPreloadedAchievementItemLayout = new KeyValues(controlResourceName);
+	g_pPreloadedAchievementItemLayout->LoadFromFile(g_pFullFileSystem, controlResourceName);
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Loads settings from hl2/resource/ui/achievementitem.res
 //			Sets display info for this achievement item.
 //-----------------------------------------------------------------------------
 void CAchievementDialogItemPanel::ApplySchemeSettings( IScheme* pScheme )
 {
-	LoadControlSettings( "resource/ui/AchievementItem.res" );
+	if ( !g_pPreloadedAchievementItemLayout )
+	{
+		PreloadResourceFile();
+	}
+
+	LoadControlSettings( "", NULL, g_pPreloadedAchievementItemLayout );
 
 	m_pSchemeSettings = pScheme;
 	
@@ -753,24 +1044,32 @@ void CAchievementDialogItemPanel::ApplySchemeSettings( IScheme* pScheme )
 		return;
 	}
 
+	m_pAchievementIcon		= SETUP_PANEL(dynamic_cast<vgui::ImagePanel*>(FindChildByName("AchievementIcon")));
+	m_pAchievementNameLabel = dynamic_cast<vgui::Label*>(FindChildByName("AchievementName"));
+	m_pAchievementDescLabel = dynamic_cast<vgui::Label*>(FindChildByName("AchievementDesc"));
+	m_pPercentageBar		= SETUP_PANEL(dynamic_cast<vgui::ImagePanel*>(FindChildByName("PercentageBar")));
+	m_pPercentageText		= dynamic_cast<vgui::Label*>(FindChildByName("PercentageText"));
+	m_pShowOnHUDCheck		= dynamic_cast<vgui::CheckButton*>(FindChildByName("ShowOnHUD"));
+	m_pShowOnHUDCheck->SetMouseInputEnabled( true );
+	m_pShowOnHUDCheck->SetEnabled( true );
+	m_pShowOnHUDCheck->SetCheckButtonCheckable( true );
+	m_pShowOnHUDCheck->AddActionSignalTarget( this );
+
 	BaseClass::ApplySchemeSettings( pScheme );
 
 	// m_pSchemeSettings must be set for this.
-	UpdateAchievementInfo();
+	UpdateAchievementInfo( pScheme );
+}
 
-	if ( m_pSourceAchievement->IsAchieved() )
+void CAchievementDialogItemPanel::ToggleShowOnHUD( void )
+{
+	m_pShowOnHUDCheck->SetSelected( !m_pShowOnHUDCheck->IsSelected() );
+}
+
+void CAchievementDialogItemPanel::OnCheckButtonChecked(Panel *panel)
+{
+	if ( GameSupportsAchievementTracker() && panel == m_pShowOnHUDCheck && m_pSourceAchievement )
 	{
-		SetBgColor( pScheme->GetColor( "AchievementsLightGrey", Color(255, 0, 0, 255) ) );
-
-		m_pAchievementNameLabel->SetFgColor( pScheme->GetColor( "SteamLightGreen", Color(255, 255, 255, 255) ) );
+		m_pSourceAchievement->SetShowOnHUD( m_pShowOnHUDCheck->IsSelected() );
 	}
-	else
-	{
-		SetBgColor( pScheme->GetColor( "AchievementsDarkGrey", Color(255, 0, 0, 255) ) );
-
-		Color fgColor = pScheme->GetColor( "AchievementsInactiveFG", Color(255, 255, 255, 255) );
-		m_pAchievementNameLabel->SetFgColor( fgColor );
-		m_pAchievementDescLabel->SetFgColor( fgColor );
-		m_pPercentageText->SetFgColor( fgColor );
-	}	
 }

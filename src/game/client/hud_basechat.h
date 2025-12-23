@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,11 +14,11 @@
 #include "hudelement.h"
 #include <vgui_controls/Panel.h>
 #include "vgui_basepanel.h"
-#include "vgui_controls/frame.h"
+#include "vgui_controls/Frame.h"
 #include <vgui_controls/TextEntry.h>
 #include <vgui_controls/RichText.h>
-#include <vgui_controls/button.h>
-#include <vgui_controls/checkbutton.h>
+#include <vgui_controls/Button.h>
+#include <vgui_controls/CheckButton.h>
 
 class CBaseHudChatInputLine;
 class CBaseHudChatEntry;
@@ -49,12 +49,22 @@ extern ConVar cl_showtextmsg;
 
 enum ChatFilters
 {
-	CHAT_FILTER_NONE = 0,
-	CHAT_FILTER_JOINLEAVE = 1,
-	CHAT_FILTER_NAMECHANGE = 2,
-	CHAT_FILTER_PUBLICCHAT = 4,
-	CHAT_FILTER_SERVERMSG = 8,
-	CHAT_FILTER_TEAMCHANGE = 16
+	CHAT_FILTER_NONE		= 0,
+	CHAT_FILTER_JOINLEAVE	= 0x000001,
+	CHAT_FILTER_NAMECHANGE	= 0x000002,
+	CHAT_FILTER_PUBLICCHAT	= 0x000004,
+	CHAT_FILTER_SERVERMSG	= 0x000008,
+	CHAT_FILTER_TEAMCHANGE	= 0x000010,
+    //=============================================================================
+    // HPE_BEGIN:
+    // [tj]Added a filter for achievement announce
+    //=============================================================================
+     
+    CHAT_FILTER_ACHIEVEMENT	= 0x000020,
+     
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
 };
 
 
@@ -66,15 +76,20 @@ enum TextColor
 	COLOR_PLAYERNAME = 3,
 	COLOR_LOCATION = 4,
 	COLOR_ACHIEVEMENT = 5,
+	COLOR_CUSTOM = 6,		// Will use the most recently SetCustomColor()
+	COLOR_HEXCODE = 7,		// Reads the color from the next six characters
+	COLOR_HEXCODE_ALPHA = 8,// Reads the color and alpha from the next eight characters
 	COLOR_MAX
 };
 
 //--------------------------------------------------------------------------------------------------------------
 struct TextRange
 {
+	TextRange() { preserveAlpha = false; }
 	int start;
 	int end;
 	Color color;
+	bool preserveAlpha;
 };
 
 void StripEndNewlineFromString( char *str );
@@ -82,9 +97,22 @@ void StripEndNewlineFromString( wchar_t *str );
 
 char* ConvertCRtoNL( char *str );
 wchar_t* ConvertCRtoNL( wchar_t *str );
-wchar_t* ReadLocalizedString( bf_read &msg, wchar_t *pOut, int outSize, bool bStripNewline, char *originalString = NULL, int originalSize = 0 );
-wchar_t* ReadChatTextString( bf_read &msg, wchar_t *pOut, int outSize );
+wchar_t* ReadLocalizedString( bf_read &msg, OUT_Z_BYTECAP(outSizeInBytes) wchar_t *pOut, int outSizeInBytes, bool bStripNewline, OUT_Z_CAP(originalSize) char *originalString = NULL, int originalSize = 0 );
+wchar_t* ReadChatTextString( bf_read &msg, OUT_Z_BYTECAP(outSizeInBytes) wchar_t *pOut, int outSizeInBytes );
 char* RemoveColorMarkup( char *str );
+
+//--------------------------------------------------------------------------------------------------------
+/**
+ * Simple utility function to allocate memory and duplicate a wide string
+ */
+inline wchar_t *CloneWString( const wchar_t *str )
+{
+	const int nLen = V_wcslen(str)+1;
+	wchar_t *cloneStr = new wchar_t [ nLen ];
+	const int nSize = nLen * sizeof( wchar_t );
+	V_wcsncpy( cloneStr, str, nSize );
+	return cloneStr;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: An output/display line of the chat interface
@@ -154,7 +182,6 @@ class CHudChatHistory : public vgui::RichText
 public:
 
 	CHudChatHistory( vgui::Panel *pParent, const char *panelName );
-	virtual ~CHudChatHistory() {}
 
 	virtual void	ApplySchemeSettings(vgui::IScheme *pScheme);
 };
@@ -213,12 +240,15 @@ public:
 
 	void			MsgFunc_TextMsg(const char *pszName, int iSize, void *pbuf);
 	
-	virtual void	Printf( int iFilter, const char *fmt, ... );
-	virtual void	ChatPrintf( int iPlayerIndex, int iFilter, const char *fmt, ... );
+	virtual void	Printf( int iFilter, PRINTF_FORMAT_STRING const char *fmt, ... );
+	virtual void	ChatPrintf( int iPlayerIndex, int iFilter, PRINTF_FORMAT_STRING const char *fmt, ... ) FMTFUNCTION( 4, 5 );
 	
-	void			StartMessageMode( int iMessageModeType );
-	void			StopMessageMode( void );
+	virtual void	StartMessageMode( int iMessageModeType );
+	virtual void	StopMessageMode( void );
 	void			Send( void );
+
+	MESSAGE_FUNC( OnChatEntrySend, "ChatEntrySend" );
+	MESSAGE_FUNC( OnChatEntryStopMessageMode, "ChatEntryStopMessageMode" );
 
 	virtual void	ApplySchemeSettings(vgui::IScheme *pScheme);
 	virtual void	Paint( void );
@@ -251,9 +281,11 @@ public:
 	CBaseHudChatInputLine	*GetChatInput( void ) { return m_pChatInput; }
 	CHudChatFilterPanel		*GetChatFilterPanel( void );
 
-	int						GetFilterFlags( void ) { return m_iFilterFlags; }
+	virtual int				GetFilterFlags( void ) { return m_iFilterFlags; }
 	void					SetFilterFlag( int iFilter );
 
+	//-----------------------------------------------------------------------------
+	virtual Color	GetDefaultTextColor( void );
 	virtual Color	GetTextColorForClient( TextColor colorNum, int clientIndex );
 	virtual Color	GetClientColor( int clientIndex );
 
@@ -263,6 +295,10 @@ public:
 
 	bool			IsVoiceSubtitle( void ) { return m_bEnteringVoice; }
 	void			SetVoiceSubtitleState( bool bState ) { m_bEnteringVoice = bState; }
+	int				GetMessageMode( void ) { return m_nMessageMode; }
+
+	void			SetCustomColor( Color colNew ) { m_ColorCustom = colNew; }
+	void			SetCustomColor( const char *pszColorName );
 
 protected:
 	CBaseHudChatLine		*FindUnusedChatLine( void );
@@ -275,6 +311,8 @@ protected:
 
 	CHudChatFilterButton	*m_pFiltersButton;
 	CHudChatFilterPanel		*m_pFilterPanel;
+
+	Color			m_ColorCustom;
 
 private:	
 	void			Clear( void );
@@ -289,13 +327,14 @@ private:
 
 	int				m_iFilterFlags;
 	bool			m_bEnteringVoice;
+
 };
 
 class CBaseHudChatEntry : public vgui::TextEntry
 {
 	typedef vgui::TextEntry BaseClass;
 public:
-	CBaseHudChatEntry( vgui::Panel *parent, char const *panelName, CBaseHudChat *pChat )
+	CBaseHudChatEntry( vgui::Panel *parent, char const *panelName, vgui::Panel *pChat )
 		: BaseClass( parent, panelName )
 	{
 		SetCatchEnterKey( true );
@@ -319,14 +358,14 @@ public:
 			{
 				if ( m_pHudChat )
 				{
-					m_pHudChat->Send();
+					PostMessage( m_pHudChat, new KeyValues("ChatEntrySend") );
 				}
 			}
 		
 			// End message mode.
 			if ( m_pHudChat )
 			{
-				m_pHudChat->StopMessageMode();
+				PostMessage( m_pHudChat, new KeyValues("ChatEntryStopMessageMode") );
 			}
 		}
 		else if ( code == KEY_TAB )
@@ -341,7 +380,7 @@ public:
 	}
 
 private:
-	CBaseHudChat *m_pHudChat;
+	vgui::Panel *m_pHudChat;
 };
 
 //-----------------------------------------------------------------------------
@@ -352,13 +391,12 @@ class CBaseHudChatInputLine : public vgui::Panel
 	typedef vgui::Panel BaseClass;
 	
 public:
-	CBaseHudChatInputLine( CBaseHudChat *parent, char const *panelName );
-	virtual ~CBaseHudChatInputLine() {}
+	CBaseHudChatInputLine( vgui::Panel *parent, char const *panelName );
 
 	void			SetPrompt( const wchar_t *prompt );
 	void			ClearEntry( void );
 	void			SetEntry( const wchar_t *entry );
-	void			GetMessageText( wchar_t *buffer, int buffersizebytes );
+	void			GetMessageText( OUT_Z_BYTECAP(buffersizebytes) wchar_t *buffer, int buffersizebytes );
 
 	virtual void	PerformLayout();
 	virtual void	ApplySchemeSettings(vgui::IScheme *pScheme);

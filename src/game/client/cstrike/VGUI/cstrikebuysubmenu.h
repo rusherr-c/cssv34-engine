@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -28,6 +28,9 @@ public:
 	}; 
 	
 protected:
+
+	virtual void OnThink();
+	void UpdateVestHelmPrice();
 
 	virtual void OnCommand( const char *command );
 

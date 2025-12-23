@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Engine implementation of services required by the audio subsystem
 //
@@ -29,7 +29,7 @@
 #include "sys_dll.h"
 #include "toolframework/itoolframework.h"
 #include "tier0/vprof.h"
-#include "steam/steam_api.h"
+#include "cl_steamauth.h"
 #include "tier1/fmtstr.h"
 #include "MapReslistGenerator.h"
 #include "cl_main.h"
@@ -108,7 +108,8 @@ public:
 
 	virtual void SetSoundFrametime( float realDt, float hostDt )
 	{
-		if ( cl_movieinfo.IsRecording() )
+		extern bool IsReplayRendering();
+		if ( cl_movieinfo.IsRecording() || IsReplayRendering() )
 		{
 			m_frameTime = hostDt;
 		}
@@ -135,17 +136,6 @@ public:
 
 	virtual void OnChangeVoiceStatus( int entity, bool status)
 	{
-		// Local player changing state
-		if ( entity == -1 )
-		{
-#ifndef NO_STEAM
-			if ( SteamFriends() )
-			{
-				// Tell Friends' Voice chat that the local user is speaking!!!
-				SteamFriends()->SetInGameVoiceSpeaking( SteamUser()->GetSteamID(), status );
-			}
-#endif
-		}
 		ClientDLL_VoiceStatus(entity, status);
 	}
 
@@ -187,6 +177,18 @@ public:
 		}
 
 		return engineClient->IsPaused();
+	}
+	
+	virtual bool IsGameActive()
+	{
+		extern IVEngineClient *engineClient;
+		if ( !engineClient )
+		{
+			Assert( !"No engineClient, bug???" );
+			return true;
+		}
+
+		return engineClient->IsActiveApp();
 	}
 
 	virtual void RestartSoundSystem()
@@ -339,9 +341,8 @@ public:
 			wchar_t file[ 256 ];
 			g_pVGuiLocalize->ConvertANSIToUnicode( cachefile, file, sizeof( file ) );
 
-			g_pVGuiLocalize->ConstructString( 
+			g_pVGuiLocalize->ConstructString_safe( 
 				constructed, 
-				sizeof( constructed ),
 				( wchar_t * )format,
 				1,
 				file );
@@ -497,6 +498,7 @@ private:
 		msg->SetInt( "soundlevel", (int)params.soundlevel );
 		msg->SetInt( "flags", params.flags );
 		msg->SetInt( "pitch", params.pitch );
+		msg->SetInt( "specialdsp", params.specialdsp );
 		msg->SetInt( "fromserver", params.fromserver ? 1 : 0 );
 		msg->SetFloat( "delay", params.delay );
 		msg->SetInt( "speakerentity", params.speakerentity );

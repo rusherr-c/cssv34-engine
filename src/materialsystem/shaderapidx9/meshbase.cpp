@@ -1,11 +1,11 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //===========================================================================//
 
 #include "meshbase.h"
-#include "ShaderAPI_Global.h"
+#include "shaderapi_global.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -87,7 +87,6 @@ CVertexBufferBase::~CVertexBufferBase()
 void CVertexBufferBase::PrintVertexFormat( VertexFormat_t vertexFormat )
 {
 	VertexCompressionType_t compression = CompressionType( vertexFormat );
-	char pBuf[256];
 	if( vertexFormat & VERTEX_POSITION )
 	{
 		Msg( "VERTEX_POSITION|" );
@@ -126,14 +125,12 @@ void CVertexBufferBase::PrintVertexFormat( VertexFormat_t vertexFormat )
 	}
 	if( NumBoneWeights( vertexFormat ) > 0 )
 	{
-		Q_snprintf( pBuf, sizeof(pBuf), "VERTEX_BONEWEIGHT(%d)%s|",
+		Msg( "VERTEX_BONEWEIGHT(%d)%s|",
 			NumBoneWeights( vertexFormat ), ( compression ? "[COMPRESSED]" : "" ) );
-		Msg( pBuf );
 	}
 	if( UserDataSize( vertexFormat ) > 0 )
 	{
-		Q_snprintf( pBuf, sizeof(pBuf), "VERTEX_USERDATA_SIZE(%d)|", UserDataSize( vertexFormat ) );
-		Msg( pBuf );
+		Msg( "VERTEX_USERDATA_SIZE(%d)|", UserDataSize( vertexFormat ) );
 	}
 	int i;
 	for( i = 0; i < VERTEX_MAX_TEXTURE_COORDINATES; i++ )
@@ -142,8 +139,7 @@ void CVertexBufferBase::PrintVertexFormat( VertexFormat_t vertexFormat )
 		if ( nDim == 0 )
 			continue;
 
-		Q_snprintf( pBuf, sizeof(pBuf), "VERTEX_TEXCOORD_SIZE(%d,%d)", i, nDim );
-		Msg( pBuf );
+		Msg( "VERTEX_TEXCOORD_SIZE(%d,%d)", i, nDim );
 	}
 	Msg( "\n" );
 }
@@ -180,7 +176,7 @@ void CVertexBufferBase::Spew( int nVertexCount, const VertexDesc_t &desc )
 
 	char pTempBuf[1024];
 	Q_snprintf( pTempBuf, sizeof(pTempBuf), "\nVerts %d (First %d, Offset %d) :\n", nVertexCount, desc.m_nFirstVertex, desc.m_nOffset );
-	Warning( pTempBuf );
+	Warning( "%s", pTempBuf );
 
 	Assert( ( desc.m_NumBoneWeights == 2 ) || ( desc.m_NumBoneWeights == 0 ) );
 
@@ -259,7 +255,7 @@ void CVertexBufferBase::Spew( int nVertexCount, const VertexDesc_t &desc )
 		}
 
 		Q_snprintf( &pTempBuf[nLen], sizeof(pTempBuf) - nLen, "\n" );
-		Warning( pTempBuf );
+		Warning( "%s", pTempBuf );
 		nLen = 0;
 	}
 }
@@ -374,7 +370,7 @@ void CIndexBufferBase::Spew( int nIndexCount, const IndexDesc_t &indexDesc )
 	pTempBuf[0] = '\0';
 	char *pTemp = pTempBuf;
 	Q_snprintf( pTempBuf, sizeof(pTempBuf), "\nIndices: %d (First %d, Offset %d)\n", nIndexCount, indexDesc.m_nFirstIndex, indexDesc.m_nOffset );
-	Warning( pTempBuf );
+	Warning( "%s", pTempBuf );
 	for ( int i = 0; i < nIndexCount; ++i )
 	{
 		nLen += Q_snprintf( pTemp, sizeof(pTempBuf) - nLen - 1, "%d ", ( int )indexDesc.m_pIndices[i] );
@@ -382,14 +378,14 @@ void CIndexBufferBase::Spew( int nIndexCount, const IndexDesc_t &indexDesc )
 		if ( (i & 0x0F) == 0x0F )
 		{
 			Q_snprintf( pTemp, sizeof(pTempBuf) - nLen - 1, "\n" );
-			Warning( pTempBuf );
+			Warning( "%s", pTempBuf );
 			pTempBuf[0] = '\0';
 			nLen = 0;
 			pTemp = pTempBuf;
 		}
 	}
 	Q_snprintf( pTemp, sizeof(pTempBuf) - nLen - 1, "\n" );
-	Warning( pTempBuf ); 
+	Warning( "%s", pTempBuf ); 
 }
 
 

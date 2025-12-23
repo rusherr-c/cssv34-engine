@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2006, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: particle system code
 //
@@ -352,7 +352,7 @@ class C_OP_ContinuousEmitter : public CParticleOperatorInstance
 			//}
 		}
 		float flDeltaTime = flCurrDrawTime - flPrevDrawTime;
-		flDeltaTime = min (flDeltaTime, 4.0);
+		flDeltaTime = min( flDeltaTime, 4.f );
 		flPrevDrawTime = flCurrDrawTime - flDeltaTime;
 		//disabled for now
 		pCtx->m_flTotalActualParticlesSoFar = flDeltaTime * flEmissionRate;
@@ -392,7 +392,7 @@ class C_OP_ContinuousEmitter : public CParticleOperatorInstance
 			pParticles->m_fl4CurTime = ReplicateX4( flPrevDrawTime );
 			for( float i = flPrevDrawTime; i < flCurrDrawTime; i += 0.1 )
 			{
-				pParticles->Simulate( .1 );
+				pParticles->Simulate( .1, false );
 			}
 		}
 	}
@@ -780,7 +780,7 @@ uint32 C_OP_NoiseEmitter::Emit( CParticleCollection *pParticles, float flCurStre
 	}
 
 	float flInitialNoise = ( ValueBase + ( ValueScale * flNoise ) );
-	flInitialNoise = clamp(flInitialNoise, 0.0f, INT_MAX );
+	flInitialNoise = clamp(flInitialNoise, 0.0f, (float) INT_MAX );
 
 	//Global strength scale brought in by operator fade in/fade out/oscillate 
 	float flEmissionRate = flInitialNoise * flCurStrength;

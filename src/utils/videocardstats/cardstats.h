@@ -1,21 +1,17 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
-// The copyright to the contents herein is the property of Valve, L.L.C.
-// The contents may be used and/or copied only with the written permission of
-// Valve, L.L.C., or in accordance with the terms and conditions stipulated in
-// the agreement/contract under which the contents have been supplied.
+// Purpose: 
 //
-// $Header: $
 // $NoKeywords: $
 //
-//=============================================================================
+//=============================================================================//
 
 #ifndef CARDSTATS_H
 #define CARDSTATS_H
 
-#include "UtlBuffer.h"
-#include "UtlVector.h"
-#include "strtools.h"
+#include "tier1/UtlBuffer.h"
+#include "tier1/utlvector.h"
+#include "tier1/strtools.h"
 
 int LoadFileIntoBuffer( CUtlBuffer &buf, char *pszFilename );
 void WriteOutputToFile( CUtlBuffer &buf, char *pszFilename, char *pszSearchString );

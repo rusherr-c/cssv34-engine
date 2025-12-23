@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -14,8 +14,8 @@
 #include "faceposer_models.h"
 #include "tabwindow.h"
 #include "inputproperties.h"
-#include "keyvalues.h"
-#include "FileSystem.h"
+#include "KeyValues.h"
+#include "filesystem.h"
 #include "tier1/KeyValues.h"
 #include "tier1/UtlBuffer.h"
 
@@ -424,6 +424,8 @@ void AnimationBrowser::redraw()
 
 	int rcx, rcy, rcw, rch;
 
+	EnableStickySnapshotMode( );
+
 	int c = curcount;
 	for ( int i = 0; i < c; i++ )
 	{
@@ -437,6 +439,8 @@ void AnimationBrowser::redraw()
 
 		DrawThumbNail( i, helper, rcx, rcy, rcw, rch );
 	}
+
+	DisableStickySnapshotMode( );
 
 	helper.StopClipping();
 
@@ -1286,7 +1290,7 @@ void AnimationBrowser::RenameCustomFile( int index )
 	anim->m_ShortName = params.m_szInputText;
 	
 	char basename[ 128 ];
-	Q_StripExtension( hdr->name(), basename, sizeof( basename ) );
+	Q_StripExtension( hdr->pszName(), basename, sizeof( basename ) );
 	Q_snprintf( fn, sizeof( fn ), "expressions/%s/animation/%s.txt", basename, params.m_szInputText );
 	Q_FixSlashes( fn );
 	Q_strlower( fn );
@@ -1370,7 +1374,7 @@ void AnimationBrowser::OnModelChanged()
 		{
 			char subdir[ 512 ];
 			char basename[ 512 ];
-			Q_StripExtension( hdr->name(), basename, sizeof( basename ) );
+			Q_StripExtension( hdr->pszName(), basename, sizeof( basename ) );
 			Q_snprintf( subdir, sizeof( subdir ), "expressions/%s/animation", basename );
 			Q_FixSlashes( subdir );
 			Q_strlower( subdir );
@@ -1421,7 +1425,7 @@ void AnimationBrowser::OnModelChanged()
 	// Create it
 	char fn[ 512 ];
 	char basename[ 512 ];
-	Q_StripExtension( hdr->name(), basename, sizeof( basename ) );
+	Q_StripExtension( hdr->pszName(), basename, sizeof( basename ) );
 	Q_snprintf( fn, sizeof( fn ), "expressions/%s/animation/%s.txt", basename, params.m_szInputText );
 	Q_FixSlashes( fn );
 	Q_strlower( fn );

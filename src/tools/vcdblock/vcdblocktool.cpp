@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -14,7 +14,7 @@
 #include "vgui/ilocalize.h"
 #include "tier0/icommandline.h"
 #include "materialsystem/imaterialsystem.h"
-#include "vguimatsurface/imatsystemsurface.h"
+#include "VGuiMatSurface/IMatSystemSurface.h"
 #include "vcdblockdoc.h"
 #include "infotargetbrowserpanel.h"
 #include "infotargetpropertiespanel.h"
@@ -858,7 +858,7 @@ void CVcdBlockTool::OnNew()
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetEditFileName();
 	}
 
@@ -876,7 +876,7 @@ void CVcdBlockTool::OnOpen( )
 	const char *pSaveFileName = NULL;
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		nFlags = FOSM_SHOW_SAVE_QUERY;
+		nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 		pSaveFileName = m_pDoc->GetEditFileName();
 	}
 
@@ -901,7 +901,7 @@ void CVcdBlockTool::Save()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( m_pDoc->GetEditFileName(), "vle", NULL );
+		SaveFile( m_pDoc->GetEditFileName(), "vle", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -909,7 +909,7 @@ void CVcdBlockTool::OnSaveAs()
 {
 	if ( m_pDoc )
 	{
-		SaveFile( NULL, "vle", NULL );
+		SaveFile( NULL, "vle", FOSM_SHOW_PERFORCE_DIALOGS );
 	}
 }
 
@@ -940,7 +940,7 @@ void CVcdBlockTool::SaveAndTest()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetEditFileName(), "vle", NULL, 
+		SaveFile( m_pDoc->GetEditFileName(), "vle", FOSM_SHOW_PERFORCE_DIALOGS, 
 			new KeyValues( "RestartLevel" ) );
 	}
 	else
@@ -972,7 +972,7 @@ void CVcdBlockTool::OnClose()
 {
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
-		SaveFile( m_pDoc->GetEditFileName(), "vle", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetEditFileName(), "vle", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnClose" ) );
 		return;
 	}
@@ -1071,7 +1071,7 @@ void CVcdBlockTool::OpenSpecificFile( const char *pFileName )
 
 		if ( m_pDoc->IsDirty() )
 		{
-			nFlags = FOSM_SHOW_SAVE_QUERY;
+			nFlags = FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY;
 			pSaveFileName = m_pDoc->GetEditFileName();
 		}
 	}
@@ -1161,7 +1161,7 @@ bool CVcdBlockTool::CanQuit()
 	if ( m_pDoc && m_pDoc->IsDirty() )
 	{
 		// Show Save changes Yes/No/Cancel and re-quit if hit yes/no
-		SaveFile( m_pDoc->GetEditFileName(), "vle", FOSM_SHOW_SAVE_QUERY, 
+		SaveFile( m_pDoc->GetEditFileName(), "vle", FOSM_SHOW_PERFORCE_DIALOGS | FOSM_SHOW_SAVE_QUERY, 
 			new KeyValues( "OnQuit" ) );
 		return false;
 	}

@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Core Movie Maker UI API
 //
@@ -13,9 +13,9 @@
 
 #include "tier1/interface.h"
 #include "toolframework/itoolsystem.h"
-#include "vgui/ischeme.h"
-#include "vgui_controls/editablepanel.h"
-#include "vgui_controls/phandle.h"
+#include "vgui/IScheme.h"
+#include "vgui_controls/EditablePanel.h"
+#include "vgui_controls/PHandle.h"
 #include "toolutils/recentfilelist.h"
 #include "vgui/keycode.h"
 #include "vgui_controls/fileopenstatemachine.h"

@@ -1,11 +1,12 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose:  baseclient.cpp: implementation of the CBaseClient class.
 //
 //===========================================================================//
- 
+
 
 #include "client_pch.h"
+#include "tier0/etwprof.h"
 #include "eiface.h"
 #include "baseclient.h"
 #include "server.h"
@@ -19,17 +20,27 @@
 #include "vgui_baseui_interface.h"
 #endif
 #include "sv_remoteaccess.h" // NotifyDedicatedServerUI()
-#include "userid.h"
 #include "MapReslistGenerator.h"
 #include "sv_steamauth.h"
 #include "matchmaking.h"
 #include "iregistry.h"
 #include "sv_main.h"
+#include "hltvserver.h"
+#include <ctype.h>
+#if defined( REPLAY_ENABLED )
+#include "replay_internal.h"
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 extern IServerGameDLL	*serverGameDLL;
+extern ConVar tv_enable;
+
+ConVar sv_namechange_cooldown_seconds( "sv_namechange_cooldown_seconds", "30.0", FCVAR_NONE, "When a client name change is received, wait N seconds before allowing another name change" );
+ConVar sv_netspike_on_reliable_snapshot_overflow( "sv_netspike_on_reliable_snapshot_overflow", "0", FCVAR_NONE, "If nonzero, the server will dump a netspike trace if a client is dropped due to reliable snapshot overflow" );
+ConVar sv_netspike_sendtime_ms( "sv_netspike_sendtime_ms", "0", FCVAR_NONE, "If nonzero, the server will dump a netspike trace if it takes more than N ms to prepare a snapshot to a single client.  This feature does take some CPU cycles, so it should be left off when not in use." );
+ConVar sv_netspike_output( "sv_netspike_output", "1", FCVAR_NONE, "Where the netspike data be written?  Sum of the following values: 1=netspike.txt, 2=ordinary server log" );
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -43,16 +54,24 @@ CBaseClient::CBaseClient()
 	m_Server = NULL;
 	m_pBaseline = NULL;
 	m_bIsHLTV = false;
+#if defined( REPLAY_ENABLED )
+	m_bIsReplay = false;
+#endif
 	m_bConVarsChanged = false;
+	m_bInitialConVarsSet = false;
 	m_bSendServerInfo = false;
-	m_SteamID = NULL;
 	m_bFullyAuthenticated = false;
+	m_fTimeLastNameChange = 0.0;
+	m_szPendingNameChange[0] = '\0';
+	m_bReportFakeClient = true;
+	m_iTracing = 0;
+	m_bPlayerNameLocked = false;
 }
 
 CBaseClient::~CBaseClient()
 {
-	delete m_SteamID;
 }
+
 
 void CBaseClient::SetRate(int nRate, bool bForce )
 {
@@ -80,13 +99,16 @@ bool CBaseClient::FillUserInfo( player_info_s &userInfo )
 		return false; // inactive user, no more data available
 
 	Q_strncpy( userInfo.name, GetClientName(), MAX_PLAYER_NAME_LENGTH );
-	Q_memcpy( userInfo.guid, GetNetworkIDString(), SIGNED_GUID_LEN + 1 );
+	V_strcpy_safe( userInfo.guid, GetNetworkIDString() );
 	userInfo.friendsID = m_nFriendsID;
 	Q_strncpy( userInfo.friendsName, m_FriendsName, sizeof(m_FriendsName) );
 	userInfo.userID = GetUserID();
 	userInfo.fakeplayer = IsFakeClient();
 	userInfo.ishltv = IsHLTV();
-		
+#if defined( REPLAY_ENABLED )
+	userInfo.isreplay = IsReplay();
+#endif
+
 	for( int i=0; i< MAX_CUSTOM_FILES; i++ )
 		userInfo.customFiles[i] = m_nCustomFiles[i].crc;
 
@@ -102,6 +124,11 @@ bool CBaseClient::FillUserInfo( player_info_s &userInfo )
 //-----------------------------------------------------------------------------
 void CBaseClient::ClientPrintf (const char *fmt, ...)
 {
+	if ( !m_NetChannel )
+	{
+		return;
+	}
+
 	va_list		argptr;
 	char		string[1024];
 
@@ -135,33 +162,41 @@ bool CBaseClient::SendNetMsg(INetMessage &msg, bool bForceReliable)
 	return bret;
 }
 
-char const *CBaseClient::GetUserSetting(char const *cvar) const 
+char const *CBaseClient::GetUserSetting(char const *pchCvar) const 
 {
-	if ( !m_ConVars || !cvar || !cvar[0] )
+	if ( !m_ConVars || !pchCvar || !pchCvar[0] )
 	{
 		return "";
 	}
 
-	const char * value = m_ConVars->GetString( cvar, "" );
+	const char * value = m_ConVars->GetString( pchCvar, "" );
 
 	if ( value[0]==0 )
 	{
 		// check if this var even existed
-		if ( m_ConVars->GetDataType( cvar ) ==	KeyValues::TYPE_NONE )
+		if ( m_ConVars->GetDataType( pchCvar ) ==	KeyValues::TYPE_NONE )
 		{
-			DevMsg( "GetUserSetting: cvar '%s' unknown.\n", cvar );
+			DevMsg( "GetUserSetting: cvar '%s' unknown.\n", pchCvar );
 		}
 	}
 
 	return value;
 }
 
-void CBaseClient::SetUserCVar( const char *cvar, const char *value)
+void CBaseClient::SetUserCVar( const char *pchCvar, const char *value)
 {
-	if ( !cvar || !value )
+	if ( !pchCvar || !value )
 		return;
 
-	m_ConVars->SetString( cvar, value );
+	// Name is handled differently
+	if ( !Q_stricmp( pchCvar, "name") )
+	{
+		//Msg("CBaseClient::SetUserCVar[index=%d]('name', '%s')\n", m_nClientSlot, value );
+		ClientRequestNameChange( value );
+		return;
+	}
+
+	m_ConVars->SetString( pchCvar, value );
 }
 
 void CBaseClient::SetUpdateRate(int udpaterate, bool bForce)
@@ -214,10 +249,14 @@ void CBaseClient::Clear()
 	m_nSignonState = SIGNONSTATE_NONE;
 	m_nDeltaTick = -1;
 	m_nSignonTick = 0;
+	m_nStringTableAckTick = 0;
 	m_pLastSnapshot = NULL;
 	m_nForceWaitForTick = -1;
 	m_bFakePlayer = false;
 	m_bIsHLTV = false;
+#if defined( REPLAY_ENABLED )
+	m_bIsReplay = false;
+#endif
 	m_fNextMessageTime = 0;
 	m_fSnapshotInterval = 0;
 	m_bReceivedPacket = false;
@@ -232,6 +271,8 @@ void CBaseClient::Clear()
 	m_bConVarsChanged = false;
 	m_bSendServerInfo = false;
 	m_bFullyAuthenticated = false;
+	m_fTimeLastNameChange = 0.0;
+	m_szPendingNameChange[0] = '\0';
 
 	Q_memset( m_nCustomFiles, 0, sizeof(m_nCustomFiles) );
 }
@@ -257,7 +298,8 @@ bool CBaseClient::SetSignonState(int state, int spawncount)
 		case SIGNONSTATE_SPAWN		:	ActivatePlayer();
 										break;
 
-		case SIGNONSTATE_FULL		:	break;	
+		case SIGNONSTATE_FULL		:	OnSignonStateFull();
+										break;
 
 		case SIGNONSTATE_CHANGELEVEL:	break;	
 
@@ -284,6 +326,7 @@ void CBaseClient::Inactivate( void )
 
 	m_nDeltaTick = -1;
 	m_nSignonTick = 0;
+	m_nStringTableAckTick = 0;
 	m_pLastSnapshot = NULL;
 	m_nForceWaitForTick = -1;
 
@@ -308,8 +351,58 @@ void CBaseClient::Inactivate( void )
 	g_GameEventManager.RemoveListener( this );
 }
 
-void CBaseClient::SetName(const char * name)
+//---------------------------------------------------------------------------
+// Purpose: Determine whether or not a character should be ignored in a player's name.
+//---------------------------------------------------------------------------
+inline bool BIgnoreCharInName ( unsigned char cChar, bool bIsFirstCharacter )
 {
+	// Don't copy '%' or '~' chars across
+	// Don't copy '#' chars across if they would go into the first position in the name
+	// Don't allow color codes ( less than COLOR_MAX )
+	return cChar == '%' || cChar == '~' || cChar < 0x09 || ( bIsFirstCharacter && cChar == '#' );
+}
+
+void ValidateName( char *pszName, int nBuffSize )
+{
+	if ( !pszName )
+		return;
+
+	// did we get an empty string for the name?
+	if ( Q_strlen( pszName ) <= 0 )
+	{
+		Q_snprintf( pszName, nBuffSize, "unnamed" );
+	}
+	else
+	{
+		Q_RemoveAllEvilCharacters( pszName );
+
+		const unsigned char *pChar = (unsigned char *)pszName;
+
+		// also skip characters we're going to ignore
+		while ( *pChar && ( isspace(*pChar) || BIgnoreCharInName( *pChar, true ) ) )
+		{
+			++pChar;
+		}
+
+		// did we get all the way to the end of the name without a non-whitespace character?
+		if ( *pChar == '\0' )
+		{
+			Q_snprintf( pszName, nBuffSize, "unnamed" );
+		}
+	}
+}
+
+void CBaseClient::SetName(const char * playerName)
+{
+	char name[MAX_PLAYER_NAME_LENGTH];
+	Q_strncpy( name, playerName, sizeof(name) );
+
+	// Clear any pending name change
+	m_szPendingNameChange[0] = '\0';
+
+	// quick check to make sure the name isn't empty or full of whitespace
+	ValidateName( name, sizeof(name) );
+
 	if ( Q_strncmp( name, m_Name, sizeof(m_Name) ) == 0 )
 		return; // didn't change
 
@@ -328,9 +421,8 @@ void CBaseClient::SetName(const char * name)
 	{
 		// Don't copy '%' or '~' chars across
 		// Don't copy '#' chars across if they would go into the first position in the name
-		if ( *pFrom != '%' &&
-			 *pFrom != '~' &&
-			 ( *pFrom != '#' || pTo != &m_Name[0] ) )
+		// Don't allow color codes ( less than COLOR_MAX )
+		if ( !BIgnoreCharInName( *pFrom, pTo == &m_Name[0] ) )
 		{
 			*pTo++ = *pFrom;
 		}
@@ -339,9 +431,10 @@ void CBaseClient::SetName(const char * name)
 	}
 	*pTo = 0;
 
-	if ( Q_strlen( m_Name ) <= 0 )
+	Assert( m_Name[ 0 ] != '\0' ); // this should've been caught by ValidateName
+	if ( m_Name[ 0 ] == '\0' )
 	{
-		Q_snprintf( m_Name, sizeof(m_Name), "unnamed" );
+		V_strncpy( m_Name, "unnamed", sizeof(m_Name) );
 	}
 
 	val = m_Name;
@@ -360,8 +453,21 @@ void CBaseClient::SetName(const char * name)
 				if( !client->IsConnected() || client == this )
 					continue;
 				
-				if( !Q_stricmp( client->GetClientName(), val ) )
-					break;
+				// If it's 2 bots they're allowed to have matching names, otherwise there's a conflict
+				if( !Q_stricmp( client->GetClientName(), val ) && !( IsFakeClient() && client->IsFakeClient() ) )
+				{
+					CBaseClient *pClient = dynamic_cast< CBaseClient* >( client );
+					if ( IsFakeClient() && pClient )
+					{
+						// We're a bot so we get to keep the name... change the other guy
+						pClient->m_Name[ 0 ] = '\0';
+						pClient->SetName( val );
+					}
+					else
+					{
+						break;
+					}
+				}
 			}
 
 			if (i >= m_Server->GetClientCount())
@@ -381,7 +487,7 @@ void CBaseClient::SetName(const char * name)
 				}
 			}
 
-			Q_snprintf(newname, sizeof(newname), "(%d)%-0.*s", dupc++, MAX_PLAYER_NAME_LENGTH - 4, p );
+			Q_snprintf(newname, sizeof(newname), "(%d)%-.*s", dupc++, MAX_PLAYER_NAME_LENGTH - 4, p );
 			Q_strncpy(m_Name, newname, sizeof(m_Name));
 			
 			val = m_Name;		
@@ -389,6 +495,7 @@ void CBaseClient::SetName(const char * name)
 	}
 
 	m_ConVars->SetString( "name", m_Name );
+	m_bConVarsChanged = true;
 
 	m_Server->UserInfoChanged( m_nClientSlot );
 }
@@ -452,7 +559,7 @@ bool CBaseClient::SendSignonData( void )
 	return m_NetChannel->SendNetMsg( signonState );
 }
 
-void CBaseClient::Connect(const char * szName, int nUserID, INetChannel *pNetChannel, bool bFakePlayer)
+void CBaseClient::Connect( const char * szName, int nUserID, INetChannel *pNetChannel, bool bFakePlayer, int clientChallenge )
 {
 	COM_TimestampedLog( "CBaseClient::Connect" );
 #ifndef SWDS
@@ -461,16 +568,14 @@ void CBaseClient::Connect(const char * szName, int nUserID, INetChannel *pNetCha
 	Clear();
 
 	m_ConVars = new KeyValues("userinfo");
+	m_bInitialConVarsSet = false;
 
 	m_UserID = nUserID;
 
 	SetName( szName );
+	m_fTimeLastNameChange = 0.0;
 
 	m_bFakePlayer = bFakePlayer;
-	if ( bFakePlayer )
-	{
-		Steam3Server().NotifyLocalClientConnect( this );
-	}
 	m_NetChannel = pNetChannel;
 
 	if ( m_NetChannel && m_Server && m_Server->IsMultiplayer() )
@@ -478,7 +583,15 @@ void CBaseClient::Connect(const char * szName, int nUserID, INetChannel *pNetCha
 		m_NetChannel->SetCompressionMode( true );
 	}
 
+	m_clientChallenge = clientChallenge;
+
 	m_nSignonState = SIGNONSTATE_CONNECTED;
+
+	if ( bFakePlayer )
+	{
+		// Hidden fake players and the HLTV/Replay bot will get removed by CSteam3Server::SendUpdatedServerDetails.
+		Steam3Server().NotifyLocalClientConnect( this );
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -496,7 +609,7 @@ void CBaseClient::Disconnect( const char *fmt, ... )
 	if ( m_nSignonState == SIGNONSTATE_NONE )
 		return;	// no recursion
 
-#ifndef SWDS
+#if !defined( SWDS ) && defined( ENABLE_RPT )
 	SV_NotifyRPTOfDisconnect( m_nClientSlot );
 #endif
 
@@ -533,6 +646,8 @@ void CBaseClient::Disconnect( const char *fmt, ... )
 
 void CBaseClient::FireGameEvent( IGameEvent *event )
 {
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
+
 	char buffer_data[MAX_EVENT_BYTES];
 
 	SVC_GameEvent eventMsg;
@@ -544,7 +659,9 @@ void CBaseClient::FireGameEvent( IGameEvent *event )
 	{
 		if ( m_NetChannel )
 		{
-			m_NetChannel->SendNetMsg( eventMsg );
+			bool bSent = m_NetChannel->SendNetMsg( eventMsg );
+			if ( !bSent )
+				DevMsg("GameEventManager: failed to send event '%s'.\n", event->GetName() );
 		}
 	}
 	else
@@ -663,6 +780,13 @@ void CBaseClient::ConnectionStart(INetChannel *chan)
 	
 	REGISTER_CLC_MSG( RespondCvarValue );
 	REGISTER_CLC_MSG( FileCRCCheck );
+	REGISTER_CLC_MSG( FileMD5Check );
+
+#if defined( REPLAY_ENABLED )
+	REGISTER_CLC_MSG( SaveReplay );
+#endif
+
+	REGISTER_CLC_MSG( CmdKeyValues );
 }
 
 bool CBaseClient::ProcessTick( NET_Tick *msg )
@@ -683,12 +807,56 @@ bool CBaseClient::ProcessSetConVar( NET_SetConVar *msg )
 	{
 		const char *name = msg->m_ConVars[i].name;
 		const char *value = msg->m_ConVars[i].value;
+
+		// Discard any convar change request if contains funky characters
+		bool bFunky = false;
+		for (const char *s = name ; *s != '\0' ; ++s )
+		{
+			if ( !V_isalnum(*s) && *s != '_' )
+			{
+				bFunky = true;
+				break;
+			}
+		}
+		if ( bFunky )
+		{
+			Msg( "Ignoring convar change request for variable '%s' from client %s; invalid characters in the variable name\n", name, GetClientName() );
+			continue;
+		}
+
+		// "name" convar is handled differently
+		if ( V_stricmp( name, "name" ) == 0 )
+		{
+			ClientRequestNameChange( value );
+			continue;
+		}
+
+		// The initial set of convars must contain all client convars that are flagged userinfo. This is a simple fix to
+		// exploits that send bogus data later, and catches bugs (why are new userinfo convars appearing later?)
+		if ( m_bInitialConVarsSet && !m_ConVars->FindKey( name ) )
+		{
+#ifndef _DEBUG	// warn all the time in debug build
+			static double s_dblLastWarned = 0.0;
+			double dblTimeNow = Plat_FloatTime();
+			if ( dblTimeNow - s_dblLastWarned > 10 )
+#endif
+			{
+#ifndef _DEBUG
+				s_dblLastWarned = dblTimeNow;
+#endif
+				Warning( "Client \"%s\" userinfo ignored: \"%s\" = \"%s\"\n",
+				         this->GetClientName(), name, value );
+			}
+			continue;
+		}
+
 		m_ConVars->SetString( name, value );
 
 		// DevMsg( 1, " UserInfo update %s: %s = %s\n", m_Client->m_Name, name, value );
 	}
 
 	m_bConVarsChanged = true;
+	m_bInitialConVarsSet = true;
 
 	return true;
 }
@@ -721,9 +889,27 @@ bool CBaseClient::ProcessSignonState( NET_SignonState *msg)
 
 bool CBaseClient::ProcessClientInfo( CLC_ClientInfo *msg )
 {
+	if ( m_nSignonState != SIGNONSTATE_NEW )
+	{
+		Warning( "Dropping ClientInfo packet from client not in appropriate state\n" );
+		return false;
+	}
+
 	m_nSendtableCRC = msg->m_nSendTableCRC;
-	
-	m_bIsHLTV = msg->m_bIsHLTV;
+
+	// Protect against spoofed packets claiming to be HLTV clients
+	if ( ( hltv && hltv->IsTVRelay() ) || tv_enable.GetBool() )
+	{
+		m_bIsHLTV = msg->m_bIsHLTV;
+	}
+	else
+	{
+		m_bIsHLTV = false;
+	}
+
+#if defined( REPLAY_ENABLED )
+	m_bIsReplay = msg->m_bIsReplay;
+#endif
 
 	m_nFilesDownloaded = 0;
 	m_nFriendsID = msg->m_nFriendsID;
@@ -845,44 +1031,65 @@ bool CBaseClient::ProcessListenEvents( CLC_ListenEvents *msg )
 	return true;
 }
 
-
-
-bool CBaseClient::IsTracing() const
-{
-	return m_Trace.m_nMinWarningBytes != 0;
-}
+extern int GetNetSpikeValue();
 
 void CBaseClient::StartTrace( bf_write &msg )
 {
-	if ( !IsTracing() )
-		return;
+
+	// Should we be tracing?
+	m_Trace.m_nMinWarningBytes = 0;
+	if ( !IsHLTV() && !IsReplay() && !IsFakeClient() )
+		m_Trace.m_nMinWarningBytes = GetNetSpikeValue();
+	if ( m_iTracing < 2 )
+	{
+		if ( m_Trace.m_nMinWarningBytes <= 0 && sv_netspike_sendtime_ms.GetFloat() <= 0.0f )
+		{
+			m_iTracing = 0;
+			return;
+		}
+
+		m_iTracing = 1;
+	}
 	m_Trace.m_nStartBit = msg.GetNumBitsWritten();
 	m_Trace.m_nCurBit = m_Trace.m_nStartBit;
+	m_Trace.m_StartSendTime = Plat_FloatTime();
 }
 
 #define SERVER_PACKETS_LOG	"netspike.txt"
 
 void CBaseClient::EndTrace( bf_write &msg )
 {
-	if ( !IsTracing() )
+	if ( m_iTracing == 0 )
 		return;
+	VPROF_BUDGET( "CBaseClient::EndTrace", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 
 	int bits = m_Trace.m_nCurBit - m_Trace.m_nStartBit;
-	if ( bits < ( m_Trace.m_nMinWarningBytes << 3 ) )
+	float flElapsedMs = ( Plat_FloatTime() - m_Trace.m_StartSendTime ) * 1000.0;
+	int nBitThreshold = m_Trace.m_nMinWarningBytes << 3;
+	if ( m_iTracing < 2 // not forced
+		&& ( nBitThreshold <= 0 || bits < nBitThreshold ) // didn't exceed data threshold
+		&& ( sv_netspike_sendtime_ms.GetFloat() <= 0.0f || flElapsedMs < sv_netspike_sendtime_ms.GetFloat() ) ) // didn't exceed time threshold
 	{
 		m_Trace.m_Records.RemoveAll();
+		m_iTracing = 0;
 		return;
 	}
 
 	CUtlBuffer logData( 0, 0, CUtlBuffer::TEXT_BUFFER );
 
-	logData.Printf( "%f/%d Player [%s][%d][adr:%s] was sent a datagram %d bits (%8.3f bytes)\n",
+	logData.Printf( "%f/%d Player [%s][%d][adr:%s] was sent a datagram %d bits (%8.3f bytes), took %.2fms\n",
 		realtime, 
 		host_tickcount,
 		GetClientName(), 
 		GetPlayerSlot(), 
 		GetNetChannel()->GetAddress(),
-		bits, (float)bits / 8.0f );
+		bits, (float)bits / 8.0f,
+		flElapsedMs
+	);
+
+	// Write header line to the log if we aren't writing the whole thing
+	if ( ( sv_netspike_output.GetInt() & 2 ) == 0 )
+		Log("netspike: %s", logData.String() );
 
 	for ( int i = 0 ; i < m_Trace.m_Records.Count() ; ++i )
 	{
@@ -890,14 +1097,20 @@ void CBaseClient::EndTrace( bf_write &msg )
 		logData.Printf( "%64.64s : %8d bits (%8.3f bytes)\n", sp.m_szDesc, sp.m_nBits, (float)sp.m_nBits / 8.0f );
 	}
 
-	COM_LogString( SERVER_PACKETS_LOG, (char *)logData.Base() );
+	if ( sv_netspike_output.GetInt() & 1 )
+		COM_LogString( SERVER_PACKETS_LOG, logData.String() );
+	if ( sv_netspike_output.GetInt() & 2 )
+		Log( "%s", logData.String() );
+	ETWMark1S( "netspike", logData.String() );
 	m_Trace.m_Records.RemoveAll();
+	m_iTracing = 0;
 }
 
 void CBaseClient::TraceNetworkData( bf_write &msg, char const *fmt, ... )
 {
 	if ( !IsTracing() )
 		return;
+	VPROF_BUDGET( "CBaseClient::TraceNetworkData", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	char buf[ 64 ];
 	va_list argptr;
 	va_start( argptr, fmt );
@@ -915,6 +1128,7 @@ void CBaseClient::TraceNetworkMsg( int nBits, char const *fmt, ... )
 {
 	if ( !IsTracing() )
 		return;
+	VPROF_BUDGET( "CBaseClient::TraceNetworkMsg", VPROF_BUDGETGROUP_OTHER_NETWORKING );
 	char buf[ 64 ];
 	va_list argptr;
 	va_start( argptr, fmt );
@@ -925,11 +1139,6 @@ void CBaseClient::TraceNetworkMsg( int nBits, char const *fmt, ... )
 	Q_strncpy( t.m_szDesc, buf, sizeof( t.m_szDesc ) );
 	t.m_nBits = nBits;
 	m_Trace.m_Records.AddToTail( t );
-}
-
-void CBaseClient::SetTraceThreshold( int nThreshold )
-{
-	m_Trace.m_nMinWarningBytes = nThreshold;
 }
 
 void CBaseClient::SendSnapshot( CClientFrame *pFrame )
@@ -951,7 +1160,10 @@ void CBaseClient::SendSnapshot( CClientFrame *pFrame )
 	}
 
 	VPROF_BUDGET( "SendSnapshot", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+	tmZoneFiltered( TELEMETRY_LEVEL0, 50, TMZF_NONE, "%s", __FUNCTION__ );
 
+	bool bFailedOnce = false;
+write_again:
 	bf_write msg( "CBaseClient::SendSnapshot", m_SnapshotScratchBuffer, sizeof( m_SnapshotScratchBuffer ) );
 
 	TRACE_PACKET( ( "SendSnapshot(%d)\n", pFrame->tick_count ) );
@@ -967,10 +1179,7 @@ void CBaseClient::SendSnapshot( CClientFrame *pFrame )
 	// send tick time
 	NET_Tick tickmsg( pFrame->tick_count, host_frametime_unbounded, host_frametime_stddeviation );
 
-	if ( IsTracing() )
-	{
-		StartTrace( msg );
-	}
+	StartTrace( msg );
 
 	tickmsg.WriteToBuffer( msg );
 
@@ -1015,19 +1224,38 @@ void CBaseClient::SendSnapshot( CClientFrame *pFrame )
 
 	WriteGameSounds( msg );
 	
-	if ( IsTracing() )
-	{
-		TraceNetworkMsg( 0, "Finished [delta %s]", deltaFrame ? "yes" : "no" );
-		EndTrace( msg );
-	}
-
 	// write message to packet and check for overflow
 	if ( msg.IsOverflowed() )
 	{
+		bool bWasTracing = IsTracing();
+		if ( bWasTracing )
+		{
+			TraceNetworkMsg( 0, "Finished [delta %s]", deltaFrame ? "yes" : "no" );
+			EndTrace( msg );
+		}
+
 		if ( !deltaFrame )
 		{
+
+			if ( !bWasTracing )
+			{
+
+				// Check for debugging by dumping a snapshot
+				if ( sv_netspike_on_reliable_snapshot_overflow.GetBool() )
+				{
+					if ( !bFailedOnce ) // shouldn't be necessary, but just in case
+					{
+						Warning(" RELIABLE SNAPSHOT OVERFLOW!  Triggering trace to see what is so large\n" );
+						bFailedOnce = true;
+						m_iTracing = 2;
+						goto write_again;
+					}
+					m_iTracing = 0;
+				}
+			}
+
 			// if this is a reliable snapshot, drop the client
-			Disconnect( "ERROR! Reliable snaphsot overflow." );
+			Disconnect( "ERROR! Reliable snapshot overflow." );
 			return;
 		}
 		else
@@ -1045,6 +1273,7 @@ void CBaseClient::SendSnapshot( CClientFrame *pFrame )
 	if ( m_bFakePlayer && !m_NetChannel )
 	{
 		m_nDeltaTick = pFrame->tick_count;
+		m_nStringTableAckTick = m_nDeltaTick;
 		return;
 	}
 
@@ -1053,6 +1282,8 @@ void CBaseClient::SendSnapshot( CClientFrame *pFrame )
 	// is this is a full entity update (no delta) ?
 	if ( !deltaFrame )
 	{
+		VPROF_BUDGET( "SendSnapshot Transmit Full", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 		// transmit snapshot as reliable data chunk
 		bSendOK = m_NetChannel->SendData( msg );
 		bSendOK = bSendOK && m_NetChannel->Transmit();
@@ -1063,11 +1294,21 @@ void CBaseClient::SendSnapshot( CClientFrame *pFrame )
 	}
 	else
 	{
+		VPROF_BUDGET( "SendSnapshot Transmit Delta", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 		// just send it as unreliable snapshot
 		bSendOK = m_NetChannel->SendDatagram( &msg ) > 0;
 	}
 		
-	if ( !bSendOK )
+	if ( bSendOK )
+	{
+		if ( IsTracing() )
+		{
+			TraceNetworkMsg( 0, "Finished [delta %s]", deltaFrame ? "yes" : "no" );
+			EndTrace( msg );
+		}
+	}
+	else
 	{
 		Disconnect( "ERROR! Couldn't send snapshot." );
 	}
@@ -1124,6 +1365,8 @@ bool CBaseClient::ShouldSendMessages( void )
 		// we would like to send a message, but bandwidth isn't available yet
 		// tell netchannel that we are choking a packet
 		m_NetChannel->SetChoked();	
+		// Record an ETW event to indicate that we are throttling.
+		ETWThrottled();
 		bSendMessage = false;
 	}
 
@@ -1145,7 +1388,7 @@ void CBaseClient::UpdateSendState( void )
 	{
 		// snapshot mode: send snapshots frequently
 		float maxDelta = min ( m_Server->GetTickInterval(), m_fSnapshotInterval );
-		float delta = clamp( net_time - m_fNextMessageTime, 0.0f, maxDelta );
+		float delta = clamp( (float)( net_time - m_fNextMessageTime ), 0.0f, maxDelta );
 		m_fNextMessageTime = net_time + m_fSnapshotInterval - delta;
 	}
 	else // multiplayer signon mode
@@ -1166,11 +1409,26 @@ void CBaseClient::UpdateSendState( void )
 
 void CBaseClient::UpdateUserSettings()
 {
-	// set user name
-	SetName( m_ConVars->GetString( "name", "unnamed") );
+	int rate = m_ConVars->GetInt( "rate", DEFAULT_RATE );
+
+	if ( sv.IsActive() )
+	{
+		// If we're running a local listen server then set the rate very high
+		// in order to avoid delays due to network throttling. This allows for
+		// easier profiling of other issues (it removes most of the frame-render
+		// time which can otherwise dominate profiles) and saves developer time
+		// by making maps and models load much faster.
+		if ( rate == DEFAULT_RATE )
+		{
+			// Only override the rate if the user hasn't customized it.
+			// The max rate should be a million or so in order to truly
+			// eliminate networking delays.
+			rate = MAX_RATE;
+		}
+	}
 
 	// set server to client network rate
-	SetRate( m_ConVars->GetInt( "rate", 5000), false );
+	SetRate( rate, false );
 
 	// set server to client update rate
 	SetUpdateRate( m_ConVars->GetInt( "cl_updaterate", 20), false );
@@ -1182,8 +1440,74 @@ void CBaseClient::UpdateUserSettings()
 	m_bConVarsChanged = false;
 }
 
+void CBaseClient::ClientRequestNameChange( const char *pszNewName )
+{
+	// This is called several times.  Only show a status message the first time.
+	bool bShowStatusMessage = ( m_szPendingNameChange[0] == '\0' );
+	
+	V_strcpy_safe( m_szPendingNameChange, pszNewName );
+	CheckFlushNameChange( bShowStatusMessage );
+}
+
+void CBaseClient::CheckFlushNameChange( bool bShowStatusMessage /*= false*/ )
+{
+	if ( !IsConnected() )
+		return;
+	
+	if ( m_szPendingNameChange[0] == '\0' )
+		return;
+	
+	if ( m_bPlayerNameLocked )
+		return;
+
+	// Did they change it back to the original?
+	if ( !Q_strcmp( m_szPendingNameChange, m_Name ) )
+	{
+
+		// Nothing really pending, they already changed it back
+		// we had a chance to apply the other one!
+		m_szPendingNameChange[0] = '\0';
+		return;
+	}
+
+	// Check for throttling name changes
+	// Don't do it on bots
+	if ( !IsFakeClient() && IsNameChangeOnCooldown( bShowStatusMessage ) )
+	{
+		return;
+	}
+
+	// Set the new name
+	m_fTimeLastNameChange = Plat_FloatTime();
+	SetName( m_szPendingNameChange );
+}
+
+bool CBaseClient::IsNameChangeOnCooldown( bool bShowStatusMessage /*= false*/ )
+{
+	// Check cooldown.  The first name change is free
+	if ( m_fTimeLastNameChange > 0.0 )
+	{
+		// Too recent?
+		double timeNow = Plat_FloatTime();
+		double dNextChangeTime = m_fTimeLastNameChange + sv_namechange_cooldown_seconds.GetFloat();
+		if ( timeNow < dNextChangeTime )
+		{
+			// Cooldown period still active; throttle the name change
+			if ( bShowStatusMessage )
+			{
+				ClientPrintf( "You have changed your name recently, and must wait %i seconds.\n", (int)abs( timeNow - dNextChangeTime ) );
+			}
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void CBaseClient::OnRequestFullUpdate()
 {
+	VPROF_BUDGET( "CBaseClient::OnRequestFullUpdate", VPROF_BUDGETGROUP_OTHER_NETWORKING );
+
 	// client requests a full update 
 	m_pLastSnapshot = NULL;
 
@@ -1206,6 +1530,7 @@ bool CBaseClient::UpdateAcknowledgedFramecount(int tick)
 	{
 		// fake clients are always fine
 		m_nDeltaTick = tick; 
+		m_nStringTableAckTick = tick;
 		return true;
 	}
 
@@ -1274,6 +1599,11 @@ bool CBaseClient::UpdateAcknowledgedFramecount(int tick)
 	// get acknowledged client frame
 	m_nDeltaTick = tick; 
 
+	if ( m_nDeltaTick > -1 )
+	{
+		m_nStringTableAckTick = m_nDeltaTick;
+	}
+
 	if ( (m_nBaselineUpdateTick > -1) && (m_nDeltaTick > m_nBaselineUpdateTick) )
 	{
 		// server sent a baseline update, but it wasn't acknowledged yet so it was probably lost. 
@@ -1296,31 +1626,35 @@ const char *GetUserIDString( const USERID_t& id )
 	{
 	case IDTYPE_STEAM:
 		{
-			TSteamGlobalUserID nullID;
-			Q_memset( &nullID, 0, sizeof( TSteamGlobalUserID ) );
+			CSteamID nullID;
 
-			if ( Steam3Server().BLanOnly() && !Q_memcmp( &id.steamid, &nullID, sizeof( TSteamGlobalUserID ) ) ) 
+			if ( Steam3Server().BLanOnly() && nullID == id.steamid ) 
 			{
-				strcpy( idstr, "STEAM_ID_LAN" );
+				V_strcpy_safe( idstr, "STEAM_ID_LAN" );
 			}
-			else if ( !Q_memcmp( &id.steamid, &nullID, sizeof( TSteamGlobalUserID ) ))
+			else if ( nullID == id.steamid )
 			{
-				strcpy( idstr, "STEAM_ID_PENDING" );
+				V_strcpy_safe( idstr, "STEAM_ID_PENDING" );
 			}
 			else
-			{			
-				Q_snprintf( idstr, sizeof( idstr ) - 1, id.steamid.Render() );
+			{
+				V_sprintf_safe( idstr, "%s", id.steamid.Render() );
 			}
 		}
 		break;		
 	case IDTYPE_HLTV:
 		{
-			strcpy( idstr, "HLTV" );
+			V_strcpy_safe( idstr, "HLTV" );
+		}
+		break;
+	case IDTYPE_REPLAY:
+		{
+			V_strcpy_safe( idstr, "REPLAY" );
 		}
 		break;
 	default:
 		{
-			strcpy( idstr, "UNKNOWN" );
+			V_strcpy_safe( idstr, "UNKNOWN" );
 		}
 		break;
 	}
@@ -1338,7 +1672,7 @@ const char *CBaseClient::GetNetworkIDString() const
 		return "BOT";
 	}
 
-	return ( GetUserIDString( m_NetworkID ) );
+	return ( GetUserIDString( GetNetworkID() ) );
 }
 
 bool CBaseClient::IgnoreTempEntity( CEventInfo *event )
@@ -1348,10 +1682,19 @@ bool CBaseClient::IgnoreTempEntity( CEventInfo *event )
 	return !event->filter.IncludesPlayer( iPlayerIndex );
 }
 
-void CBaseClient::SetSteamID( const CSteamID &inputSteamID )
+const USERID_t CBaseClient::GetNetworkID() const
 {
-	m_SteamID = new CSteamID;
-	*m_SteamID = inputSteamID;
+	USERID_t userID;
+
+	userID.steamid = m_SteamID;
+	userID.idtype = IDTYPE_STEAM; 
+
+	return userID;
+}
+
+void CBaseClient::SetSteamID( const CSteamID &steamID )
+{
+	m_SteamID = steamID;
 }
 
 void CBaseClient::SetMaxRoutablePayloadSize( int nMaxRoutablePayloadSize )
@@ -1360,4 +1703,33 @@ void CBaseClient::SetMaxRoutablePayloadSize( int nMaxRoutablePayloadSize )
 	{
 		m_NetChannel->SetMaxRoutablePayloadSize( nMaxRoutablePayloadSize );
 	}
+}
+
+int CBaseClient::GetMaxAckTickCount() const
+{
+	int nMaxTick = m_nSignonTick;
+	if ( m_nDeltaTick > nMaxTick )
+	{
+		nMaxTick = m_nDeltaTick;
+	}
+	if ( m_nStringTableAckTick > nMaxTick )
+	{
+		nMaxTick = m_nStringTableAckTick;
+	}
+	return nMaxTick;
+}
+
+bool CBaseClient::ProcessCmdKeyValues( CLC_CmdKeyValues *msg )
+{
+	return true;
+}
+
+void CBaseClient::OnSignonStateFull()
+{
+#if defined( REPLAY_ENABLED )
+	if ( g_pReplay && g_pServerReplayContext )
+	{
+		g_pServerReplayContext->CreateSessionOnClient( m_nClientSlot );
+	}
+#endif
 }

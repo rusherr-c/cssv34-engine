@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -20,7 +20,7 @@
 #include "movieobjects/dmedrawsettings.h"
 #include "movieobjects/dmmeshcomp.h"
 #include "tier3/tier3.h"
-#include "tier1/keyvalues.h"
+#include "tier1/KeyValues.h"
 #include "tier0/dbg.h"
 #include "datamodel/dmelementfactoryhelper.h"
 #include "materialsystem/imaterialsystem.h"
@@ -319,19 +319,22 @@ void CDmeMesh::OnConstruction()
 
 void CDmeMesh::OnDestruction()
 {
-	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
-	int nCount = m_hwFaceSets.Count();
-	for ( int i = 0; i < nCount; ++i )
+	if ( g_pMaterialSystem )
 	{
-		if ( !m_hwFaceSets[i].m_bBuilt )
-			continue;
-
-		if ( m_hwFaceSets[i].m_pMesh )
+		CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
+		int nCount = m_hwFaceSets.Count();
+		for ( int i = 0; i < nCount; ++i )
 		{
-			pRenderContext->DestroyStaticMesh( m_hwFaceSets[i].m_pMesh );
+			if ( !m_hwFaceSets[i].m_bBuilt )
+				continue;
+
+			if ( m_hwFaceSets[i].m_pMesh )
+			{
+				pRenderContext->DestroyStaticMesh( m_hwFaceSets[i].m_pMesh );
+			}
 		}
+		m_hwFaceSets.RemoveAll();
 	}
-	m_hwFaceSets.RemoveAll();
 
 	DeleteAttributeVarElementArray( m_BaseStates );
 	DeleteAttributeVarElementArray( m_DeltaStates );
@@ -767,14 +770,6 @@ void CDmeMesh::DrawDynamicMesh( CDmeFaceSet *pFaceSet, matrix3x4_t *pPoseToWorld
 			meshBuilder.Color4ub( 255, 255, 255, 255 );
 		}
 
-		meshBuilder.BoneWeight( 0, 1.0f  );
-		meshBuilder.BoneMatrix( 0, 0 );
-		meshBuilder.BoneWeight( 1, 0.0f  );
-		meshBuilder.BoneMatrix( 1, 0 );
-		meshBuilder.BoneWeight( 2, 0.0f  );
-		meshBuilder.BoneMatrix( 2, 0 );
-		meshBuilder.BoneWeight( 3, 0.0f  );
-		meshBuilder.BoneMatrix( 3, 0 );
 		meshBuilder.AdvanceVertex();
 	}
 
@@ -3592,10 +3587,15 @@ void CDmeMesh::GrowSelection( int nSize, CDmeSingleIndexedComponent *pSelection,
 		const int nNeighbours = pMeshComp->FindNeighbouringVerts( sIndices[ i ], neighbours );
 		for ( int j = 0; j < nNeighbours; ++j )
 		{
-			const int vIndex = neighbours[ j ]->Index();
-			if ( !pSelection->HasComponent( vIndex ) )
+			CDmMeshComp::CVert *pNeighbour = neighbours[ j ];
+			Assert( pNeighbour );
+			if ( pNeighbour )
 			{
-				sHelper.AddVert( vIndex, sWeights[ i ] );
+				const int vIndex = pNeighbour->PositionIndex();
+				if ( !pSelection->HasComponent( vIndex ) )
+				{
+					sHelper.AddVert( vIndex, sWeights[ i ] );
+				}
 			}
 		}
 	}
@@ -3640,7 +3640,7 @@ void CDmeMesh::ShrinkSelection( int nSize, CDmeSingleIndexedComponent *pSelectio
 		const int nNeighbours = pMeshComp->FindNeighbouringVerts( vIndex, neighbours );
 		for ( int j = 0; j < nNeighbours; ++j )
 		{
-			const int nvIndex = neighbours[ j ]->Index();
+			const int nvIndex = neighbours[ j ]->PositionIndex();
 			if ( pSelection->HasComponent( nvIndex ) )
 			{
 				hasSelectedNeighbour = true;
@@ -3749,7 +3749,7 @@ CDmeSingleIndexedComponent *CDmeMesh::FeatherSelection(
 
 			for ( int j = 0; j < nNeighbours; ++j )
 			{
-				const int vIndex = neighbours[ j ]->Index();
+				const int vIndex = neighbours[ j ]->PositionIndex();
 
 				if ( pNewSelection->HasComponent( vIndex ) )
 					continue;
@@ -3845,6 +3845,95 @@ bool CDmeMesh::AddMaskedDelta(
 				break;
 			}
 			break;
+		}
+	}
+
+	return retVal;
+}
+
+
+//-----------------------------------------------------------------------------
+// Add the specified delta, scaled by the weight value to the DmeVertexData
+// base state specified.  Optionally the add can be masked by a specified
+// weight map.
+//
+// If a DmeVertexData is not explicitly specified, the current state of the
+// mesh is modified unless it's the bind state.  The bind state will never
+// be modified even if it is explicitly specified.
+//
+// Only the delta specified is added.  No dependent states are added.
+//-----------------------------------------------------------------------------
+bool CDmeMesh::AddCorrectedMaskedDelta(
+	CDmeVertexDeltaData *pDelta,
+	CDmeVertexData *pDst /* = NULL */,
+	float weight /* = 1.0f */,
+	const CDmeSingleIndexedComponent *pMask /* = NULL */ )
+{
+	CDmeVertexData *pBase = pDst ? pDst : GetCurrentBaseState();
+
+	if ( !pBase || pBase == GetBindBaseState() )
+		return false;
+
+	bool retVal = true;
+
+	const int nBaseField( pBase->FieldCount() );
+	const int nDeltaField( pDelta->FieldCount() );
+
+	// This should be cached and recomputed only when states are added
+	CUtlVector< DeltaComputation_t > compList;
+	ComputeDependentDeltaStateList( compList );
+
+	const int nDeltas( compList.Count() );
+	for ( int i = 0; i < nDeltas; ++i )
+	{
+		if ( pDelta != GetDeltaState( compList[ i ].m_nDeltaIndex ) )
+			continue;
+
+		// Try to add every field of the base state
+		for ( int j( 0 ); j < nBaseField; ++j )
+		{
+			const CUtlString &baseFieldName( pBase->FieldName( j ) );
+
+			// Find the corresponding field in the delta
+			for ( int k( 0 ); k < nDeltaField; ++k )
+			{
+				const CUtlString &deltaFieldName( pDelta->FieldName( k ) );
+
+				if ( baseFieldName != deltaFieldName )
+					continue;
+
+				const FieldIndex_t baseFieldIndex( pBase->FindFieldIndex( baseFieldName ) );
+				const FieldIndex_t deltaFieldIndex( pDelta->FindFieldIndex( deltaFieldName ) );
+				if ( baseFieldIndex < 0 || deltaFieldIndex < 0 )
+					break;
+
+				CDmAttribute *pBaseData( pBase->GetVertexData( baseFieldIndex ) );
+				CDmAttribute *pDeltaData( pDelta->GetVertexData( deltaFieldIndex ) );
+
+				if ( pBaseData->GetType() != pDeltaData->GetType() )
+					break;
+
+				const CUtlVector< int > &baseIndices( pBase->GetVertexIndexData( baseFieldIndex ) );
+
+				switch ( pBaseData->GetType() )
+				{
+				case AT_FLOAT_ARRAY:
+					AddCorrectedDelta( CDmrArray< float >( pBaseData ), baseIndices, compList[ i ], baseFieldName, weight, pMask );
+					break;
+				case AT_COLOR_ARRAY:
+					AddCorrectedDelta( CDmrArray< Vector >( pBaseData ), baseIndices, compList[ i ], baseFieldName, weight, pMask );
+					break;
+				case AT_VECTOR2_ARRAY:
+					AddCorrectedDelta( CDmrArray< Vector2D >( pBaseData ), baseIndices, compList[ i ], baseFieldName, weight, pMask );
+					break;
+				case AT_VECTOR3_ARRAY:
+					AddCorrectedDelta( CDmrArray< Vector >( pBaseData ), baseIndices, compList[ i ], baseFieldName, weight, pMask );
+					break;
+				default:
+					break;
+				}
+				break;
+			}
 		}
 	}
 
@@ -4338,9 +4427,9 @@ void CDmeMesh::GetBoundingSphere(
 		float sqDist;
 		for ( int i = 0; i < nSelectionCount; ++i )
 		{
-			for ( int i = 0; i < nPositions; ++i )
+			for ( int iPos = 0; iPos < nPositions; ++iPos )
 			{
-				sqDist = c.DistToSqr( pData[ i ] );
+				sqDist = c.DistToSqr( pData[ iPos ] );
 				if ( sqDist > r )
 				{
 					r = sqDist;
@@ -4360,9 +4449,9 @@ void CDmeMesh::GetBoundingSphere(
 		float sqDist;
 		for ( int i = 0; i < nPositions; ++i )
 		{
-			for ( int i = 0; i < nPositions; ++i )
+			for ( int iPos = 0; iPos < nPositions; ++iPos )
 			{
-				sqDist = c.DistToSqr( pData[ i ] );
+				sqDist = c.DistToSqr( pData[iPos] );
 				if ( sqDist > r )
 				{
 					r = sqDist;
@@ -4587,4 +4676,342 @@ bool CDmeMesh::SetBaseStateToDeltas( CDmeVertexData *pPassedBase /*= NULL */ )
 	}
 
 	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+// Replace all instances of a material with a different material
+//-----------------------------------------------------------------------------
+void CDmeMesh::ReplaceMaterial( const char *pOldMaterialName, const char *pNewMaterialName )
+{
+	char pOldFixedName[MAX_PATH];
+	char pNewFixedName[MAX_PATH];
+	char pFixedName[MAX_PATH];
+	if ( pOldMaterialName )
+	{
+		V_FixupPathName( pOldFixedName, sizeof(pOldFixedName), pOldMaterialName );
+	}
+	V_FixupPathName( pNewFixedName, sizeof(pNewFixedName), pNewMaterialName );
+	V_FixSlashes( pNewFixedName, '/' );
+
+	CDmeMaterial *pReplacementMaterial = NULL;
+
+	int nCount = m_FaceSets.Count();
+	for ( int i = 0; i < nCount; ++i )
+	{
+		CDmeFaceSet *pFaceSet = m_FaceSets[i];
+		CDmeMaterial *pMaterial = pFaceSet->GetMaterial();
+		if ( pOldMaterialName )
+		{
+			const char *pMaterialName = pMaterial->GetMaterialName();
+			V_FixupPathName( pFixedName, sizeof(pFixedName), pMaterialName );
+			if ( Q_stricmp( pFixedName, pOldFixedName ) )
+				continue;
+		}
+
+		if ( !pReplacementMaterial )
+		{
+			pReplacementMaterial = CreateElement< CDmeMaterial >( pMaterial->GetName(), pMaterial->GetFileId() );
+			pReplacementMaterial->SetMaterial( pNewFixedName );
+		}
+		pFaceSet->SetMaterial( pReplacementMaterial );
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+// Cleans up delta data that is referring to normals which have been merged out
+//-----------------------------------------------------------------------------
+static void CollapseRedundantDeltaNormals( CDmeVertexDeltaData *pDmeDelta, const CUtlVector< int > &normalMap )
+{
+	if ( !pDmeDelta )
+		return;
+
+	FieldIndex_t nNormalFieldIndex = pDmeDelta->FindFieldIndex( CDmeVertexData::FIELD_NORMAL );
+	if ( nNormalFieldIndex < 0 )
+		return;	// No normal deltas
+
+	const CUtlVector< Vector > &oldNormalData = pDmeDelta->GetNormalData();
+	const CUtlVector< int > &oldNormalIndices = pDmeDelta->GetVertexIndexData( nNormalFieldIndex );
+
+	Assert( oldNormalData.Count() == oldNormalIndices.Count() );
+
+	CUtlVector< bool > done;
+	done.SetCount( normalMap.Count() );
+	Q_memset( done.Base(), 0, done.Count() * sizeof( bool ) );
+
+	CUtlVector< Vector > newNormalData;
+	CUtlVector< int > newNormalIndices;
+
+	for ( int i = 0; i < oldNormalIndices.Count(); ++i )
+	{
+		const int nNewIndex = normalMap[ oldNormalIndices[i] ];
+		if ( nNewIndex < 0 || done[ nNewIndex ] )
+			continue;
+
+		done[ nNewIndex ] = true;
+		newNormalData.AddToTail( oldNormalData[i] );
+		newNormalIndices.AddToTail( nNewIndex );
+	}
+
+	pDmeDelta->RemoveAllVertexData( nNormalFieldIndex );
+	nNormalFieldIndex = pDmeDelta->CreateField( CDmeVertexDeltaData::FIELD_NORMAL );
+	pDmeDelta->AddVertexData( nNormalFieldIndex, newNormalData.Count() );
+	pDmeDelta->SetVertexData( nNormalFieldIndex, 0, newNormalData.Count(), AT_VECTOR3, newNormalData.Base() );
+	pDmeDelta->SetVertexIndices( nNormalFieldIndex, 0, newNormalIndices.Count(), newNormalIndices.Base() );
+}
+
+
+//-----------------------------------------------------------------------------
+// Remove redundant normals from a DMX Mesh
+// Looks at all of the normals around each position vertex and merges normals
+// which are numerically similar (within flNormalBlend which by default in
+// studiomdl is within 2 degrees) around that vertex
+//
+// If this would result in more normals being created, then don't do anything
+// return false.
+//-----------------------------------------------------------------------------
+static bool CollapseRedundantBaseNormals( CDmeVertexData *pDmeVertexData, CUtlVector< int > &normalMap, float flNormalBlend )
+{
+	if ( !pDmeVertexData )
+		return false;
+
+	FieldIndex_t nPositionFieldIndex = pDmeVertexData->FindFieldIndex( CDmeVertexData::FIELD_POSITION );
+	FieldIndex_t nNormalFieldIndex = pDmeVertexData->FindFieldIndex( CDmeVertexData::FIELD_NORMAL );
+	if ( nPositionFieldIndex < 0 || nNormalFieldIndex < 0 )
+		return false;
+
+	const CUtlVector< Vector > &oldNormalData = pDmeVertexData->GetNormalData();
+	const CUtlVector< int > &oldNormalIndices = pDmeVertexData->GetVertexIndexData( nNormalFieldIndex );
+
+	CUtlVector< Vector > newNormalData;
+	CUtlVector< int > newNormalIndices;
+
+	newNormalIndices.SetCount( oldNormalIndices.Count() );
+	for ( int i = 0; i < newNormalIndices.Count(); ++i )
+	{
+		newNormalIndices[i] = -1;
+	}
+
+	const int nPositionDataCount = pDmeVertexData->GetPositionData().Count();
+	for ( int i = 0; i < nPositionDataCount; ++i )
+	{
+		int nNewNormalDataIndex = newNormalData.Count();
+
+		const CUtlVector< int > &vertexIndices = pDmeVertexData->FindVertexIndicesFromDataIndex( CDmeVertexData::FIELD_POSITION, i );
+		for ( int j = 0; j < vertexIndices.Count(); ++j )
+		{
+			bool bUnique = true;
+			const int nVertexIndex = vertexIndices[j];
+			const Vector &vNormal = oldNormalData[ oldNormalIndices[ vertexIndices[j] ] ];
+
+			for ( int k = nNewNormalDataIndex; k < newNormalData.Count(); ++k )
+			{
+				if ( DotProduct( vNormal, newNormalData[k] ) > flNormalBlend )
+				{
+					newNormalIndices[ nVertexIndex ] = k;
+					bUnique = false;
+					break;
+				}
+			}
+
+			if ( !bUnique )
+				continue;
+
+			newNormalIndices[ nVertexIndex ] = newNormalData.AddToTail( vNormal );
+		}
+	}
+
+	for ( int i = 0; i < newNormalIndices.Count(); ++i )
+	{
+		if ( newNormalIndices[i] == -1 )
+		{
+			newNormalIndices[i] = newNormalData.AddToTail( oldNormalData[ oldNormalIndices[i] ] );
+		}
+	}
+
+	// If it's the same or more don't do anything
+	if ( newNormalData.Count() >= oldNormalData.Count() )
+		return false;
+
+	normalMap.SetCount( oldNormalData.Count() );
+	for ( int i = 0; i < normalMap.Count(); ++i )
+	{
+		normalMap[i] = -1;
+	}
+
+	Assert( newNormalIndices.Count() == oldNormalIndices.Count() );
+	for ( int i = 0; i < oldNormalIndices.Count(); ++i )
+	{
+		if ( normalMap[ oldNormalIndices[i] ] == -1 )
+		{
+			normalMap[ oldNormalIndices[i] ] = newNormalIndices[i];
+		}
+		else
+		{
+			Assert( normalMap[ oldNormalIndices[i] ] == newNormalIndices[i] );
+		}
+	}
+
+	pDmeVertexData->RemoveAllVertexData( nNormalFieldIndex );
+	nNormalFieldIndex = pDmeVertexData->CreateField( CDmeVertexDeltaData::FIELD_NORMAL );
+	pDmeVertexData->AddVertexData( nNormalFieldIndex, newNormalData.Count() );
+	pDmeVertexData->SetVertexData( nNormalFieldIndex, 0, newNormalData.Count(), AT_VECTOR3, newNormalData.Base() );
+	pDmeVertexData->SetVertexIndices( nNormalFieldIndex, 0, newNormalIndices.Count(), newNormalIndices.Base() );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+// Collapse all normals with the same numerical value into the same normal
+//-----------------------------------------------------------------------------
+static bool CollapseRedundantBaseNormalsAggressive( CDmeVertexData *pDmeVertexData, float flNormalBlend )
+{
+	if ( !pDmeVertexData )
+		return false;
+
+	FieldIndex_t nNormalFieldIndex = pDmeVertexData->FindFieldIndex( CDmeVertexData::FIELD_NORMAL );
+	if ( nNormalFieldIndex < 0 )
+		return false;
+
+	const CUtlVector< Vector > &oldNormalData = pDmeVertexData->GetNormalData();
+	const CUtlVector< int > &oldNormalIndices = pDmeVertexData->GetVertexIndexData( nNormalFieldIndex );
+
+	CUtlVector< int > normalMap;
+	normalMap.SetCount( oldNormalData.Count() );
+
+	CUtlVector< Vector > newNormalData;
+
+	for ( int i = 0; i < oldNormalData.Count(); ++i )
+	{
+		bool bUnique = true;
+		const Vector &vNormal = oldNormalData[ i ];
+
+		for ( int j = 0; j < newNormalData.Count(); ++j )
+		{
+			if ( DotProduct( vNormal, newNormalData[j] ) > flNormalBlend )
+			{
+				normalMap[ i ] = j;
+				bUnique = false;
+				break;
+			}
+		}
+
+		if ( !bUnique )
+			continue;
+
+		normalMap[ i ] = newNormalData.AddToTail( vNormal );
+	}
+
+	// If it's the same then don't do anything.
+	if ( newNormalData.Count() >= oldNormalData.Count() )
+		return false;
+
+	CUtlVector< int > newNormalIndices;
+	newNormalIndices.SetCount( oldNormalIndices.Count() );
+
+	for ( int i = 0; i < oldNormalIndices.Count(); ++i )
+	{
+		newNormalIndices[i] = normalMap[ oldNormalIndices[i] ];
+	}
+
+	pDmeVertexData->RemoveAllVertexData( nNormalFieldIndex );
+	nNormalFieldIndex = pDmeVertexData->CreateField( CDmeVertexDeltaData::FIELD_NORMAL );
+	pDmeVertexData->AddVertexData( nNormalFieldIndex, newNormalData.Count() );
+	pDmeVertexData->SetVertexData( nNormalFieldIndex, 0, newNormalData.Count(), AT_VECTOR3, newNormalData.Base() );
+	pDmeVertexData->SetVertexIndices( nNormalFieldIndex, 0, newNormalIndices.Count(), newNormalIndices.Base() );
+
+	return true;
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmeMesh::NormalizeNormals()
+{
+	Vector vNormal;
+
+	for ( int i = 0; i < this->BaseStateCount(); ++i )
+	{
+		CDmeVertexData *pDmeVertexData = GetBaseState( i );
+		if ( !pDmeVertexData )
+			continue;
+
+		FieldIndex_t nNormalIndex = pDmeVertexData->FindFieldIndex( CDmeVertexData::FIELD_NORMAL );
+		if ( nNormalIndex < 0 )
+			continue;
+
+		CDmAttribute *pDmNormalAttr = pDmeVertexData->GetVertexData( nNormalIndex );
+		if ( !pDmNormalAttr )
+			continue;
+
+		CDmrArray< Vector > normalData( pDmNormalAttr );
+		for ( int j = 0; j < normalData.Count(); ++j )
+		{
+			vNormal = normalData.Get( j );
+			VectorNormalize( vNormal );
+			normalData.Set( j, vNormal );
+		}
+	}
+}
+
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+void CDmeMesh::CollapseRedundantNormals( float flNormalBlend )
+{
+	NormalizeNormals();
+
+	CDmeVertexData *pDmeBind = GetBindBaseState();
+	if ( !pDmeBind )
+		return;
+
+	CUtlVector< int > normalMap;
+
+	const int nDeltaStateCount = DeltaStateCount();
+	if ( nDeltaStateCount <= 0 )
+	{
+		// No deltas
+		if ( CollapseRedundantBaseNormalsAggressive( pDmeBind, flNormalBlend ) )
+		{
+			// Collapse any other states
+			for ( int i = 0; i < BaseStateCount(); ++i )
+			{
+				CDmeVertexData *pDmeVertexData = GetBaseState( i );
+				if ( !pDmeVertexData || pDmeVertexData == pDmeBind )
+					continue;
+
+				CollapseRedundantBaseNormalsAggressive( pDmeVertexData, flNormalBlend );
+			}
+		}
+	}
+	else
+	{
+		// Collapse the base state
+		if ( CollapseRedundantBaseNormals( pDmeBind, normalMap, flNormalBlend ) )
+		{
+			// Collapse any delta states using the baseState normal map
+			for ( int i = 0; i < DeltaStateCount(); ++i )
+			{
+				CDmeVertexDeltaData *pDmeDeltaData = GetDeltaState( i );
+				if ( !pDmeDeltaData )
+					continue;
+
+				CollapseRedundantDeltaNormals( pDmeDeltaData, normalMap );
+			}
+
+			// Collapse any other states
+			for ( int i = 0; i < BaseStateCount(); ++i )
+			{
+				CDmeVertexData *pDmeVertexData = GetBaseState( i );
+				if ( !pDmeVertexData || pDmeVertexData == pDmeBind )
+					continue;
+
+				CollapseRedundantBaseNormals( pDmeVertexData, normalMap, flNormalBlend );
+			}
+		}
+	}
 }

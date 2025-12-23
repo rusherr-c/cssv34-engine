@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -23,8 +23,11 @@
 #define PORT_HLTV			27020	// Default hltv port
 #define PORT_MATCHMAKING	27025	// Default matchmaking port
 #define PORT_SYSTEMLINK		27030	// Default system link port
+#ifdef ENABLE_RPT
 #define PORT_RPT			27035	// default RPT (remote perf testing) port, TCP
 #define PORT_RPT_LISTEN		27036	// RPT connection listener (remote perf testing) port, TCP
+#endif // ENABLE_RPT
+#define PORT_REPLAY			27040	// Default replay port
 
 // out of band message id bytes
 
@@ -100,6 +103,7 @@
 // Response to server info requests
 
 // Request for detailed server/rule information.
+#define S2A_INFO_SRC			'I' // + Address, hostname, map, gamedir, gamedescription, active players, maxplayers, protocol
 #define S2A_INFO_GOLDSRC		'm' // Reserved for use by goldsrc servers
 
 #define S2M_GETFILE				'J'	// request module from master
@@ -115,9 +119,17 @@
 #define A2M_GETACTIVEMODS3		'Q' // get a list of mods and the stats about them
 
 #define S2A_LOGSTRING			'R'	// send a log string
-#define S2A_LOGKEY				'S'	// send a log event as key value
+#define S2A_LOGSTRING2			'S'	// send a log string including a secret value
 
+#define A2S_INFO				'T'	// generic server info request - this must match the Source engine
+#define A2S_PLAYER				'U'	// request player list
+#define A2S_RULES				'V'	// request rules list from server
 #define A2S_SERVERQUERY_GETCHALLENGE		'W'	// Request challenge # from another machine
+
+#define C2C_MOD					'X' // Mod specific packet for DOTA2, not used by the OB engine
+
+#define A2S_PING2				'Y' // new-style minimalist ping request
+#define S2A_PING2REPLY			'Z' // new-style minimalist ping reply
 
 #define A2S_KEY_STRING		"Source Engine Query" // required postfix to a A2S_INFO query
 
@@ -133,5 +145,7 @@
 									 // authenticated the server
 
 #define S2C_CONNREJECT			'9'  // Special protocol for rejected connections.
+
+#define S2C_MAGICVERSION		0x5a4f4933 // Magic used in the S2C_CHALLNGE to detect version differences
 
 #endif

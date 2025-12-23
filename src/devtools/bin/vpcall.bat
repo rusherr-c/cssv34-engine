@@ -1,1 +1,1 @@
-vpc /allgames +everything
+vpc /allgames +everything %*

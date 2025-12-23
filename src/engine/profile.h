@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -16,7 +16,7 @@
 #pragma once
 #endif
 
-void Host_ReadConfiguration( const bool readDefault = false );
-void Host_WriteConfiguration( const char *dirname, const char *filename );
+void Host_ReadConfiguration();
+void Host_WriteConfiguration( const char *filename = NULL, bool bAllVars = false );
 
 #endif // PROFILE_H

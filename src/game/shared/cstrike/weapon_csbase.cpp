@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: Laser Rifle & Shield combo
 //
@@ -12,11 +12,12 @@
 #include "ammodef.h"
 #include "cs_gamerules.h"
 
+#define ALLOW_WEAPON_SPREAD_DISPLAY	0
 
 #if defined( CLIENT_DLL )
 
 	#include "vgui/ISurface.h"
-	#include "vgui_controls/controls.h"
+	#include "vgui_controls/Controls.h"
 	#include "c_cs_player.h"
 	#include "hud_crosshair.h"
 	#include "c_te_effect_dispatch.h"
@@ -36,57 +37,22 @@
 #endif
 
 
+ConVar weapon_accuracy_model( "weapon_accuracy_model", "2", FCVAR_REPLICATED | FCVAR_DEVELOPMENTONLY | FCVAR_ARCHIVE );
+
+
 // ----------------------------------------------------------------------------- //
 // Global functions.
 // ----------------------------------------------------------------------------- //
 
-//--------------------------------------------------------------------------------------------------------
-static const char * s_WeaponAliasInfo[] = 
-{
-	"none",		// WEAPON_NONE
-	"p228",		// WEAPON_P228
-	"glock",	// WEAPON_GLOCK				// old glock
-	"scout",	// WEAPON_SCOUT
-	"hegren",	// WEAPON_HEGRENADE
-	"xm1014",	// WEAPON_XM1014			// auto shotgun
-	"c4",		// WEAPON_C4
-	"mac10",	// WEAPON_MAC10				// T only
-	"aug",		// WEAPON_AUG
-	"sgren",	// WEAPON_SMOKEGRENADE
-	"elite",	// WEAPON_ELITE
-	"fiveseven",// WEAPON_FIVESEVEN
-	"ump45",	// WEAPON_UMP45
-	"sg550",	// WEAPON_SG550				// auto-sniper
-	"galil",	// WEAPON_GALIL
-	"famas",	// WEAPON_FAMAS				// CT cheap m4a1
-	"usp",		// WEAPON_USP
-	"awp",		// WEAPON_AWP
-	"mp5navy",	// WEAPON_MP5N 
-	"m249",		// WEAPON_M249				// big machinegun
-	"m3",		// WEAPON_M3 				// cheap shotgun
-	"m4a1",		// WEAPON_M4A1
-	"tmp",		// WEAPON_TMP
-	"g3sg1",	// WEAPON_G3SG1				// T auto-sniper
-	"flash",	// WEAPON_FLASHBANG
-	"deagle",	// WEAPON_DEAGLE
-	"sg552",	// WEAPON_SG552				// T aug equivalent
-	"ak47",		// WEAPON_AK47
-	"knife",	// WEAPON_KNIFE
-	"p90",		// WEAPON_P90
-	"shield",	// WEAPON_SHIELDGUN 
-	"kevlar",
-	"assaultsuit",
-	"nightvision",
-	NULL,		// WEAPON_NONE
-};
+
 
 struct WeaponAliasTranslationInfoStruct
 {
-	char *m_alias;
-	char *m_translatedAlias;
+	const char* alias;
+	const char* translatedAlias;
 };
 
-static const WeaponAliasTranslationInfoStruct s_WeaponAliasTranslationInfo[] = 
+static const WeaponAliasTranslationInfoStruct s_WeaponAliasTranslationInfo[] =
 {
 	{ "cv47", "ak47" },
 	{ "defender", "galil" },
@@ -117,6 +83,60 @@ static const WeaponAliasTranslationInfoStruct s_WeaponAliasTranslationInfo[] =
 	{ "", "" } // this needs to be last
 };
 
+
+struct WeaponAliasInfo
+{
+	CSWeaponID id;
+	const char* alias;
+};
+
+WeaponAliasInfo s_weaponAliasInfo[] =
+{
+	{ WEAPON_P228,				"p228" },
+	{ WEAPON_GLOCK,				"glock" },
+	{ WEAPON_SCOUT,				"scout" },
+	{ WEAPON_XM1014,			"xm1014" },
+	{ WEAPON_MAC10,				"mac10" },
+	{ WEAPON_AUG,				"aug" },
+	{ WEAPON_ELITE,				"elite" },
+	{ WEAPON_FIVESEVEN,			"fiveseven" },
+	{ WEAPON_UMP45,				"ump45" },
+	{ WEAPON_SG550,				"sg550" },
+	{ WEAPON_GALIL,				"galil" },
+	{ WEAPON_FAMAS,				"famas" },
+	{ WEAPON_USP,				"usp" },
+	{ WEAPON_AWP,				"awp" },
+	{ WEAPON_MP5NAVY,			"mp5navy" },
+	{ WEAPON_M249,				"m249" },
+	{ WEAPON_M3,				"m3" },
+	{ WEAPON_M4A1,				"m4a1" },
+	{ WEAPON_TMP,				"tmp" },
+	{ WEAPON_G3SG1,				"g3sg1" },
+	{ WEAPON_DEAGLE,			"deagle" },
+	{ WEAPON_SG552,				"sg552" },
+	{ WEAPON_AK47,				"ak47" },
+	{ WEAPON_P90,				"p90" },
+
+	{ WEAPON_KNIFE,				"knife" },
+	{ WEAPON_C4,				"c4" },
+	{ WEAPON_FLASHBANG,			"flashbang" },
+	{ WEAPON_SMOKEGRENADE,		"smokegrenade" },
+	{ WEAPON_SMOKEGRENADE,		"sgren" },
+	{ WEAPON_HEGRENADE,			"hegrenade" },
+	{ WEAPON_HEGRENADE,			"hegren" },
+
+	// not sure any of these are needed
+	{ WEAPON_SHIELDGUN,			"shield" },
+	{ WEAPON_SHIELDGUN,			"shieldgun" },
+	{ WEAPON_KEVLAR,			"kevlar" },
+	{ WEAPON_ASSAULTSUIT,		"assaultsuit" },
+	{ WEAPON_NVG,				"nightvision" },
+	{ WEAPON_NVG,				"nvg" },
+
+	{ WEAPON_NONE,				"none" },
+};
+
+
 bool IsAmmoType( int iAmmoType, const char *pAmmoName )
 {
 	return GetAmmoDef()->Index( pAmmoName ) == iAmmoType;
@@ -126,50 +146,53 @@ bool IsAmmoType( int iAmmoType, const char *pAmmoName )
 //
 // Given an alias, return the translated alias.
 //
-const char * GetTranslatedWeaponAlias(const char *alias)
+const char * GetTranslatedWeaponAlias( const char *szAlias )
+{
+	for ( int i = 0; i < ARRAYSIZE(s_WeaponAliasTranslationInfo); ++i )
+	{
+		if ( Q_stricmp(s_WeaponAliasTranslationInfo[i].alias, szAlias) == 0 )
+		{
+			return s_WeaponAliasTranslationInfo[i].translatedAlias;
+		}
+	}
+
+	return szAlias;
+}
+
+//--------------------------------------------------------------------------------------------------------
+//
+// Given a translated alias, return the alias.
+//
+const char * GetWeaponAliasFromTranslated(const char *translatedAlias)
 {
 	int i = 0;
 	const WeaponAliasTranslationInfoStruct *info = &(s_WeaponAliasTranslationInfo[i]);
 
-	while (info->m_alias[0] != 0)
+	while (info->alias[0] != 0)
 	{
-		if (Q_stricmp(alias, info->m_alias) == 0)
+		if (Q_stricmp(translatedAlias, info->translatedAlias) == 0)
 		{
-			return info->m_translatedAlias;
+			return info->alias;
 		}
 		info = &(s_WeaponAliasTranslationInfo[++i]);
 	}
 
-	return alias;
+	return translatedAlias;
 }
 
 //--------------------------------------------------------------------------------------------------------
 //
 // Given an alias, return the associated weapon ID
 //
-int AliasToWeaponID( const char *alias )
+CSWeaponID AliasToWeaponID( const char *szAlias )
 {
-	if (alias)
+	if ( szAlias )
 	{
-		for( int i=0; s_WeaponAliasInfo[i] != NULL; ++i )
-			if (!Q_stricmp( s_WeaponAliasInfo[i], alias ))
-				return i;
-	}
-
-	return WEAPON_NONE;
-}
-
-//--------------------------------------------------------------------------------------------------------
-//
-// Given a classname, return the associated weapon ID
-//
-int ClassnameToWeaponID( const char *classname )
-{
-	if ( classname )
-	{
-		for( int i=0; s_WeaponAliasInfo[i] != NULL; ++i )
-			if ( Q_stristr( classname, s_WeaponAliasInfo[i] ) )
-				return i;
+		for ( int i=0; i < ARRAYSIZE(s_weaponAliasInfo); ++i)
+		{
+			if ( Q_stricmp( s_weaponAliasInfo[i].alias, szAlias) == 0 )
+				return s_weaponAliasInfo[i].id;
+		}
 	}
 
 	return WEAPON_NONE;
@@ -181,40 +204,25 @@ int ClassnameToWeaponID( const char *classname )
 //
 const char *WeaponIDToAlias( int id )
 {
-	if ( (id >= WEAPON_MAX) || (id < 0) )
-		return NULL;
+	for ( int i=0; i < ARRAYSIZE(s_weaponAliasInfo); ++i)
+	{
+		if ( s_weaponAliasInfo[i].id == id )
+			return s_weaponAliasInfo[i].alias;
+	}
 
-	return s_WeaponAliasInfo[id];
+	return NULL;
 }
 
 //--------------------------------------------------------------------------------------------------------
 //
 // Return true if given weapon ID is a primary weapon
 //
-bool IsPrimaryWeapon( int id )
+bool IsPrimaryWeapon( CSWeaponID id )
 {
-	switch( id )
+	const CCSWeaponInfo* pWeaponInfo = GetWeaponInfo( id );
+	if ( pWeaponInfo )
 	{
-		case WEAPON_SCOUT:
-		case WEAPON_XM1014:
-		case WEAPON_MAC10:
-		case WEAPON_AUG:
-		case WEAPON_UMP45:
-		case WEAPON_SG550:
-		case WEAPON_GALIL:
-		case WEAPON_FAMAS:
-		case WEAPON_AWP:
-		case WEAPON_MP5NAVY:
-		case WEAPON_M249:
-		case WEAPON_M3:
-		case WEAPON_M4A1:
-		case WEAPON_TMP:
-		case WEAPON_G3SG1:
-		case WEAPON_SG552:
-		case WEAPON_AK47:
-		case WEAPON_P90:
-		case WEAPON_SHIELDGUN:
-			return true;
+		return pWeaponInfo->iSlot == WEAPON_SLOT_RIFLE;
 	}
 
 	return false;
@@ -224,18 +232,11 @@ bool IsPrimaryWeapon( int id )
 //
 // Return true if given weapon ID is a secondary weapon
 //
-bool IsSecondaryWeapon( int id )
+bool IsSecondaryWeapon( CSWeaponID id )
 {
-	switch( id )
-	{
-		case WEAPON_USP:
-		case WEAPON_GLOCK:
-		case WEAPON_DEAGLE:
-		case WEAPON_ELITE:
-		case WEAPON_P228:
-		case WEAPON_FIVESEVEN:
-			return true;
-	}
+	const CCSWeaponInfo* pWeaponInfo = GetWeaponInfo( id );
+	if ( pWeaponInfo )
+		return pWeaponInfo->iSlot == WEAPON_SLOT_PISTOL;
 
 	return false;
 }
@@ -271,23 +272,31 @@ int GetShellForAmmoType( const char *ammoname )
 IMPLEMENT_NETWORKCLASS_ALIASED( WeaponCSBase, DT_WeaponCSBase )
 
 BEGIN_NETWORK_TABLE( CWeaponCSBase, DT_WeaponCSBase )
-#ifdef CLIENT_DLL
-  
-#else
-	// world weapon models have no aminations
-  	SendPropExclude( "DT_AnimTimeMustBeFirst", "m_flAnimTime" ),
-	SendPropExclude( "DT_BaseAnimating", "m_nSequence" ),
+#if !defined( CLIENT_DLL )
+SendPropInt( SENDINFO( m_weaponMode ), 1, SPROP_UNSIGNED ),
+SendPropFloat(SENDINFO(m_fAccuracyPenalty) ),
+// world weapon models have no aminations
+SendPropExclude( "DT_AnimTimeMustBeFirst", "m_flAnimTime" ),
+SendPropExclude( "DT_BaseAnimating", "m_nSequence" ),
 //	SendPropExclude( "DT_LocalActiveWeaponData", "m_flTimeWeaponIdle" ),
+#else
+RecvPropInt( RECVINFO( m_weaponMode ) ),
+RecvPropFloat( RECVINFO(m_fAccuracyPenalty)),
 #endif
-
-
 END_NETWORK_TABLE()
 
-#if defined CLIENT_DLL
+#if defined(CLIENT_DLL)
 BEGIN_PREDICTION_DATA( CWeaponCSBase )
 	DEFINE_PRED_FIELD( m_flTimeWeaponIdle, FIELD_FLOAT, FTYPEDESC_OVERRIDE | FTYPEDESC_NOERRORCHECK ),
+	DEFINE_PRED_FIELD( m_flNextPrimaryAttack, FIELD_FLOAT, FTYPEDESC_OVERRIDE | FTYPEDESC_NOERRORCHECK ),
+	DEFINE_PRED_FIELD( m_flNextSecondaryAttack, FIELD_FLOAT, FTYPEDESC_OVERRIDE | FTYPEDESC_NOERRORCHECK ),
+	DEFINE_PRED_FIELD( m_bDelayFire, FIELD_BOOLEAN, 0 ),
+	DEFINE_PRED_FIELD( m_flAccuracy, FIELD_FLOAT, 0 ),
+	DEFINE_PRED_FIELD( m_weaponMode, FIELD_INTEGER, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD_TOL( m_fAccuracyPenalty, FIELD_FLOAT, FTYPEDESC_INSENDTABLE, 0.00005f ),
 END_PREDICTION_DATA()
 #endif
+
 
 LINK_ENTITY_TO_CLASS( weapon_cs_base, CWeaponCSBase );
 
@@ -297,19 +306,52 @@ LINK_ENTITY_TO_CLASS( weapon_cs_base, CWeaponCSBase );
 	BEGIN_DATADESC( CWeaponCSBase )
 
 		//DEFINE_FUNCTION( DefaultTouch ),
-		DEFINE_FUNCTION( FallThink )
+		DEFINE_THINKFUNC( FallThink )
 
 	END_DATADESC()
 
 #endif
 
-#ifdef CLIENT_DLL
-	ConVar cl_crosshaircolor( "cl_crosshaircolor", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
-	ConVar cl_dynamiccrosshair( "cl_dynamiccrosshair", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
-	ConVar cl_scalecrosshair( "cl_scalecrosshair", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
-	ConVar cl_crosshairscale( "cl_crosshairscale", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+#if defined( CLIENT_DLL )
+	ConVar cl_crosshaircolor( "cl_crosshaircolor", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Set crosshair color: 0=green, 1=red, 2=blue, 3=yellow, 4=cyan, 5=custom" );
+	ConVar cl_dynamiccrosshair( "cl_dynamiccrosshair", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Enables dynamic crosshair; 0=off, 1=normal behavior (based on actual weapon accuracy), 2=legacy simulated dynamic behavior, 3=legacy simulated static behavior" );
+	ConVar cl_crosshairspreadscale( "cl_crosshairspreadscale", "0.3", FCVAR_CLIENTDLL | FCVAR_ARCHIVE);
+	ConVar cl_scalecrosshair( "cl_scalecrosshair", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Enable crosshair scaling (deprecated)" );
+	ConVar cl_crosshairscale( "cl_crosshairscale", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Crosshair scaling factor (deprecated)" );
 	ConVar cl_crosshairalpha( "cl_crosshairalpha", "200", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
-	ConVar cl_crosshairusealpha( "cl_crosshairusealpha", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshairusealpha( "cl_crosshairusealpha", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshairsize( "cl_crosshairsize", "5", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshairthickness( "cl_crosshairthickness", "0.5", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshairdot( "cl_crosshairdot", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshaircolor_r( "cl_crosshaircolor_r", "50", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshaircolor_g( "cl_crosshaircolor_g", "250", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+	ConVar cl_crosshaircolor_b( "cl_crosshaircolor_b", "50", FCVAR_CLIENTDLL | FCVAR_ARCHIVE );
+
+#if ALLOW_WEAPON_SPREAD_DISPLAY
+	ConVar weapon_debug_spread_show( "weapon_debug_spread_show", "0", FCVAR_CLIENTDLL | FCVAR_DEVELOPMENTONLY, "Enables display of weapon accuracy; 1: show accuracy box, 2: show box with recoil offset" );
+	ConVar weapon_debug_spread_gap( "weapon_debug_spread_gap", "0.67", FCVAR_CLIENTDLL | FCVAR_DEVELOPMENTONLY );
+#endif
+
+	// [paquin] make sure crosshair scales independent of frame rate
+	// unless legacy cvar is set
+	ConVar cl_legacy_crosshair_recoil( "cl_legacy_crosshair_recoil", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Enable legacy framerate dependent crosshair recoil");
+
+	// use old scaling behavior
+	ConVar cl_legacy_crosshair_scale( "cl_legacy_crosshair_scale", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE, "Enable legacy crosshair scaling");
+
+void DrawCrosshairRect( int x0, int y0, int x1, int y1, bool bAdditive )
+{
+	if ( bAdditive )
+	{
+		vgui::surface()->DrawTexturedRect( x0, y0, x1, y1 );
+	}
+	else
+	{
+		// Alpha-blended crosshair
+		vgui::surface()->DrawFilledRect( x0, y0, x1, y1 );
+	}
+}
+
 #endif
 
 // must be included after the above macros
@@ -319,7 +361,7 @@ LINK_ENTITY_TO_CLASS( weapon_cs_base, CWeaponCSBase );
 
 
 // ----------------------------------------------------------------------------- //
-// CWeaponCSBase implementation. 
+// CWeaponCSBase implementation.
 // ----------------------------------------------------------------------------- //
 CWeaponCSBase::CWeaponCSBase()
 {
@@ -331,11 +373,13 @@ CWeaponCSBase::CWeaponCSBase()
 
 #ifdef CLIENT_DLL
 	m_iCrosshairTextureID = 0;
-
-	m_bInReloadAnimation = false;
 #else
 	m_iDefaultExtraAmmo = 0;
 #endif
+
+	m_fAccuracyPenalty = 0.0f;
+
+	m_weaponMode = Primary_Mode;
 }
 
 
@@ -362,7 +406,7 @@ bool CWeaponCSBase::KeyValue( const char *szKeyName, const char *szValue )
 
 
 bool CWeaponCSBase::IsPredicted() const
-{ 
+{
 	return true;
 }
 
@@ -373,9 +417,9 @@ bool CWeaponCSBase::IsPistol() const
 }
 
 
-bool CWeaponCSBase::IsAwp() const
+bool CWeaponCSBase::IsFullAuto() const
 {
-	return false;
+	return GetCSWpnData().m_bFullAuto;
 }
 
 
@@ -385,7 +429,7 @@ bool CWeaponCSBase::PlayEmptySound()
 	//	C4
 	//	Flashbang
 	//	HE Grenade
-	//	Smoke grenade				
+	//	Smoke grenade
 
 	CPASAttenuationFilter filter( this );
 	filter.UsePredictionRules();
@@ -407,6 +451,30 @@ CCSPlayer* CWeaponCSBase::GetPlayerOwner() const
 	return dynamic_cast< CCSPlayer* >( GetOwner() );
 }
 
+//=============================================================================
+// HPE_BEGIN:
+//=============================================================================
+
+//[dwenger] Accessors for the prior owner list
+void CWeaponCSBase::AddToPriorOwnerList(CCSPlayer* pPlayer)
+{
+    if ( !IsAPriorOwner( pPlayer ) )
+    {
+        // Add player to prior owner list
+        m_PriorOwners.AddToTail( pPlayer );
+    }
+}
+
+bool CWeaponCSBase::IsAPriorOwner(CCSPlayer* pPlayer)
+{
+    return (m_PriorOwners.Find( pPlayer ) != -1);
+}
+
+//=============================================================================
+// HPE_END
+//=============================================================================
+
+
 void CWeaponCSBase::SecondaryAttack( void )
 {
 #ifndef CLIENT_DLL
@@ -423,10 +491,8 @@ void CWeaponCSBase::SecondaryAttack( void )
 
 		if ( pPlayer->IsShieldDrawn() )
 			 SendWeaponAnim( ACT_SHIELD_UP );
-		else 
+		else
 			 SendWeaponAnim( ACT_SHIELD_DOWN );
-
-		pPlayer->ResetMaxSpeed();
 
 		m_flNextSecondaryAttack = gpGlobals->curtime + 0.4;
 		m_flNextPrimaryAttack = gpGlobals->curtime + 0.4;
@@ -442,19 +508,19 @@ bool CWeaponCSBase::SendWeaponAnim( int iActivity )
 	if ( pPlayer && pPlayer->HasShield() )
 	{
 		CBaseViewModel *vm = pPlayer->GetViewModel( 1 );
-	
+
 		if ( vm == NULL )
 			return false;
-	
+
 		vm->SetWeaponModel( SHIELD_VIEW_MODEL, this );
 
 		int	idealSequence = vm->SelectWeightedSequence( (Activity)iActivity );
-		
+
 		if ( idealSequence >= 0 )
 		{
 			vm->SendViewModelMatchingSequence( idealSequence );
 		}
-	} 
+	}
 #endif
 
 	return BaseClass::SendWeaponAnim( iActivity );
@@ -468,12 +534,14 @@ void CWeaponCSBase::ItemPostFrame()
 	if ( !pPlayer )
 		return;
 
+	UpdateAccuracyPenalty();
+
 	UpdateShieldState();
 
 	if ((m_bInReload) && (pPlayer->m_flNextAttack <= gpGlobals->curtime))
 	{
-		// complete the reload. 
-		int j = min( GetMaxClip1() - m_iClip1, pPlayer->GetAmmoCount( m_iPrimaryAmmoType ) );	
+		// complete the reload.
+		int j = MIN( GetMaxClip1() - m_iClip1, pPlayer->GetAmmoCount( m_iPrimaryAmmoType ) );
 
 		// Add them to the clip
 		m_iClip1 += j;
@@ -484,83 +552,91 @@ void CWeaponCSBase::ItemPostFrame()
 
 	if ((pPlayer->m_nButtons & IN_ATTACK2) && (m_flNextSecondaryAttack <= gpGlobals->curtime))
 	{
-		if ( m_iClip2 != -1 && !pPlayer->GetAmmoCount( GetSecondaryAmmoType() ) )
-		{
-			m_bFireOnEmpty = TRUE;
-		}
-
 		if ( pPlayer->HasShield() )
 			CWeaponCSBase::SecondaryAttack();
 		else
 			SecondaryAttack();
-		
+
 		pPlayer->m_nButtons &= ~IN_ATTACK2;
 	}
 	else if ((pPlayer->m_nButtons & IN_ATTACK) && (m_flNextPrimaryAttack <= gpGlobals->curtime ))
 	{
-		if ( (m_iClip1 == 0/* && pszAmmo1()*/) || (GetMaxClip1() == -1 && !pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) ) )
-		{
-			m_bFireOnEmpty = TRUE;
-		}
+		if ( CSGameRules()->IsFreezePeriod() )	// Can't shoot during the freeze period
+			return;
 
-		// Can't shoot during the freeze period
-		// Ken: Always allow firing in single player
-		//---
-		if ( !CSGameRules()->IsFreezePeriod() && 
-			!pPlayer->m_bIsDefusing &&
-			pPlayer->State_Get() == STATE_ACTIVE && !pPlayer->IsShieldDrawn()
-			)
+		if ( pPlayer->m_bIsDefusing )
+			return;
+
+		if ( pPlayer->State_Get() != STATE_ACTIVE )
+			return;
+
+		if ( pPlayer->IsShieldDrawn() ) 
+			return;
+
+		// we have to reset the FireOnEmpty flag before we can fire on an empty clip
+		if ( m_iClip1 == 0 && !m_bFireOnEmpty )
+			return;
+
+		// don't repeat fire if this is not a full auto weapon 
+		if ( pPlayer->m_iShotsFired > 0 && !IsFullAuto() )
+			return;
+
+#if !defined(CLIENT_DLL)
+		// allow the bots to react to the gunfire
+		if ( GetCSWpnData().m_WeaponType != WEAPONTYPE_GRENADE )
 		{
-#ifndef CLIENT_DLL
-			// allow the bots to react to the gunfire
-			if ( GetCSWpnData().m_WeaponType != WEAPONTYPE_GRENADE )
+			IGameEvent * event = gameeventmanager->CreateEvent( (HasAmmo()) ? "weapon_fire" : "weapon_fire_on_empty" );
+			if( event )
 			{
-				IGameEvent * event = gameeventmanager->CreateEvent( (HasAmmo()) ? "weapon_fire" : "weapon_fire_on_empty" );
-				if( event )
+				const char *weaponName = STRING( m_iClassname );
+				if ( strncmp( weaponName, "weapon_", 7 ) == 0 )
 				{
-					const char *weaponName = STRING( m_iClassname );
-					if ( strncmp( weaponName, "weapon_", 7 ) == 0 )
-					{
-						weaponName += 7;
-					}
-
-					event->SetInt( "userid", pPlayer->GetUserID() );
-					event->SetString( "weapon", weaponName );
-					gameeventmanager->FireEvent( event );
+					weaponName += 7;
 				}
+
+				event->SetInt( "userid", pPlayer->GetUserID() );
+				event->SetString( "weapon", weaponName );
+				gameeventmanager->FireEvent( event );
 			}
-#endif
-			PrimaryAttack();
 		}
-		//---
+#endif
+		PrimaryAttack();
 	}
-	else if ( pPlayer->m_nButtons & IN_RELOAD && GetMaxClip1() != WEAPON_NOCLIP && !m_bInReload && m_flNextPrimaryAttack < gpGlobals->curtime) 
+	else if ( pPlayer->m_nButtons & IN_RELOAD && GetMaxClip1() != WEAPON_NOCLIP && !m_bInReload && m_flNextPrimaryAttack < gpGlobals->curtime)
 	{
 		// reload when reload is pressed, or if no buttons are down and weapon is empty.
-		
+
 		//MIKETODO: add code for shields...
 		//if ( !FBitSet( m_iWeaponState, WPNSTATE_SHIELD_DRAWN ) )
 
 		if ( !pPlayer->IsShieldDrawn() )
 		{
+			 if ( Reload() )
+			 {
 #ifndef CLIENT_DLL
-			// allow the bots to react to the reload
-			IGameEvent * event = gameeventmanager->CreateEvent( "weapon_reload" );
-			if( event )
-			{
-				event->SetInt( "userid", pPlayer->GetUserID() );
-				gameeventmanager->FireEvent( event );
-			}
+				 // allow the bots to react to the reload
+				 IGameEvent * event = gameeventmanager->CreateEvent( "weapon_reload" );
+				 if( event )
+				 {
+					 event->SetInt( "userid", pPlayer->GetUserID() );
+					 gameeventmanager->FireEvent( event );
+				 }
 #endif
-
-			 Reload();	
+			 }
 		}
 	}
 	else if ( !(pPlayer->m_nButtons & (IN_ATTACK|IN_ATTACK2) ) )
 	{
-		// no fire buttons down
+		if ( weapon_accuracy_model.GetInt() == 2 )
+		{
+			// Fire button not down -- reset the shots fired count
+			if ( pPlayer->m_iShotsFired > 0 && ( !IsFullAuto() || m_iClip1 == 0 ) )
+			{
+				pPlayer->m_iShotsFired = 0;
+			}
+		}
 
-		// The following code prevents the player from tapping the firebutton repeatedly 
+		// The following code prevents the player from tapping the firebutton repeatedly
 		// to simulate full auto and retaining the single shot accuracy of single fire
 		if ( m_bDelayFire )
 		{
@@ -568,11 +644,11 @@ void CWeaponCSBase::ItemPostFrame()
 
 			if (pPlayer->m_iShotsFired > 15)
 				pPlayer->m_iShotsFired = 15;
-			
+
 			m_flDecreaseShotsFired = gpGlobals->curtime + 0.4;
 		}
 
-		m_bFireOnEmpty = FALSE;
+		m_bFireOnEmpty = true;
 
 		// if it's a pistol then set the shots fired to 0 after the player releases a button
 		if ( IsPistol() )
@@ -588,11 +664,7 @@ void CWeaponCSBase::ItemPostFrame()
 			}
 		}
 
-		if ( (!IsUseable() && m_flNextPrimaryAttack < gpGlobals->curtime)
-#ifdef CLIENT_DLL
-		|| ( m_bInReloadAnimation )
-#endif
-		)
+		if ( (!IsUseable() && m_flNextPrimaryAttack < gpGlobals->curtime) )
 		{
 			// Intentionally blank -- used to switch weapons here
 		}
@@ -612,6 +684,43 @@ void CWeaponCSBase::ItemPostFrame()
 }
 
 
+void CWeaponCSBase::ItemBusyFrame()
+{
+	UpdateAccuracyPenalty();
+
+	BaseClass::ItemBusyFrame();
+}
+
+
+float CWeaponCSBase::GetInaccuracy() const
+{
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
+		return 0.0f;
+
+	const CCSWeaponInfo& weaponInfo = GetCSWpnData();
+
+	float fMaxSpeed = GetMaxSpeed();
+	if ( fMaxSpeed == 0.0f )
+		fMaxSpeed = GetCSWpnData().m_flMaxSpeed;
+
+	return m_fAccuracyPenalty + 
+		RemapValClamped(pPlayer->GetAbsVelocity().Length2D(), 
+		fMaxSpeed * CS_PLAYER_SPEED_DUCK_MODIFIER, 
+		fMaxSpeed * 0.95f,							// max out at 95% of run speed to avoid jitter near max speed
+		0.0f, weaponInfo.m_fInaccuracyMove[m_weaponMode]);
+}
+
+
+float CWeaponCSBase::GetSpread() const
+{
+	if ( weapon_accuracy_model.GetInt() == 1 )
+		return 0.0f;
+
+	return GetCSWpnData().m_fSpread[m_weaponMode];
+}
+
+
 float CWeaponCSBase::GetMaxSpeed() const
 {
 	// The weapon should have set this in its constructor.
@@ -619,7 +728,6 @@ float CWeaponCSBase::GetMaxSpeed() const
 	Assert( flRet > 1 );
 	return flRet;
 }
-
 
 const CCSWeaponInfo &CWeaponCSBase::GetCSWpnData() const
 {
@@ -638,23 +746,22 @@ const CCSWeaponInfo &CWeaponCSBase::GetCSWpnData() const
 
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose:
 //-----------------------------------------------------------------------------
 const char *CWeaponCSBase::GetViewModel( int /*viewmodelindex = 0 -- this is ignored in the base class here*/ ) const
 {
 	CCSPlayer *pOwner = GetPlayerOwner();
 
 	if ( pOwner == NULL )
-	{
 		 return BaseClass::GetViewModel();
-	}
-	
+
 	if ( pOwner->HasShield() && GetCSWpnData().m_bCanUseWithShield )
 		 return GetCSWpnData().m_szShieldViewModel;
 	else
 		 return GetWpnData().szViewModel;
 
 	return BaseClass::GetViewModel();
+
 }
 
 void CWeaponCSBase::Precache( void )
@@ -720,7 +827,7 @@ void CWeaponCSBase::UpdateShieldState( void )
 	//Make the hitbox set switches here!!!
 	if ( pOwner->HasShield() == false )
 	{
-		
+
 		pOwner->SetShieldDrawnState( false );
 		//pOwner->SetHitBoxSet( 0 );
 		return;
@@ -756,16 +863,27 @@ bool CWeaponCSBase::CanDeploy( void )
 	return BaseClass::CanDeploy();
 }
 
+float CWeaponCSBase::CalculateNextAttackTime( float fCycleTime )
+{
+	float fCurAttack = m_flNextPrimaryAttack;
+	float fDeltaAttack = gpGlobals->curtime - fCurAttack;
+	if ( fDeltaAttack < 0 || fDeltaAttack > gpGlobals->interval_per_tick )
+	{
+		fCurAttack = gpGlobals->curtime;
+	}
+	m_flNextSecondaryAttack = m_flNextPrimaryAttack = fCurAttack + fCycleTime;
+
+	return fCurAttack;
+}
+
 bool CWeaponCSBase::Holster( CBaseCombatWeapon *pSwitchingTo )
 {
 	CCSPlayer *pPlayer = GetPlayerOwner();
 	if ( !pPlayer )
 		return false;
 
-#ifndef CLIENT_DLL
 	if ( pPlayer )
 		pPlayer->SetFOV( pPlayer, 0 ); // reset the default FOV.
-#endif
 
 	if ( pPlayer )
 		pPlayer->SetShieldDrawnState( false );
@@ -775,13 +893,19 @@ bool CWeaponCSBase::Holster( CBaseCombatWeapon *pSwitchingTo )
 
 bool CWeaponCSBase::Deploy()
 {
+	CCSPlayer *pPlayer = GetPlayerOwner();
+
 #ifdef CLIENT_DLL
 	m_iAlpha =  80;
+	if ( pPlayer )
+	{
+		pPlayer->m_iLastZoom = 0;
+		pPlayer->SetFOV( pPlayer, 0 );
+	}
 #else
-	
+
 	m_flDecreaseShotsFired = gpGlobals->curtime;
 
-	CCSPlayer *pPlayer = GetPlayerOwner();
 
 	if ( pPlayer )
 	{
@@ -791,6 +915,8 @@ bool CWeaponCSBase::Deploy()
 		pPlayer->SetFOV( pPlayer, 0 );
 	}
 #endif
+
+	m_fAccuracyPenalty = 0.0f;
 
 	return BaseClass::Deploy();
 }
@@ -833,7 +959,7 @@ void CWeaponCSBase::Drop(const Vector &vecVelocity)
 	FallInit();
 	SetGroundEntity( NULL );
 
-	m_bInReload = false; // stop reloading 
+	m_bInReload = false; // stop reloading
 
 	SetThink( NULL );
 	m_nextPrevOwnerTouchTime = gpGlobals->curtime + 0.8f;
@@ -871,7 +997,7 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 	BaseClass::DefaultTouch(pOther);
 }
 
-#ifdef CLIENT_DLL
+#if defined( CLIENT_DLL )
 
 	//-----------------------------------------------------------------------------
 	// Purpose: Draw the weapon's crosshair
@@ -890,7 +1016,7 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 		pCrosshair->SetCrosshair( 0, Color( 255, 255, 255, 255 ) );
 
 		CCSPlayer* pPlayer = (CCSPlayer*)C_BasePlayer::GetLocalPlayer();
-		
+
 		if ( !pPlayer )
 			return;
 
@@ -900,88 +1026,21 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 		// Draw the targeting zone around the pCrosshair
 		if ( pPlayer->IsInVGuiInputMode() )
 			return;
-		
-		if ( pPlayer->HasShield() && pPlayer->IsShieldDrawn() == true )
-			 return;
-
-		// no crosshair for sniper rifles
-		if ( GetCSWpnData().m_WeaponType == WEAPONTYPE_SNIPER_RIFLE )
-			 return;
-
-		int iDistance = GetCSWpnData().m_iCrosshairMinDistance; // The minimum distance the crosshair can achieve...
-		
-		int iDeltaDistance = GetCSWpnData().m_iCrosshairDeltaDistance; // Distance at which the crosshair shrinks at each step
-		
-		if ( cl_dynamiccrosshair.GetBool() )
-		{
-			if ( !( pPlayer->GetFlags() & FL_ONGROUND ) )
-				 iDistance *= 2.0f;
-			else if ( pPlayer->GetFlags() & FL_DUCKING )
-				 iDistance *= 0.5f;
-			else if ( pPlayer->GetAbsVelocity().Length() > 100 )
-				 iDistance *= 1.5f;
-		}
-	
-		if ( pPlayer->m_iShotsFired > m_iAmmoLastCheck )
-		{
-			m_flCrosshairDistance = min( 15, m_flCrosshairDistance + iDeltaDistance );
-		}
-		else if( m_flCrosshairDistance > iDistance )
-		{
-			m_flCrosshairDistance -= 0.1f + m_flCrosshairDistance * 0.013;
-		}
-
-		m_iAmmoLastCheck = pPlayer->m_iShotsFired;
-
-		if ( m_flCrosshairDistance < iDistance )
-			 m_flCrosshairDistance = iDistance;
-
-		//scale bar size to the resolution
-		int crosshairScale = cl_crosshairscale.GetInt();
-		if ( crosshairScale < 1 )
-		{
-			if ( ScreenHeight() <= 600 )
-			{
-				crosshairScale = 600;
-			}
-			else if ( ScreenHeight() <= 768 )
-			{
-				crosshairScale = 768;
-			}
-			else
-			{
-				crosshairScale = 1200;
-			}
-		}
-
-		float scale;
-		if( cl_scalecrosshair.GetBool() == false )
-		{
-			scale = 1.0f;
-		}
-		else
-		{
-			scale = (float)ScreenHeight() / (float)crosshairScale;
-		}
-
-		int iCrosshairDistance = (int)ceil( m_flCrosshairDistance * scale );
-
-		int iBarSize = XRES(5) + (iCrosshairDistance - iDistance) / 2;
-
-		iBarSize = max( 1, (int)( (float)iBarSize * scale ) );
-
-		int iBarThickness = max( 1, (int)floor( scale + 0.5f ) );
 
 		int	r, g, b;
-
 		switch ( cl_crosshaircolor.GetInt() )
 		{
-			case 0 :	r = 50;		g = 250;	b = 50;		break;
-			case 1 :	r = 250;	g = 50;		b = 50;		break;
-			case 2 :	r = 50;		g = 50;		b = 250;	break;
-			case 3 :	r = 250;	g = 250;	b = 50;		break;
-			case 4 :	r = 50;		g = 250;	b = 250;	break;
-			default :	r = 50;		g = 250;	b = 50;		break;
+		case 0 :	r = 50;		g = 250;	b = 50;		break;
+		case 1 :	r = 250;	g = 50;		b = 50;		break;
+		case 2 :	r = 50;		g = 50;		b = 250;	break;
+		case 3 :	r = 250;	g = 250;	b = 50;		break;
+		case 4 :	r = 50;		g = 250;	b = 250;	break;
+		case 5 :
+			r = cl_crosshaircolor_r.GetInt();
+			g = cl_crosshaircolor_g.GetInt();
+			b = cl_crosshaircolor_b.GetInt();
+			break;
+		default :	r = 50;		g = 250;	b = 50;		break;
 		}
 
 		// if user is using nightvision, make the crosshair red.
@@ -1004,52 +1063,226 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 			}
 		}
 
-		if ( !cl_crosshairusealpha.GetBool() )
+		bool bAdditive = !cl_crosshairusealpha.GetBool() && !pPlayer->m_bNightVisionOn;
+		if ( bAdditive )
 		{
 			vgui::surface()->DrawSetColor( r, g, b, 200 );
 			vgui::surface()->DrawSetTexture( m_iCrosshairTextureID );
 		}
 
-		int iHalfScreenWidth = ScreenWidth() / 2;
-		int iHalfScreenHeight = ScreenHeight() / 2;
+		if ( pPlayer->HasShield() && pPlayer->IsShieldDrawn() == true )
+			 return;
 
-		int iLeft		= iHalfScreenWidth - ( iCrosshairDistance + iBarSize );
-		int iRight		= iHalfScreenWidth + iCrosshairDistance + iBarThickness;
-		int iFarLeft	= iLeft + iBarSize;
-		int iFarRight	= iRight + iBarSize;
+		// no crosshair for sniper rifles
+		bool bCrosshairVisible = crosshair.GetBool() && GetCSWpnData().m_WeaponType != WEAPONTYPE_SNIPER_RIFLE;
 
-		if ( !cl_crosshairusealpha.GetBool() && !pPlayer->m_bNightVisionOn)
+		if ( !bCrosshairVisible 
+#if ALLOW_WEAPON_SPREAD_DISPLAY
+			&& !weapon_debug_spread_show.GetBool()
+#endif
+			)
+			 return;
+
+		float fHalfFov = DEG2RAD(pPlayer->GetFOV()) * 0.5f;
+
+		int iCrosshairDistance;
+		int iBarSize = RoundFloatToInt(YRES(cl_crosshairsize.GetFloat()));
+		int iBarThickness = MAX( 1, RoundFloatToInt(YRES(cl_crosshairthickness.GetFloat())));
+
+		switch ( cl_dynamiccrosshair.GetInt() )
 		{
-			// Additive crosshair
-			vgui::surface()->DrawTexturedRect( iLeft, iHalfScreenHeight, iFarLeft, iHalfScreenHeight + iBarThickness );
-			vgui::surface()->DrawTexturedRect( iRight, iHalfScreenHeight, iFarRight, iHalfScreenHeight + iBarThickness );
-		}
-		else
-		{
-			// Alpha-blended crosshair
-			vgui::surface()->DrawFilledRect( iLeft, iHalfScreenHeight, iFarLeft, iHalfScreenHeight + iBarThickness );
-			vgui::surface()->DrawFilledRect( iRight, iHalfScreenHeight, iFarRight, iHalfScreenHeight + iBarThickness );
+		case 0:
+		default:
+			{
+				// static crosshair
+				float fSpread = (GetCSWpnData().m_fSpread[m_weaponMode] + GetCSWpnData().m_fInaccuracyStand[m_weaponMode]) * 320.0f / tanf(fHalfFov);
+				iCrosshairDistance = MAX( 0, RoundFloatToInt( YRES( fSpread * cl_crosshairspreadscale.GetFloat() ) ) );
+			}
+			break;
+
+		case 1:
+			{
+				float fSpread = (GetInaccuracy() + GetSpread()) * 320.0f / tanf(fHalfFov);
+				iCrosshairDistance = MAX( 0, RoundFloatToInt( YRES( fSpread * cl_crosshairspreadscale.GetFloat() ) ) );
+			}
+			break;
+
+		case 2:
+		case 3:
+			{
+				float fCrosshairDistanceGoal = GetCSWpnData().m_iCrosshairMinDistance; // The minimum distance the crosshair can achieve...
+
+				// legacy dynamic crosshair
+				if ( cl_dynamiccrosshair.GetInt() == 2 )
+				{
+					if ( !( pPlayer->GetFlags() & FL_ONGROUND ) )
+						fCrosshairDistanceGoal *= 2.0f;
+					else if ( pPlayer->GetFlags() & FL_DUCKING )
+						fCrosshairDistanceGoal *= 0.5f;
+					else if ( pPlayer->GetAbsVelocity().Length() > 100 )
+						fCrosshairDistanceGoal *= 1.5f;
+				}
+
+				// [jpaquin] changed to only bump up the crosshair size if the player is still shooting or is spectating someone else
+				int iDeltaDistance = GetCSWpnData().m_iCrosshairDeltaDistance; // Amount by which the crosshair expands when shooting (per frame)
+				if ( pPlayer->m_iShotsFired > m_iAmmoLastCheck && (pPlayer->m_nButtons & (IN_ATTACK|IN_ATTACK2)) )
+					fCrosshairDistanceGoal += iDeltaDistance;
+
+				m_iAmmoLastCheck = pPlayer->m_iShotsFired;
+
+				if ( m_flCrosshairDistance > fCrosshairDistanceGoal )
+				{
+					// [jpaquin] if we're not in legacy crosshair mode, use an exponential decay function so
+					// that the crosshair shrinks at the same rate regardless of the frame rate
+					if ( !cl_legacy_crosshair_recoil.GetBool() )
+					{
+						// .44888 on the next line makes the decay very close to what old method produces at 100fps.
+						m_flCrosshairDistance = Lerp(expf(-gpGlobals->frametime / 0.44888f), fCrosshairDistanceGoal, m_flCrosshairDistance);
+					}
+					else
+					{
+						m_flCrosshairDistance -= 0.1f + m_flCrosshairDistance * 0.013;
+					}
+				}
+
+				// clamp max crosshair expansion
+				m_flCrosshairDistance = clamp(m_flCrosshairDistance, fCrosshairDistanceGoal, 25.0f);
+
+				if ( cl_legacy_crosshair_scale.GetBool() )
+				{
+					//scale bar size to the resolution
+					int crosshairScale = cl_crosshairscale.GetInt();
+					if ( crosshairScale < 1 )
+					{
+						if ( ScreenHeight() <= 600 )
+						{
+							crosshairScale = 600;
+						}
+						else if ( ScreenHeight() <= 768 )
+						{
+							crosshairScale = 768;
+						}
+						else
+						{
+							crosshairScale = 1200;
+						}
+					}
+
+					float scale;
+					if( cl_scalecrosshair.GetBool() == false )
+					{
+						scale = 1.0f;
+					}
+					else
+					{
+						scale = (float)ScreenHeight() / (float)crosshairScale;
+					}
+
+					// calculate the inner distance of the crosshair in current screen units
+					iCrosshairDistance = (int)ceil( m_flCrosshairDistance * scale );
+
+					iBarSize = XRES(5); //  + (iCrosshairDistance - fCrosshairDistanceGoal) / 2;
+					iBarSize = MAX( 1, (int)( (float)iBarSize * scale ) );
+					iBarThickness = MAX( 1, (int)floor( scale + 0.5f ) );
+				}
+				else
+				{
+					iCrosshairDistance = RoundFloatToInt(m_flCrosshairDistance * ScreenHeight() / 1200.0f);
+				}
+			}
+			break;
 		}
 
-		int iTop		= iHalfScreenHeight - ( iCrosshairDistance + iBarSize );
-		int iBottom		= iHalfScreenHeight + iCrosshairDistance + iBarThickness;
-		int iFarTop		= iTop + iBarSize;
-		int iFarBottom	= iBottom + iBarSize;
+		int iCenterX = ScreenWidth() / 2;
+		int iCenterY = ScreenHeight() / 2;
 
-		if ( !cl_crosshairusealpha.GetBool() && !pPlayer->m_bNightVisionOn)
+		if ( bCrosshairVisible )
 		{
-			// Additive crosshair
-			vgui::surface()->DrawTexturedRect( iHalfScreenWidth, iTop, iHalfScreenWidth + iBarThickness, iFarTop );
-			vgui::surface()->DrawTexturedRect( iHalfScreenWidth, iBottom, iHalfScreenWidth + iBarThickness, iFarBottom );
+			// draw horizontal crosshair lines
+			int iInnerLeft	= iCenterX - iCrosshairDistance - iBarThickness / 2;
+			int iInnerRight	= iInnerLeft + 2 * iCrosshairDistance + iBarThickness;
+			int iOuterLeft	= iInnerLeft - iBarSize;
+			int iOuterRight	= iInnerRight + iBarSize;
+			int y0 = iCenterY - iBarThickness / 2;
+			int y1 = y0 + iBarThickness;
+			DrawCrosshairRect( iOuterLeft, y0, iInnerLeft, y1, bAdditive );
+			DrawCrosshairRect( iInnerRight, y0, iOuterRight, y1, bAdditive );
+
+			// draw vertical crosshair lines
+			int iInnerTop		= iCenterY - iCrosshairDistance - iBarThickness / 2;
+			int iInnerBottom	= iInnerTop + 2 * iCrosshairDistance + iBarThickness;
+			int iOuterTop		= iInnerTop - iBarSize;
+			int iOuterBottom	= iInnerBottom + iBarSize;
+			int x0 = iCenterX - iBarThickness / 2;
+			int x1 = x0 + iBarThickness;
+			DrawCrosshairRect( x0, iOuterTop, x1, iInnerTop, bAdditive );
+			DrawCrosshairRect( x0, iInnerBottom, x1, iOuterBottom, bAdditive );
+
+			// draw dot
+			if ( cl_crosshairdot.GetBool() )
+			{
+				int x0 = iCenterX - iBarThickness / 2;
+				int x1 = x0 + iBarThickness;
+				int y0 = iCenterY - iBarThickness / 2;
+				int y1 = y0 + iBarThickness;
+				DrawCrosshairRect( x0, y0, x1, y1, bAdditive );
+			}
 		}
-		else
+
+#if ALLOW_WEAPON_SPREAD_DISPLAY
+		// show accuracy brackets
+		if ( weapon_debug_spread_show.GetInt() == 1 || weapon_debug_spread_show.GetInt() == 2 )
 		{
-			// Alpha-blended crosshair
-			vgui::surface()->DrawFilledRect( iHalfScreenWidth, iTop, iHalfScreenWidth + iBarThickness, iFarTop );
-			vgui::surface()->DrawFilledRect( iHalfScreenWidth, iBottom, iHalfScreenWidth + iBarThickness, iFarBottom );
+			if ( weapon_debug_spread_show.GetInt() == 2 )
+			{
+				const QAngle& punchAngles = pPlayer->GetPunchAngle();
+				Vector vecDirShooting;
+				AngleVectors( punchAngles, &vecDirShooting );
+
+				float iOffsetX = RoundFloatToInt(YRES(vecDirShooting.y * 320.0f / tanf(fHalfFov)));
+				float iOffsetY = RoundFloatToInt(YRES(vecDirShooting.z * 320.0f / tanf(fHalfFov)));
+
+				iCenterX -= iOffsetX;
+				iCenterY -= iOffsetY;
+			}
+
+			// colors
+			r = 250;
+			g = 250;
+			b = 50;
+			vgui::surface()->DrawSetColor( r, g, b, alpha );
+
+			int iBarThickness = MAX( 1, RoundFloatToInt(YRES(cl_crosshairthickness.GetFloat())));
+
+			float fSpreadDistance = (GetInaccuracy() + GetSpread()) * 320.0f / tanf(fHalfFov);
+			int iSpreadDistance = RoundFloatToInt(YRES(fSpreadDistance));
+
+			// draw vertical spread lines
+			int iInnerLeft	= iCenterX - iSpreadDistance;
+			int iInnerRight	= iCenterX + iSpreadDistance;
+			int iOuterLeft	= iInnerLeft - iBarThickness;
+			int iOuterRight	= iInnerRight + iBarThickness;
+			int iInnerTop		= iCenterY - iSpreadDistance;
+			int iInnerBottom	= iCenterY + iSpreadDistance;
+			int iOuterTop		= iInnerTop - iBarThickness;
+			int iOuterBottom	= iInnerBottom + iBarThickness;
+
+			int iGap = RoundFloatToInt(weapon_debug_spread_gap.GetFloat() * iSpreadDistance);
+
+			// draw horizontal lines
+			DrawCrosshairRect( iOuterLeft, iOuterTop, iCenterX - iGap, iInnerTop, bAdditive );
+			DrawCrosshairRect( iCenterX + iGap, iOuterTop, iOuterRight, iInnerTop, bAdditive );
+			DrawCrosshairRect( iOuterLeft, iInnerBottom, iCenterX - iGap, iOuterBottom, bAdditive );
+			DrawCrosshairRect( iCenterX + iGap, iInnerBottom, iOuterRight, iOuterBottom, bAdditive );
+
+			// draw vertical lines
+			DrawCrosshairRect( iOuterLeft, iOuterTop, iInnerLeft, iCenterY - iGap, bAdditive );
+			DrawCrosshairRect( iOuterLeft, iCenterY + iGap, iInnerLeft, iOuterBottom, bAdditive );
+			DrawCrosshairRect( iInnerRight, iOuterTop, iOuterRight, iCenterY - iGap, bAdditive );
+			DrawCrosshairRect( iInnerRight, iCenterY + iGap, iOuterRight, iOuterBottom, bAdditive );
 		}
+#endif
 	}
-
 
 	void CWeaponCSBase::OnDataChanged( DataUpdateType_t type )
 	{
@@ -1072,7 +1305,7 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 	{
 		// This is handled from the player's animstate, so it can match up to the beginning of the fire animation
 	}
-		
+
 
 	bool CWeaponCSBase::OnFireEvent( C_BaseViewModel *pViewModel, const Vector& origin, const QAngle& angles, int event, const char *options )
 	{
@@ -1081,13 +1314,13 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 			C_CSPlayer *pPlayer = ToCSPlayer( GetOwner() );
 			if( pPlayer && pPlayer->GetFOV() < pPlayer->GetDefaultFOV() && HideViewModelWhenZoomed() )
 				return true;
-			
+
 			CEffectData data;
 			data.m_fFlags = 0;
 			data.m_hEntity = pViewModel->GetRefEHandle();
 			data.m_nAttachmentIndex = 1;
 			data.m_flScale = GetCSWpnData().m_flMuzzleScale;
-		
+
 			switch( GetMuzzleFlashStyle() )
 			{
 			case CS_MUZZLEFLASH_NONE:
@@ -1098,7 +1331,7 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 					DispatchEffect( "CS_MuzzleFlash_X", data );
 				}
 				break;
-				
+
 			case CS_MUZZLEFLASH_NORM:
 			default:
 				{
@@ -1122,8 +1355,8 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 	{
 		return LookupAttachment( "muzzle_flash" );
 	}
-	
-#else		
+
+#else
 
 	//-----------------------------------------------------------------------------
 	// Purpose: Get the accuracy derived from weapon and player, and return it
@@ -1158,6 +1391,21 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 			return true;
 	}
 
+
+    //=============================================================================
+    // HPE_BEGIN:
+    // [dwenger] Handle round restart processing for the weapon.
+    //=============================================================================
+
+    void CWeaponCSBase::OnRoundRestart()
+    {
+        // Clear out the list of prior owners
+        m_PriorOwners.RemoveAll();
+    }
+
+    //=============================================================================
+    // HPE_END
+    //=============================================================================
 
 	//=========================================================
 	// Materialize - make a CWeaponCSBase visible and tangible
@@ -1197,7 +1445,7 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 	}
 
 	//=========================================================
-	// CheckRespawn - a player is taking this weapon, should 
+	// CheckRespawn - a player is taking this weapon, should
 	// it respawn?
 	//=========================================================
 	void CWeaponCSBase::CheckRespawn()
@@ -1206,7 +1454,7 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 		return;
 	}
 
-		
+
 	//=========================================================
 	// Respawn- this item is already in the world, but it is
 	// invisible and intangible. Make it visible and tangible.
@@ -1238,15 +1486,15 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 	}
 
 	//-----------------------------------------------------------------------------
-	// Purpose: 
+	// Purpose:
 	//-----------------------------------------------------------------------------
 	void CWeaponCSBase::Use( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )
 	{
 		CBasePlayer *pPlayer = ToBasePlayer( pActivator );
-
+		
 		if ( pPlayer )
 		{
-			pPlayer->Weapon_Equip( this );
+			m_OnPlayerUse.FireOutput( pActivator, pCaller );
 		}
 	}
 
@@ -1259,13 +1507,6 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 		pPlayer->m_iShotsFired = 0;
 
 		bool retval = BaseClass::Reload();
-
-#ifdef CLIENT_DLL
-		if (retval)
-		{
-			m_bInReloadAnimation = true;
-		}
-#endif
 
 		return retval;
 	}
@@ -1281,17 +1522,27 @@ void CWeaponCSBase::DefaultTouch(CBaseEntity *pOther)
 
 		// Set this here to allow players to shoot dropped weapons
 		SetCollisionGroup( COLLISION_GROUP_WEAPON );
-		
+
 		SetExtraAmmoCount( m_iDefaultExtraAmmo );	//Start with no additional ammo
 
 		m_nextPrevOwnerTouchTime = 0.0;
 		m_prevOwner = NULL;
 
-#ifdef CLIENT_DLL
-		m_bInReloadAnimation = false;
-#endif
+        //=============================================================================
+        // HPE_BEGIN:
+        //=============================================================================
+
+        // [tj] initialize donor of this weapon
+        m_donor = NULL;
+        m_donated = false;
+
+		m_weaponMode = Primary_Mode;
+
+        //=============================================================================
+        // HPE_END
+        //=============================================================================
 	}
-	
+
 	bool CWeaponCSBase::DefaultReload( int iClipSize1, int iClipSize2, int iActivity )
 	{
 		if ( BaseClass::DefaultReload( iClipSize1, iClipSize2, iActivity ) )
@@ -1340,10 +1591,6 @@ bool CWeaponCSBase::DefaultPistolReload()
 
 	pPlayer->m_iShotsFired = 0;
 
-#ifdef CLIENT_DLL
-	m_bInReloadAnimation = true;
-#endif
-
 	return true;
 }
 
@@ -1355,9 +1602,9 @@ bool CWeaponCSBase::IsUseable()
 
 	if ( Clip1() <= 0 )
 	{
-		if ( pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) <= 0 && GetMaxClip1() != -1 )			
+		if ( pPlayer->GetAmmoCount( GetPrimaryAmmoType() ) <= 0 && GetMaxClip1() != -1 )
 		{
-			// clip is empty (or nonexistant) and the player has no more ammo of this type. 
+			// clip is empty (or nonexistant) and the player has no more ammo of this type.
 			return false;
 		}
 	}
@@ -1374,9 +1621,9 @@ bool CWeaponCSBase::IsUseable()
 	static ConVar	cl_bobcycle( "cl_bobcycle","0.8", FCVAR_CHEAT );
 	static ConVar	cl_bob( "cl_bob","0.002", FCVAR_CHEAT );
 	static ConVar	cl_bobup( "cl_bobup","0.5", FCVAR_CHEAT );
-	
+
 	//-----------------------------------------------------------------------------
-	// Purpose: 
+	// Purpose:
 	// Output : float
 	//-----------------------------------------------------------------------------
 	float CWeaponCSBase::CalcViewmodelBob( void )
@@ -1385,13 +1632,13 @@ bool CWeaponCSBase::IsUseable()
 		static	float lastbobtime;
 		static  float lastspeed;
 		float	cycle;
-		
+
 		CBasePlayer *player = ToBasePlayer( GetOwner() );
 		//Assert( player );
 
 		//NOTENOTE: For now, let this cycle continue when in the air, because it snaps badly without it
 
-		if ( ( !gpGlobals->frametime ) || 
+		if ( ( !gpGlobals->frametime ) ||
 			 ( player == NULL ) ||
 			 ( cl_bobcycle.GetFloat() <= 0.0f ) ||
 			 ( cl_bobup.GetFloat() <= 0.0f ) ||
@@ -1403,7 +1650,7 @@ bool CWeaponCSBase::IsUseable()
 
 		//Find the speed of the player
 		float speed = player->GetLocalVelocity().Length2D();
-		float flmaxSpeedDelta = max( 0, (gpGlobals->curtime - lastbobtime) * 320.0f );
+		float flmaxSpeedDelta = MAX( 0, (gpGlobals->curtime - lastbobtime) * 320.0f );
 
 		// don't allow too big speed changes
 		speed = clamp( speed, lastspeed-flmaxSpeedDelta, lastspeed+flmaxSpeedDelta );
@@ -1414,10 +1661,10 @@ bool CWeaponCSBase::IsUseable()
 		//FIXME: This maximum speed value must come from the server.
 		//		 MaxSpeed() is not sufficient for dealing with sprinting - jdw
 
-		
+
 
 		float bob_offset = RemapVal( speed, 0, 320, 0.0f, 1.0f );
-		
+
 		bobtime += ( gpGlobals->curtime - lastbobtime ) * bob_offset;
 		lastbobtime = gpGlobals->curtime;
 
@@ -1433,7 +1680,7 @@ bool CWeaponCSBase::IsUseable()
 		{
 			cycle = M_PI + M_PI*(cycle-cl_bobup.GetFloat())/(1.0 - cl_bobup.GetFloat());
 		}
-		
+
 		g_verticalBob = speed*0.005f;
 		g_verticalBob = g_verticalBob*0.3 + g_verticalBob*0.7*sin(cycle);
 
@@ -1455,17 +1702,17 @@ bool CWeaponCSBase::IsUseable()
 		g_lateralBob = speed*0.005f;
 		g_lateralBob = g_lateralBob*0.3 + g_lateralBob*0.7*sin(cycle);
 		g_lateralBob = clamp( g_lateralBob, -7.0f, 4.0f );
-		
+
 		//NOTENOTE: We don't use this return value in our case (need to restructure the calculation function setup!)
 		return 0.0f;
 
 	}
 
 	//-----------------------------------------------------------------------------
-	// Purpose: 
-	// Input  : &origin - 
-	//			&angles - 
-	//			viewmodelindex - 
+	// Purpose:
+	// Input  : &origin -
+	//			&angles -
+	//			viewmodelindex -
 	//-----------------------------------------------------------------------------
 	void CWeaponCSBase::AddViewmodelBob( CBaseViewModel *viewmodel, Vector &origin, QAngle &angles )
 	{
@@ -1476,10 +1723,10 @@ bool CWeaponCSBase::IsUseable()
 
 		// Apply bob, but scaled down to 40%
 		VectorMA( origin, g_verticalBob * 0.4f, forward, origin );
-		
+
 		// Z bob a bit more
 		origin[2] += g_verticalBob * 0.1f;
-		
+
 		// bob the angles
 		angles[ ROLL ]	+= g_verticalBob * 0.5f;
 		angles[ PITCH ]	-= g_verticalBob * 0.4f;
@@ -1536,8 +1783,8 @@ bool CWeaponCSBase::PhysicsSplash( const Vector &centerPoint, const Vector &norm
 #endif // !CLIENT_DLL
 
 //-----------------------------------------------------------------------------
-// Purpose: 
-// Input  : *pPicker - 
+// Purpose:
+// Input  : *pPicker -
 //-----------------------------------------------------------------------------
 void CWeaponCSBase::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 {
@@ -1546,6 +1793,8 @@ void CWeaponCSBase::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 
 	if( pNewOwner->IsPlayer() && pNewOwner->IsAlive() )
 	{
+		m_OnPlayerPickup.FireOutput(pNewOwner, this);
+
 		// Play the pickup sound for 1st-person observers
 		CRecipientFilter filter;
 		for ( int i=0; i<gpGlobals->maxClients; ++i )
@@ -1561,8 +1810,8 @@ void CWeaponCSBase::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 			CBaseEntity::EmitSound( filter, pNewOwner->entindex(), "Player.PickupWeapon" );
 		}
 
-		// Robin: We don't want to delete weapons the player has picked up, so 
-		// clear the name of the weapon. This prevents wildcards that are meant 
+		// Robin: We don't want to delete weapons the player has picked up, so
+		// clear the name of the weapon. This prevents wildcards that are meant
 		// to find NPCs finding weapons dropped by the NPCs as well.
 		SetName( NULL_STRING );
 	}
@@ -1570,4 +1819,99 @@ void CWeaponCSBase::OnPickedUp( CBaseCombatCharacter *pNewOwner )
 	// Someone picked me up, so make it so that I can't be removed.
 	SetRemoveable( false );
 #endif
+}
+
+
+void CWeaponCSBase::UpdateAccuracyPenalty()
+{
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
+		return;
+
+	const CCSWeaponInfo& weaponInfo = GetCSWpnData();
+
+	float fNewPenalty = 0.0f;
+
+	// on ladder?
+	if ( pPlayer->GetMoveType() == MOVETYPE_LADDER )
+	{
+		fNewPenalty += weaponInfo.m_fInaccuracyStand[m_weaponMode] + weaponInfo.m_fInaccuracyLadder[m_weaponMode];
+	}
+	// in the air?
+// 	else if ( !FBitSet( pPlayer->GetFlags(), FL_ONGROUND ) )
+// 	{
+// 		fNewPenalty += weaponInfo.m_fInaccuracyStand[m_weaponMode] + weaponInfo.m_fInaccuracyJump[m_weaponMode];
+// 	}
+	else if ( FBitSet( pPlayer->GetFlags(), FL_DUCKING) )
+	{
+		fNewPenalty += weaponInfo.m_fInaccuracyCrouch[m_weaponMode];
+	}
+	else
+	{
+		fNewPenalty += weaponInfo.m_fInaccuracyStand[m_weaponMode];
+	}
+
+	if ( m_bInReload )
+	{
+ 		fNewPenalty += weaponInfo.m_fInaccuracyReload;
+	}
+
+	if ( fNewPenalty > m_fAccuracyPenalty )
+	{
+		m_fAccuracyPenalty = fNewPenalty;
+	}
+	else
+	{
+		float fDecayFactor;
+
+		if ( pPlayer->GetMoveType() == MOVETYPE_LADDER )
+		{
+			fDecayFactor = logf(10.0f) / weaponInfo.m_fRecoveryTimeStand;
+		}
+		else if ( !FBitSet(pPlayer->GetFlags(), FL_ONGROUND) )	// in air
+		{
+			// enforce a large recovery speed penalty (300%) for players in the air; this helps to provide
+			// comparable in-air accuracy to the old weapon model
+			fDecayFactor = logf(10.0f) / (weaponInfo.m_fRecoveryTimeCrouch * 3.0f);
+		}
+		else if ( FBitSet(pPlayer->GetFlags(), FL_DUCKING) )
+		{
+			fDecayFactor = logf(10.0f) / weaponInfo.m_fRecoveryTimeCrouch;
+		}
+		else
+		{
+			fDecayFactor = logf(10.0f) / weaponInfo.m_fRecoveryTimeStand;
+		}
+		m_fAccuracyPenalty = Lerp(expf(TICK_INTERVAL * -fDecayFactor), fNewPenalty, (float)m_fAccuracyPenalty);
+	}
+}
+
+
+const float kJumpVelocity = sqrtf(2.0f * 800.0f * 57.0f);	// see CCSGameMovement::CheckJumpButton()
+
+void CWeaponCSBase::OnJump( float fImpulse )
+{
+	m_fAccuracyPenalty += GetCSWpnData().m_fInaccuracyJump[m_weaponMode] * fImpulse / kJumpVelocity;
+}
+
+void CWeaponCSBase::OnLand( float fVelocity )
+{
+	float fPenalty = GetCSWpnData().m_fInaccuracyLand[m_weaponMode] * fVelocity / kJumpVelocity;
+	m_fAccuracyPenalty += fPenalty;
+
+/*
+	// this bit of code is only if we want to punch the player view on all landings
+
+	CCSPlayer *pPlayer = GetPlayerOwner();
+	if ( !pPlayer )
+		return;
+
+	QAngle angle = pPlayer->GetPunchAngle();
+	float fVKick = RAD2DEG(asinf(fPenalty)) * 0.4f;
+	float fHKick = SharedRandomFloat("LandPunchAngleYaw", -1.0f, +1.0f) * fVKick * 0.1f;
+
+	angle.x += fVKick;	// pitch
+	angle.y += fHKick;	// yaw
+	pPlayer->SetPunchAngle( angle );
+*/
 }

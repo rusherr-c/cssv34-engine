@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -37,17 +37,11 @@ void EngineBitBufErrorHandler( BitBufErrorType errorType, const char *pDebugName
 		}
 	}
 
-	Assert( 0 );
+	AssertMsg( false, "%s: %s errorType: %d", __FUNCTION__, pDebugName, errorType );
 }
-
 
 void InstallBitBufErrorHandler()
 {
 	SetBitBufErrorHandler( EngineBitBufErrorHandler );
 }
-
-
-
-
-
 
