@@ -5,7 +5,7 @@
 //-----------------------------------------------------------------------------
 
 $Macro SRCDIR		"..\.."
-$Macro OUTBINDIR	"$SRCDIR\..\game\bin"
+$Macro OUTBINDIR	"$LIBPUBLIC"
 
 $Include "$SRCDIR\vpc_scripts\source_exe_base.vpc"
 
@@ -320,7 +320,6 @@ $Project "hlfaceposer"
 		$File	"$SRCDIR\public\networkvar.h"
 		$File	"$SRCDIR\game\shared\npcevent.h"
 		$File	"$SRCDIR\public\optimize.h"
-		$File	"$SRCDIR\public\phonemeextractor\phonemeextractor.h"
 		$File	"$SRCDIR\public\phyfile.h"
 		$File	"..\common\physdll.h"
 		$File	"..\hlmv\physmesh.h"

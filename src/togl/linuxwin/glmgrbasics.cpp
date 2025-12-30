@@ -2628,7 +2628,11 @@ bool	GLMDetectOGLP( void )
 #include <sys/types.h>  
 #ifndef _WIN32
 	#include <unistd.h>  
-	#include <sys/sysctl.h>  
+#ifdef LINUX
+#include <linux/sysctl.h>
+#else
+#include <sys/sysctl.h>
+#endif
 #endif
 
 // From Technical Q&A QA1361  
@@ -4239,7 +4243,9 @@ CGLMEditableTextItem::~CGLMEditableTextItem( )
 	
 	if (m_mirror)
 	{
-		free( m_mirror );
+		//free( m_mirror );
+        // MoeMod : should be delete here
+        delete m_mirror;
 	}
 }
 

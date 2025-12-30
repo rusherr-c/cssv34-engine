@@ -444,7 +444,7 @@ void CMaterialSystem::CreateCompositorMaterials()
 
 		IMaterialInternal *pMatqf = assert_cast< IMaterialInternal* >( FindMaterial( pszMaterial, TEXTURE_GROUP_RUNTIME_COMPOSITE ) );
 		Assert( pMatqf );
-		Assert( !pMatqf->IsErrorMaterial() );
+		//Assert( !pMatqf->IsErrorMaterial() );
 		IMaterialInternal *pMatrt = pMatqf->GetRealTimeVersion();
 		Assert( pMatrt );
 		pMatrt->IncrementReferenceCount(); // Hold a ref.
@@ -517,7 +517,7 @@ void CMaterialSystem::CleanUpErrorMaterial()
 //-----------------------------------------------------------------------------
 CMaterialSystem::CMaterialSystem()
 {
-	m_nRenderThreadID = 0xFFFFFFFF;
+	m_nRenderThreadID = (uintp)-1;
 	m_hAsyncLoadFileCache = NULL;
 	m_ShaderHInst = 0;
 	m_pMaterialProxyFactory = NULL;
@@ -1769,12 +1769,7 @@ static ConVar mat_phong(			"mat_phong", "1" );
 static ConVar mat_parallaxmap(		"mat_parallaxmap", "1", FCVAR_HIDDEN | FCVAR_ALLOWED_IN_COMPETITIVE );
 static ConVar mat_reducefillrate(	"mat_reducefillrate", "0", FCVAR_ALLOWED_IN_COMPETITIVE );
 
-#if defined( OSX ) && !defined( STAGING_ONLY ) && !defined( _DEBUG )
-// OSX users are currently running OOM. We limit them to texture quality high here, which avoids the problem while we come up with a real solution.
-static ConVar mat_picmip(			"mat_picmip", "1", FCVAR_ARCHIVE, "", true, 0, true, 4 );
-#else
-static ConVar mat_picmip(			"mat_picmip", "0", FCVAR_ARCHIVE, "", true, -1, true, 4 );
-#endif
+static ConVar mat_picmip(			"mat_picmip", "0", FCVAR_ARCHIVE, "", true, -32, true, 8 );
 static ConVar mat_slopescaledepthbias_normal( "mat_slopescaledepthbias_normal", "0.0f", FCVAR_CHEAT );
 static ConVar mat_depthbias_normal( "mat_depthbias_normal", "0.0f", FCVAR_CHEAT | FCVAR_ALLOWED_IN_COMPETITIVE );
 static ConVar mat_slopescaledepthbias_decal( "mat_slopescaledepthbias_decal", "-0.5", FCVAR_CHEAT );		// Reciprocals of these biases sent to API
@@ -1872,7 +1867,12 @@ void CMaterialSystem::ReadConfigFromConVars( MaterialSystem_Config_t *pConfig )
 	pConfig->m_fGammaTVExponent = mat_monitorgamma_tv_exp.GetFloat();
 	pConfig->m_bGammaTVEnabled = mat_monitorgamma_tv_enabled.GetBool();
 
+#ifdef TOGLES
+	pConfig->m_nAASamples = 0;
+#else
 	pConfig->m_nAASamples = mat_antialias.GetInt();
+#endif
+
 	pConfig->m_nAAQuality = mat_aaquality.GetInt();
 	pConfig->bShowDiffuse = mat_diffuse.GetInt() ? true : false;	
 //	pConfig->bAllowCheats = false; // hack
@@ -2780,8 +2780,8 @@ IMaterial* CMaterialSystem::FindMaterialEx( char const* pMaterialName, const cha
 {
 	// We need lower-case symbols for this to work
 	int nLen = Q_strlen( pMaterialName ) + 1;
-	char *pFixedNameTemp = (char*)stackalloc( nLen );
-	char *pTemp = (char*)stackalloc( nLen );
+	char *pFixedNameTemp = (char*)malloc( nLen );
+	char *pTemp = (char*)malloc( nLen );
 	Q_strncpy( pFixedNameTemp, pMaterialName, nLen );
 	Q_strlower( pFixedNameTemp );
 #ifdef POSIX
@@ -2882,6 +2882,9 @@ IMaterial* CMaterialSystem::FindMaterialEx( char const* pMaterialName, const cha
 			DevWarning( "material \"%s\" not found.\n", name );
 		}
 	}
+
+	free(pTemp);
+	free(pFixedNameTemp);
 
 	return g_pErrorMaterial->GetRealTimeVersion();
 }
@@ -3542,7 +3545,7 @@ void CMaterialSystem::ThreadExecuteQueuedContext( CMatQueuedRenderContext *pCont
 	m_pRenderContext.Set( &m_HardwareRenderContext );
 	pContext->EndQueue( true );
 	m_pRenderContext.Set( pSavedRenderContext );
-	m_nRenderThreadID = 0xFFFFFFFF; 
+	m_nRenderThreadID = (uintp)-1;
 }
 
 IThreadPool *CMaterialSystem::CreateMatQueueThreadPool()

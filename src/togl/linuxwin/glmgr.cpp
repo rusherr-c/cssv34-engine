@@ -670,7 +670,7 @@ void GLMContext::DumpCaps( void )
 	#define	dumpfield_hex( fff )	printf( "\n  %-30s : 0x%08x", #fff, (int) m_caps.fff )
 	#define	dumpfield_str( fff )	printf( "\n  %-30s : %s", #fff, m_caps.fff )
 
-	printf("\n-------------------------------- context caps for context %08x", (uint)this);
+	printf("\n-------------------------------- context caps for context %p", this);
 
 	dumpfield( m_fullscreen );
 	dumpfield( m_accelerated );
@@ -1745,8 +1745,9 @@ void GLMContext::PreloadTex( CGLMTex *tex, bool force )
 		}
 	}
 
-	gGL->glUseProgram( (GLuint)preloadPair->m_program );
-					
+	gGL->glUseProgramObjectARB( preloadPair->m_program );
+	//gGL->glUseProgram( (GLuint)preloadPair->m_program );
+
 	m_pBoundPair = preloadPair;
 	m_bDirtyPrograms = true;
 			
@@ -1788,14 +1789,14 @@ void GLMContext::PreloadTex( CGLMTex *tex, bool force )
 								0.0f, 0.0f, 0.0f,
 								0.0f, 0.0f, 0.0f };
 
-	static int indices[] = { 0, 1, 2 };
+	static short indices[] = { 0, 1, 2 };
 	
 
 	gGL->glEnableVertexAttribArray( 0 );
 
-	gGL->glVertexAttribPointer( 0, 3, GL_FLOAT, 0, 0, posns );
+	gGL->glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), posns );
 
-	gGL->glDrawRangeElements( GL_TRIANGLES, 0, 3, 3, GL_UNSIGNED_INT, indices);
+	gGL->glDrawRangeElements( GL_TRIANGLES, 0, 2, 3, GL_UNSIGNED_SHORT, indices);
 
 	gGL->glDisableVertexAttribArray( 0 );
 	
@@ -2453,6 +2454,7 @@ static uint gPersistentBufferSize[kGLMNumBufferTypes] =
 
 GLMContext::GLMContext( IDirect3DDevice9 *pDevice, GLMDisplayParams *params )
 {
+	m_nNumDirtySamplers = 0;
 // 	m_bUseSamplerObjects = true;
 // 	
 // 	// On most AMD drivers (like the current latest, 12.10 Windows), the PCF depth comparison mode doesn't work on sampler objects, so just punt them.
@@ -2701,6 +2703,10 @@ GLMContext::GLMContext( IDirect3DDevice9 *pDevice, GLMDisplayParams *params )
 
 	// debug state
 	m_debugFrameIndex = -1;
+
+#if defined( OSX ) && defined( GLMDEBUG )
+    memset( m_boundProgram , 0, sizeof( m_boundProgram ) );
+#endif
 	
 #if GLMDEBUG
 	// #######################################################################################
@@ -2806,6 +2812,7 @@ GLMContext::GLMContext( IDirect3DDevice9 *pDevice, GLMDisplayParams *params )
 		}
 	}
 
+/*
 	if ( m_caps.m_badDriver108Intel )
 	{
 		// this way we have something to look for in terminal spew if users report issues related to this in the future.
@@ -2815,6 +2822,7 @@ GLMContext::GLMContext( IDirect3DDevice9 *pDevice, GLMDisplayParams *params )
 			Warning( "Unable to enable OSX 10.8 / Intel HD4000 workaround, there might be crashes.\n" );
 		}
 	}
+*/
 
 #endif
 	// also, set the remote convar "gl_can_query_fast" to 1 if perf package present, else 0.
@@ -4649,14 +4657,14 @@ void GLMContext::GenDebugFontTex( void )
 		
 		//-----------------------------------------------------
 		// fetch elements of font data and make texels... we're doing the whole slab so we don't really need the stride info
-		unsigned long *destTexelPtr = (unsigned long *)lockAddress;
+		uint32 *destTexelPtr = (uint32 *)lockAddress;
 
 		for( int index = 0; index < 16384; index++ )
 		{
 			if (g_glmDebugFontMap[index] == ' ')
 			{
 				// clear
-				*destTexelPtr = 0x00000000;
+				*destTexelPtr = 0;
 			}
 			else
 			{
@@ -5074,7 +5082,7 @@ static inline uint GetDataTypeSizeInBytes( GLenum dataType )
 	return 0;
 }
 
-#ifndef OSX
+#if 1 //ifndef OS 
 
 void GLMContext::DrawRangeElementsNonInline( GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const GLvoid *indices, uint baseVertex, CGLMBuffer *pIndexBuf )
 {
@@ -5093,11 +5101,11 @@ void GLMContext::DrawRangeElementsNonInline( GLenum mode, GLuint start, GLuint e
 	if ( pIndexBuf->m_bPseudo )
 	{
 		// you have to pass actual address, not offset
-		indicesActual = (void*)( (int)indicesActual + (int)pIndexBuf->m_pPseudoBuf );
+		indicesActual = (void*)( (intp)indicesActual + (intp)pIndexBuf->m_pPseudoBuf );
 	}
 	if (pIndexBuf->m_bUsingPersistentBuffer)
 	{
-		indicesActual = (void*)( (int)indicesActual + (int)pIndexBuf->m_nPersistentBufferStartOffset );
+		indicesActual = (void*)( (intp)indicesActual + (intp)pIndexBuf->m_nPersistentBufferStartOffset );
 	}
 
 #if GL_ENABLE_INDEX_VERIFICATION
@@ -5202,11 +5210,11 @@ void GLMContext::DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsize
 	if ( pIndexBuf->m_bPseudo )
 	{
 		// you have to pass actual address, not offset
-		indicesActual = (void*)( (int)indicesActual + (int)pIndexBuf->m_pPseudoBuf );
+		indicesActual = (void*)( (intp)indicesActual + (intp)pIndexBuf->m_pPseudoBuf );
 	} 
 	if (pIndexBuf->m_bUsingPersistentBuffer)
 	{
-		indicesActual = (void*)( (int)indicesActual + (int)pIndexBuf->m_nPersistentBufferStartOffset );
+		indicesActual = (void*)( (intp)indicesActual + (intp)pIndexBuf->m_nPersistentBufferStartOffset );
 	}
 
 #if GLMDEBUG
@@ -5244,7 +5252,11 @@ void GLMContext::DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsize
 		}
 		else
 		{
+#if defined( OSX )
+            // MoeMod: TOGL IS NOT USING m_boundProgram THIS AT ALL
+#else
 			AssertOnce(!"drawing with no vertex program bound");
+#endif
 		}
 
 		if (m_boundProgram[kGLMFragmentProgram])
@@ -5253,7 +5265,11 @@ void GLMContext::DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsize
 		}
 		else
 		{
+#if defined( OSX )
+            // MoeMod: TOGL IS NOT USING m_boundProgram THIS AT ALL
+#else
 			AssertOnce(!"drawing with no fragment program bound");
+#endif
 		}
 #endif
 

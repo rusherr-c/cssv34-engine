@@ -224,7 +224,9 @@ bool IGameSystem::InitAllSystems()
 		XBX_rTimeStampLog( Plat_FloatTime(), sz );
 #endif
 		if ( !valid )
-			return false;
+			// Even if it's critical do not return false
+			Msg( "%s->Init():FAILED\n", sys->Name() );
+			//return false;
 	}
 
 	return true;
@@ -314,7 +316,6 @@ void IGameSystem::UpdateAllSystems( float frametime )
 	{
 		IGameSystemPerFrame *sys = s_GameSystemsPerFrame[i];
 		MDLCACHE_CRITICAL_SECTION();
-		tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s - %s", __FUNCTION__, sys->Name() );
 		sys->Update( frametime );
 	}
 }

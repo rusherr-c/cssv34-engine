@@ -12,6 +12,7 @@
 #include "wchartypes.h"
 
 #include "tier0/valve_off.h"
+#include <string.h>
 
 #ifdef _WIN32
 #pragma once
@@ -38,10 +39,12 @@
 #endif
 
 // stdio.h
-#ifndef NULL
+#if !defined(NULL) || defined(__FreeBSD__)
+#ifdef NULL
+# undef NULL
+#endif
 #define NULL 0
 #endif
-
 
 #ifdef POSIX
 #include <stdint.h>
@@ -170,19 +173,28 @@ typedef float vec_t;
 // This assumes the ANSI/IEEE 754-1985 standard
 //-----------------------------------------------------------------------------
 
-inline unsigned long& FloatBits( vec_t& f )
+// MoeMod : fix reinterpret_cast UB - Maybe fail with strict alias
+union FloatCast_u
 {
-	return *reinterpret_cast<unsigned long*>(&f);
+    vec_t f;
+    unsigned int i;
+};
+
+inline unsigned int& FloatBits( vec_t& f )
+{
+	return reinterpret_cast<FloatCast_u *>(&f)->i;
 }
 
-inline unsigned long const& FloatBits( vec_t const& f )
+inline unsigned int const& FloatBits( vec_t const& f )
 {
-	return *reinterpret_cast<unsigned long const*>(&f);
+	return reinterpret_cast<FloatCast_u const*>(&f)->i;
 }
 
-inline vec_t BitsToFloat( unsigned long i )
+inline vec_t BitsToFloat( unsigned int i )
 {
-	return *reinterpret_cast<vec_t*>(&i);
+	vec_t f;
+	memcpy( &f, &i, sizeof(f));
+	return f;
 }
 
 inline bool IsFinite( vec_t f )
@@ -190,7 +202,7 @@ inline bool IsFinite( vec_t f )
 	return ((FloatBits(f) & 0x7F800000) != 0x7F800000);
 }
 
-inline unsigned long FloatAbsBits( vec_t f )
+inline unsigned int FloatAbsBits( vec_t f )
 {
 	return FloatBits(f) & 0x7FFFFFFF;
 }
@@ -315,7 +327,7 @@ template< class DummyType >
 class CIntHandle16 : public CBaseIntHandle< unsigned short >
 {
 public:
-	inline			CIntHandle16() {}
+	inline			CIntHandle16() = default;
 
 	static inline	CIntHandle16<DummyType> MakeHandle( HANDLE_TYPE val )
 	{
@@ -334,7 +346,7 @@ template< class DummyType >
 class CIntHandle32 : public CBaseIntHandle< unsigned long >
 {
 public:
-	inline			CIntHandle32() {}
+	inline			CIntHandle32() = default;
 
 	static inline	CIntHandle32<DummyType> MakeHandle( HANDLE_TYPE val )
 	{

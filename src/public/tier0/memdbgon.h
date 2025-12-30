@@ -29,7 +29,11 @@
 #include <wchar.h>
 #endif
 #include <string.h>
+#ifdef OSX
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include "commonmacros.h"
 #include "memalloc.h"
 
@@ -39,7 +43,9 @@
 		#define _NORMAL_BLOCK 1
 		
 		#include <cstddef>
+		#ifndef ANDROID
 		#include <glob.h>
+		#endif
 		#include <new>
 		#include <sys/types.h>
 		#if !defined( DID_THE_OPERATOR_NEW )

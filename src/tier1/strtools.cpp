@@ -47,7 +47,6 @@
 #include <stdarg.h>
 
 #ifdef POSIX
-#include <iconv.h>
 #include <ctype.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -79,6 +78,12 @@
 #include "xbox/xbox_win32stubs.h"
 #endif
 #include "tier0/memdbgon.h"
+
+#ifdef ANDROID
+#include "common/iconv.h"
+#elif POSIX
+#include <iconv.h>
+#endif
 
 static int FastToLower( char c )
 {
@@ -1421,7 +1426,7 @@ int _V_UCS2ToUnicode( const ucs2 *pUCS2, wchar_t *pUnicode, int cubDestSizeInByt
 	size_t nMaxUTF8 = cubDestSizeInBytes;
 	char *pIn = (char *)pUCS2;
 	char *pOut = (char *)pUnicode;
-	if ( conv_t > 0 )
+	if ( conv_t > (void*)0 )
 	{
 		cchResult = iconv( conv_t, &pIn, &nLenUnicde, &pOut, &nMaxUTF8 );
 		iconv_close( conv_t );
@@ -1461,7 +1466,7 @@ int _V_UnicodeToUCS2( const wchar_t *pUnicode, int cubSrcInBytes, char *pUCS2, i
 	size_t nMaxUCS2 = cubDestSizeInBytes;
 	char *pIn = (char*)pUnicode;
 	char *pOut = pUCS2;
-	if ( conv_t > 0 )
+	if ( conv_t > (void*)0 )
 	{
 		cchResult = iconv( conv_t, &pIn, &nLenUnicde, &pOut, &nMaxUCS2 );
 		iconv_close( conv_t );
@@ -1509,7 +1514,7 @@ int _V_UCS2ToUTF8( const ucs2 *pUCS2, char *pUTF8, int cubDestSizeInBytes )
 	size_t nMaxUTF8 = cubDestSizeInBytes - 1;
 	char *pIn = (char *)pUCS2;
 	char *pOut = (char *)pUTF8;
-	if ( conv_t > 0 )
+	if ( conv_t > (void*)0 )
 	{
 		const size_t nBytesToWrite = nMaxUTF8;
 		cchResult = iconv( conv_t, &pIn, &nLenUnicde, &pOut, &nMaxUTF8 );
@@ -1554,7 +1559,7 @@ int _V_UTF8ToUCS2( const char *pUTF8, int cubSrcInBytes, ucs2 *pUCS2, int cubDes
 	size_t nMaxUTF8 = cubDestSizeInBytes;
 	char *pIn = (char *)pUTF8;
 	char *pOut = (char *)pUCS2;
-	if ( conv_t > 0 )
+	if ( conv_t > (void*)0 )
 	{
 		cchResult = iconv( conv_t, &pIn, &nLenUnicde, &pOut, &nMaxUTF8 );
 		iconv_close( conv_t );
@@ -2014,6 +2019,9 @@ bool V_StripLastDir( char *dirName, int maxlen )
 //-----------------------------------------------------------------------------
 const char * V_UnqualifiedFileName( const char * in )
 {
+	if( !in || !in[0] )
+		return in;
+
 	// back up until the character after the first path separator we find,
 	// or the beginning of the string
 	const char * out = in + strlen( in ) - 1;
@@ -2945,7 +2953,7 @@ extern "C" void qsort_s( void *base, size_t num, size_t width, int (*compare )(v
 
 void V_qsort_s( void *base, size_t num, size_t width, int ( __cdecl *compare )(void *, const void *, const void *), void * context ) 
 {
-#if defined OSX
+#if defined(OSX) || defined(PLATFORM_BSD)
 	// the arguments are swapped 'round on the mac - awesome, huh?
 	return qsort_r( base, num, width, context, compare );
 #else
@@ -3337,8 +3345,9 @@ const Tier1FullHTMLEntity_t g_Tier1_FullHTMLEntities[] =
 	{ L'\u00FF', "&yuml;", 6 },
 	{ 0, NULL, 0 } // sentinel for end of array
 };
+#ifdef _WIN32
 #pragma warning( pop )
-
+#endif
 
 
 bool V_BasicHtmlEntityEncode( char *pDest, const int nDestSize, char const *pIn, const int nInSize, bool bPreserveWhitespace /*= false*/ )

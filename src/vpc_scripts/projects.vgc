@@ -60,22 +60,22 @@ $Project "bspzip"
 
 $Project "bugreporter"
 {
-	"utils\bugreporter\bugreporter.vpc" [$WIN32]
+//	"utils\bugreporter\bugreporter.vpc" [$WIN32]
 }
 
 $Project "bugreporter_public"
 {
-	"utils\bugreporter_public\bugreporter_public.vpc" [$WINDOWS||$POSIX]
+//	"utils\bugreporter_public\bugreporter_public.vpc" [$WINDOWS||$POSIX]
 }
 
 $Project "bugreporter_text"
 {
-	"utils\bugreporter_text\bugreporter_text.vpc" [$WIN32]
+//	"utils\bugreporter_text\bugreporter_text.vpc" [$WIN32]
 }
 
 $Project "bugreporter_filequeue"
 {
-	"utils\bugreporter_filequeue\bugreporter_filequeue.vpc" [$WINDOWS||$POSIX]
+//	"utils\bugreporter_filequeue\bugreporter_filequeue.vpc" [$WINDOWS||$POSIX]
 }
 
 $Project "bzip2"
@@ -249,16 +249,6 @@ $Project "ep2_deathmap"
 	"devtools\ep2_deathmap\ep2_deathmap.vpc" [$WIN32]
 }
 
-$Project "fbx2dmx"
-{
-	"utils\fbx2dmx\fbx2dmx.vpc" [$WIN32]
-}
-
-$Project "fbxutils"
-{
-	"fbxutils\fbxutils.vpc" [$WIN32]
-}
-
 $Project "fgdlib"
 {
 	"fgdlib\fgdlib.vpc" [$WIN32]
@@ -379,11 +369,6 @@ $Project "hammer_launcher"
 	"hammer_launcher\hammer_launcher.vpc" [$WIN32]
 }
 
-$Project "haptics"
-{
-	"haptics\haptics.vpc" [$WIN32]
-}
-
 $Project "havana_constraints"
 {
 	"ivp\havana\havana_constraints.vpc" [$WINDOWS||$X360||$POSIX]
@@ -432,7 +417,7 @@ $Project "particles"
 
 $Project "sdktoolslib"
 {
-	"sdktools/sdktoolslib/sdktoolslib.vpc"
+//	"sdktools/sdktoolslib/sdktoolslib.vpc"
 }
 
 $Project "server"
@@ -484,11 +469,6 @@ $Project "hl_sdk_hl2mp"
 	"game\server\hl_sdk_hl2mp.vpc" [$WIN32]
 }
 
-$Project "ifm"
-{
-	"tools\ifm\ifm.vpc" [$WIN32]
-}
-
 $Project "ihvtest1"
 {
 	"unittests\ihvtest1\ihvtest1.vpc" [$WIN32]
@@ -511,17 +491,17 @@ $Project "ivp_compactbuilder"
 
 $Project "itemtest_com"
 {
-	"utils\itemtest\itemtest_com.vpc"
+//	"utils\itemtest\itemtest_com.vpc"
 }
 
 $Project "itemtest_controls"
 {
-	"utils\itemtest_controls\itemtest_controls.vpc"
+//	"utils\itemtest_controls\itemtest_controls.vpc"
 }
 
 $Project "itemtest_lib"
 {
-	"utils\itemtest_lib\itemtest_lib.vpc"
+//	"utils\itemtest_lib\itemtest_lib.vpc"
 }
 
 $Project "ivp_physics"
@@ -562,16 +542,6 @@ $Project "localization_check"
 $Project "localresource"
 {
 	"shell\localresource\localresource.vpc" [$WIN32]
-}
-
-$Project "lxVsDmxIO_Modo302"
-{
-	"sdktools/modo/lxVsDmxIO/lxVsDmxIO_modo302.vpc" [$WIN32]
-}
-
-$Project "lua"
-{
-	"lua\lua.vpc" [$WINDOWS]
 }
 
 $Project "lzma"
@@ -724,11 +694,6 @@ $Project "nvtristriplib"
 	"utils\nvtristriplib\nvtristriplib.vpc" [$WIN32]
 }
 
-$Project "p4lib"
-{
-	"p4lib\p4lib.vpc" [$WIN32]
-}
-
 $Project "mdllib"
 {
 	"mdllib\mdllib.vpc" [$WIN32]
@@ -768,16 +733,6 @@ $Project "pfmcomp"
 $Project "pfm2tgas"
 {
 	"utils\pfm2tgas\pfm2tgas.vpc" [$WIN32]
-}
-
-$Project "phonemeextractor"
-{
-	"utils\phonemeextractor\phonemeextractor.vpc" [$WIN32]
-}
-
-$Project "phonemeextractor_ims"
-{
-	"utils\phonemeextractor\phonemeextractor_ims.vpc" [$WIN32]
 }
 
 $Project "printbones"
@@ -1017,7 +972,7 @@ $Project "vaudio_speex"
 
 $Project "vaudio_celt"
 {
-	"engine\voice_codecs\celt\vaudio_celt.vpc" [$WIN32||$POSIX]
+//	"engine\voice_codecs\celt\vaudio_celt.vpc" [$WIN32||$POSIX]
 }
 
 //$Project "splitskybox"
@@ -1255,39 +1210,14 @@ $Project "video_services"
 	"video\video_services.vpc" [$WINDOWS||$X360||$POSIX]
 }
 
-$Project "valvemaya_maya2009"
-{
-	"sdktools\maya\valveMaya\valveMaya_Maya2009.vpc" [$WIN32]
-}
-
-$Project "valvemaya_maya2010"
-{
-	"sdktools\maya\valvemaya\valvemaya_maya2010.vpc" [$WIN32]
-}
-
-$Project "valvemaya_maya2011"
-{
-	"sdktools\maya\valvemaya\valvemaya_maya2011.vpc" [$WIN32]
-}
-
-$Project "valvemaya_maya2012"
-{
-	"sdktools\maya\valvemaya\valvemaya_maya2012.vpc" [$WIN32]
-}
-
-$Project "valvemaya_maya2013"
-{
-	"sdktools\maya\valvemaya\valvemaya_maya2013.vpc" [$WIN32]
-}
-
-$Project "valvepython_python2.5"
-{
-	"sdktools\python\valvePython\valvePython_python2.5.vpc" [$WIN32]
-}
-
 $Project "vaudio_miles"
 {
-	"engine\voice_codecs\miles\vaudio_miles.vpc" [$WINDOWS||$POSIX]
+//	"engine\voice_codecs\miles\vaudio_miles.vpc" [$WINDOWS||$POSIX]
+}
+
+$Project "vaudio_minimp3"
+{
+	"engine\voice_codecs\minimp3\vaudio_minimp3.vpc" [$WINDOWS||$POSIX]
 }
 
 $Project "vbsp"
@@ -1332,7 +1262,7 @@ $Project "vcrtrace"
 
 $Project "video_bink"
 {
-	"video\video_bink.vpc" [($WINDOWS||$LINUX)]
+//	"video\video_bink.vpc" [($WINDOWS||$LINUX)]
 }
 
 $Project "video_quicktime"
@@ -1445,11 +1375,6 @@ $Project "voice_tweak"
 	"utils\voice_tweak\voice_tweak.vpc" [$WIN32]
 }
 
-$Project "vp_python2.5"
-{
-	"sdktools\python\vp\vp_python2.5.vpc" [$WIN32]
-}
-
 $Project "vp4"
 {
 	"utils\vp4\vp4.vpc" [$WIN32]
@@ -1491,96 +1416,6 @@ $Project "vrad_launcher"
 	"utils\vrad_launcher\vrad_launcher.vpc" [$WIN32]
 }
 
-$Project "vs_python2.5"
-{
-	"sdktools\python\vs\vs_python2.5.vpc" [$WIN32]
-}
-
-$Project "vsblendeditor_maya2009"
-{
-	"sdktools\maya\vsblendeditor\vsblendeditor_maya2009.vpc"	[$WIN32]
-}
-
-$Project "vsdmxio_maya2009"
-{
-	"sdktools\maya\vsdmxio\vsdmxio_Maya2009.vpc" [$WIN32]
-}
-
-$Project "vsdmxio_maya2010"
-{
-	"sdktools\maya\vsdmxio\vsdmxio_maya2010.vpc" [$WIN32]
-}
-
-$Project "vsdmxio_maya2011"
-{
-	"sdktools\maya\vsdmxio\vsdmxio_maya2011.vpc" [$WIN32]
-}
-
-$Project "vsdmxio_maya2012"
-{
-	"sdktools\maya\vsdmxio\vsdmxio_maya2012.vpc" [$WIN32]
-}
-
-$Project "vsdmxio_maya2013"
-{
-	"sdktools\maya\vsdmxio\vsdmxio_maya2013.vpc" [$WIN32]
-}
-
-$Project "vslib_python2.5"
-{
-	"sdktools\python\vs\vslib_python2.5.vpc" [$WIN32]
-}
-
-$Project "vsmaster_maya2009"
-{
-	"sdktools\maya\vsmaster\vsmaster_maya2009.vpc"	[$WIN32]
-}
-
-$Project "vsmaster_maya2010"
-{
-	"sdktools\maya\vsmaster\vsmaster_maya2010.vpc"	[$WIN32]
-}
-
-$Project "vsmaster_maya2011"
-{
-	"sdktools\maya\vsmaster\vsmaster_maya2011.vpc"	[$WIN32]
-}
-
-$Project "vsmaster_maya2012"
-{
-	"sdktools\maya\vsmaster\vsmaster_maya2012.vpc"	[$WIN32]
-}
-
-$Project "vsmaster_maya2013"
-{
-	"sdktools\maya\vsmaster\vsmaster_maya2013.vpc"	[$WIN32]
-}
-
-$Project "vsmdlio_maya2009"
-{
-	"sdktools\maya\vsmdlio\vsmdlio_maya2009.vpc"	[$WIN32]
-}
-
-$Project "vsmdlio_maya2010"
-{
-	"sdktools\maya\vsmdlio\vsmdlio_maya2010.vpc"	[$WIN32]
-}
-
-$Project "vsmdlio_maya2011"
-{
-	"sdktools\maya\vsmdlio\vsmdlio_maya2011.vpc"	[$WIN32]
-}
-
-$Project "vsmdlio_maya2012"
-{
-	"sdktools\maya\vsmdlio\vsmdlio_maya2012.vpc"	[$WIN32]
-}
-
-$Project "vsmdlio_maya2013"
-{
-	"sdktools\maya\vsmdlio\vsmdlio_maya2013.vpc"	[$WIN32]
-}
-
 $Project "coroutine_osx"
 {
 	"vstdlib\coroutine_osx.vpc"						[$OSXALL]
@@ -1589,101 +1424,6 @@ $Project "coroutine_osx"
 $Project "vstdlib"
 {
 	"vstdlib\vstdlib.vpc"		[$WINDOWS || $X360||$POSIX]
-}
-
-$Project "vstutils_maya2009"
-{
-	"sdktools\maya\vstutils\vstutils_maya2009.vpc"	[$WIN32]
-}
-
-$Project "vstutils_maya2010"
-{
-	"sdktools\maya\vstutils\vstutils_maya2010.vpc"	[$WIN32]
-}
-
-$Project "vstutils_maya2011"
-{
-	"sdktools\maya\vstutils\vstutils_maya2011.vpc"	[$WIN32]
-}
-
-$Project "vstutils_maya2012"
-{
-	"sdktools\maya\vstutils\vstutils_maya2012.vpc"	[$WIN32]
-}
-
-$Project "vstutils_maya2013"
-{
-	"sdktools\maya\vstutils\vstutils_maya2013.vpc"	[$WIN32]
-}
-
-$Project "vstSmdIO_maya2009"
-{
-	"sdktools\maya\vstSmdIO\vstSmdIO_maya2009.vpc"	[$WIN32]
-}
-
-$Project "vstsmdio_maya2010"
-{
-	"sdktools\maya\vstsmdio\vstsmdio_maya2010.vpc"	[$WIN32]
-}
-
-$Project "vstsmdio_maya2011"
-{
-	"sdktools\maya\vstsmdio\vstsmdio_maya2011.vpc"	[$WIN32]
-}
-
-$Project "vstsmdio_maya2012"
-{
-	"sdktools\maya\vstsmdio\vstsmdio_maya2012.vpc"	[$WIN32]
-}
-
-$Project "vstsmdio_maya2013"
-{
-	"sdktools\maya\vstsmdio\vstsmdio_maya2013.vpc"	[$WIN32]
-}
-
-$Project "vsvmfio_maya2009"
-{
-	"sdktools\maya\vsvmfio\vsvmfio_maya2009.vpc"	[$WIN32]
-}
-
-$Project "vsvmfio_maya2010"
-{
-	"sdktools\maya\vsvmfio\vsvmfio_maya2010.vpc"	[$WIN32]
-}
-
-$Project "vsvmfio_maya2011"
-{
-	"sdktools\maya\vsvmfio\vsvmfio_maya2011.vpc"	[$WIN32]
-}
-
-$Project "vsvmfio_maya2012"
-{
-	"sdktools\maya\vsvmfio\vsvmfio_maya2012.vpc"	[$WIN32]
-}
-
-$Project "vsvmfio_maya2013"
-{
-	"sdktools\maya\vsvmfio\vsvmfio_maya2013.vpc"	[$WIN32]
-}
-
-$Project "vstOverlap_maya2009"
-{
-	"sdktools\maya\vstOverlap\vstOverlap_Maya2009.vpc"	[$WIN32]
-}
-
-$Project "vstoverlap_maya2010"
-{
-	"sdktools\maya\vstoverlap\vstoverlap_maya2010.vpc"	[$WIN32]
-}
-
-$Project "vstoverlap_maya2011"
-{
-	"sdktools\maya\vstoverlap\vstoverlap_maya2011.vpc"	[$WIN32]
-}
-
-$Project "vstoverlap_maya2012"
-{
-	"sdktools\maya\vstoverlap\vstoverlap_maya2012.vpc"	[$WIN32]
 }
 
 $Project "vtaexp"
@@ -1774,14 +1514,4 @@ $Project "xwad"
 $Project "ZipAlign"
 {
 	"utils\zipalign\ZipAlign.vpc" [$WIN32]
-}
-
-$Project "socketlib"
-{
-	"socketlib/socketlib.vpc" [$WINDOWS]
-}
-
-$Project "zlib"
-{
-    "thirdparty\zlib-1.2.5\zlib.vpc" [$WINDOWS]
 }

@@ -142,6 +142,7 @@ $Project "Dedicated"
 		$Lib	tier2
 		$Lib	tier3
 		$Lib	vgui_controls [$WIN32]
+		$Lib 	vpklib
 		$LibExternal "$SRCDIR/thirdparty/libedit-3.1/src/.libs/libedit" [$LINUXALL]
 		$ImpLibExternal steam_api
 		$ImpLib SDL2 [$SDL]

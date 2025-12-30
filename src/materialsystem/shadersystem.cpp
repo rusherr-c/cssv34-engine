@@ -27,9 +27,12 @@
 
 // NOTE: This must be the last file included!
 #include "tier0/memdbgon.h"
+#include "mat_stub.h"
 
 
 //#define DEBUG_DEPTH 1
+
+CDummyTextureInternal g_BitchCubemapTexture("bitch_cubemap");
 
 //-----------------------------------------------------------------------------
 // Lovely convars
@@ -37,7 +40,6 @@
 static ConVar mat_showenvmapmask( "mat_showenvmapmask", "0" );
 static ConVar mat_debugdepth( "mat_debugdepth", "0" );
 extern ConVar mat_supportflashlight;
-
 
 //-----------------------------------------------------------------------------
 // Implementation of the shader system
@@ -445,7 +447,8 @@ extern "C"
 
 void CShaderSystem::VerifyBaseShaderDLL( CSysModule *pModule )
 {
-#if defined( _WIN32 ) && !defined( _X360 )
+//#if defined( _WIN32 ) && !defined( _X360 )
+#if 0
 	const char *pErrorStr = "Corrupt save data settings.";
 
 	unsigned char *testData1 = new unsigned char[SHADER_DLL_VERIFY_DATA_LEN1];
@@ -1953,7 +1956,7 @@ void CShaderSystem::LoadTexture( IMaterialVar *pTextureVar, const char *pTexture
 	// Force local cubemaps when using the editor
 	if ( MaterialSystem()->CanUseEditorMaterials() && ( stricmp( pName, "env_cubemap" ) == 0 ) )
 	{
-		pTexture = (ITextureInternal*)-1;
+		pTexture = &g_BitchCubemapTexture;
 	}
 	else
 	{
@@ -2024,10 +2027,9 @@ void CShaderSystem::LoadCubeMap( IMaterialVar **ppParams, IMaterialVar *pTexture
 
 	if ( stricmp( pTextureVar->GetStringValue(), "env_cubemap" ) == 0 )
 	{
-		// garymcthack 
-		// don't have to load anything here. . just set the texture value to something
+		// don't have to load anything here. . just set the texture value to DummyTexture
 		// special that says to use the cubemap entity.
-		pTextureVar->SetTextureValue( ( ITexture * )-1 );
+		pTextureVar->SetTextureValue( &g_BitchCubemapTexture );
 		SetFlags2( ppParams, MATERIAL_VAR2_USES_ENV_CUBEMAP );
 	}
 	else

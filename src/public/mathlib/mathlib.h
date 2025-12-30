@@ -237,7 +237,7 @@ bool R_CullBoxSkipNear( const Vector& mins, const Vector& maxs, const Frustum_t 
 
 struct matrix3x4_t
 {
-	matrix3x4_t() {}
+	matrix3x4_t() = default;
 	matrix3x4_t( 
 		float m00, float m01, float m02, float m03,
 		float m10, float m11, float m12, float m13,
@@ -457,12 +457,10 @@ void inline SinCos( float radians, float *sine, float *cosine )
 #elif defined( PLATFORM_WINDOWS_PC64 )
 	*sine = sin( radians );
 	*cosine = cos( radians );
+#elif defined( OSX )
+    __sincosf(radians, sine, cosine);
 #elif defined( POSIX )
-	double __cosr, __sinr;
-	__asm ("fsincos" : "=t" (__cosr), "=u" (__sinr) : "0" (radians));
-
-  	*sine = __sinr;
-  	*cosine = __cosr;
+	sincosf(radians, sine, cosine);
 #endif
 }
 
@@ -1217,6 +1215,8 @@ FORCEINLINE int RoundFloatToInt(float f)
 	};
 	flResult = __fctiw( f );
 	return pResult[1];
+#elif defined (__arm__) ||  defined (__aarch64__)
+        return (int)(f + 0.5f);
 #else
 #error Unknown architecture
 #endif
@@ -1247,8 +1247,9 @@ FORCEINLINE unsigned long RoundFloatToUnsignedLong(float f)
 	Assert( pIntResult[1] >= 0 );
 	return pResult[1];
 #else  // !X360
-	
-#if defined( PLATFORM_WINDOWS_PC64 )
+#if defined(__arm__) || defined(__aarch64__)
+        return (unsigned long)(f + 0.5f);
+#elif defined( PLATFORM_WINDOWS_PC64 )
 	uint nRet = ( uint ) f;
 	if ( nRet & 1 )
 	{
@@ -2169,7 +2170,7 @@ inline bool CloseEnough( const Vector &a, const Vector &b, float epsilon = EQUAL
 // Fast compare
 // maxUlps is the maximum error in terms of Units in the Last Place. This 
 // specifies how big an error we are willing to accept in terms of the value
-// of the least significant digit of the floating point number’s 
+// of the least significant digit of the floating point numberï¿½s 
 // representation. maxUlps can also be interpreted in terms of how many 
 // representable floats we are willing to accept between A and B. 
 // This function will allow maxUlps-1 floats between A and B.

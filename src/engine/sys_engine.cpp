@@ -39,6 +39,9 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+#ifdef POSIX
+#include <signal.h>
+#endif
 
 //-----------------------------------------------------------------------------
 // Forward declarations
@@ -355,23 +358,7 @@ void CEngine::Frame( void )
 			// Calculate how long we need to wait.
 			int nSleepMS = (int)( ( m_flMinFrameTime - m_flFrameTime ) * 1000 - fBusyWaitMS );
 			if ( nSleepMS > 0 )
-			{
 				ThreadSleep( nSleepMS );
-			}
-			else
-			{
-				// On x86, busy-wait using PAUSE instruction which encourages
-				// power savings by idling for ~10 cycles (also yielding to
-				// the other logical hyperthread core if the CPU supports it)
-				for (int i = 2000; i >= 0; --i)
-				{
-#if defined(POSIX)
-					__asm( "pause" ); __asm( "pause" ); __asm( "pause" ); __asm( "pause" );
-#elif defined(IS_WINDOWS_PC)
-					_asm { pause }; _asm { pause }; _asm { pause }; _asm { pause };
-#endif
-				}
-			}
 
 			// Go back to the top of the loop and see if it is time yet.
 		}

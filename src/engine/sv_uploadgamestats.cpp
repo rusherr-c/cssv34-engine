@@ -21,9 +21,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 //$ #include <uuid/uuid.h>
-typedef unsigned char uuid_t[16];
 #ifdef OSX
 #include <uuid/uuid.h>
+#elif defined(PLATFORM_BSD)
+#include <uuid.h>
 #else
 typedef unsigned char uuid_t[16];
 #endif
@@ -397,6 +398,9 @@ public:
 			uuid_t newId;
 #ifdef OSX
 			uuid_generate( newId );
+#elif defined(PLATFORM_BSD)
+			uint32_t status;
+			uuid_create( &newId, &status );
 #endif
 #else
 #error
@@ -1099,7 +1103,7 @@ protected:
 	};
 
 public:
-	static unsigned CallbackThreadProc( void *pvParam ) { ((CAsyncUploaderThread*) pvParam)->ThreadProc(); return 0; }
+	static uintp CallbackThreadProc( void *pvParam ) { ((CAsyncUploaderThread*) pvParam)->ThreadProc(); return 0; }
 	void QueueData( char const *szMapName, uint uiBlobVersion, uint uiBlobSize, const void *pvBlob );
 	void TerminateAndSelfDelete();
 };

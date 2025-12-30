@@ -5,7 +5,7 @@
 //-----------------------------------------------------------------------------
 
 $Macro SRCDIR		".."
-$Macro OUTBINDIR	"$SRCDIR\..\game\bin"
+$Macro OUTBINDIR	"$LIBPUBLIC"
 
 $Include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
 
@@ -338,7 +338,6 @@ $Project "hammer_dll"
 		$File	"TitleWnd.cpp"
 		$File	"TitleWnd.h"
 		$File	"Tooldefs.h"
-		$File	"$SRCDIR\public\maya\valveMaya\Undo.h"
 		$File	"VGuiWnd.cpp"
 		$File	"VGuiWnd.h"
 		$File	"ViewerSettings.h"

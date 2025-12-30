@@ -15,7 +15,8 @@
 #include <Psapi.h>
 #endif
 
-#if defined( OSX )
+#if defined( OSX ) || defined(PLATFORM_BSD)
+#include <sys/types.h>
 #include <sys/sysctl.h>
 #endif
 
@@ -100,6 +101,7 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+#include "tier0/memalloc.h"
 
 //-----------------------------------------------------------------------------
 // Globals
@@ -277,7 +279,7 @@ static void posix_signal_handler( int i )
 #define DO_TRY		if ( sigsetjmp( g_mark, 1 ) == 0 )
 #define DO_CATCH	else
 
-#if defined( OSX )
+#if defined( OSX ) || defined(PLATFORM_BSD)
 #define __sighandler_t sig_t
 #endif
 
@@ -536,7 +538,7 @@ public:
 			FreeLibrary( hInst );
 		}
 
-#elif defined( OSX )
+#elif defined( OSX ) || defined(PLATFORM_BSD)
 
 		static const struct
 		{
@@ -547,8 +549,13 @@ public:
 		#define _XTAG( _x ) { _x, #_x }
 			_XTAG( HW_PHYSMEM ),
 			_XTAG( HW_USERMEM ),
+#ifdef PLATFORM_BSD
+			_XTAG( HW_PHYSMEM ),
+			_XTAG( HW_NCPU ),
+#else
 			_XTAG( HW_MEMSIZE ),
 			_XTAG( HW_AVAILCPU ),
+#endif
 		#undef _XTAG
 		};
 
@@ -560,7 +567,7 @@ public:
 
 			if ( sysctl( mib, Q_ARRAYSIZE( mib ), &val, &len, NULL, 0 ) == 0 )
 			{
-				CommentPrintf( " %s: %" PRIu64 "\n", s_ctl_names[ i ].name, val );
+				CommentPrintf( " %s: %d\n", s_ctl_names[ i ].name, val );
 			}
 		}
 
@@ -1175,7 +1182,7 @@ InitReturnVal_t CEngineAPI::Init()
 	m_bRunningSimulation = false;
 
 	// Initialize the FPU control word
-#if defined(WIN32) && !defined( SWDS ) && !defined( _X360 )
+#if defined(WIN32) && !defined( SWDS ) && !defined( _X360 ) && !defined (__arm__) && !defined(PLATFORM_WINDOWS_PC64)
 	_asm
 	{
 		fninit
@@ -2260,7 +2267,7 @@ bool EnableLongTickWatcher()
 #ifdef POSIX
 			(void*)
 #endif
-			LongTickWatcherThread, NULL, 0, (unsigned long int *)&nThreadID );
+			LongTickWatcherThread, NULL, 0, (uintp *)&nThreadID );
 
 		bRet = true;
 	}

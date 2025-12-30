@@ -36,6 +36,9 @@
 #include "xbox/xbox_win32stubs.h"
 #endif
 
+#ifdef POSIX
+#include <sys/stat.h>
+#endif
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -179,7 +182,7 @@ static HMODULE InternalLoadLibrary( const char *pName, Sys_Flags flags )
 		return LoadLibraryEx( pName, NULL, LOAD_WITH_ALTERED_SEARCH_PATH );
 #endif
 }
-unsigned ThreadedLoadLibraryFunc( void *pParam )
+uintp ThreadedLoadLibraryFunc( void *pParam )
 {
 	ThreadedLoadLibaryContext_t *pContext = (ThreadedLoadLibaryContext_t*)pParam;
 	pContext->m_hLibrary = InternalLoadLibrary( pContext->m_pLibraryName, SYS_NOFLAGS );
@@ -226,7 +229,7 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName, Sys_Flags flags )
 	context.m_pLibraryName = str;
 	context.m_hLibrary = 0;
 
-	ThreadHandle_t h = CreateSimpleThread( ThreadedLoadLibraryFunc, &context );
+	ThreadHandle_t h = CreateSimpleThread( (ThreadFunc_t)ThreadedLoadLibraryFunc, &context );
 
 #ifdef _X360
 	ThreadSetAffinity( h, XBOX_PROCESSOR_3 );
@@ -235,7 +238,7 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName, Sys_Flags flags )
 	unsigned int nTimeout = 0;
 	while( ThreadWaitForObject( h, true, nTimeout ) == TW_TIMEOUT )
 	{
-		nTimeout = threadFunc();
+		nTimeout = threadFunc(0);
 	}
 
 	ReleaseThreadHandle( h );
@@ -244,8 +247,10 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName, Sys_Flags flags )
 #elif POSIX
 	int dlopen_mode = RTLD_NOW;
 
+#ifndef ANDROID
 	if ( flags & SYS_NOLOAD )
 		dlopen_mode |= RTLD_NOLOAD;
+#endif
 
 	HMODULE ret = ( HMODULE )dlopen( str, dlopen_mode );
 	if ( !ret && !( flags & SYS_NOLOAD ) )
@@ -253,7 +258,7 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName, Sys_Flags flags )
 		const char *pError = dlerror();
 		if ( pError && ( strstr( pError, "No such file" ) == 0 ) && ( strstr( pError, "image not found" ) == 0 ) )
 		{
-			Msg( " failed to dlopen %s error=%s\n", str, pError );
+			Msg( "failed to dlopen %s error=%s\n", str, pError );
 		}
 	}
 	
@@ -261,6 +266,36 @@ HMODULE Sys_LoadLibrary( const char *pLibraryName, Sys_Flags flags )
 #endif
 }
 static bool s_bRunningWithDebugModules = false;
+
+#ifdef POSIX
+
+#ifdef ANDROID
+#define DEFAULT_LIB_PATH ""
+#else
+#define DEFAULT_LIB_PATH "bin/"
+#endif
+
+bool foundLibraryWithPrefix( char *pModuleAbsolutePath, size_t AbsolutePathSize, const char *pPath, const char *pModuleName )
+{
+	char str[1024];
+	Q_strncpy( str, pModuleName, sizeof(str) );
+	V_SetExtension( str, DLL_EXT_STRING, sizeof(str) );
+	bool bFound = false;
+
+	struct stat statBuf;
+	Q_snprintf(pModuleAbsolutePath, AbsolutePathSize, "%s/" DEFAULT_LIB_PATH "lib%s", pPath, str);
+	bFound |= stat(pModuleAbsolutePath, &statBuf) == 0;
+
+	if( !bFound )
+	{
+		Q_snprintf(pModuleAbsolutePath, AbsolutePathSize, "%s/" DEFAULT_LIB_PATH "%s", pPath, str);
+		bFound |= stat(pModuleAbsolutePath, &statBuf) == 0;
+	}
+
+	return bFound;
+}
+
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose: Loads a DLL/component from disk and returns a handle to it
@@ -273,6 +308,9 @@ CSysModule *Sys_LoadModule( const char *pModuleName, Sys_Flags flags /* = SYS_NO
 	// file in the depot (MFP) or a filesystem GetLocalCopy() call must be made
 	// prior to the call to this routine.
 	char szCwd[1024];
+#ifdef POSIX
+	char szModuleName[1024] = { 0 };
+#endif
 	HMODULE hDLL = NULL;
 
 	if ( !Q_IsAbsolutePath( pModuleName ) )
@@ -287,24 +325,68 @@ CSysModule *Sys_LoadModule( const char *pModuleName, Sys_Flags flags /* = SYS_NO
 				V_strcpy_safe( szCwd, CommandLine()->GetParm( i + 1 ) );
 			}
 		}
+
 		if (szCwd[strlen(szCwd) - 1] == '/' || szCwd[strlen(szCwd) - 1] == '\\' )
 		{
 			szCwd[strlen(szCwd) - 1] = 0;
 		}
 
-		char szAbsoluteModuleName[1024];
-		size_t cCwd = strlen( szCwd );
-		if ( strstr( pModuleName, "bin/") == pModuleName || ( szCwd[ cCwd - 1 ] == 'n'  && szCwd[ cCwd - 2 ] == 'i' && szCwd[ cCwd - 3 ] == 'b' )  )
+		char szAbsoluteModuleName[2048];
+#ifdef ANDROID
+		char *libPath = getenv("APP_LIB_PATH");
+		char *modLibPath = getenv("APP_MOD_LIB");
+		bool bFound;
+
+		if( modLibPath && *modLibPath ) // first load library from mod launcher
 		{
-			// don't make bin/bin path
-			Q_snprintf( szAbsoluteModuleName, sizeof(szAbsoluteModuleName), "%s/%s", szCwd, pModuleName );			
+			bFound = foundLibraryWithPrefix( szAbsoluteModuleName, sizeof(szAbsoluteModuleName), modLibPath, pModuleName );
+
+			if( bFound )
+				hDLL = Sys_LoadLibrary( szAbsoluteModuleName, flags );
+
+			if( !hDLL && bFound )
+				Error("Can't find mod library %s\n", szAbsoluteModuleName);
 		}
-		else
+
+		if( !foundLibraryWithPrefix( szAbsoluteModuleName, sizeof(szAbsoluteModuleName), libPath, pModuleName ) )
 		{
-			Q_snprintf( szAbsoluteModuleName, sizeof(szAbsoluteModuleName), "%s/bin/%s", szCwd, pModuleName );
+			Warning("Can't find module - %s\n", pModuleName);
+			return reinterpret_cast<CSysModule *>(hDLL);
 		}
-		hDLL = Sys_LoadLibrary( szAbsoluteModuleName, flags );
+
+#elif defined( POSIX )
+		if( !foundLibraryWithPrefix(szAbsoluteModuleName, sizeof(szAbsoluteModuleName), szCwd, pModuleName) )
+		{
+			Warning("Can't find module - %s\n", pModuleName);
+			return reinterpret_cast<CSysModule *>(hDLL);
+		}
+#else
+		Q_snprintf( szAbsoluteModuleName, sizeof(szAbsoluteModuleName), "%s/bin/%s", szCwd, pModuleName );
+#endif
+		Msg("LoadLibrary: pModule: %s, path: %s\n", pModuleName, szAbsoluteModuleName);
+
+		if( !hDLL )
+			hDLL = Sys_LoadLibrary( szAbsoluteModuleName, flags );
 	}
+	else
+	{
+#ifdef POSIX
+		Q_strncpy( szModuleName, pModuleName, sizeof(szModuleName) );
+		V_SetExtension( szModuleName, DLL_EXT_STRING, sizeof(szModuleName) );
+
+		struct stat statBuf;
+		bool bFound = stat(szModuleName, &statBuf) == 0;
+
+		if( !bFound )
+		{
+			Warning("Can't find module - %s\n", pModuleName);
+			return reinterpret_cast<CSysModule *>(hDLL);
+		}
+
+		Msg("LoadLibrary: path: %s\n", szModuleName);
+#endif
+	}
+
 
 	if ( !hDLL )
 	{

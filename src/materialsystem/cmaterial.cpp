@@ -17,7 +17,11 @@
 #include "materialsystem/imaterialproxyfactory.h"
 #include "IHardwareConfigInternal.h"
 #include "utlsymbol.h"
+#ifdef OSX
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include "filesystem.h"
 #include <KeyValues.h>
 #include "mempool.h"
@@ -1177,7 +1181,7 @@ bool CMaterial::ShouldSkipVar( KeyValues *pVar, bool *pWasConditional )
 		}
 		else if ( ! stricmp( pCond, "hdr" ) )
 		{
-			bShouldSkip = ( HardwareConfig()->GetHDRType() == HDR_TYPE_NONE );
+			bShouldSkip = false; //( HardwareConfig()->GetHDRType() == HDR_TYPE_NONE );
 		}
 		else if ( ! stricmp( pCond, "srgb" ) )
 		{
@@ -1190,6 +1194,10 @@ bool CMaterial::ShouldSkipVar( KeyValues *pVar, bool *pWasConditional )
 		else if ( ! stricmp( pCond, "360" ) )
 		{
 			bShouldSkip = !IsX360();
+		}
+		else if ( ! stricmp( pCond, "gameconsole" ) )
+		{
+			bShouldSkip = !IsGameConsole();
 		}
 		else
 		{
@@ -1400,7 +1408,7 @@ static KeyValues *FindBuiltinFallbackBlock( char const *pShaderName, KeyValues *
 		if ( pRet )
 			return pRet;
 	}
-	if ( HardwareConfig()->GetHDRType() != HDR_TYPE_NONE )
+//	if ( HardwareConfig()->GetHDRType() != HDR_TYPE_NONE )
 	{
 		KeyValues *pRet = CheckConditionalFakeShaderName( pShaderName,"hdr_dx9", pKeyValues );
 		if ( pRet )
@@ -1409,7 +1417,7 @@ static KeyValues *FindBuiltinFallbackBlock( char const *pShaderName, KeyValues *
 		if ( pRet )
 			return pRet;
 	}
-	else
+	if( HardwareConfig()->GetHDRType() == HDR_TYPE_NONE )
 	{
 		KeyValues *pRet = CheckConditionalFakeShaderName( pShaderName,"ldr", pKeyValues );
 		if ( pRet )
@@ -2378,15 +2386,12 @@ void CMaterial::ReloadTextures( void )
 	IMaterialVar **ppVars = GetShaderParams();
 	for( i = 0; i < nParams; i++ )
 	{
-		if( ppVars[i] )		
+		if( ppVars[i] )
 		{
 			if( ppVars[i]->IsTexture() )
 			{
 				ITextureInternal *pTexture = ( ITextureInternal * )ppVars[i]->GetTextureValue();
-				if( !IsTextureInternalEnvCubemap( pTexture ) )
-				{
-					pTexture->Download();
-				}
+				pTexture->Download();
 			}
 		}
 	}

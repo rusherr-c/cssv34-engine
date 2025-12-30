@@ -4,8 +4,10 @@
 //
 //=============================================================================//
 
+#ifdef USE_SDL
 #include "SDL.h"
 #include "SDL_opengl.h"
+#endif
 
 #include "appframework/ilaunchermgr.h"
 #include "inputsystem/ButtonCode.h"
@@ -17,6 +19,9 @@
 
 #include "tier1/utllinkedlist.h"
 #include "tier1/convar.h"
+#ifdef TOGLES
+#include <EGL/egl.h>
+#endif
 
 // NOTE: This has to be the last file included! (turned off below, since this is included like a header)
 #include "tier0/memdbgon.h"
@@ -31,8 +36,8 @@
 #define GLMPRINTF(args)
 #endif
 
-#ifdef OSX
-ConVar osx_rawinput_set_one_time( "osx_rawinput_set_one_time", "0", FCVAR_ARCHIVE|FCVAR_HIDDEN, "");
+#if defined( OSX ) || defined( ANDROID )
+ConVar rawinput_set_one_time( "rawinput_set_one_time", "0", FCVAR_ARCHIVE|FCVAR_HIDDEN, "");
 #endif
 
 ConVar gl_blit_halfx( "gl_blit_halfx", "0" );
@@ -54,6 +59,24 @@ COpenGLEntryPoints *gGL = NULL;
 
 const int kBogusSwapInterval = INT_MAX;
 
+#if defined ANDROID || defined TOGLES
+static void *l_gl4es = NULL;
+static void *l_egl = NULL;
+static void *l_gles = NULL;
+
+typedef void *(*t_glGetProcAddress)( const char * );
+typedef EGLBoolean (*t_eglBindAPI)(EGLenum api);
+typedef EGLBoolean (*t_eglInitialize)(EGLDisplay display, EGLint *major, EGLint *minor);
+typedef EGLDisplay (*t_eglGetDisplay)(NativeDisplayType native_display);
+typedef char const *(*t_eglQueryString)(EGLDisplay display, EGLint name);
+
+t_eglBindAPI _eglBindAPI;
+t_glGetProcAddress _glGetProcAddress;
+t_eglInitialize _eglInitialize;
+t_eglGetDisplay _eglGetDisplay;
+t_eglQueryString _eglQueryString;
+#endif
+
 /*
 From Ryan Gordon:
  
@@ -66,7 +89,7 @@ that Apple unhelpfully clamps you to vsync in this scenario, which would
 explain the 60fps max.
 
 There are a few options:
-- SDL_WINDOW_FULLSCREEN mode will not use this new magic (only
+- SDL_WAINDOW_FULLSCREEN mode will not use this new magic (only
 SDL_WINDOW_FULLSCREEN_DESKTOP), but that brings other problems and I
 wouldn't recommend a drastic change like that.
 
@@ -168,11 +191,31 @@ void	CheckGLError( int line )
 void *VoidFnPtrLookup_GlMgr(const char *fn, bool &okay, const bool bRequired, void *fallback)
 {
 	void *retval = NULL;
+
+#ifndef TOGLES // TODO(nillerusr): remove this hack
 	if ((!okay) && (!bRequired))  // always look up if required (so we get a complete list of crucial missing symbols).
 		return NULL;
+#endif
 
 	// The SDL path would work on all these platforms, if we were using SDL there, too...
-#if defined( USE_SDL )
+
+
+#if defined ANDROID || defined TOGLES
+	// SDL does the right thing, so we never need to use tier0 in this case.
+	if( _glGetProcAddress )
+	{
+		retval = _glGetProcAddress(fn);
+
+		if( !retval && l_gles )
+			retval = dlsym( l_gles, fn );
+	}
+	//printf("CDynamicFunctionOpenGL: SDL_GL_GetProcAddress(\"%s\") returned %p\n", fn, retval);
+	if ((retval == NULL) && (fallback != NULL))
+	{
+		//printf("CDynamicFunctionOpenGL: Using fallback %p for \"%s\"\n", fallback, fn);
+		retval = fallback;
+	}
+#elif defined( USE_SDL )
 	// SDL does the right thing, so we never need to use tier0 in this case.
 	retval = SDL_GL_GetProcAddress(fn);
 	//printf("CDynamicFunctionOpenGL: SDL_GL_GetProcAddress(\"%s\") returned %p\n", fn, retval);
@@ -188,13 +231,18 @@ void *VoidFnPtrLookup_GlMgr(const char *fn, bool &okay, const bool bRequired, vo
 	// Note that a non-NULL response doesn't mean it's safe to call the function!
 	//  You always have to check that the extension is supported;
 	//  an implementation MAY return NULL in this case, but it doesn't have to (and doesn't, with the DRI drivers).
+
+#ifdef TOGLES // TODO(nillerusr): remove this hack
+	okay = retval != NULL;
+#else
 	okay = (okay && (retval != NULL));
+#endif
 	if (bRequired && !okay)
 	{
 		// We can't continue execution, because one or more GL function pointers will be NULL.
 		Error( "Could not find required OpenGL entry point '%s'! Either your video card is unsupported, or your OpenGL driver needs to be updated.\n", fn);
 	}
-	
+
 	return retval;
 }
 
@@ -219,10 +267,10 @@ public:
 	
 	virtual void IncWindowRefCount();
 	virtual void DecWindowRefCount();
-				
+
 	// Get the next N events. The function returns the number of events that were filled into your array.
 	virtual int GetEvents( CCocoaEvent *pEvents, int nMaxEventsToReturn, bool debugEvents = false );
-#ifdef LINUX
+#if defined(LINUX) || defined(PLATFORM_BSD)
 	virtual int PeekAndRemoveKeyboardEvents( bool *pbEsc, bool *pbReturn, bool *pbSpace, bool debugEvent = false );
 #endif
 
@@ -355,7 +403,7 @@ private:
 	Uint32 m_MouseButtonDownTimeStamp;
 	int m_MouseButtonDownX;
 	int m_MouseButtonDownY;
-			
+
 	double m_flPrevGLSwapWindowTime;
 };
 
@@ -473,7 +521,11 @@ InitReturnVal_t CSDLMgr::Init()
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG );
 		}
 
+#if defined( TOGLES )
+		if (SDL_GL_LoadLibrary("libGLESv3.so") == -1)
+#else
 		if (SDL_GL_LoadLibrary(NULL) == -1)
+#endif
 			Error( "SDL_GL_LoadLibrary(NULL) failed: %s", SDL_GetError() );
 #endif
 	}
@@ -525,23 +577,76 @@ InitReturnVal_t CSDLMgr::Init()
 	m_MouseButtonDownTimeStamp = 0;
 	m_MouseButtonDownX = 0;
 	m_MouseButtonDownY = 0;
-		
+
 	m_bExpectSyntheticMouseMotion = false;
 	m_nMouseTargetX = 0;
 	m_nMouseTargetY = 0;
 	m_nWarpDelta = 0;
 	m_bRawInput = false;
-			
+
 	m_flPrevGLSwapWindowTime = 0.0f;
-		
+
 	memset(m_pixelFormatAttribs, '\0', sizeof (m_pixelFormatAttribs));
 
 	int *attCursor = m_pixelFormatAttribs;
 
-	#define SET_GL_ATTR(key,value) \
-	    *(attCursor++) = (int) (key); \
-	    *(attCursor++) = (int) (value);
+#define SET_GL_ATTR(key,value) \
+	*(attCursor++) = (int) (key); \
+	*(attCursor++) = (int) (value);
 
+
+#ifdef TOGLES
+	l_egl = dlopen("libEGL.so", RTLD_LAZY);
+	l_gles = dlopen("libGLESv3.so", RTLD_LAZY);
+
+	if( l_egl )
+	{
+		_glGetProcAddress = (t_glGetProcAddress)dlsym(l_egl, "eglGetProcAddress");
+	}
+
+	SET_GL_ATTR(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SET_GL_ATTR(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SET_GL_ATTR(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+
+	_eglInitialize = (t_eglInitialize)dlsym(l_egl, "eglInitialize");
+	_eglGetDisplay = (t_eglGetDisplay)dlsym(l_egl, "eglGetDisplay");
+	_eglQueryString = (t_eglQueryString)dlsym(l_egl, "eglQueryString");
+
+	if( _eglInitialize && _eglInitialize && _eglQueryString )
+	{
+		EGLDisplay display = _eglGetDisplay(EGL_DEFAULT_DISPLAY);
+		if( _eglInitialize(display, NULL, NULL) != -1
+			&& strstr(_eglQueryString(display, EGL_EXTENSIONS) ,"EGL_KHR_gl_colorspace") )
+				SET_GL_ATTR(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1)
+	}
+#elif ANDROID
+	bool m_bOGL = false;
+
+	l_egl = dlopen("libEGL.so", RTLD_LAZY);
+
+	if( l_egl )
+	{
+		_eglBindAPI = (t_eglBindAPI)dlsym(l_egl, "eglBindAPI");
+
+		if( _eglBindAPI && _eglBindAPI(EGL_OPENGL_API) )
+		{
+			Msg("OpenGL support found!\n");
+			m_bOGL = true;
+		}
+	}
+
+
+	if( m_bOGL )
+	{
+		_glGetProcAddress = (t_glGetProcAddress)dlsym(l_egl, "eglGetProcAddress");
+		SET_GL_ATTR(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	}
+	else
+	{
+		l_gl4es = dlopen("libgl4es.so", RTLD_LAZY);
+		_glGetProcAddress = (t_glGetProcAddress)dlsym(l_gl4es, "gl4es_glGetProcAddress");
+	}
+#endif
 	SET_GL_ATTR(SDL_GL_RED_SIZE, 8);
 	SET_GL_ATTR(SDL_GL_GREEN_SIZE, 8);
 	SET_GL_ATTR(SDL_GL_BLUE_SIZE, 8);
@@ -565,11 +670,11 @@ InitReturnVal_t CSDLMgr::Init()
 	//  GL entry points, but the game hasn't made a window yet. So it's time
 	//  to make a window! We make a 640x480 one here, and later, when asked
 	//  to really actually make a window, we just resize the one we built here.
-	if ( !CreateHiddenGameWindow( "", 640, 480 ) )
+	if ( !CreateHiddenGameWindow( "", 1280, 720 ) )
 		Error( "CreateGameWindow failed" );
-	
+
 	SDL_HideWindow( m_Window );
-	
+
 	return INIT_OK;
 }
 
@@ -599,7 +704,11 @@ void CSDLMgr::Shutdown()
 	SDLAPP_FUNC;
 
 	if (gGL && m_readFBO)
+#ifdef TOGLES
+		gGL->glDeleteFramebuffers(1, &m_readFBO);
+#else
 		gGL->glDeleteFramebuffersEXT(1, &m_readFBO);
+#endif
 	m_readFBO = 0;
 
 	if ( m_Window )
@@ -705,7 +814,7 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 #if defined( DX_TO_GL_ABSTRACTION )
 	flags |= SDL_WINDOW_OPENGL;
 #endif
-	m_Window = SDL_CreateWindow( pTitle, x, y, width, height,  flags );
+	m_Window = SDL_CreateWindow( pTitle, x, y, width, height, flags );
 
 	if (m_Window == NULL)
 		Error( "Failed to create SDL window: %s", SDL_GetError() );
@@ -740,6 +849,16 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 
 	SDL_GL_MakeCurrent(m_Window, m_GLContext);
 
+#if defined ANDROID && !defined TOGLES
+	if( l_gl4es )
+	{
+		_glGetProcAddress = (t_glGetProcAddress)dlsym(l_gl4es, "gl4es_GetProcAddress" );
+		void (*initialize_gl4es)( );
+		initialize_gl4es = (void(*)())dlsym(l_gl4es, "initialize_gl4es" );
+		initialize_gl4es();
+	}
+#endif
+
 	// !!! FIXME: note for later...we never delete this context anywhere, I think.
 	// !!! FIXME:  when we do get around to that, don't forget to delete/NULL gGL!
 
@@ -755,12 +874,14 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 	// If we specified -gl_debug, make sure the extension string is present now.
 	if ( CommandLine()->FindParm( "-gl_debug" ) )
 	{
+#ifndef TOGLES
 		Assert( V_strstr(pszString, "GL_ARB_debug_output") );
+#endif
 	}
 #endif // DBGFLAG_ASSERT
 
 	gGL = GetOpenGLEntryPoints(VoidFnPtrLookup_GlMgr);
-	
+
 	// It is now safe to call any base GL entry point that's supplied by gGL.
 	// You still need to explicitly test for extension entry points, though!
 
@@ -780,7 +901,11 @@ bool CSDLMgr::CreateHiddenGameWindow( const char *pTitle, int width, int height 
 		DebugPrintf("\n");
 	}
 
+#ifdef TOGLES
+	gGL->glGenFramebuffers(1, &m_readFBO);
+#else
 	gGL->glGenFramebuffersEXT(1, &m_readFBO);
+#endif
 
 	gGL->glViewport(0, 0, width, height);    /* Reset The Current Viewport And Perspective Transformation */
 	gGL->glScissor(0, 0, width, height);    /* Reset The Current Viewport And Perspective Transformation */
@@ -879,7 +1004,7 @@ int CSDLMgr::GetEvents( CCocoaEvent *pEvents, int nMaxEventsToReturn, bool debug
 	return nToWrite;
 }
 
-#ifdef LINUX
+#if defined(LINUX) || defined(PLATFORM_BSD)
 
 int CSDLMgr::PeekAndRemoveKeyboardEvents( bool *pbEsc, bool *pbReturn, bool *pbSpace, bool debugEvent )
 {
@@ -957,10 +1082,10 @@ void CSDLMgr::PostEvent( const CCocoaEvent &theEvent, bool debugEvent )
 	SDLAPP_FUNC;
 
 	m_CocoaEventsMutex.Lock();
-	
+
 	CUtlLinkedList<CCocoaEvent,int> &queue = debugEvent ? m_CocoaEvents : m_DebugEvents;
 	queue.AddToTail( theEvent );
-	
+
 	m_CocoaEventsMutex.Unlock();
 }
 
@@ -1014,17 +1139,15 @@ void CSDLMgr::OnFrameRendered()
 
 		ConVarRef rawinput( "m_rawinput" );
 
-		
-#ifdef OSX
-		// We default raw input to on on Mac and set it one time for all users since
+#if defined( OSX ) || defined( ANDROID )
+		// We default raw input to on on Mac/Android and set it one time for all users since
 		// it didn't used to be the default.
-		if ( !osx_rawinput_set_one_time.GetBool() )
+		if ( !rawinput_set_one_time.GetBool() )
 		{
-			osx_rawinput_set_one_time.SetValue( 1 );
+			rawinput_set_one_time.SetValue( 1 );
 			rawinput.SetValue( 1 );
 		}
 #endif
-
 		m_bRawInput = !m_bCursorVisible && rawinput.IsValid() && rawinput.GetBool();
 
 		SDL_bool bWindowGrab = !m_bCursorVisible ? SDL_TRUE : SDL_FALSE;
@@ -1127,6 +1250,17 @@ void CSDLMgr::ShowPixels( CShowPixelsParams *params )
 			// bind a quickie FBO to enclose the source texture
 			GLint	myreadfb = 1000;
 
+#ifdef TOGLES
+			glBindFramebuffer( GL_READ_FRAMEBUFFER, myreadfb);
+			CheckGLError( __LINE__ );
+
+			glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0);		// to the default FB/backbuffer
+			CheckGLError( __LINE__ );
+
+			// attach source tex to source FB
+			glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, params->m_srcTexName, 0);
+			CheckGLError( __LINE__ );
+#else
 			glBindFramebufferEXT( GL_READ_FRAMEBUFFER_EXT, myreadfb);
 			CheckGLError( __LINE__ );
 
@@ -1136,6 +1270,7 @@ void CSDLMgr::ShowPixels( CShowPixelsParams *params )
 			// attach source tex to source FB
 			glFramebufferTexture2DEXT( GL_READ_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, params->m_srcTexName, 0);
 			CheckGLError( __LINE__ );
+#endif
 
 			// blit
 
@@ -1170,6 +1305,23 @@ void CSDLMgr::ShowPixels( CShowPixelsParams *params )
 			// go NEAREST if sizes match
 			GLenum filter = ( ((srcxmax-srcxmin)==(dstxmax-dstxmin)) && ((srcymax-srcymin)==(dstymax-dstymin)) ) ? GL_NEAREST : GL_LINEAR;
 
+#ifdef TOGLES
+			glBlitFramebuffer(
+					/* src min and maxes xy xy */ srcxmin, srcymin,				srcxmax,srcymax,
+					/* dst min and maxes xy xy */ dstxmin, dstymax,				dstxmax,dstymin,		// note yflip here
+					GL_COLOR_BUFFER_BIT, filter );
+			CheckGLError( __LINE__ );
+
+			// detach source tex
+			glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+			CheckGLError( __LINE__ );
+
+			glBindFramebuffer( GL_READ_FRAMEBUFFER, 0);
+			CheckGLError( __LINE__ );
+
+			glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0);		// to the default FB/backbuffer
+			CheckGLError( __LINE__ );
+#else
 			glBlitFramebufferEXT(
 					/* src min and maxes xy xy */ srcxmin, srcymin,				srcxmax,srcymax,
 					/* dst min and maxes xy xy */ dstxmin, dstymax,				dstxmax,dstymin,		// note yflip here
@@ -1185,6 +1337,7 @@ void CSDLMgr::ShowPixels( CShowPixelsParams *params )
 
 			glBindFramebufferEXT( GL_DRAW_FRAMEBUFFER_EXT, 0);		// to the default FB/backbuffer
 			CheckGLError( __LINE__ );
+#endif
 
 		}
 		else
@@ -1278,6 +1431,7 @@ void CSDLMgr::ShowPixels( CShowPixelsParams *params )
 
 	m_flPrevGLSwapWindowTime = tm.GetDurationInProgress().GetMillisecondsF();
 
+	
 	CheckGLError( __LINE__ );
 }
 #endif // DX_TO_GL_ABSTRACTION
@@ -1805,7 +1959,6 @@ void CSDLMgr::PumpWindowsMessageLoop()
 				}
 				break;
 			}
-
 			case SDL_QUIT:
 			{
 				CCocoaEvent theEvent;
@@ -1813,7 +1966,6 @@ void CSDLMgr::PumpWindowsMessageLoop()
 				PostEvent( theEvent );
 				break;
 			}
-
 			default:
 				break;
 		}
@@ -1849,7 +2001,11 @@ void CSDLMgr::DecWindowRefCount()
 
 		if ( gGL && m_readFBO )
 		{
+#ifdef TOGLES
+			gGL->glDeleteFramebuffers( 1, &m_readFBO );
+#else
 			gGL->glDeleteFramebuffersEXT( 1, &m_readFBO );
+#endif
 		}
 		m_readFBO = 0;
 								

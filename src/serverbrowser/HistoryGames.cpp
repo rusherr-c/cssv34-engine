@@ -19,15 +19,6 @@ CHistoryGames::CHistoryGames(vgui::Panel *parent) :
 	m_pGameList->SetSortFunc(10, LastPlayedCompare);
 	m_pGameList->SetSortColumn(10);
 
-	if ( !IsSteamGameServerBrowsingEnabled() )
-	{
-		m_pGameList->SetEmptyListText("#ServerBrowser_OfflineMode");
-		m_pConnect->SetEnabled( false );
-		m_pRefreshAll->SetEnabled( false );
-		m_pRefreshQuick->SetEnabled( false );
-		m_pAddServer->SetEnabled( false );
-		m_pFilter->SetEnabled( false );
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -42,11 +33,6 @@ CHistoryGames::~CHistoryGames()
 //-----------------------------------------------------------------------------
 void CHistoryGames::LoadHistoryList()
 {
-	if ( IsSteamGameServerBrowsingEnabled() )
-	{
-		// set empty message
-		m_pGameList->SetEmptyListText("#ServerBrowser_NoServersPlayed");
-	}
 
 	if ( m_bRefreshOnListReload )
 	{

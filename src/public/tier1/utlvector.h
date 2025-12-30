@@ -182,6 +182,7 @@ public:
 
 	// Purges the list and calls delete on each element in it.
 	void PurgeAndDeleteElements();
+	void PurgeAndDeleteElementsArray();
 
 	// Compacts the vector to the number of elements actually in use 
 	void Compact();
@@ -324,9 +325,12 @@ public:
 // Especialy useful if you have a lot of vectors that are sparse, or if you're
 // carefully packing holders of vectors
 //-----------------------------------------------------------------------------
+
+#ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable : 4200) // warning C4200: nonstandard extension used : zero-sized array in struct/union
 #pragma warning(disable : 4815 ) // warning C4815: 'staticData' : zero-sized array in stack object will have no elements
+#endif
 
 class CUtlVectorUltraConservativeAllocator
 {
@@ -472,6 +476,18 @@ public:
 		}
 	}
 
+	void PurgeAndDeleteElementsArray()
+	{
+		if ( m_pData != StaticData() )
+		{
+			for( int i=0; i < m_pData->m_Size; i++ )
+			{
+				delete[] Element(i);
+			}
+			RemoveAll();
+		}
+	}
+
 	void FastRemove( int elem )
 	{
 		Assert( IsValidIndex(elem) );
@@ -573,7 +589,9 @@ private:
 	}
 };
 
+#ifdef _WIN32
 #pragma warning(pop)
+#endif
 
 // Make sure nobody adds multiple inheritance and makes this class bigger.
 COMPILE_TIME_ASSERT( sizeof(CUtlVectorUltraConservative<int>) == sizeof(void*) );
@@ -1409,6 +1427,17 @@ inline void CUtlVector<T, A>::PurgeAndDeleteElements()
 }
 
 template< typename T, class A >
+inline void CUtlVector<T, A>::PurgeAndDeleteElementsArray()
+{
+	for( int i=0; i < m_Size; i++ )
+	{
+		delete[] Element(i);
+	}
+	RemoveAll();
+}
+
+
+template< typename T, class A >
 inline void CUtlVector<T, A>::Compact()
 {
 	m_Memory.Purge(m_Size);
@@ -1436,23 +1465,16 @@ void CUtlVector<T, A>::Validate( CValidator &validator, char *pchName )
 }
 #endif // DBGFLAG_VALIDATE
 
-// A vector class for storing pointers, so that the elements pointed to by the pointers are deleted
-// on exit.
-template<class T> class CUtlVectorAutoPurge : public CUtlVector< T, CUtlMemory< T, int> >
-{
-public:
-	~CUtlVectorAutoPurge( void )
-	{
-		this->PurgeAndDeleteElements();
-	}
-
-};
-
 // easy string list class with dynamically allocated strings. For use with V_SplitString, etc.
 // Frees the dynamic strings in destructor.
-class CUtlStringList : public CUtlVectorAutoPurge< char *>
+class CUtlStringList : public CUtlVector< char*, CUtlMemory< char*, int > >
 {
 public:
+	~CUtlStringList( void )
+	{
+		PurgeAndDeleteElementsArray();
+	}
+
 	void CopyAndAddToTail( char const *pString )			// clone the string and add to the end
 	{
 		char *pNewStr = new char[1 + strlen( pString )];
@@ -1465,7 +1487,7 @@ public:
 		return strcmp( *sz1, *sz2 );
 	}
 
-	CUtlStringList(){}
+	CUtlStringList() = default;
 
 	CUtlStringList( char const *pString, char const *pSeparator )
 	{

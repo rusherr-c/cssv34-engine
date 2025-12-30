@@ -10,7 +10,7 @@
 #include <windows.h>
 #include "shlwapi.h" // registry stuff
 #include <direct.h>
-#elif defined ( LINUX ) || defined( OSX )
+#elif defined(POSIX)
 	#define O_EXLOCK 0
 	#include <sys/types.h>
 	#include <sys/stat.h>
@@ -67,7 +67,8 @@
 #endif
 
 #if defined( USE_SDL )
-#include "SDL.h"
+#include <SDL.h>
+#include <SDL_version.h>
 
 #if !defined( _WIN32 )
 #define MB_OK 			0x00000001
@@ -80,6 +81,11 @@ int MessageBox( HWND hWnd, const char *message, const char *header, unsigned uTy
 
 #if defined( POSIX )
 #define RELAUNCH_FILE "/tmp/hl2_relaunch"
+#endif
+
+#if defined ( ANDROID )
+#include <android/log.h>
+#include "jni.h"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -199,7 +205,7 @@ class CVCRHelpers : public IVCRHelpers
 public:
 	virtual void ErrorMessage( const char *pMsg )
 	{
-#if defined( WIN32 ) || defined( LINUX )
+#if defined( WIN32 ) || defined( LINUX ) || defined(PLATFORM_BSD)
 		NOVCR( ::MessageBox( NULL, pMsg, "VCR Error", MB_OK ) );
 #endif
 	}
@@ -248,7 +254,11 @@ bool GetExecutableName( char *out, int outSize )
 //-----------------------------------------------------------------------------
 char *GetBaseDirectory( void )
 {
+#ifdef ANDROID
+	return getenv("VALVE_GAME_PATH");
+#else
 	return g_szBasedir;
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -680,8 +690,7 @@ bool CSourceAppSystemGroup::Create()
 
 	if ( !AddSystems( appSystems ) ) 
 		return false;
-
-
+	
 	// This will be NULL for games that don't support VR. That's ok. Just don't load the DLL
 	AppModule_t sourceVRModule = LoadModule( "sourcevr" DLL_EXT_STRING );
 	if( sourceVRModule != APP_MODULE_INVALID )
@@ -757,6 +766,11 @@ bool CSourceAppSystemGroup::Create()
 
 bool CSourceAppSystemGroup::PreInit()
 {
+	if ( !CommandLine()->FindParm( "-nolog" ) )
+		DebugLogger()->Init("engine.log");
+	else
+		DebugLogger()->Disable();
+
 	CreateInterfaceFn factory = GetFactory();
 	ConnectTier1Libraries( &factory, 1 );
 	ConVar_Register( );
@@ -934,7 +948,9 @@ bool GrabSourceMutex()
 	CRC32_ProcessBuffer( &gameCRC, (void *)pchGameParam, Q_strlen( pchGameParam ) );
 	CRC32_Final( &gameCRC );
 
-#ifdef LINUX
+#ifdef ANDROID
+	return true;
+#elif defined (LINUX) || defined(PLATFORM_BSD)
 	/*
 	 * Linux
  	 */
@@ -1166,6 +1182,8 @@ static const char *BuildCommand()
 	return (const char *)build.Base();
 }
 
+extern void InitGL4ES();
+
 //-----------------------------------------------------------------------------
 // Purpose: The real entry point for the application
 // Input  : hInstance - 
@@ -1175,12 +1193,12 @@ static const char *BuildCommand()
 // Output : int APIENTRY
 //-----------------------------------------------------------------------------
 #ifdef WIN32
-extern "C" __declspec(dllexport) int LauncherMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow )
+DLL_EXPORT int LauncherMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow )
 #else
 DLL_EXPORT int LauncherMain( int argc, char **argv )
 #endif
 {
-#ifdef LINUX
+#if (defined(LINUX) || defined(PLATFORM_BSD)) && !defined ANDROID
 	// Temporary fix to stop us from crashing in printf/sscanf functions that don't expect
 	//  localization to mess with your "." and "," float seperators. Mac OSX also sets LANG
 	//  to en_US.UTF-8 before starting up (in info.plist I believe).
@@ -1196,9 +1214,20 @@ DLL_EXPORT int LauncherMain( int argc, char **argv )
 	const char *CurrentLocale = setlocale( LC_ALL, NULL );
 	if ( Q_stricmp( CurrentLocale, en_US ) )
 	{
-		Warning( "WARNING: setlocale('%s') failed, using locale:'%s'. International characters may not work.\n", en_US, CurrentLocale );
+		Msg( "WARNING: setlocale('%s') failed, using locale:'%s'. International characters may not work.\n", en_US, CurrentLocale );
 	}
+
 #endif // LINUX
+
+#ifdef USE_SDL
+	SDL_version ver;
+	SDL_GetVersion( &ver );
+	Msg("SDL version: %d.%d.%d rev: %s\n", (int)ver.major, (int)ver.minor, (int)ver.patch, SDL_GetRevision());
+#endif
+
+#if (defined LINUX || defined PLATFORM_BSD) && defined USE_SDL && defined TOGLES && !defined ANDROID
+	SDL_SetHint(SDL_HINT_VIDEO_X11_FORCE_EGL, "1");
+#endif
 
 #ifdef WIN32
 	SetAppInstance( hInstance );
@@ -1218,18 +1247,12 @@ DLL_EXPORT int LauncherMain( int argc, char **argv )
 	// Hook the debug output stuff.
 	SpewOutputFunc( LauncherDefaultSpewFunc );
 
-	if ( 0 && IsWin98OrOlder() )
-	{
-		Error( "This build does not currently run under Windows 98/Me." );
-		return -1;
-	}
-
 	// Quickly check the hardware key, essentially a warning shot.  
 	if ( !Plat_VerifyHardwareKeyPrompt() )
 	{
 		return -1;
 	}
-
+	
 	const char *filename;
 #ifdef WIN32
 	CommandLine()->CreateCmdLine( IsPC() ? VCRHook_GetCommandLine() : lpCmdLine );
@@ -1448,6 +1471,7 @@ DLL_EXPORT int LauncherMain( int argc, char **argv )
 
 	// Figure out the directory the executable is running from
 	// and make that be the current working directory
+
 	_chdir( GetBaseDirectory() );
 
 	g_LeakDump.m_bCheckLeaks = CommandLine()->CheckParm( "-leakcheck" ) ? true : false;
@@ -1529,7 +1553,7 @@ DLL_EXPORT int LauncherMain( int argc, char **argv )
 		RegCloseKey(hKey);
 	}
 
-#elif defined( OSX ) || defined( LINUX )
+#elif defined( OSX ) || defined( LINUX ) || defined(PLATFORM_BSD)
 	struct stat st;
 	if ( stat( RELAUNCH_FILE, &st ) == 0 ) 
 	{
@@ -1546,7 +1570,7 @@ DLL_EXPORT int LauncherMain( int argc, char **argv )
 				}
 				szCmd[nChars] = 0;
 				char szOpenLine[ MAX_PATH ];
-				#if defined( LINUX )
+				#if defined( LINUX ) || defined(PLATFORM_BSD)
 					Q_snprintf( szOpenLine, sizeof(szOpenLine), "xdg-open \"%s\"", szCmd );
 				#else
 					Q_snprintf( szOpenLine, sizeof(szOpenLine), "open \"%s\"", szCmd );

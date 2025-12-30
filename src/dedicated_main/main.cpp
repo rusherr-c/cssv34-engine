@@ -206,9 +206,12 @@ int main( int argc, char *argv[] )
 	void *tier0 = dlopen( "libtier0" DLL_EXT_STRING, RTLD_NOW );
 	void *vstdlib = dlopen( "libvstdlib" DLL_EXT_STRING, RTLD_NOW );
 
-	const char *pBinaryName = "dedicated" DLL_EXT_STRING;
+	const char *pBinaryName = "bin/dedicated" DLL_EXT_STRING;
 
 	void *dedicated = dlopen( pBinaryName, RTLD_NOW );
+	if ( !dedicated )
+		dedicated = dlopen( "bin/libdedicated" DLL_EXT_STRING, RTLD_NOW );
+
 	if ( !dedicated )
 	{
 		printf( "Failed to open %s (%s)\n", pBinaryName, dlerror());

@@ -18,6 +18,7 @@
 #include "prediction.h"
 #include "bitbuf.h"
 #include "checksum_md5.h"
+#include "touch.h"
 #include "hltvcamera.h"
 #if defined( REPLAY_ENABLED )
 #include "replay/replaycamera.h"
@@ -43,9 +44,6 @@ extern ConVar cam_idealyaw;
 
 // For showing/hiding the scoreboard
 #include <game/client/iviewport.h>
-
-// Need this for steam controller
-#include "clientsteamcontext.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -314,8 +312,6 @@ CInput::CInput( void )
 	m_pCommands = NULL;
 	m_pCameraThirdData = NULL;
 	m_pVerifiedCommands = NULL;
-	m_PreferredGameActionSet = GAME_ACTION_SET_MENUCONTROLS;
-	m_bSteamControllerGameActionsInitialized = false;
 }
 
 //-----------------------------------------------------------------------------
@@ -950,8 +946,9 @@ void CInput::ControllerMove( float frametime, CUserCmd *cmd )
 		}
 	}
 
-	SteamControllerMove( frametime, cmd );
-	JoyStickMove( frametime, cmd );
+	JoyStickMove( frametime, cmd);
+
+	TouchMove( cmd );
 
 	// NVNT if we have a haptic device..
 	if(haptics && haptics->HasDevice())
@@ -1198,9 +1195,9 @@ void CInput::CreateMove ( int sequence_number, float input_sample_frametime, boo
 
 	// Using joystick?
 #ifdef SIXENSE
-	if ( in_joystick.GetInt() || g_pSixenseInput->IsEnabled() )
+	if ( in_joystick.GetInt() || g_pSixenseInput->IsEnabled() || touch_enable.GetInt() )
 #else
-	if ( in_joystick.GetInt() )
+	if ( in_joystick.GetInt() || touch_enable.GetInt() )
 #endif
 	{
 		if ( cmd->forwardmove > 0 )
@@ -1668,9 +1665,6 @@ void CInput::Init_All (void)
 	m_fHadJoysticks = false;
 	m_flLastForwardMove = 0.0;
 
-	// Make sure this is activated now so steam controller stuff works
-	ClientSteamContext().Activate();
-
 	// Initialize inputs
 	if ( IsPC() )
 	{
@@ -1680,9 +1674,6 @@ void CInput::Init_All (void)
 		
 	// Initialize third person camera controls.
 	Init_Camera();
-
-	// Initialize steam controller action sets
-	m_bSteamControllerGameActionsInitialized = InitializeSteamControllerGameActionSets();
 }
 
 /*

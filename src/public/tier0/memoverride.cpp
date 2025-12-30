@@ -145,6 +145,11 @@ inline void *ReallocUnattributed( void *pMem, size_t nSize )
 #define FREE_CALL
 #endif
 
+// check for noexcept in crt
+#ifndef _CRT_NOEXCEPT
+#define _CRT_NOEXCEPT
+#endif
+
 extern "C"
 {
 	
@@ -203,12 +208,12 @@ ALLOC_CALL void *_realloc_base( void *pMem, size_t nSize )
 	return ReallocUnattributed( pMem, nSize );
 }
 
-ALLOC_CALL void *_recalloc_base( void *pMem, size_t nSize )
+ALLOC_CALL void *_recalloc_base( void *pMem, size_t nCount, size_t nSize )
 {
-	void *pMemOut = ReallocUnattributed( pMem, nSize );
+	void *pMemOut = ReallocUnattributed( pMem, nCount * nSize );
 	if ( !pMem )
 	{
-		memset( pMemOut, 0, nSize );
+		memset( pMemOut, 0, nCount * nSize);
 	}
 	return pMemOut;
 }
@@ -242,7 +247,7 @@ void * __cdecl _realloc_crt(void *ptr, size_t size)
 
 void * __cdecl _recalloc_crt(void *ptr, size_t count, size_t size)
 {
-	return _recalloc_base( ptr, size * count );
+	return _recalloc_base( ptr, size, count );
 }
 
 ALLOC_CALL void * __cdecl _recalloc ( void * memblock, size_t count, size_t size )
@@ -255,7 +260,7 @@ ALLOC_CALL void * __cdecl _recalloc ( void * memblock, size_t count, size_t size
 	return pMem;
 }
 
-size_t _msize_base( void *pMem )
+size_t _msize_base( void *pMem ) _CRT_NOEXCEPT
 {
 	return g_pMemAlloc->GetSize(pMem);
 }
@@ -390,7 +395,7 @@ extern "C"
 // ensures they are here even when linking against debug or release static libs
 //-----------------------------------------------------------------------------
 #ifndef NO_MEMOVERRIDE_NEW_DELETE
-#ifdef OSX
+#if defined (OSX) || defined (ANDROID)
 void *__cdecl operator new( size_t nSize ) throw (std::bad_alloc)
 #else
 void *__cdecl operator new( size_t nSize )
@@ -404,7 +409,7 @@ void *__cdecl operator new( size_t nSize, int nBlockUse, const char *pFileName, 
 	return g_pMemAlloc->Alloc(nSize, pFileName, nLine);
 }
 
-#ifdef OSX
+#if defined (OSX) || defined (ANDROID)
 void __cdecl operator delete( void *pMem ) throw()
 #else
 void __cdecl operator delete( void *pMem )
@@ -412,8 +417,7 @@ void __cdecl operator delete( void *pMem )
 {
 	g_pMemAlloc->Free( pMem );
 }
-
-#ifdef OSX
+#if defined (OSX) || defined (ANDROID)
 void operator delete(void*pMem, std::size_t)
 #else
 void operator delete(void*pMem, std::size_t) throw()
@@ -422,7 +426,7 @@ void operator delete(void*pMem, std::size_t) throw()
 	g_pMemAlloc->Free( pMem );
 }
 
-#ifdef OSX
+#if defined (OSX) || defined (ANDROID)
 void *__cdecl operator new[]( size_t nSize ) throw (std::bad_alloc)
 #else
 void *__cdecl operator new[]( size_t nSize )
@@ -436,7 +440,7 @@ void *__cdecl operator new[] ( size_t nSize, int nBlockUse, const char *pFileNam
 	return g_pMemAlloc->Alloc(nSize, pFileName, nLine);
 }
 
-#ifdef OSX
+#if defined (OSX) || defined (ANDROID)
 void __cdecl operator delete[]( void *pMem ) throw()
 #else
 void __cdecl operator delete[]( void *pMem )

@@ -71,7 +71,7 @@ void Button::Init()
 	_keyFocusBorder = NULL;
 	m_bSelectionStateSaved = false;
 	m_bStaySelectedOnClick = false;
-	m_bStaySelectedOnClick = false;
+	m_bStayArmedOnClick = false;
 	m_sArmedSoundName = UTL_INVAL_SYMBOL;
 	m_sDepressedSoundName = UTL_INVAL_SYMBOL;
 	m_sReleasedSoundName = UTL_INVAL_SYMBOL;
@@ -139,11 +139,12 @@ void Button::SetSelected( bool state )
 		InvalidateLayout(false);
 	}
 
-	if ( !m_bStayArmedOnClick && state && _buttonFlags.IsFlagSet( ARMED ) )
-	{
-		_buttonFlags.SetFlag( ARMED,  false );
-		InvalidateLayout(false);
-	}
+	// Jusic: idk what is it for
+	//if (!m_bStayArmedOnClick && state && _buttonFlags.IsFlagSet(ARMED))
+	//{
+	//	_buttonFlags.SetFlag( ARMED,  false );
+	//	InvalidateLayout(false);
+	//}
 }
 
 void Button::SetBlink( bool state )
@@ -696,13 +697,13 @@ void Button::SetMouseClickEnabled(MouseCode code,bool state)
 	if(state)
 	{
 		//set bit to 1
-		_mouseClickMask|=1<<((int)(code+1));
+		_mouseClickMask|=1<<(static_cast<int>(code-MOUSE_FIRST));
 	}
 	else
 	{
 		//set bit to 0
-		_mouseClickMask&=~(1<<((int)(code+1)));
-	}	
+		_mouseClickMask&=~(static_cast<int>(code-MOUSE_FIRST));
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -710,7 +711,7 @@ void Button::SetMouseClickEnabled(MouseCode code,bool state)
 //-----------------------------------------------------------------------------
 bool Button::IsMouseClickEnabled(MouseCode code)
 {
-	if(_mouseClickMask&(1<<((int)(code+1))))
+	if(_mouseClickMask&(1<<(static_cast<int>(code-MOUSE_FIRST))))
 	{
 		return true;
 	}
@@ -876,7 +877,11 @@ void Button::ApplySettings( KeyValues *inResourceData )
 		SetReleasedSound(sound);
 	}
 
-	_activationType = (ActivationType_t)inResourceData->GetInt( "button_activation_type", ACTIVATE_ONRELEASED );
+	int iButtonActivationType = inResourceData->GetInt( "button_activation_type", -1 );
+	if (iButtonActivationType != -1)
+	{
+		_activationType = (ActivationType_t)iButtonActivationType;
+	}
 }
 
 

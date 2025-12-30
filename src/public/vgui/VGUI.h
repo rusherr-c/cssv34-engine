@@ -14,6 +14,8 @@
 
 #define null 0L
 
+#define NeedProportional() (IsAndroid() || CommandLine()->CheckParm("-gameuiproportionality"))
+
 #ifndef NULL
 #ifdef __cplusplus
 #define NULL    0
@@ -22,6 +24,7 @@
 #endif
 #endif
 
+#ifdef _WIN32
 #pragma warning( disable: 4800 )	// disables 'performance warning converting int to bool'
 #pragma warning( disable: 4786 )	// disables 'identifier truncated in browser information' warning
 #pragma warning( disable: 4355 )	// disables 'this' : used in base member initializer list
@@ -29,11 +32,20 @@
 #pragma warning( disable: 4514 )	// warning C4514: 'Color::Color' : unreferenced inline function has been removed
 #pragma warning( disable: 4100 )	// warning C4100: 'code' : unreferenced formal parameter
 #pragma warning( disable: 4127 )	// warning C4127: conditional expression is constant
+#endif
 
 typedef unsigned char  uchar;
 typedef unsigned short ushort;
 typedef unsigned int   uint;
 typedef unsigned long  ulong;
+
+#ifdef PLATFORM_64BITS
+typedef long long			intp;
+typedef unsigned long long	uintp;
+#else
+typedef int					intp;
+typedef unsigned int		uintp;
+#endif
 
 #ifndef _WCHAR_T_DEFINED
 // DAL - wchar_t is a built in define in gcc 3.2 with a size of 4 bytes
@@ -50,7 +62,7 @@ namespace vgui
 {
 // handle to an internal vgui panel
 // this is the only handle to a panel that is valid across dll boundaries
-typedef unsigned int VPANEL;
+typedef uintp VPANEL;
 
 // handles to vgui objects
 // NULL values signify an invalid value
@@ -59,7 +71,7 @@ typedef unsigned long HScheme;
 typedef unsigned long HTexture;
 typedef unsigned long HCursor;
 typedef unsigned long HPanel;
-const HPanel INVALID_PANEL = 0xffffffff;
+const HPanel INVALID_PANEL = (HPanel)-1;
 typedef unsigned long HFont;
 const HFont INVALID_FONT = 0; // the value of an invalid font handle
 }

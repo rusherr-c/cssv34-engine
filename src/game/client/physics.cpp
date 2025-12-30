@@ -41,7 +41,7 @@ extern IVEngineClient *engine;
 class CCollisionEvent : public IPhysicsCollisionEvent, public IPhysicsCollisionSolver, public IPhysicsObjectEvent
 {
 public:
-	CCollisionEvent( void );
+	CCollisionEvent( void ) = default;
 
 	void	ObjectSound( int index, vcollisionevent_t *pEvent );
 	void	PreCollision( vcollisionevent_t *pEvent ) {}
@@ -177,7 +177,7 @@ void PhysicsLevelInit( void )
 	physenv->SetGravity( Vector(0, 0, -GetCurrentGravity() ) );
 	// 15 ms per tick
 	// NOTE: Always run client physics at this rate - helps keep ragdolls stable
-	physenv->SetSimulationTimestep( IsXbox() ? DEFAULT_XBOX_CLIENT_VPHYSICS_TICK : gpGlobals->interval_per_tick );
+	physenv->SetSimulationTimestep( IsXbox() ? DEFAULT_XBOX_CLIENT_VPHYSICS_TICK : DEFAULT_TICK_INTERVAL );
 	physenv->SetCollisionEventHandler( &g_Collisions );
 	physenv->SetCollisionSolver( &g_Collisions );
 
@@ -477,12 +477,6 @@ void CPhysicsSystem::PhysicsSimulate()
 void PhysicsSimulate()
 {
 	g_PhysicsSystem.PhysicsSimulate();
-}
-
-
-
-CCollisionEvent::CCollisionEvent( void ) 
-{ 
 }
 
 void CCollisionEvent::ObjectSound( int index, vcollisionevent_t *pEvent )

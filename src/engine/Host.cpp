@@ -40,6 +40,7 @@
 #include "steam/steam_api.h"
 #include "LoadScreenUpdate.h"
 #include "datacache/idatacache.h"
+#include "master.h"
 
 #if !defined SWDS
 #include "voice.h"
@@ -127,7 +128,10 @@
 #endif
 #if defined( LINUX )
 #include <locale.h>
+
+#ifdef USE_SDL
 #include "SDL.h"
+#endif
 #endif
 
 #include "ixboxsystem.h"
@@ -1817,6 +1821,8 @@ void Host_ShutdownServer( void )
 	if ( !sv.IsActive() )
 		return;
 
+	master->ShutdownConnection();
+
 	Host_AllowQueuedMaterialSystem( false );
 	// clear structures
 #if !defined( SWDS )
@@ -2747,10 +2753,6 @@ void CheckSpecialCheatVars()
 	if ( !mat_picmip )
 		mat_picmip = g_pCVar->FindVar( "mat_picmip" );
 
-	// In multiplayer, don't allow them to set mat_picmip > 2.	
-	if ( mat_picmip )
-		CheckVarRange_Generic( mat_picmip, -1, 2 );
-	
 	CheckVarRange_r_rootlod();
 	CheckVarRange_r_lod();
 	HandleServerAllowColorCorrection();
@@ -3900,7 +3902,7 @@ void Host_PostInit()
 		EngineVGui()->PostInit();
 	}
 
-#if defined( LINUX )
+#if defined( LINUX ) && !defined ANDROID
 	const char en_US[] = "en_US.UTF-8";
 	const char *CurrentLocale = setlocale( LC_ALL, NULL );
 	if ( !CurrentLocale )
@@ -3948,7 +3950,7 @@ bool DLL_LOCAL Host_IsValidSignature( const char *pFilename, bool bAllowUnknown 
 #if defined( SWDS ) || defined(_X360)
 	return true;
 #else
-	if ( sv.IsDedicated() || IsOSX() || IsLinux() )
+	if ( sv.IsDedicated() || IsOSX() || IsLinux() || IsBSD() )
 	{
 		// dedicated servers and Mac and Linux  binaries don't check signatures
 		return true;
@@ -4847,7 +4849,9 @@ void Host_FreeToLowMark( bool server )
 //-----------------------------------------------------------------------------
 void Host_Shutdown(void)
 {
+#ifndef ANDROID
 	extern void ShutdownMixerControls();
+#endif
 
 	if ( host_checkheap )
 	{
@@ -4950,7 +4954,7 @@ void Host_Shutdown(void)
 	TRACESHUTDOWN( HLTV_Shutdown() );
 
 	TRACESHUTDOWN( g_Log.Shutdown() );
-	
+
 	TRACESHUTDOWN( g_GameEventManager.Shutdown() );
 
 	TRACESHUTDOWN( sv.Shutdown() );
@@ -4959,7 +4963,7 @@ void Host_Shutdown(void)
 
 #ifndef SWDS
 	TRACESHUTDOWN( Key_Shutdown() );
-#ifndef _X360
+#if !defined _X360 && !defined ANDROID
 	TRACESHUTDOWN( ShutdownMixerControls() );
 #endif
 #endif

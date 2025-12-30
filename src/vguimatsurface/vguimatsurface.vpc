@@ -13,6 +13,7 @@ $Configuration
 {
 	$Compiler
 	{
+		$AdditionalIncludeDirectories   "$BASE;.\;/usr/include/freetype2/"
 		$PreprocessorDefinitions		"$BASE;BENCHMARK;VGUIMATSURFACE_DLL_EXPORT;GAMEUI_EXPORTS;DONT_PROTECT_FILEIO_FUNCTIONS;PROTECTED_THINGS_ENABLE"
 		$PreprocessorDefinitions		"$BASE;fopen=dont_use_fopen" [$WIN32]
 		$EnableC++Exceptions			"Yes (/EHsc)"
@@ -40,6 +41,7 @@ $Project "vguimatsurface"
 		$File	"FontTextureCache.cpp"
 		$File	"Input.cpp"
 		$File	"MatSystemSurface.cpp"
+		$File	"asanstubs.cpp"
 		$File	"memorybitmap.cpp"						[$WIN32]
 		$File	"TextureDictionary.cpp"
 		$File	"$SRCDIR\vgui2\src\vgui_key_translation.cpp"

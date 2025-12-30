@@ -28,10 +28,14 @@
 #include "vgui_key_translation.h"
 #include "filesystem.h"
 
-#ifdef OSX
-#include <Carbon/Carbon.h>
+#if defined(OSX) || defined(PLATFORM_BSD)
+#include <sys/param.h>
+#include <sys/mount.h>
 #elif defined(LINUX)
 #include <sys/vfs.h>
+#endif
+#ifdef OSX
+#include <Carbon/Carbon.h>
 #endif
 
 #ifdef USE_SDL
@@ -288,7 +292,7 @@ void CSystem::ShellExecute(const char *command, const char *file)
 	if ( pid == 0 )
 	{
 		// Child
-#ifdef LINUX
+#if defined(LINUX) || defined(PLATFORM_BSD)
 		// Escape steam runtime if necessary
 		const char *szSteamRuntime = getenv( "STEAM_RUNTIME" );
 		if ( szSteamRuntime )
@@ -583,8 +587,14 @@ int CSystem::GetAvailableDrives(char *buf, int bufLen)
 //-----------------------------------------------------------------------------
 double CSystem::GetFreeDiskSpace(const char *path)
 {
+#if __DARWIN_ONLY_64_BIT_INO_T || PLATFORM_BSD
+    // MoeMod: newer macOS only support 64bit, so no statfs64 is provided
+    struct statfs buf;
+    int ret = statfs( path, &buf );
+#else
 	struct statfs64 buf;
 	int ret = statfs64( path, &buf );
+#endif
 	if ( ret < 0 )
 		return 0.0;
 	return (double) ( buf.f_bsize * buf.f_bfree );

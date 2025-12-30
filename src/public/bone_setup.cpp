@@ -21,6 +21,8 @@
 #include "convar.h"
 #include "tier0/tslist.h"
 #include "vphysics_interface.h"
+#include "mathlib/compressed_vector.h"
+
 #ifdef CLIENT_DLL
 	#include "posedebugger.h"
 #endif
@@ -378,14 +380,18 @@ void CalcBoneQuaternion( int frame, float s,
 {
 	if ( panim->flags & STUDIO_ANIM_RAWROT )
 	{
-		q = *(panim->pQuat48());
+		Quaternion48 tmp;
+		V_memcpy( &tmp, panim->pQuat48(), sizeof(Quaternion48) );
+		q = tmp;
 		Assert( q.IsValid() );
 		return;
-	} 
-	
+	}
+
 	if ( panim->flags & STUDIO_ANIM_RAWROT2 )
 	{
-		q = *(panim->pQuat64());
+		Quaternion64 tmp;
+		V_memcpy( &tmp, panim->pQuat64(), sizeof(Quaternion64) );
+		q = tmp;
 		Assert( q.IsValid() );
 		return;
 	}
@@ -5603,18 +5609,20 @@ bool Studio_AnimPosition( mstudioanimdesc_t *panim, float flCycle, Vector &vecPo
 
 	float	flFrame = flCycle * (panim->numframes - 1);
 
+
 	for (int i = 0; i < panim->nummovements; i++)
 	{
-		mstudiomovement_t *pmove = panim->pMovement( i );
+		mstudiomovement_t pmove;
+		// TODO(nillerusr): fix alignment on model loading
+		V_memcpy(&pmove, panim->pMovement( i ), sizeof(mstudiomovement_t));
 
-		if (pmove->endframe >= flFrame)
+		if (pmove.endframe >= flFrame)
 		{
-			float f = (flFrame - prevframe) / (pmove->endframe - prevframe);
+			float f = (flFrame - prevframe) / (pmove.endframe - prevframe);
+			float d = pmove.v0 * f + 0.5 * (pmove.v1 - pmove.v0) * f * f;
 
-			float d = pmove->v0 * f + 0.5 * (pmove->v1 - pmove->v0) * f * f;
-
-			vecPos = vecPos + d * pmove->vector;
-			vecAngle.y = vecAngle.y * (1 - f) + pmove->angle * f;
+			vecPos = vecPos + d * pmove.vector;
+			vecAngle.y = vecAngle.y * (1 - f) + pmove.angle * f;
 			if (iLoops != 0)
 			{
 				mstudiomovement_t *pmoveAnim = panim->pMovement( panim->nummovements - 1 );
@@ -5625,9 +5633,9 @@ bool Studio_AnimPosition( mstudioanimdesc_t *panim, float flCycle, Vector &vecPo
 		}
 		else
 		{
-			prevframe = pmove->endframe;
-			vecPos = pmove->position;
-			vecAngle.y = pmove->angle;
+			prevframe = pmove.endframe;
+			vecPos = pmove.position;
+			vecAngle.y = pmove.angle;
 		}
 	}
 
@@ -5937,6 +5945,8 @@ const char *Studio_GetDefaultSurfaceProps( CStudioHdr *pstudiohdr )
 
 float Studio_GetMass( CStudioHdr *pstudiohdr )
 {
+	if( pstudiohdr == NULL ) return 0.f;
+
 	return pstudiohdr->mass();
 }
 

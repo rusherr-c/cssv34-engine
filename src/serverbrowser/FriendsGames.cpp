@@ -17,15 +17,6 @@ CFriendsGames::CFriendsGames(vgui::Panel *parent) :
 {
 	m_iServerRefreshCount = 0;
 	
-	if ( !IsSteamGameServerBrowsingEnabled() )
-	{
-		m_pGameList->SetEmptyListText("#ServerBrowser_OfflineMode");
-		m_pConnect->SetEnabled( false );
-		m_pRefreshAll->SetEnabled( false );
-		m_pRefreshQuick->SetEnabled( false );
-		m_pAddServer->SetEnabled( false );
-		m_pFilter->SetEnabled( false );
-	}
 }
 
 //-----------------------------------------------------------------------------

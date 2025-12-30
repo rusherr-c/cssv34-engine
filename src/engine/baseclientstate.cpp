@@ -37,6 +37,7 @@
 #include "sv_plugin.h"
 #include "sys_dll.h"
 #include "host.h"
+#include "master.h"
 #if defined( REPLAY_ENABLED )
 #include "replay_internal.h"
 #include "replayserver.h"
@@ -570,7 +571,7 @@ bool CBaseClientState::PrepareSteamConnectResponse( uint64 unGSSteamID, bool bGS
 		return true;
 	}
 
-#if !defined( NO_STEAM ) && !defined( SWDS  ) 
+#if 0 //!defined( NO_STEAM ) && !defined( SWDS  ) 
 	if ( !Steam3Client().SteamUser() )
 	{
 		COM_ExplainDisconnection( true, "#GameUI_ServerRequireSteam" );
@@ -578,14 +579,14 @@ bool CBaseClientState::PrepareSteamConnectResponse( uint64 unGSSteamID, bool bGS
 		return false;
 	}
 #endif
-	
+
 	netadr_t checkAdr = adr;
 	if ( adr.GetType() == NA_LOOPBACK || adr.IsLocalhost() )
 	{
 		checkAdr.SetIP( net_local_adr.GetIPHostByteOrder() );
 	}
 
-#ifndef SWDS
+#if 0 // #ifndef SWDS
 	// now append the steam3 cookie
 	char steam3Cookie[ STEAM_KEYSIZE ];
 	uint32 steam3CookieLen = 0;
@@ -875,6 +876,8 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 
 	Assert( packet );
 
+	master->ProcessConnectionlessPacket( packet );
+
 	bf_read &msg = packet->message;	// handy shortcut 
 
 	int c = msg.ReadByte();
@@ -936,6 +939,7 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 								int authprotocol = msg.ReadLong();
 								uint64 unGSSteamID = 0;
 								bool bGSSecure = false;
+#if 0
 								if ( authprotocol == PROTOCOL_STEAM )
 								{
 									if ( msg.ReadShort() != 0 )
@@ -963,6 +967,7 @@ bool CBaseClientState::ProcessConnectionlessPacket( netpacket_t *packet )
 										return false;
 									}
 								}
+#endif
 								SendConnectPacket( challenge, authprotocol, unGSSteamID, bGSSecure );
 							}
 							break;

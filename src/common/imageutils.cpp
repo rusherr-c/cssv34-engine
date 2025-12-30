@@ -54,6 +54,8 @@ extern void longjmp( jmp_buf, int ) __attribute__((noreturn));
 	extern IEngineReplay *g_pEngine;
 #elif ENGINE_DLL
 	#include "EngineInterface.h"
+#elif UTILS
+	// OwO
 #else
 	#include "cdll_int.h"
 	extern IVEngineClient *engine;
@@ -61,10 +63,23 @@ extern void longjmp( jmp_buf, int ) __attribute__((noreturn));
 
 // use the JPEGLIB_USE_STDIO define so that we can read in jpeg's from outside the game directory tree.
 #define JPEGLIB_USE_STDIO
+#if ANDROID
+#include "android/jpeglib/jpeglib.h"
+#else
 #include "jpeglib/jpeglib.h"
+#endif
 #undef JPEGLIB_USE_STDIO
 
+
+#if HAVE_PNG
+
+#if ANDROID || WIN32
 #include "libpng/png.h"
+#else
+#include <png.h>
+#endif
+
+#endif
 
 #include <setjmp.h>
 
@@ -93,6 +108,8 @@ extern void longjmp( jmp_buf, int ) __attribute__((noreturn));
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
+#if HAVE_JPEG
+
 struct ValveJpegErrorHandler_t 
 {
 	// The default manager
@@ -129,12 +146,12 @@ static void ValveJpegErrorHandler( j_common_ptr cinfo )
 	// Bail
 	longjmp( pError->m_ErrorContext, 1 );
 }
-
+#endif
 
 // convert the JPEG file given to a TGA file at the given output path.
 ConversionErrorType ImgUtl_ConvertJPEGToTGA( const char *jpegpath, const char *tgaPath, bool bRequirePowerOfTwo )
 {
-#if !defined( _X360 )
+#if !defined( _X360 ) && HAVE_JPEG
 
 	//
 	// !FIXME! This really probably should use ImgUtl_ReadJPEGAsRGBA, to avoid duplicated code.
@@ -485,7 +502,7 @@ unsigned char * ImgUtl_ReadTGAAsRGBA(const char *tgaPath, int &width, int &heigh
 
 unsigned char *ImgUtl_ReadJPEGAsRGBA( const char *jpegPath, int &width, int &height, ConversionErrorType &errcode )
 {
-#if !defined( _X360 )
+#if !defined( _X360 ) && HAVE_JPEG
 	struct jpeg_decompress_struct jpegInfo;
 	struct ValveJpegErrorHandler_t jerr;
 	JSAMPROW row_pointer[1];
@@ -636,6 +653,7 @@ unsigned char *ImgUtl_ReadJPEGAsRGBA( const char *jpegPath, int &width, int &hei
 #endif
 }
 
+#if HAVE_PNG
 static void ReadPNGData( png_structp png_ptr, png_bytep outBytes, png_size_t byteCountToRead )
 {
 
@@ -654,19 +672,37 @@ static void ReadPNGData( png_structp png_ptr, png_bytep outBytes, png_size_t byt
 	// Read the bytes
 	pBuf->Get( outBytes, byteCountToRead );
 }
-
+#endif
 
 unsigned char *ImgUtl_ReadPNGAsRGBA( const char *pngPath, int &width, int &height, ConversionErrorType &errcode )
 {
-#if !defined( _X360 )
+#if !defined( _X360 ) && HAVE_PNG
 
 	// Just load the whole file into a memory buffer
 	CUtlBuffer bufFileContents;
+
+#if UTILS
+	static char buf[8192];
+	FILE *readfile = fopen(pngPath, "rb");
+	if( !readfile )
+	{
+		errcode = CE_CANT_OPEN_SOURCE_FILE;
+		return NULL;
+	}
+
+	size_t size;
+	while( ( size = fread(buf, 1, sizeof(buf), readfile ) ) > 0 )
+		bufFileContents.Put( buf, size );
+
+	// Load it
+	return ImgUtl_ReadPNGAsRGBAFromBuffer( bufFileContents, width, height, errcode );
+#else
 	if ( !g_pFullFileSystem->ReadFile( pngPath, NULL, bufFileContents ) )
 	{
 		errcode = CE_CANT_OPEN_SOURCE_FILE;
 		return NULL;
 	}
+#endif
 
 	// Load it
 	return ImgUtl_ReadPNGAsRGBAFromBuffer( bufFileContents, width, height, errcode );
@@ -679,7 +715,7 @@ unsigned char *ImgUtl_ReadPNGAsRGBA( const char *pngPath, int &width, int &heigh
 
 unsigned char		*ImgUtl_ReadPNGAsRGBAFromBuffer( CUtlBuffer &buffer, int &width, int &height, ConversionErrorType &errcode )
 {
-#if !defined( _X360 )
+#if !defined( _X360 ) && HAVE_PNG
 
 	png_const_bytep pngData = (png_const_bytep)buffer.Base();
 	if (png_sig_cmp( pngData, 0, 8))
@@ -1470,7 +1506,7 @@ ConversionErrorType ImgUtl_ConvertTGAToVTF(const char *tgaPath, int nMaxWidth/*=
 	inbuf.SeekPut( CUtlBuffer::SEEK_HEAD, nBytesRead );
 
 	// load vtex_dll.dll and get the interface to it.
-	CSysModule *vtexmod = Sys_LoadModule("vtex_dll");
+	CSysModule *vtexmod = Sys_LoadModule("vtex_dll" DLL_EXT_STRING);
 	if (vtexmod == NULL)
 	{
 		Msg( "Failed to open TGA conversion module vtex_dll: %s\n", tgaPath);
@@ -1519,6 +1555,17 @@ static void DoCopyFile( const char *source, const char *destination )
 	::COM_CopyFile( source, destination );
 #elif REPLAY_DLL
 	g_pEngine->CopyFile( source, destination );
+#elif UTILS
+	static char buf[16384];
+	FILE *readfile = fopen(source, "rb");
+	FILE *writefile = fopen(destination, "wb");
+
+	size_t size = 0;
+	while( (size = fread(buf, sizeof(buf), 1, readfile)) != 0 )
+		fwrite(buf, size, 1, writefile);
+
+	fclose(readfile);
+	fclose(writefile);
 #else
 	engine->CopyLocalFile( source, destination );
 #endif
@@ -1709,12 +1756,12 @@ ConversionErrorType	ImgUtl_ConvertToVTFAndDumpVMT( const char *pInPath, const ch
 		Q_strncpy(finalPath, com_gamedir, sizeof(finalPath));
 #elif REPLAY_DLL
 		Q_strncpy(finalPath, g_pEngine->GetGameDir(), sizeof(finalPath));
-#else
+#elif !UTILS
 		Q_strncpy(finalPath, engine->GetGameDirectory(), sizeof(finalPath));
 #endif
 		Q_strncat(finalPath, szOutDir, sizeof(finalPath), COPY_ALL_CHARACTERS);
 		Q_strncat(finalPath, vtfFilename, sizeof(finalPath), COPY_ALL_CHARACTERS);
-	
+
 		c = finalPath + strlen(finalPath);
 		while ((c > finalPath) && (*(c-1) != '.'))
 		{
@@ -1826,6 +1873,7 @@ ConversionErrorType ImgUtl_WriteGenericVMT( const char *vtfPath, const char *pMa
 	return CE_SUCCESS;
 }
 
+#if HAVE_PNG
 static void WritePNGData( png_structp png_ptr, png_bytep inBytes, png_size_t byteCountToWrite )
 {
 
@@ -1927,11 +1975,13 @@ fail:
 	return CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
 #endif
 }
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose:  Initialize destination --- called by jpeg_start_compress
 //  before any data is actually written.
 //-----------------------------------------------------------------------------
+#if HAVE_JPEG
 METHODDEF(void) init_destination (j_compress_ptr cinfo)
 {
 	JPEGDestinationManager_t *dest = ( JPEGDestinationManager_t *) cinfo->dest;
@@ -2012,12 +2062,14 @@ GLOBAL(void) jpeg_UtlBuffer_dest (j_compress_ptr cinfo, CUtlBuffer *pBuffer )
     dest->pub.term_destination      = term_destination;
     dest->pBuffer                   = pBuffer;
 }
+#endif
 
 //-----------------------------------------------------------------------------
 // Purpose: Write three channel RGB data to a JPEG file
 //-----------------------------------------------------------------------------
 bool ImgUtl_WriteRGBToJPEG( unsigned char *pSrcBuf, unsigned int nSrcWidth, unsigned int nSrcHeight, const char *lpszFilename )
 {
+#if HAVE_JPEG
 	CUtlBuffer dstBuf;
 
 	JSAMPROW row_pointer[1];     // pointer to JSAMPLE row[s]
@@ -2067,13 +2119,16 @@ bool ImgUtl_WriteRGBToJPEG( unsigned char *pSrcBuf, unsigned int nSrcWidth, unsi
 
 	// Cleanup
 	jpeg_destroy_compress(&cinfo);
-	
+
 	return CE_SUCCESS;
+#else
+	return CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
+#endif
 }
 
 ConversionErrorType ImgUtl_WriteRGBAAsJPEGToBuffer( const unsigned char *pRGBAData, int nWidth, int nHeight, CUtlBuffer &bufOutData, int nStride )
 {
-#if !defined( _X360 )
+#if !defined( _X360 ) && HAVE_JPEG
 
 	JSAMPROW row_pointer[1];     // pointer to JSAMPLE row[s]
 	int row_stride;              // physical row width in image buffer
@@ -2214,6 +2269,7 @@ ConversionErrorType ImgUtl_SaveBitmapToBuffer( CUtlBuffer &fileData, const Bitma
 
 ConversionErrorType ImgUtl_LoadPNGBitmapFromBuffer( CUtlBuffer &fileData, Bitmap_t &bitmap )
 {
+#if HAVE_PNG
 	bitmap.Clear();
 	ConversionErrorType nErrorCode;
 	int width, height;
@@ -2226,10 +2282,14 @@ ConversionErrorType ImgUtl_LoadPNGBitmapFromBuffer( CUtlBuffer &fileData, Bitmap
 	// Install the buffer into the bitmap, and transfer ownership
 	bitmap.SetBuffer( width, height, IMAGE_FORMAT_RGBA8888, buffer, true, width*4 );
 	return CE_SUCCESS;
+#else
+	return CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
+#endif
 }
 
 ConversionErrorType ImgUtl_SavePNGBitmapToBuffer( CUtlBuffer &fileData, const Bitmap_t &bitmap )
 {
+#if HAVE_PNG
 	if ( !bitmap.IsValid() )
 	{
 		Assert( bitmap.IsValid() );
@@ -2252,6 +2312,9 @@ ConversionErrorType ImgUtl_SavePNGBitmapToBuffer( CUtlBuffer &fileData, const Bi
 		bitmap.Stride()
 	);
 	return result;
+#else
+	return CE_SOURCE_FILE_FORMAT_NOT_SUPPORTED;
+#endif
 }
 
 ConversionErrorType ImgUtl_ResizeBitmap( Bitmap_t &destBitmap, int nWidth, int nHeight, const Bitmap_t *pImgSource )

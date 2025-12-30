@@ -307,6 +307,9 @@ static bool Sys_GetExecutableName( char *out, int len )
 
 bool FileSystem_GetExecutableDir( char *exedir, int exeDirLen )
 {
+#ifdef ANDROID
+	Q_snprintf( exedir, exeDirLen, "%s", getenv("APP_LIB_PATH") );
+#else
 	exedir[0] = 0;
 
 	if ( s_bUseVProjectBinDir )
@@ -341,29 +344,37 @@ bool FileSystem_GetExecutableDir( char *exedir, int exeDirLen )
 
 	Q_FixSlashes( exedir );
 
+	const char* libDir = "bin";
+
 	// Return the bin directory as the executable dir if it's not in there
 	// because that's really where we're running from...
 	char ext[MAX_PATH];
 	Q_StrRight( exedir, 4, ext, sizeof( ext ) );
-	if ( ext[0] != CORRECT_PATH_SEPARATOR || Q_stricmp( ext+1, "bin" ) != 0 )
+	if ( ext[0] != CORRECT_PATH_SEPARATOR || Q_stricmp( ext+1, libDir ) != 0 )
 	{
 		Q_strncat( exedir, CORRECT_PATH_SEPARATOR_S, exeDirLen, COPY_ALL_CHARACTERS );
-		Q_strncat( exedir, "bin", exeDirLen, COPY_ALL_CHARACTERS );
+		Q_strncat( exedir, libDir, exeDirLen, COPY_ALL_CHARACTERS );
 		Q_FixSlashes( exedir );
 	}
-	
+#endif
+
 	return true;
 }
 
 static bool FileSystem_GetBaseDir( char *baseDir, int baseDirLen )
 {
+#ifdef ANDROID
+	strncpy(baseDir, getenv("VALVE_GAME_PATH"), baseDirLen);
+	return true;
+#else
 	if ( FileSystem_GetExecutableDir( baseDir, baseDirLen ) )
 	{
 		Q_StripFilename( baseDir );
 		return true;
 	}
-	
+
 	return false;
+#endif
 }
 
 void LaunchVConfig()
@@ -543,6 +554,8 @@ FSReturnCode_t FileSystem_LoadSearchPaths( CFSSearchPathsInit &initInfo )
 	if ( !FileSystem_GetBaseDir( baseDir, sizeof( baseDir ) ) )
 		return SetupFileSystemError( false, FS_INVALID_PARAMETERS, "FileSystem_GetBaseDir failed." );
 
+	Msg("filesystem BaseDir: %s\n", baseDir);
+
 	// The MOD directory is always the one that contains gameinfo.txt
 	Q_strncpy( initInfo.m_ModPath, initInfo.m_pDirectoryName, sizeof( initInfo.m_ModPath ) );
 
@@ -568,6 +581,20 @@ FSReturnCode_t FileSystem_LoadSearchPaths( CFSSearchPathsInit &initInfo )
 		}
 	}
 
+	const char *ExtraVpkPaths = getenv( "EXTRAS_VPK_PATH" );
+	char szAbsSearchPath[MAX_PATH];
+
+	if( ExtraVpkPaths )
+	{
+		CUtlStringList vecPaths;
+		V_SplitString( ExtraVpkPaths, ",", vecPaths );
+
+		FOR_EACH_VEC( vecPaths, idxExtraPath )
+		{
+			FileSystem_AddLoadedSearchPath( initInfo, "GAME", vecPaths[idxExtraPath], false );
+		}
+	}
+
 	bool bLowViolence = initInfo.m_bLowViolence;
 	for ( KeyValues *pCur=pSearchPaths->GetFirstValue(); pCur; pCur=pCur->GetNextValue() )
 	{
@@ -589,11 +616,12 @@ FSReturnCode_t FileSystem_LoadSearchPaths( CFSSearchPathsInit &initInfo )
 			// We need a special identifier in the gameinfo.txt here because the base hl2 folder exists in different places.
 			// In the case of a game or a Steam-launched dedicated server, all the necessary prior engine content is mapped in with the Steam depots,
 			// so we can just use the path as-is.
+
 			pLocation += strlen( BASESOURCEPATHS_TOKEN );
 		}
 
+
 		CUtlStringList vecFullLocationPaths;
-		char szAbsSearchPath[MAX_PATH];
 		V_MakeAbsolutePath( szAbsSearchPath, sizeof( szAbsSearchPath ), pLocation, pszBaseDir );
 
 		// Now resolve any ./'s.
@@ -1084,6 +1112,7 @@ FSReturnCode_t FileSystem_SetBasePaths( IFileSystem *pFileSystem )
 //-----------------------------------------------------------------------------
 FSReturnCode_t FileSystem_GetFileSystemDLLName( char *pFileSystemDLL, int nMaxLen, bool &bSteam )
 {
+#if 0
 	bSteam = false;
 
 	// Inside of here, we don't have a filesystem yet, so we have to assume that the filesystem_stdio or filesystem_steam
@@ -1112,6 +1141,31 @@ FSReturnCode_t FileSystem_GetFileSystemDLLName( char *pFileSystemDLL, int nMaxLe
 			bSteam = true;
 		}
 	#endif
+#else
+	char executablePath[MAX_PATH];
+	if ( !FileSystem_GetExecutableDir( executablePath, sizeof( executablePath ) )	)
+		return SetupFileSystemError( false, FS_INVALID_PARAMETERS, "FileSystem_GetExecutableDir failed." );
+
+	// Assume we'll use local files
+	Q_snprintf( pFileSystemDLL, nMaxLen, "%s%clibfilesystem_stdio" DLL_EXT_STRING, executablePath, CORRECT_PATH_SEPARATOR );
+
+	#if !defined( _X360 )
+		// Use filsystem_steam if it exists?
+		#if defined( OSX ) || defined( LINUX )
+			struct stat statBuf;
+		#endif
+		if (
+			#if defined( OSX ) || defined( LINUX )
+				stat( pFileSystemDLL, &statBuf ) != 0
+			#else
+				_access( pFileSystemDLL, 0 ) != 0
+			#endif
+		) {
+			Q_snprintf( pFileSystemDLL, nMaxLen, "%s%cfilesystem_stdio" DLL_EXT_STRING, executablePath, CORRECT_PATH_SEPARATOR );
+		}
+	#endif
+
+#endif
 
 	return FS_OK;
 }

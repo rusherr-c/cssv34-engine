@@ -11,16 +11,8 @@
 $Games
 {
 	"CSTRIKE"
-	"DOD"
 	"EPISODIC"
-	"HL1"
-	"HL1MP"
 	"HL2"
-	"HL2MP"
-	"LOSTCOAST"
-	"PORTAL"
-	"SDK"
-	"TF"
 }
 
 $Include "vpc_scripts\projects.vgc"

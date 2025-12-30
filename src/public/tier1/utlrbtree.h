@@ -32,7 +32,7 @@ template <typename T>
 class CDefLess
 {
 public:
-	CDefLess() {}
+	CDefLess() = default;
 	CDefLess( int i ) {}
 	inline bool operator()( const T &lhs, const T &rhs ) const { return ( lhs < rhs );	}
 	inline bool operator!() const { return false; }
@@ -295,9 +295,10 @@ protected:
 	void	Link( I elem );
 
 	// Used for sorting.
+	M m_Elements;
+
 	LessFunc_t m_LessFunc;
 
-	M m_Elements;
 	I m_Root;
 	I m_NumElements;
 	I m_FirstFree;
@@ -664,8 +665,11 @@ inline void CUtlRBTree<T, I, L, M>::SetColor( I i, typename CUtlRBTree<T, I, L, 
 //-----------------------------------------------------------------------------
 // Allocates/ deallocates nodes
 //-----------------------------------------------------------------------------
+#ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:4389) // '==' : signed/unsigned mismatch
+#endif
+
 template < class T, class I, typename L, class M >
 I  CUtlRBTree<T, I, L, M>::NewNode()
 {
@@ -710,7 +714,9 @@ I  CUtlRBTree<T, I, L, M>::NewNode()
 
 	return elem;
 }
+#ifdef _WIN32
 #pragma warning(pop)
+#endif
 
 template < class T, class I, typename L, class M >
 void  CUtlRBTree<T, I, L, M>::FreeNode( I i )

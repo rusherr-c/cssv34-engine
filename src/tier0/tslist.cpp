@@ -11,6 +11,7 @@
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
 #endif
+#include "unitlib/unitlib.h"
 
 namespace TSListTests
 {
@@ -129,13 +130,13 @@ void ValidateBuckets()
 		if ( g_pTestBuckets[i] != 0 )
 		{
 			Msg( "Test bucket %d has an invalid value %d\n", i, g_pTestBuckets[i] );
-			DebuggerBreakIfDebugging();
+			Shipping_Assert( 0 );
 			return;
 		}
 	}
 }
 
-unsigned PopThreadFunc( void *)
+uintp PopThreadFunc( void *)
 {
 	ThreadSetDebugName( "PopThread" );
 	g_nPopThreads++;
@@ -151,7 +152,7 @@ unsigned PopThreadFunc( void *)
 		{
 			if ( g_nPushThreads == 0 )
 			{
-				// Pop the rest 
+				// Pop the rest
 				while ( g_pTestOps->Pop( &ignored ) )
 				{
 					ThreadSleep( 0 );
@@ -165,7 +166,7 @@ unsigned PopThreadFunc( void *)
 	return 0;
 }
 
-unsigned PushThreadFunc( void * )
+uintp PushThreadFunc( void * )
 {
 	ThreadSetDebugName( "PushThread" );
 	g_nPushThreads++;
@@ -216,6 +217,7 @@ void TestEnd( bool bExpectEmpty = true )
 	if ( g_nPops != g_nPushes )
 	{
 		Msg( "FAIL: Not all items popped\n" );
+		Shipping_Assert( 0 );
 		return;
 	}
 
@@ -228,11 +230,13 @@ void TestEnd( bool bExpectEmpty = true )
 		else
 		{
 			Msg("FAIL: !IsEmpty()\n");
+			Shipping_Assert( 0 );
 		}
 	}
 	else
 	{
 		Msg("FAIL: !Validate()\n");
+		Shipping_Assert( 0 );
 	}
 	while ( g_ThreadHandles.size() )
 	{
@@ -306,7 +310,7 @@ void PushPopInterleavedTest()
 	TestEnd();
 }
 
-unsigned PushPopInterleavedTestThreadFunc( void * )
+uintp PushPopInterleavedTestThreadFunc( void * )
 {
 	ThreadSetDebugName( "PushPopThread" );
 	g_nThreads++;

@@ -322,16 +322,6 @@ void CBaseGamesPage::PerformLayout()
 		m_pRefreshQuick->SetEnabled(false);
 	}
 
-	if ( !steamapicontext->SteamMatchmakingServers() || !steamapicontext->SteamMatchmaking() )
-	{
-		m_pAddCurrentServer->SetVisible( false );
-		m_pRefreshQuick->SetEnabled( false );
-		m_pAddServer->SetEnabled( false );
-		m_pConnect->SetEnabled( false );
-		m_pRefreshAll->SetEnabled( false );
-		m_pAddToFavoritesButton->SetEnabled( false );
-		m_pGameList->SetEmptyListText( "#ServerBrowser_SteamRunning" );
-	}
 
 	Repaint();
 }

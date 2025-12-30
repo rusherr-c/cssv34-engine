@@ -72,9 +72,11 @@
 #include "cl_rcon.h"
 #include "host_state.h"
 #include "voice.h"
+#include "cbenchmark.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+#include "tier0/memalloc.h"
 
 extern CNetworkStringTableContainer *networkStringTableContainerServer;
 extern CNetworkStringTableContainer *networkStringTableContainerClient;
@@ -208,10 +210,11 @@ static ConVar sv_consistency( "sv_consistency", "1", FCVAR_REPLICATED, "Legacy v
 
 /// XXX(JohnS): When steam voice gets ugpraded to Opus we will probably default back to steam.  At that time we should
 ///             note that Steam voice is the highest quality codec below.
-static ConVar sv_voicecodec( "sv_voicecodec", "vaudio_celt", 0,
+static ConVar sv_voicecodec( "sv_voicecodec", "vaudio_opus", 0,
                              "Specifies which voice codec to use. Valid options are:\n"
                              "vaudio_speex - Legacy Speex codec (lowest quality)\n"
                              "vaudio_celt - Newer CELT codec\n"
+							 "vaudio_opus - Latest Opus codec (highest quality, comes by default)\n"
                              "steam - Use Steam voice API" );
 
 
@@ -1388,6 +1391,7 @@ bool CGameServer::FinishCertificateCheck( netadr_t &adr, int nAuthProtocol, cons
 		if ( AllowDebugDedicatedServerOutsideSteam() )
 			return true;
 
+/*
 		if ( !Host_IsSinglePlayerGame() || sv.IsDedicated()) // PROTOCOL_HASHEDCDKEY isn't allowed for multiplayer servers
 		{
 			RejectConnection( adr, clientChallenge, "#GameUI_ServerCDKeyAuthInvalid" );
@@ -1398,7 +1402,7 @@ bool CGameServer::FinishCertificateCheck( netadr_t &adr, int nAuthProtocol, cons
 		{
 			RejectConnection( adr, clientChallenge, "#GameUI_ServerInvalidCDKey" );
 			return false;
-		}
+		}*/
 
 		int nHashCount = 0;
 
@@ -2710,6 +2714,14 @@ bool CGameServer::SpawnServer( const char *szMapName, const char *szMapFile, con
 		event->SetString( "os", "LINUX" );
 #elif defined ( OSX )
 		event->SetString( "os", "OSX" );
+#elif defined(PLATFORM_BSD)
+    event->SetString("os",
+#    ifdef __FreeBSD__
+      "FreeBSD"
+#    else
+      "BSD"
+#    endif
+    );
 #else
 #error
 #endif
@@ -2842,6 +2854,9 @@ void SV_Think( bool bIsSimulating )
 	bIsSimulating =  bIsSimulating && ( sv.IsMultiplayer() || cl.IsActive() );
 
 	g_pServerPluginHandler->GameFrame( bIsSimulating );
+
+	if( bIsSimulating )
+		GetBenchResultsMgr()->Frame();
 }
 
 //-----------------------------------------------------------------------------
@@ -2917,6 +2932,7 @@ void SV_Frame( bool finalTick )
 	// unlock sting tables to allow changes, helps to find unwanted changes (bebug build only)
 	networkStringTableContainerServer->Lock( false );
 	
+
 	// Run any commands from client and play client Think functions if it is time.
 	sv.RunFrame(); // read network input etc
 

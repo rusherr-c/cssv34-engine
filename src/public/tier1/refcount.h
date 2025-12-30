@@ -167,7 +167,7 @@ class CRefPtr : public CBaseAutoPtr<T>
 {
 	typedef CBaseAutoPtr<T> BaseClass;
 public:
-	CRefPtr()												{}
+	CRefPtr() = default;
 	CRefPtr( T *pInit )										: BaseClass( pInit ) {}
 	CRefPtr( const CRefPtr<T> &from )						: BaseClass( from ) {}
 	~CRefPtr()												{ if ( BaseClass::m_pObject ) BaseClass::m_pObject->Release(); }
@@ -193,8 +193,8 @@ public:
 class CRefMT
 {
 public:
-	static int Increment( int *p) { return ThreadInterlockedIncrement( (long *)p ); }
-	static int Decrement( int *p) { return ThreadInterlockedDecrement( (long *)p ); }
+	static int Increment( int *p) { return ThreadInterlockedIncrement( (int32 *)p ); }
+	static int Decrement( int *p) { return ThreadInterlockedDecrement( (int32 *)p ); }
 };
 
 class CRefST

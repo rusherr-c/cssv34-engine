@@ -23,9 +23,8 @@ class CModelSoundsCache : public IBaseCacheInfo
 public:
 	CUtlVector< unsigned short > sounds;
 
-	CModelSoundsCache();
+	CModelSoundsCache() = default;
 	CModelSoundsCache( const CModelSoundsCache& src );
-	virtual ~CModelSoundsCache(){}
 
 	void PrecacheSoundList();
 

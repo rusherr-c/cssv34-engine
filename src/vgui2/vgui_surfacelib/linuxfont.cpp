@@ -12,7 +12,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#ifdef OSX
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <tier0/dbg.h>
 #include <vgui/ISurface.h>
 #include <utlbuffer.h>
@@ -92,7 +96,8 @@ void CLinuxFont::CreateFontList()
 	if ( m_FriendlyNameCache.Count() > 0 ) 
 		return;
 
-	if(!FcInit()) 
+#if HAVE_FC
+	if(!FcInit())
 		return;
     FcConfig *config;
     FcPattern *pat;
@@ -160,50 +165,50 @@ void CLinuxFont::CreateFontList()
     FcFontSetDestroy(fontset);
     FcObjectSetDestroy(os);
     FcPatternDestroy(pat);
+
+#endif
 }
 
-static FcPattern* FontMatch(const char* type, FcType vtype, const void* value,
-                            ...)
+#if HAVE_FC
+static FcPattern* FontMatch(const char* type, ...)
 {
+    FcValue fcvalue;
     va_list ap;
-    va_start(ap, value);
+    va_start(ap, type);
 
     FcPattern* pattern = FcPatternCreate();
 
-    for (;;)
-	{
-        FcValue fcvalue;
-        fcvalue.type = vtype;
-        switch (vtype) {
+    for (;;) {
+        // FcType is promoted to int when passed through ...
+        fcvalue.type = static_cast<FcType>(va_arg(ap, int));
+        switch (fcvalue.type) {
             case FcTypeString:
-                fcvalue.u.s = (FcChar8*) value;
+                fcvalue.u.s = va_arg(ap, const FcChar8 *);
                 break;
             case FcTypeInteger:
-                fcvalue.u.i = (int) value;
+                fcvalue.u.i = va_arg(ap, int);
                 break;
             default:
                 Assert(!"FontMatch unhandled type");
         }
-        FcPatternAdd(pattern, type, fcvalue, 0);
+        FcPatternAdd(pattern, type, fcvalue, FcFalse);
 
         type = va_arg(ap, const char *);
         if (!type)
             break;
-        // FcType is promoted to int when passed through ...
-        vtype = static_cast<FcType>(va_arg(ap, int));
-        value = va_arg(ap, const void *);
     };
     va_end(ap);
 
-    FcConfigSubstitute(0, pattern, FcMatchPattern);
+    FcConfigSubstitute(NULL, pattern, FcMatchPattern);
     FcDefaultSubstitute(pattern);
 
     FcResult result;
-    FcPattern* match = FcFontMatch(0, pattern, &result);
+    FcPattern* match = FcFontMatch(NULL, pattern, &result);
     FcPatternDestroy(pattern);
 
     return match;
 }
+#endif
 
 bool CLinuxFont::CreateFromMemory(const char *windowsFontName, void *data, int datasize, int tall, int weight, int blur, int scanlines, int flags)
 {
@@ -400,6 +405,86 @@ bool CLinuxFont::CreateFromMemory(const char *windowsFontName, void *data, int d
 	return true;
 }
 
+#include "tier1/convar.h"
+ConVar cl_language( "cl_language", "english", FCVAR_USERINFO, "Language (from HKCU\\Software\\Valve\\Steam\\Language)" );
+
+#if !HAVE_FC
+char *TryFindFont(const char *winFontName, bool bBold, int italic)
+{
+	static char fontFile[MAX_PATH];
+
+	const char *fontName, *fontNamePost = NULL;
+
+#ifdef ANDROID
+	const char *lang = cl_language.GetString();
+
+	if( strcmp( winFontName, "Courier New") == 0 )
+	{
+		fontName = "LiberationMono-Regular.ttf";
+		snprintf( fontFile, sizeof fontFile, "%s/files/%s", getenv("APP_DATA_PATH"), fontName);
+		return fontFile;
+	}
+
+	if( strcmp(lang, "japanese") == 0 ||
+		strcmp(lang, "koreana") == 0 ||
+		strcmp(lang, "korean") == 0 ||
+		strcmp(lang, "tchinese") == 0 ||
+		strcmp(lang, "schinese") == 0 )
+	{
+		fontName = "DroidSansFallback.ttf"; // for chinese/japanese/korean
+		snprintf( fontFile, sizeof fontFile, "%s/files/%s", getenv("APP_DATA_PATH"), fontName);
+		return fontFile;
+	}
+	else if( strcmp(lang, "thai") == 0 )
+	{
+		fontName = "Itim-Regular.otf";
+		snprintf( fontFile, sizeof fontFile, "%s/files/%s", getenv("APP_DATA_PATH"), fontName);
+		return fontFile;
+	}
+
+	fontName = "dejavusans";
+
+	if( bBold )
+	{
+		if( italic )
+			fontNamePost = "boldoblique";
+		else
+			fontNamePost = "bold";
+	}
+	else if( italic )
+		fontNamePost = "oblique";
+
+	if( fontNamePost )
+		snprintf(fontFile, sizeof fontFile, "%s/files/%s-%s.ttf", getenv("APP_DATA_PATH"), fontName, fontNamePost);
+	else
+		snprintf(fontFile, sizeof fontFile, "%s/files/%s.ttf", getenv("APP_DATA_PATH"), fontName);
+
+
+	return fontFile;
+#else
+	// "platform/resource/linux_fonts/";
+
+	if( strcmp( winFontName, "Courier New") == 0 )
+		fontName = "liberationmono";
+
+	if( bBold )
+	{
+		if( italic )
+			fontNamePost = "boldoblique";
+		else
+			fontNamePost = "bold";
+	}
+	else if( italic )
+		fontNamePost = "oblique";
+	else
+		fontNamePost = "regular";
+
+	snprintf(fontFile, sizeof fontFile, "platform/resource/linux_fonts/%s-%s.ttf", fontName, fontNamePost);
+	return fontFile;
+#endif
+}
+#endif
+
 //-----------------------------------------------------------------------------
 // Purpose: Given a font name from windows, match it to the filename and return that.
 //-----------------------------------------------------------------------------
@@ -413,18 +498,24 @@ char *CLinuxFont::GetFontFileName( const char *windowsFontName, int flags )
 	else if ( !Q_stricmp( pchFontName, "Arial Black" ) || Q_stristr( pchFontName, "bold" ) )
 		bBold = true;
 
-    const int italic = ( flags & vgui::ISurface::FONTFLAG_ITALIC ) ? FC_SLANT_ITALIC : FC_SLANT_ROMAN;
-	const int nFcWeight = bBold ? FC_WEIGHT_BOLD : FC_WEIGHT_NORMAL;
+	const int italic = ( flags & vgui::ISurface::FONTFLAG_ITALIC ) ? FC_SLANT_ITALIC : FC_SLANT_ROMAN;
 
-    FcPattern *match = FontMatch( FC_FAMILY, FcTypeString, pchFontName,
+#if !HAVE_FC
+	char *filename = TryFindFont( windowsFontName, bBold, italic );
+	Msg("Found font: %s\n", filename);
+	if( !filename ) return NULL;
+	return strdup( filename );
+#else
+	const int nFcWeight = bBold ? FC_WEIGHT_BOLD : FC_WEIGHT_NORMAL;
+	FcPattern *match = FontMatch( FC_FAMILY, FcTypeString, pchFontName,
 								  FC_WEIGHT, FcTypeInteger, nFcWeight,
 								  FC_SLANT, FcTypeInteger, italic,
 								  NULL);
  	if ( !match )
-    {
+	{
 		AssertMsg1( false, "Unable to find font named %s\n", windowsFontName );
-        return NULL;
-    }
+		return NULL;
+	}
 	else
 	{
 		char *filenameret = NULL;
@@ -440,8 +531,11 @@ char *CLinuxFont::GetFontFileName( const char *windowsFontName, int flags )
 		}
 
 		FcPatternDestroy( match );
+		Msg("font fc: %s - %s\n", windowsFontName, filenameret);
+
 		return filenameret;
 	}
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -502,7 +596,7 @@ void CLinuxFont::GetCharRGBA( wchar_t ch, int rgbaWide, int rgbaTall, unsigned c
 	if( error == 0 )
 	{
 		uint32 alpha_scale = 1;
-		int Width = min( rgbaWide, bitmap.width );
+		int Width = MIN( rgbaWide, bitmap.width );
 		unsigned char *rgba = prgba + ( nSkipRows * rgbaWide * 4 );
 
 		switch( m_face->glyph->bitmap.pixel_mode )

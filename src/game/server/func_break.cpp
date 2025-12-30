@@ -817,6 +817,8 @@ void CBreakable::VPhysicsCollision( int index, gamevcollisionevent_t *pEvent )
 //-----------------------------------------------------------------------------
 int CBreakable::OnTakeDamage( const CTakeDamageInfo &info )
 {
+	Vector	vecTemp;
+
 	CTakeDamageInfo subInfo = info;
 
 	// If attacker can't do at least the min required damage to us, don't take any damage from them
@@ -829,6 +831,8 @@ int CBreakable::OnTakeDamage( const CTakeDamageInfo &info )
 		m_bTookPhysicsDamage = false;
 		return 1;
 	}
+
+	vecTemp = subInfo.GetInflictor()->GetAbsOrigin() - WorldSpaceCenter();
 
 	if (!IsBreakable())
 		return 0;
@@ -1248,7 +1252,7 @@ void CPushable::Spawn( void )
 
 #ifdef HL1_DLL
 	// Force HL1 Pushables to stay axially aligned.
-	VPhysicsGetObject()->SetInertia( Vector( 1e30, 1e30, 1e30 ) );
+	VPhysicsGetObject()->SetInertia( Vector( 3.f, 3.f, 3.f ) );
 #endif//HL1_DLL
 }
 

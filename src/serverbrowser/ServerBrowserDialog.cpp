@@ -25,7 +25,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock.h>
 #endif
-#ifdef LINUX
+#if defined(LINUX) || defined(PLATFORM_BSD)
 #include <arpa/inet.h>
 #endif
 
@@ -154,9 +154,10 @@ CServerBrowserDialog::~CServerBrowserDialog()
 	SaveUserData();
 
   	if (m_pSavedData)
-  	{
   		m_pSavedData->deleteThis();
-  	}
+
+	if( m_pFilterData )
+		m_pFilterData->deleteThis();
 }
 
 

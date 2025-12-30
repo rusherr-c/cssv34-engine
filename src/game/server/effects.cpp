@@ -1434,7 +1434,12 @@ void CItemSoda::CanThink ( void )
 
 	SetSolid( SOLID_BBOX );
 	AddSolidFlags( FSOLID_TRIGGER );
+
+#ifdef HL1_DLL
+	UTIL_SetSize(this, Vector(-16, -16, 0), Vector(16, 16, 16));
+#else
 	UTIL_SetSize ( this, Vector ( -8, -8, 0 ), Vector ( 8, 8, 8 ) );
+#endif
 
 	SetThink ( NULL );
 	SetTouch ( &CItemSoda::CanTouch );
@@ -1539,11 +1544,11 @@ public:
 	DECLARE_SERVERCLASS();
 
 private:
-#ifdef POSIX
+//#ifdef POSIX
 	CEnvWindShared m_EnvWindShared; // FIXME - fails to compile as networked var due to operator= problem
-#else
-	CNetworkVarEmbedded( CEnvWindShared, m_EnvWindShared );
-#endif
+//#else
+//	CNetworkVarEmbedded( CEnvWindShared, m_EnvWindShared );
+//#endif
 };
 
 LINK_ENTITY_TO_CLASS( env_wind, CEnvWind );

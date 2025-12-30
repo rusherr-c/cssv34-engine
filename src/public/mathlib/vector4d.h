@@ -16,12 +16,16 @@
 #include <math.h>
 #include <stdlib.h>		// For rand(). We really need a library!
 #include <float.h>
-#if !defined( _X360 )
+#if defined(__SSE__) || defined(_M_IX86_FP)
 #include <xmmintrin.h>	// For SSE
 #endif
 #include "basetypes.h"	// For vec_t, put this somewhere else?
 #include "tier0/dbg.h"
 #include "mathlib/math_pfns.h"
+
+#if defined (__arm__) || defined(__aarch64__)
+#include "sse2neon.h"
+#endif
 
 // forward declarations
 class Vector;
@@ -38,7 +42,16 @@ public:
 	vec_t x, y, z, w;
 
 	// Construction/destruction
-	Vector4D(void);
+#if defined( _DEBUG ) && defined( VECTOR_PARANOIA )
+	inline Vector4D(void)
+	{
+		// Initialize to NAN to catch errors
+		x = y = z = w = VEC_T_NAN;
+	}
+#else
+	Vector4D(void) = default;
+#endif
+
 	Vector4D(vec_t X, vec_t Y, vec_t Z, vec_t W);
 	Vector4D(const float *pFloat);
 
@@ -135,7 +148,7 @@ const Vector4D vec4_invalid( FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX );
 class ALIGN16 Vector4DAligned : public Vector4D
 {
 public:
-	Vector4DAligned(void) {}
+	Vector4DAligned(void) = default;
 	Vector4DAligned( vec_t X, vec_t Y, vec_t Z, vec_t W );
 
 	inline void Set( vec_t X, vec_t Y, vec_t Z, vec_t W );
@@ -200,15 +213,6 @@ void Vector4DLerp(Vector4D const& src1, Vector4D const& src2, vec_t t, Vector4D&
 //-----------------------------------------------------------------------------
 // constructors
 //-----------------------------------------------------------------------------
-
-inline Vector4D::Vector4D(void)									
-{ 
-#ifdef _DEBUG
-	// Initialize to NAN to catch errors
-	x = y = z = w = VEC_T_NAN;
-#endif
-}
-
 inline Vector4D::Vector4D(vec_t X, vec_t Y, vec_t Z, vec_t W )
 { 
 	x = X; y = Y; z = Z; w = W;
@@ -613,7 +617,7 @@ inline void Vector4DAligned::Set( vec_t X, vec_t Y, vec_t Z, vec_t W )
 }
 
 inline void Vector4DAligned::InitZero( void )
-{ 
+{
 #if !defined( _X360 )
 	this->AsM128() = _mm_set1_ps( 0.0f );
 #else
@@ -650,10 +654,10 @@ inline void Vector4DWeightMAD( vec_t w, Vector4DAligned const& vInA, Vector4DAli
 	vOutB.z += vInB.z * w;
 	vOutB.w += vInB.w * w;
 #else
-    __vector4 temp;
+	__vector4 temp;
 
-    temp = __lvlx( &w, 0 );
-    temp = __vspltw( temp, 0 );
+	temp = __lvlx( &w, 0 );
+	temp = __vspltw( temp, 0 );
 
 	vOutA.AsM128() = __vmaddfp( vInA.AsM128(), temp, vOutA.AsM128() );
 	vOutB.AsM128() = __vmaddfp( vInB.AsM128(), temp, vOutB.AsM128() );

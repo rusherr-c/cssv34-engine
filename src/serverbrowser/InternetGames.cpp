@@ -23,7 +23,7 @@ CInternetGames::CInternetGames(vgui::Panel *parent, const char *panelName, EPage
 	m_fLastSort = 0.0f;
 	m_bDirty = false;
 	m_bRequireUpdate = true;
-	m_bOfflineMode = !IsSteamGameServerBrowsingEnabled();
+	m_bOfflineMode = false;
 
 	m_bAnyServersRetrievedFromMaster = false;
 	m_bNoServersListedOnMaster = false;
