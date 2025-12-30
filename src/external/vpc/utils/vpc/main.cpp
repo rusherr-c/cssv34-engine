@@ -75,7 +75,7 @@ CVPC::CVPC()
 	}
 
 #ifdef WIN32
-	m_eVSVersion = k_EVSVersion_2019;
+	m_eVSVersion = k_EVSVersion_2026;
 	m_bUseVS2010FileFormat = true;
 	m_bUseUnity = false;
 #else
@@ -147,11 +147,11 @@ bool CVPC::Init( int argc, char **argv )
 		m_nArgc--;
 	}
 
-	Log_Msg( LOG_VPC, "VPC - Valve Project Creator For " );
-	Log_Msg( LOG_VPC, "Visual Studio, Xbox 360, PlayStation 3, " );
-	Log_Msg( LOG_VPC, "Xcode and Make (Build: %s %s)\n", __DATE__, __TIME__ );
-	Log_Msg( LOG_VPC, "(C) Copyright 1996-2015, Valve Corporation, All rights reserved.\n" );
-	Log_Msg( LOG_VPC, "\n" );
+	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "Valve Project Creator for" );
+	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "Visual Studio (Build: %s %s)\n", __DATE__, __TIME__ );
+	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "(C) Copyright Valve Corporation, All rights reserved.\n" );
+	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "\n" );
+	Sleep(500);
 
 	return true;
 }
@@ -211,7 +211,7 @@ bool CVPC::LoadPerforceInterface()
 #ifdef _WIN32
 		// This always fails on non-Windows build machines -- the warning is
 		// annoying and not helpful.
-		VPCWarning( "Unable to get Perforce interface from p4lib.dll." );
+		//VPCWarning( "Unable to get Perforce interface from p4lib.dll." );
 #endif
 		return false;
 	}
@@ -624,13 +624,11 @@ void CVPC::SpewUsage( void )
 			Log_Msg( LOG_VPC, "[/srcctl]:     Enable P4SCC source control integration - can also set environment variable VPC_SRCCTL to 1\n" );
 #endif
 			Log_Msg( LOG_VPC, "[/mirror]:     <path> - Mirror output files to specified path. Used for A:B testing.\n" );
-			Log_Msg( LOG_VPC, "[/2019]:       Generate projects and solutions for Visual Studio 2019 [default]\n" );
+			Log_Msg( LOG_VPC, "[/2026]:       Generate projects and solutions for Visual Studio 2026\n");
+			Log_Msg( LOG_VPC, "[/2022]:       Generate projects and solutions for Visual Studio 2022\n");
+			Log_Msg( LOG_VPC, "[/2019]:       Generate projects and solutions for Visual Studio 2019\n" );
 			Log_Msg( LOG_VPC, "[/2015]:       Generate projects and solutions for Visual Studio 2015\n" );
 			Log_Msg( LOG_VPC, "[/2013]:       Generate projects and solutions for Visual Studio 2013\n" );
-			Log_Msg( LOG_VPC, "[/2012]:       Generate projects and solutions for Visual Studio 2012\n" );
-			Log_Msg( LOG_VPC, "[/2010]:       Generate projects and solutions for Visual Studio 2010\n" );
-			Log_Msg( LOG_VPC, "[/2005]:       Generate projects and solutions for Visual Studio 2005\n" );
-			Log_Msg( LOG_VPC, "[/2008]:       Generate projects and solutions for Visual Studio 2008\n" );
 			Log_Msg( LOG_VPC, "[/windows]:    Generate projects for both Win32 and Win64\n" );
 			Log_Msg( LOG_VPC, "[/unity]:      Enable unity file generation\n" );
 			Log_Msg( LOG_VPC, "[/32bittools]: Specify 32-bit toolchain in VC++ even when compiling 64 bit target\n" );
@@ -997,6 +995,16 @@ void CVPC::HandleSingleCommandLineArg( const char *pArg )
 		else if ( !V_stricmp( pArgName, "2019" ) )
 		{
 			m_eVSVersion = k_EVSVersion_2019;
+			m_ExtraOptionsCRCString += pArgName;
+		}
+		else if (!V_stricmp(pArgName, "2022"))
+		{
+			m_eVSVersion = k_EVSVersion_2022;
+			m_ExtraOptionsCRCString += pArgName;
+		}
+		else if (!V_stricmp(pArgName, "2026"))
+		{
+			m_eVSVersion = k_EVSVersion_2026;
 			m_ExtraOptionsCRCString += pArgName;
 		}
 		else if ( !V_stricmp( pArgName, "nounity" ) )
@@ -1820,6 +1828,22 @@ void CVPC::SetMacrosAndConditionals()
 		// VS2010 is strictly win32/xbox360
 		switch ( m_eVSVersion )
 		{
+		case k_EVSVersion_2026:
+			m_ExtraOptionsCRCString += "VS2026";
+			SetConditional("VS2026", true);
+
+			//SetConditional("VS2013", true);
+			m_bUseVS2010FileFormat = true;
+			break;
+
+		case k_EVSVersion_2022:
+			m_ExtraOptionsCRCString += "VS2022";
+			SetConditional("VS2022", true);
+
+			//SetConditional("VS2013", true);
+			m_bUseVS2010FileFormat = true;
+			break;
+
 		case k_EVSVersion_2019:
 			m_ExtraOptionsCRCString += "VS2019";
 			SetConditional( "VS2019", true );
@@ -2367,6 +2391,10 @@ void CVPC::SetupGenerators()
 		{
 			// spew what we are generating
 			const char *pchLogLine = "Generating for Visual Studio 2005.\n";
+			if (m_eVSVersion == k_EVSVersion_2026)
+				pchLogLine = "Generating for Visual Studio 2026.\n";
+			if (m_eVSVersion == k_EVSVersion_2022)
+				pchLogLine = "Generating for Visual Studio 2022.\n";
 			if ( m_eVSVersion == k_EVSVersion_2019 )
 				pchLogLine = "Generating for Visual Studio 2019.\n";
 			else if ( m_eVSVersion == k_EVSVersion_2015 )
@@ -2378,7 +2406,8 @@ void CVPC::SetupGenerators()
 			else if ( m_eVSVersion == k_EVSVersion_2010 )
 				pchLogLine = "Generating for Visual Studio 2010.\n";
 
-			Log_Msg( LOG_VPC, Color( 0, 255, 255, 255 ), pchLogLine );
+			Log_Msg( LOG_VPC, Color(0, 0, 255, 255 ), pchLogLine );
+			Sleep(500);
 
 			// pick a project generator
 			if ( m_bUseVS2010FileFormat )

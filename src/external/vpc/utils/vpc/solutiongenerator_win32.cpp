@@ -119,8 +119,17 @@ public:
 		if ( !fp )
 			g_pVPC->VPCError( "Can't open %s for writing.", pSolutionFilename );
 
-		
-		if ( g_pVPC->Is2019() )
+		else if (g_pVPC->Is2026())
+		{
+			fprintf(fp, "\xef\xbb\xbf\nMicrosoft Visual Studio Solution File, Format Version 12.00\n");
+			fprintf(fp, "# Visual Studio Version 18\n");
+		}
+		else if (g_pVPC->Is2022())
+		{
+			fprintf(fp, "\xef\xbb\xbf\nMicrosoft Visual Studio Solution File, Format Version 12.00\n");
+			fprintf(fp, "# Visual Studio Version 17\n");
+		}
+		else if ( g_pVPC->Is2019() )
 		{
 			fprintf( fp, "\xef\xbb\xbf\nMicrosoft Visual Studio Solution File, Format Version 12.00\n" );
 			fprintf( fp, "# Visual Studio Version 16\n" );
