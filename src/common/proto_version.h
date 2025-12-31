@@ -11,8 +11,9 @@
 #pragma once
 #endif
 
-// The current network protocol version.  Changing this makes clients and servers incompatible
+// The current network protocol version.
 #define PROTOCOL_VERSION    		7
+#define PROTOCOL2    				24
 
 #define DEMO_BACKWARDCOMPATABILITY
 

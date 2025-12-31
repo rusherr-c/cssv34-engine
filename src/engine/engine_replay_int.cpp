@@ -24,8 +24,8 @@
 #include "con_nprint.h"
 #include "net_chan.h"
 #include "download.h"
-#include "audio/public/snd_device.h"
-#include "audio/private/snd_wave_temp.h"
+#include "snd_device.h"
+#include "snd_wave_temp.h"
 #endif
 
 // memdbgon must be the last include file in a .cpp file!!!

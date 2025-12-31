@@ -40,7 +40,8 @@ CServerRecordingSessionManager::~CServerRecordingSessionManager()
 const char *CServerRecordingSessionManager::GetNewSessionName() const
 {
 	// Setup filename for the session
-	tm today; VCRHook_LocalTime( &today );
+	time_t t = time(0);
+	tm today = *localtime(&t);
 	return Replay_va(
 		"%04i%02i%02i-%02i%02i%02i-%s",
 		1900 + today.tm_year, today.tm_mon+1, today.tm_mday, 

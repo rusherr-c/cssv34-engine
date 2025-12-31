@@ -19,8 +19,8 @@ CReplayTime::CReplayTime()
 
 void CReplayTime::InitDateAndTimeToNow()
 {
-	tm now;
-	VCRHook_LocalTime( &now );
+	time_t t = time(0);
+	tm now = *localtime(&t);
 	SetDate( now.tm_mday, now.tm_mon + 1, now.tm_year + 1900 );
 	SetTime( now.tm_hour, now.tm_min, now.tm_sec );
 }

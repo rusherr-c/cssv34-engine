@@ -147,7 +147,6 @@
 #include "fbxsystem/fbxsystem.h"
 #endif
 
-#include "touch.h"
 
 extern vgui::IInputInternal *g_InputInternal;
 
@@ -729,7 +728,6 @@ public:
 	void PrecacheMaterial( const char *pMaterialName );
 
 	virtual bool IsConnectedUserInfoChangeAllowed( IConVar *pCvar );
-	virtual void IN_TouchEvent( uint data, uint data2, uint data3, uint data4 );
 
 private:
 	void UncacheAllMaterials( );
@@ -1034,7 +1032,6 @@ int CHLClient::Init( CreateInterfaceFn appSystemFactory, CreateInterfaceFn physi
 	g_pClientMode->InitViewport();
 
 	gHUD.Init();
-	gTouch.Init();
 
 	g_pClientMode->Init();
 
@@ -1199,7 +1196,6 @@ void CHLClient::Shutdown( void )
 	
 	gHUD.Shutdown();
 	VGui_Shutdown();
-	gTouch.Shutdown();
 
 	ParticleMgr()->Term();
 	
@@ -2636,25 +2632,4 @@ CSteamID GetSteamIDForPlayerIndex( int iPlayerIndex )
 
 #endif
 
- 
-void CHLClient::IN_TouchEvent( uint data, uint data2, uint data3, uint data4 )
-{
-	if( enginevgui->IsGameUIVisible() )
-		return;
 
-	touch_event_t ev;
-
-	ev.type = data & 0xFFFF;
-	ev.fingerid = (data >> 16) & 0xFFFF;
-	ev.x = (double)((data2 >> 16) & 0xFFFF)  / 0xFFFF;
-	ev.y = (double)(data2 & 0xFFFF) / 0xFFFF;
-
-	union{uint i;float f;} ifconv;
-	ifconv.i = data3;
-	ev.dx = ifconv.f;
-
-	ifconv.i = data4;
-	ev.dy = ifconv.f;
-
-	gTouch.ProcessEvent( &ev );
-}

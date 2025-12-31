@@ -155,6 +155,7 @@ modeswitchsave.tga
 !/src/lib/public/SDL2.*
 !/src/lib/public/socketlib.lib
 !/src/lib/public/openvr_api.lib
+!/src/lib/public/libz.lib
 !/src/lib/common/libjpeg.lib
 !/src/lib/common/libpng.lib
 !/src/lib/common/libz.lib

@@ -16,7 +16,7 @@ $Configuration
 {
 	$Compiler
 	{
-		$AdditionalIncludeDirectories	"$BASE;.\;audio;audio\;audio;$SRCDIR\vgui2\include;$SRCDIR\vgui2\controls"
+		$AdditionalIncludeDirectories	"$BASE;.\;.\audio;..\public\engine\audio;$SRCDIR\vgui2\include;$SRCDIR\vgui2\controls"
 		$AdditionalIncludeDirectories	"$BASE;$SRCDIR\dx9sdk\include" [$WINDOWS]
 		$PreprocessorDefinitions		"$BASE;USE_CONVARS;VOICE_OVER_IP;BUMPMAP;__USEA3D;_ADD_EAX_;ENGINE_DLL;VERSION_SAFE_STEAM_API_INTERFACES;USE_BREAKPAD_HANDLER"
 		$PreprocessorDefinitions		"$BASE;DEDICATED;SWDS" [$DEDICATED]
@@ -225,10 +225,13 @@ $Project "engine"
 				}
 			}
 		}
+		$File	"masterserver.cpp"
+
 	}
 
 	$Folder	"Source Files"
 	{
+		$File	"buildnum.cpp"
 		$File	"baseautocompletefilelist.cpp"
 		$File	"baseserver.cpp"
 		$File	"bitbuf_errorhandler.cpp"
@@ -415,9 +418,7 @@ $Project "engine"
 			{
 				$Compiler
 				{
-					$Create/UsePrecompiledHeader	"Use Precompiled Header (/Yu)"
-					$Create/UsePCHThroughFile		"audio_pch.h"
-					$PrecompiledHeaderFile			"$(IntDir)/audio_pch.pch"
+					$Create/UsePrecompiledHeader	"Not Using Precompiled Headers"
 				}
 			}
 		}
@@ -437,9 +438,7 @@ $Project "engine"
 			{
 				$Compiler
 				{
-					$Create/UsePrecompiledHeader	"Use Precompiled Header (/Yu)"
-					$Create/UsePCHThroughFile		"audio_pch.h"
-					$PrecompiledHeaderFile			"$(IntDir)/audio_pch.pch"
+					$Create/UsePrecompiledHeader	"Not Using Precompiled Headers"
 				}
 			}
 		}
@@ -452,9 +451,7 @@ $Project "engine"
 			{
 				$Compiler
 				{
-					$Create/UsePrecompiledHeader	"Use Precompiled Header (/Yu)"
-					$Create/UsePCHThroughFile		"audio_pch.h"
-					$PrecompiledHeaderFile			"$(IntDir)/audio_pch.pch"
+					$Create/UsePrecompiledHeader	"Not Using Precompiled Headers"
 				}
 			}
 		}

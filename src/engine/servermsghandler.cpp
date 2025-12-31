@@ -289,8 +289,11 @@ bool CClientState::ProcessTick( NET_Tick *msg )
 {
 	int tick = msg->m_nTick;
 
+#if PROTOCOL_VERSION > 10
 	m_NetChannel->SetRemoteFramerate( msg->m_flHostFrameTime, msg->m_flHostFrameTimeStdDeviation );
-
+#else 
+	m_NetChannel->SetRemoteFramerate(0.0f, 0.0f); // It's very very bad, but i cannot just skip this function
+#endif
 	m_ClockDriftMgr.SetServerTick( tick );
 
 	// Remember this for GetLastTimeStamp().

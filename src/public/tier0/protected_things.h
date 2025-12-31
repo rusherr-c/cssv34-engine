@@ -261,10 +261,10 @@
 	#endif
 	#define WaitForSingleObject	WaitForSingleObject__USE_VCR_MODE
 
-	#if defined( EnterCriticalSection )
-		#undef EnterCriticalSection
-	#endif
-	#define EnterCriticalSection EnterCriticalSection__USE_VCR_MODE
+	//#if defined( EnterCriticalSection )
+	//	#undef EnterCriticalSection
+	//#endif
+	//#define EnterCriticalSection EnterCriticalSection__USE_VCR_MODE
 
 #endif
 

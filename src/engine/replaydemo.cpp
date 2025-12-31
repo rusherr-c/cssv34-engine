@@ -60,7 +60,8 @@ CReplayDemoRecorder::~CReplayDemoRecorder()
 void CReplayDemoRecorder::GetUniqueDemoFilename( char *pOut, int nLength )
 {
 	Assert( pOut );
-	tm today; VCRHook_LocalTime( &today );
+	time_t t = time(NULL);
+	tm today = *localtime(&t);
 	Q_snprintf( pOut, nLength, "%04i%02i%02i-%02i%02i%02i-%s.dem", 
 		1900 + today.tm_year, today.tm_mon+1, today.tm_mday, 
 		today.tm_hour, today.tm_min, today.tm_sec, m_pReplayServer->GetMapName() ); 

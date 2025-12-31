@@ -790,7 +790,6 @@ public:
 
 	virtual bool IsConnectedUserInfoChangeAllowed( IConVar *pCvar ) = 0;
 
-	virtual void IN_TouchEvent( uint data, uint data2, uint data3, uint data4 ) = 0;
 };
 
 #define CLIENT_DLL_INTERFACE_VERSION		"VClient017"

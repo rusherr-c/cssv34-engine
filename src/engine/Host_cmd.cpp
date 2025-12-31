@@ -1189,20 +1189,8 @@ DWORD __declspec(dllimport) __stdcall GetEnvironmentVariableA( const char *, cha
 
 CON_COMMAND( version, "Print version info string." )
 {
-	ConMsg( "Build Label:          %8d   # Uniquely identifies each build\n", GetSteamInfIDVersionInfo().ServerVersion );
-	ConMsg( "Network PatchVersion: %8s   # Determines client and server compatibility\n", GetSteamInfIDVersionInfo().szVersionString );
-	ConMsg( "Protocol version:     %8d   # High level network protocol version\n", PROTOCOL_VERSION );
-
-	if ( sv.IsDedicated() || serverGameDLL )
-	{
-		ConMsg( "Server version:       %8i\n", GetSteamInfIDVersionInfo().ServerVersion );
-		ConMsg( "Server AppID:         %8i\n", GetSteamInfIDVersionInfo().ServerAppID );
-	}
-	if ( !sv.IsDedicated() )
-	{
-		ConMsg( "Client version:       %8i\n", GetSteamInfIDVersionInfo().ClientVersion );
-		ConMsg( "Client AppID:         %8i\n", GetSteamInfIDVersionInfo().AppID );
-	}
+	ConMsg("Protocol version %i <-> %i\nExe version %s (%s)\n", PROTOCOL_VERSION, PROTOCOL2, GetSteamInfIDVersionInfo().szVersionString, GetSteamInfIDVersionInfo().szProductString);
+	ConMsg("Exe build: " __TIME__ " " __DATE__ " (%i)\n", build_number());
 }
 
 

@@ -2123,6 +2123,7 @@ public:
 typedef struct _RTL_CRITICAL_SECTION RTL_CRITICAL_SECTION;
 typedef RTL_CRITICAL_SECTION CRITICAL_SECTION;
 
+//#undef EnterCriticalSection
 #ifndef _X360
 extern "C"
 {

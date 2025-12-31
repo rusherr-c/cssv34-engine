@@ -171,6 +171,15 @@ $Project "tier0"
 		$File	"stacktools.cpp"
 		$File	"thread.cpp"		[$WINDOWS||$POSIX]
 		$File	"threadtools.cpp"
+		{
+			$Configuration
+			{
+				$Compiler
+				{
+					$Create/UsePrecompiledHeader	"Not Using Precompiled Headers"
+				}
+			}
+		}
 		$File	"tier0_strtools.cpp"
 		$File	"tslist.cpp"
 		$File	"vcrmode.cpp"		[$WINDOWS]
