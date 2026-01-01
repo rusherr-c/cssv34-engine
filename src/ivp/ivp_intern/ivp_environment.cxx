@@ -970,7 +970,7 @@ void IVP_Environment::simulate_psi(IVP_Time /*psi_time*/){
     IVP_Calc_Next_PSI_Solver::commit_all_hull_managers( this, &active_hulls);
 
 #ifdef IVP_ENABLE_PERFORMANCE_COUNTER
-    get_performancecounter()->pcount(IVP_PE_PSI_SHORT_MINDISTS);
+//    get_performancecounter()->pcount(IVP_PE_PSI_SHORT_MINDISTS);
 #endif
     state = IVP_ES_PSI_SHORT;
     get_mindist_manager()->recalc_all_exact_mindists();

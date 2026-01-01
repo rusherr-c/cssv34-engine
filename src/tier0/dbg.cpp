@@ -57,12 +57,12 @@ extern const tchar* GetProcessorArchName();
 class CDbgLogger : public IDbgLogger
 {
 public:
-	CDbgLogger();
-	~CDbgLogger();
+	CDbgLogger() noexcept;
+	~CDbgLogger() noexcept;
 
-	void Init(const char *logfile);
-	void Write(const char *data);
-	void Disable();
+	void Init(const char *logfile) noexcept;
+	void Write(const char *data) noexcept;
+	void Disable() noexcept;
 
 private:
 	FILE *file;
@@ -74,7 +74,7 @@ private:
 };
 
 
-CDbgLogger::CDbgLogger()
+CDbgLogger::CDbgLogger() noexcept
 {
 	bShouldLog = true;
 	flStartTime = Plat_FloatTime();
@@ -82,7 +82,7 @@ CDbgLogger::CDbgLogger()
 	iMsg = 0;
 }
 
-void CDbgLogger::Disable()
+void CDbgLogger::Disable() noexcept
 {
 	bShouldLog = false;
 
@@ -93,8 +93,12 @@ void CDbgLogger::Disable()
 	}
 }
 
-void CDbgLogger::Init(const char *logfile)
+void CDbgLogger::Init(const char *logfile) noexcept
 {
+	Assert(logfile);
+	AssertValidWritePtr(logfile);
+	AssertValidReadPtr(logfile);
+
 	time_t timeCur;
 	struct tm tmStruct;
 
@@ -116,7 +120,10 @@ void CDbgLogger::Init(const char *logfile)
 #endif
 
 #ifdef _WIN32
-		fprintf(file, "Compiler version: %s\n", _MSC_VER);
+		fprintf(file, "Compiler version: MSVC %d (%d.%d)\n",
+			_MSC_VER,
+			_MSC_VER / 100,
+			_MSC_VER % 100);
 #endif
 
 #ifdef GNUC
@@ -135,7 +142,7 @@ void CDbgLogger::Init(const char *logfile)
 	}
 }
 
-CDbgLogger::~CDbgLogger()
+CDbgLogger::~CDbgLogger() noexcept
 {
 	while( iMsg > 0 )
 	{
@@ -159,7 +166,7 @@ CDbgLogger::~CDbgLogger()
 	fclose(file);
 }
 
-void CDbgLogger::Write(const char *data)
+void CDbgLogger::Write(const char *data) noexcept
 {
 	if( !bShouldLog )
 		return;
@@ -1015,7 +1022,7 @@ void ValidateSpew( CValidator &validator )
 // Input  : *fmt - 
 //			... - 
 //-----------------------------------------------------------------------------
-void COM_TimestampedLog( char const *fmt, ... )
+void COM_TimestampedLog(PRINTF_FORMAT_STRING char const* fmt, ...) FMTFUNCTION(1, 2)
 {
 	static float s_LastStamp = 0.0;
 	static bool s_bShouldLog = false;
@@ -1042,6 +1049,8 @@ void COM_TimestampedLog( char const *fmt, ... )
 	va_list argptr;
 	va_start( argptr, fmt );
 	_vsnprintf( string, sizeof( string ), fmt, argptr );
+	OutputDebugStringA(string);
+	OutputDebugStringA("\n");
 	va_end( argptr );
 
 	float curStamp = Plat_FloatTime();

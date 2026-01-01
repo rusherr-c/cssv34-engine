@@ -18,8 +18,10 @@ inline hk_real hk_Math::cos( hk_real r) { return hk_real(::cos(r)); }
 inline hk_real hk_Math::atan2( hk_real a, hk_real b)  { return hk_real(::atan2(a,b)); }
 inline hk_real hk_Math::asin( hk_real r) { return hk_real(::asin(r)); }
 inline hk_real hk_Math::acos( hk_real r) { return hk_real(::acos(r)); }
+#include "valve_minmax_off.h"
 inline hk_real hk_Math::max( hk_real a, hk_real b) { return a>b ? a : b; }
 inline hk_real hk_Math::min( hk_real a, hk_real b) { return a<b ? a : b; }
+#include "valve_minmax_on.h"
 
 inline hk_real hk_Math::exp( hk_real e) { return hk_real(::exp(e)); }
 
@@ -27,7 +29,7 @@ inline hk_real hk_Math::floor( hk_real r ) { return hk_real(::floor(r)); }
 inline hk_real hk_Math::ceil( hk_real r) { return hk_real(::ceil(r)); }
 inline hk_real hk_Math::pow( hk_real r, hk_real p) { return hk_real(::pow(r,p)); }
 
-#elif _LINUX || __APPLE__ || PLATFORM_BSD
+#elif POSIX
 
 namespace c_math
 {

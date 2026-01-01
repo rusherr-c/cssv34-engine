@@ -8,6 +8,8 @@
 #include <hk_math/gauss_elimination/gauss_elimination.h>
 #include <hk_math/lcp/lcp_solver.h>
 
+#pragma warning( disable : 4244)
+
 hk_result hk_Incr_LU_Matrix::normize_row_L(int row_nr) {
     hk_incrlu_real *base=&m_L_matrix[row_nr*m_aligned_row_len];
     hk_incrlu_real val=base[row_nr];

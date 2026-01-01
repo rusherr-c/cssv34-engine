@@ -11,6 +11,10 @@
 #ifndef _IVP_ENVIRONMENT_INCLUDED
 #define _IVP_ENVIRONMENT_INCLUDED
 
+#ifndef WIN32
+#	pragma interface
+#endif
+
 #define IVP_Environment_Magic_Number 123456
 #define IVP_MOVEMENT_CHECK_COUNT 10 //do not always check movement state
 
@@ -53,6 +57,10 @@ class IVP_Collision_Delegator_Root;
 class IVP_PerformanceCounter;
 class IVP_Anomaly_Manager;
 class IVP_Anomaly_Limits;
+class IVP_Time_Manager;
+class IVP_Cluster_Manager;
+class IVP_Mindist_Manager;
+class IVP_Cache_Object_Manager;
 
 /********************************************************************************
  *	Name:	     	IVP_ENV_STATE	
@@ -127,22 +135,14 @@ public:
 #endif // HAVANA_CONSTRAINTS
 };
 
-class IVP_Cluster_Manager;
-class IVP_Mindist_Manager;
-class IVP_Cache_Object_Manager;
-class IVP_Time_Manager;
-class IVP_Listener_Collision;
-class IVP_Listener_Object;
-class IVP_Template_Real_Object;
-class IVP_Template_Ball;
-class IVP_Hull_Manager_Base;
+
 /********************************************************************************
  *	Name:	  	IVP_Environment     	
  *	Description:	The physical world:
  *			The is the main class to handle simulation
  ********************************************************************************/
 class IVP_Environment {		// the environment
-
+public: //lwss
     friend class IVP_Simulation_Unit;
     friend class IVP_Friction_System;
     friend class IVP_Friction_Sys_Static;
@@ -179,7 +179,7 @@ class IVP_Environment {		// the environment
     class	IVP_Universe_Manager  *universe_manager;
     class IVP_Real_Object    *static_object;		// used for anchors which are not fixed to objects
 
-    IVP_Statistic_Manager    statistic_manager;
+    IVP_Statistic_Manager    statistic_manager; // lwss:+104 bytes
     IVP_Freeze_Manager       freeze_manager;
     IVP_BetterStatisticsmanager *better_statisticsmanager;
     IVP_Controller_Manager   *controller_manager;
@@ -193,7 +193,7 @@ class IVP_Environment {		// the environment
     
     IVP_DOUBLE time_since_last_blocking;
     
-    IVP_DOUBLE delta_PSI_time;			// delta time between two PSIs ( default 1/66 seconds. range: IVP_MAX_DELTA_PSI_TIME - IVP_MIN_DELTA_PSI_TIME seconds )
+    IVP_DOUBLE delta_PSI_time;			// delta time between two PSIs ( default 1/66 seconds. range: IVP_MAX_DELTA_PSI_TIME - IVP_MIN_DELTA_PSI_TIME seconds ) //lwss: +260 bytes
     IVP_DOUBLE inv_delta_PSI_time;
     
     IVP_U_Point gravity; 	// gravity in meter/(sec*sec) see do_gravity() in core
@@ -228,7 +228,7 @@ class IVP_Environment {		// the environment
     void revive_cores_PSI(); // at the beginning of PSI: revive cores
     
     IVP_Time current_time;
-    IVP_Time time_of_next_psi;
+    IVP_Time time_of_next_psi; //lwss: +376
     IVP_Time time_of_last_psi;	// not for public usage
     IVP_Time_CODE current_time_code;
     IVP_Time_CODE mindist_event_timestamp_reference;	
@@ -282,14 +282,17 @@ public:
     void delete_draw_vector_debug();    
     
     //////////// time management
-    IVP_Time get_next_PSI_time(){ return time_of_next_psi; }
+    IVP_Time get_next_PSI_time(){ return time_of_next_psi; } //lwss + 376
     IVP_Time get_old_time_of_last_PSI() { return time_of_last_psi; };
 
     IVP_FLOAT get_delta_PSI_time() { return delta_PSI_time; }
     IVP_FLOAT get_inv_delta_PSI_time() { return inv_delta_PSI_time; }
-    void force_psi_on_next_simulation();
+
     IVP_Time_CODE get_current_time_code(){ return current_time_code; }
-    
+
+    //lwss add
+    void force_psi_on_next_simulation();
+    //lwss end
     IVP_ENV_STATE get_env_state() { return state; };	// return state;
 
     //////// private managers
@@ -334,9 +337,13 @@ public:
     //////////// time management
     IVP_Time get_current_time(){ return current_time; }
     void 	set_delta_PSI_time( IVP_DOUBLE new_delta_PSI_time );		// range: IVP_MIN_DELTA_PSI_TIME - IVP_MAX_DELTA_PSI_TIME
-    
-    static void set_global_collision_tolerance( IVP_DOUBLE tolerance = 0.01f, IVP_DOUBLE gravity_length = 0.01f);   // set the collision tolerance (try to go for higher values if possible)
-    static IVP_FLOAT get_global_collision_tolerance();
+
+    //lwss add
+    float get_global_collision_tolerance();
+    // added gravLen arg
+    void set_global_collision_tolerance( IVP_DOUBLE tolerance = 0.01f, IVP_DOUBLE gravLen = 9.81f );   // set the collision tolerance (try to go for higher values if possible)
+    //lwss end
+
     ////////// world creation
 
     // this is preleminary: allows to define breakable objects.
@@ -496,5 +503,4 @@ public:
 };
 
 #endif
-
 

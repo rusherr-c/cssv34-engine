@@ -32,8 +32,10 @@ class hk_Math
 		
 		static inline hk_real asin( hk_real );
 		static inline hk_real acos( hk_real );
+#include "valve_minmax_off.h"
 		static inline hk_real max( hk_real, hk_real );
 		static inline hk_real min( hk_real, hk_real );
+#include "valve_minmax_on.h"
 
 		static inline hk_real floor( hk_real );
 		static inline hk_real ceil( hk_real );

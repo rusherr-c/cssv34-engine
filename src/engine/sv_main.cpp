@@ -2306,7 +2306,7 @@ bool SV_ActivateServer()
 	}
 
 	COM_TimestampedLog( "SV_ActivateServer(finished)" );
-
+	Msg("SV_ActivateServer: finished\n");
 	return true;
 }
 
@@ -2328,6 +2328,7 @@ static void SV_AllocateEdicts()
 	ED_ClearFreeEdictList();
 
 	sv.edictchangeinfo = (IChangeInfoAccessor *)Hunk_AllocName( sv.max_edicts * sizeof( IChangeInfoAccessor ), "edictchangeinfo" );
+	Msg("SV_AllocateEdicts: finished\n");
 }
 
 #include "tier0/memdbgon.h"
@@ -2378,6 +2379,7 @@ void CGameServer::ReloadWhitelist( const char *pMapName )
 			m_pPureServerWhitelist->LoadCommandsFromKeyValues( kv );
 		kv->deleteThis();
 	}
+
 
 }
 

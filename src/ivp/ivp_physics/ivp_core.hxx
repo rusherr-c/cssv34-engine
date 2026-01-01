@@ -1,4 +1,5 @@
 // Copyright (C) Ipion Software GmbH 1999-2000. All rights reserved.
+#include "ivp_environment.hxx"
 
 // IVP_EXPORT_PUBLIC
 #ifndef _IVP_CORE_INCLUDED

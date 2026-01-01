@@ -434,6 +434,11 @@ $Project "server"
 	"game\server\server_hl1mp.vpc"		[($WIN32||$POSIX) && $HL1MP]
 }
 
+$Project "steam_api"
+{
+	"thirdparty\StubSteamAPI\steam_api.vpc" [$WIN32]
+}
+
 $Project "simdtest"
 {
 	"utils\simdtest\simdtest.vpc" [$WINDOWS||$X360||$POSIX]
@@ -1262,17 +1267,7 @@ $Project "vcrtrace"
 
 $Project "video_bink"
 {
-//	"video\video_bink.vpc" [($WINDOWS||$LINUX)]
-}
-
-$Project "video_quicktime"
-{
-	"video\video_quicktime.vpc" [$WINDOWS||$OSXALL]
-}
-
-$Project "video_webm"
-{
-	"video\video_webm.vpc" [$LINUX]
+	"video\video_bink.vpc" 
 }
 
 $Project "vguimatsurface"

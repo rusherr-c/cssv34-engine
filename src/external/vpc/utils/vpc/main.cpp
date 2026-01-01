@@ -147,10 +147,10 @@ bool CVPC::Init( int argc, char **argv )
 		m_nArgc--;
 	}
 
-	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "Valve Project Creator for" );
-	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "Visual Studio (Build: %s %s)\n", __DATE__, __TIME__ );
-	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "(C) Copyright Valve Corporation, All rights reserved.\n" );
-	Log_Msg( LOG_VPC, Color(255, 0, 0, 255), "\n" );
+	Log_Msg( LOG_VPC, Color(255, 255, 255, 255), "Valve Project Creator for " );
+	Log_Msg( LOG_VPC, Color(255, 255, 255, 255), "Visual Studio (Build: %s %s)\n", __DATE__, __TIME__ );
+	Log_Msg( LOG_VPC, Color(255, 255, 255, 255), "(C) Copyright Valve Corporation, All rights reserved.\n" );
+	Log_Msg( LOG_VPC, Color(255, 255, 255, 255), "\n" );
 	Sleep(500);
 
 	return true;
@@ -2378,7 +2378,7 @@ void CVPC::SetupGenerators()
 		{
 			if ( m_bUseVS2010FileFormat )
 			{
-				Log_Msg( LOG_VPC, Color( 0, 255, 255, 255 ), "Generating for Visual Studio 2010.\n" );
+				Log_Msg( LOG_VPC, Color( 255, 255, 255, 255 ), "Generating for Visual Studio 2010.\n" );
 				m_pProjectGenerator = GetXbox360ProjectGenerator_2010();
 			}
 			else
@@ -2406,7 +2406,7 @@ void CVPC::SetupGenerators()
 			else if ( m_eVSVersion == k_EVSVersion_2010 )
 				pchLogLine = "Generating for Visual Studio 2010.\n";
 
-			Log_Msg( LOG_VPC, Color(0, 0, 255, 255 ), pchLogLine );
+			Log_Msg( LOG_VPC, Color(255, 255, 255, 255 ), pchLogLine );
 			Sleep(500);
 
 			// pick a project generator

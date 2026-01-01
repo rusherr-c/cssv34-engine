@@ -769,7 +769,7 @@ void CBaseClientState::Disconnect( const char *pszReason, bool bShowMainMenu )
 }
 
 void CBaseClientState::RunFrame (void)
-{
+{ 
 	VPROF("CBaseClientState::RunFrame");
 	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
 
@@ -823,7 +823,7 @@ void CBaseClientState::CheckForResend (void)
 	if ( m_nRetryNumber >= GetConnectionRetryNumber() )
 	{
 		COM_ExplainDisconnection( true, "Connection failed after %i retries.\n", CL_CONNECTION_RETRIES );
-		// Host_Disconnect();
+		//Host_Disconnect();
 		Disconnect( "Connection failed", true );
 		return;
 	}

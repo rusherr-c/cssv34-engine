@@ -2412,6 +2412,7 @@ void VPC_FakeKeyword_SchemaFolder( CBaseProjectDataCollector *pDataCollector )
 	FILE *fp = fopen( szSchemaPath, "wt" );
 	if ( !fp )
 	{
+		Log_Msg(LOG_VPC, Color(255, 0, 0, 255), "|x| ERROR!");
 		g_pVPC->VPCStatus( true, "Error Saving File: '%s'", szSchemaPath );
 	}
 	else

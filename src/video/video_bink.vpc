@@ -1,0 +1,59 @@
+//-----------------------------------------------------------------------------
+//	video_bink.vpc
+//
+//	Project Script
+//
+// 
+//-----------------------------------------------------------------------------
+
+$Macro SRCDIR		".."
+$Macro OUTBINDIR	"$SRCDIR\..\game\bin"
+
+$Include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
+
+$Configuration
+{
+	$Compiler
+	{
+		$AdditionalIncludeDirectories	"$BASE;$SRCDIR\dx9sdk\include"			[$WIN32]
+	}
+	$Linker
+	{
+		$IgnoreImportLibrary				"Yes" [$WIN32]
+		$SystemLibraries                    "iconv" [$OSXALL]
+		$SystemFrameworks					"Carbon" [$OSXALL]
+		$AdditionalLibraryDirectories		"$BASE;$SRCDIR\dx9sdk\lib"	[$WIN32]
+	}
+}
+
+
+
+$Project "video_bink"
+{
+	$Folder	"Source Files"   [$OSXALL||$WIN32||$LINUXALL]
+	{
+		$file	"bink_video.cpp"
+		$file	"bink_material.cpp"
+		$file	"yuv_rgb.c"
+	}
+
+	$Folder	"Header Files"   [$OSXALL||$WIN32||$LINUXALL]
+	{
+		$file   "videosubsystem.h"
+		$file   "video_macros.h"
+		$file	"bink_video.h"
+		$file   "bink_material.h"
+		$file   "bink_common.h"
+		$file	"yuv_rgb.h"
+		
+	}
+
+	$Folder "Link Libraries"
+	{
+		$Lib tier1
+		$Lib tier2
+		$Lib tier3
+		$Lib vstdlib
+	}
+}
+

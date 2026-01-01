@@ -1014,8 +1014,9 @@ void CVCProjGenerator::EndProject()
 	g_spProject->put_SccProvider( bstr );
 #endif
 
+	Log_Msg(LOG_VPC, Color(0, 255, 0, 255), "VPC Parsed, ");
 	g_pVPC->VPCStatus( true, "Saving... Project: '%s' File: '%s'", GetProjectName().String(), g_pVPC->GetOutputFilename() );
-
+	
 	if ( m_ProjectName.IsEmpty() )
 	{
 		g_pVPC->VPCError( "Invalid Empty Project Name" );
