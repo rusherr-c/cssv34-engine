@@ -143,12 +143,25 @@ modeswitchsave.tga
 /src/lib/public/tier1.lib
 /src/lib/public/vstdlib.lib
 
+# game
+/game/mod_*/bin/*
+/game/cstrike
+/game/hl2
+/game/episodic
+
 # --------------------------------------------
 # Excludes
+!/src/devtools/bin/vpc*
 !/src/devtools/*
-!/src/external/*.sln
-!/src/external/*.vcxproj
+!/src/devtools/*/*
+!/src/external/*/*/*.sln
+!/src/external/*/*/*.vcxproj
+!/src/dx9sdk/*/*.exe
+!/src/dx9sdk/*/*.dll
+!/src/dx9sdk/*/*.lib
 !/src/thirdparty/*
 !/src/lib/public/ati_compress_mt_vc8.lib
 !/src/lib/public/nvtc.lib
 !/src/lib/public/steam_api.lib
+
+!/game/bin/*.dll
