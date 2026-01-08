@@ -1,9 +1,5 @@
 ; STATIC: "NORMALMAPALPHAENVMAPMASK" "0..1"
-#ifndef _XBOX
 ps.1.1
-#else
-xps.1.1
-#endif
 
 ;------------------------------------------------------------------------------
 ; Environment mapping on a bumped surface
@@ -38,41 +34,33 @@ texm3x3vspec t3, t0_bx2
 ; - envmap contrast of 0, 1, or in between
 ; - envmap saturation of 0, 1, or in between
 
-#ifndef _XBOX
 ; r0 = constant color * result of bump into envmap
 mul r0.rgb, t3, c0
-#endif
 
-#ifndef _XBOX
 ; dot eye-vector with per-pixel normal from t0
 dp3_sat	r1, v0_bx2, t0_bx2
-#endif
-#ifdef _XBOX
-xdm r1,r0, v0_bx2, t0_bx2, t3, c0
-mov r1, r1_sat
-#endif
 
 ; run Fresnel approx. on it: R0 + (1-R0) (1-cos(q))^5 in alpha channel
 mul r1.rgb, r0, r0					; color squared
 +mul r0.a, 1-r1.a, 1-r1.a			; squared
 
-lrp	r0.rgb, c1, r1, r0				; blend between color and color * color
+lrp r0.rgb, c1, r1, r0				; blend between color and color * color
 +mul r0.a, r0.a, r0.a				; quartic
 
-dp3	r1.rgb, r0, c3					; color greyscaled
+dp3 r1.rgb, r0, c3				; color greyscaled
 +mul r0.a, r0.a, 1-r1.a				; quintic
 
 ; FIXME - these should be able to pair (I think), but don't on nvidia for some reason.
 ; (I think) cannot pair due to use of >2 constants in single stage
-lrp	r0.rgb, c2, r0, r1 				; blend between color and greyscale
+lrp	r0.rgb, c2, r0, r1 			; blend between color and greyscale
 mad r0.a, r0.a, c6.a, c4.a			; Take Fresnel R(0) into consideration
 
 mul r0.rgb, r0, r0.a				; multiply output color by result of fresnel calc
 
-#ifdef NORMALMAPALPHAENVMAPMASK_1
+#if NORMALMAPALPHAENVMAPMASK
 +mul r0.a, c0.a, t0.a				; Fade amount * alpha from the texture
 #else
-+mov r0.a, c0.a						; Just use the fade amount
++mov r0.a, c0.a					; Just use the fade amount
 #endif
 
 

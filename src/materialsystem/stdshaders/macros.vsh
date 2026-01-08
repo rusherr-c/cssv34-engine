@@ -12,11 +12,6 @@ $vPos				= "v0";
 $vBoneWeights		= "v1";
 $vBoneIndices		= "v2";
 $vNormal			= "v3";
-if ( $g_xbox )
-{
-	$vPosFlex		= "v4";
-	$vNormalFlex	= "v13";
-}
 $vColor				= "v5";
 $vSpecular			= "v6";
 $vTexCoord0			= "v7";
@@ -32,18 +27,6 @@ if( $g_dx9 )
 	if( $g_usesPos )
 	{
 		dcl_position $vPos;
-	}
-
-	if ( $g_xbox )
-	{
-		if ( $g_usesPosFlex )
-		{
-			dcl_position1 $vPosFlex;
-		}
-		if( $g_usesNormalFlex )
-		{
-			dcl_normal1 $vNormalFlex;
-		}
 	}
 	
 	if( $g_usesBoneWeights )
@@ -136,15 +119,16 @@ $cViewProj1			= "c9";
 $cViewProj2			= "c10";
 $cViewProj3			= "c11";
 
-$SHADER_HALFLAMBERT = "c12.x";
-$SHADER_FLEXSCALE	= "c13.x";
 ; currently unused
-; c14, c15
+; c12, c13
+
+$SHADER_SPECIFIC_CONST_10 = "c14";
+$SHADER_SPECIFIC_CONST_11 = "c15";
 
 $cFogParams			= "c16";
 $cFogEndOverFogRange = "c16.x";
 $cFogOne			= "c16.y";
-; NOTE: c16.z is unused
+$cFogMaxDensity		= "c16.z";
 $cOOFogRange		= "c16.w"; # (1/(fogEnd-fogStart))
 
 $cViewModel0		= "c17";
@@ -187,13 +171,8 @@ $SHADER_SPECIFIC_CONST_6  = "c44";
 $SHADER_SPECIFIC_CONST_7  = "c45";
 $SHADER_SPECIFIC_CONST_8  = "c46";
 $SHADER_SPECIFIC_CONST_9  = "c47";
-
-; xbox reserved contants for viewport transform
-; enabled extended range [-96..-1] for use by matrix palette skinning
-; using extended range forced the clobbering of xbox viewport constants c-38,c-37
-; force xbox reserved to top of range to allow matix skinning a contiguous range
-$SHADER_VIEWPORT_CONST_OFFSET = "c-1";
-$SHADER_VIEWPORT_CONST_SCALE  = "c-2";
+; $SHADER_SPECIFIC_CONST_10 is c14
+; $SHADER_SPECIFIC_CONST_11 is c15
 
 ; There are 16 model matrices for skinning
 ; NOTE: These must match the same values in vsh_prep.pl!
@@ -320,13 +299,13 @@ sub RangeFog
 	{
 		mad $tmp, -$tmp.x, $cOOFogRange, $cFogEndOverFogRange
 		min $tmp, $tmp, $cOne
-		max oFog, $tmp.x, $cZero
+		max oFog, $tmp.x, $cFogMaxDensity
 	}
 	else
 	{
 		mad $tmp, -$tmp.x, $cOOFogRange, $cFogEndOverFogRange
 		min $tmp, $tmp, $cOne
-		max oFog.x, $tmp.x, $cZero
+		max oFog.x, $tmp.x, $cFogMaxDensity
 	}
 	&FreeRegister( \$tmp );
 }
@@ -359,13 +338,13 @@ sub DepthFog
 	{
 		mad $tmp, -$projPos.w, $cOOFogRange, $cFogEndOverFogRange
 		min $tmp, $tmp, $cOne
-		max $dest, $tmp.x, $cZero
+		max $dest, $tmp.x, $cFogMaxDensity
 	}
 	else
 	{
 		mad $tmp, -$projPos.w, $cOOFogRange, $cFogEndOverFogRange
 		min $tmp, $tmp, $cOne
-		max $dest.x, $tmp.x, $cZero
+		max $dest.x, $tmp.x, $cFogMaxDensity
 	}
 
 	&FreeRegister( \$tmp );
@@ -417,13 +396,13 @@ sub WaterRangeFog
 	{
 		mad $tmp, -$tmp.w, $cOOFogRange, $cFogOne
 		min $tmp, $tmp, $cOne
-		max oFog, $tmp.x, $cZero
+		max oFog, $tmp.x, $cFogMaxDensity
 	}
 	else
 	{
 		mad $tmp, -$tmp.w, $cOOFogRange, $cFogOne
 		min $tmp, $tmp, $cOne
-		max oFog.x, $tmp.x, $cZero
+		max oFog.x, $tmp.x, $cFogMaxDensity
 	}
 
 	&FreeRegister( \$tmp );
@@ -637,91 +616,17 @@ sub ComputeSphereMapTexCoords
 	&FreeRegister( \$tmp );
 }
 
-sub FixupXboxBoneIndex_1Bone
-{
-	local( $boneIndices ) = shift;
-	
-	local( $tmp );
-	&AllocateRegister( \$tmp );
-
-	; $boneIndices.z = $boneIndices.z - ( $boneIndices.z >= 96 ? 192 : 0 )
-	add $tmp.x, $cModel0Index, $cModel0Index
-	sge $tmp.y, $boneIndices.z, $tmp.x
-	mul $tmp.y, $tmp.y, $tmp.x
-	mad $boneIndices.z, $tmp.y, -$cTwo, $boneIndices.z 
-
-	&FreeRegister( \$tmp );
-}
-
-sub FixupXboxBoneIndex_2Bone
-{
-	local( $boneIndices ) = shift;
-	
-	local( $tmp );
-	&AllocateRegister( \$tmp );
-
-	; $boneIndices.z = $boneIndices.z - ( $boneIndices.z >= 96 ? 192 : 0 )
-	add $tmp.x, $cModel0Index, $cModel0Index
-	sge $tmp.y, $boneIndices.z, $tmp.x
-	mul $tmp.y, $tmp.y, $tmp.x
-	mad $boneIndices.z, $tmp.y, -$cTwo, $boneIndices.z 
-
-	; $boneIndices.y = $boneIndices.y - ( $boneIndices.y >= 96 ? 192 : 0 )
-	sge $tmp.y, $boneIndices.y, $tmp.x
-	mul $tmp.y, $tmp.y, $tmp.x
-	mad $boneIndices.y, $tmp.y, -$cTwo, $boneIndices.y 
-
-	&FreeRegister( \$tmp );
-}
-
-sub FixupXboxBoneIndex_3Bone
-{
-	local( $boneIndices ) = shift;
-	
-	local( $tmp );
-	&AllocateRegister( \$tmp );
-
-	; $boneIndices.z = $boneIndices.z - ( $boneIndices.z >= 96 ? 192 : 0 )
-	add $tmp.x, $cModel0Index, $cModel0Index
-	sge $tmp.y, $boneIndices.z, $tmp.x
-	mul $tmp.y, $tmp.y, $tmp.x
-	mad $boneIndices.z, $tmp.y, -$cTwo, $boneIndices.z 
-
-	; $boneIndices.y = $boneIndices.y - ( $boneIndices.y >= 96 ? 192 : 0 )
-	sge $tmp.y, $boneIndices.y, $tmp.x
-	mul $tmp.y, $tmp.y, $tmp.x
-	mad $boneIndices.y, $tmp.y, -$cTwo, $boneIndices.y 
-
-	; $boneIndices.x = $boneIndices.x - ( $boneIndices.x >= 96 ? 192 : 0 )
-	sge $tmp.y, $boneIndices.x, $tmp.x
-	mul $tmp.y, $tmp.y, $tmp.x
-	mad $boneIndices.x, $tmp.y, -$cTwo, $boneIndices.x 
-
-	&FreeRegister( \$tmp );
-}
-
 sub SkinPosition
 {
-#	print "\$NUM_BONES = $NUM_BONES\n";
+#	print "\$SKINNING = $SKINNING\n";
 	local( $worldPos ) = shift;
 	
-	if( !defined $NUM_BONES && !defined $SKINNING )
+	if( !defined $SKINNING )
 	{
-		die "using \$NUM_BONES or \$SKINNING without defining.\n";
-	}
-	if ( defined $SKINNING )
-	{
-		if( $SKINNING == 0 )
-		{
-			$NUM_BONES = 0;
-		}
-		else
-		{
-			$NUM_BONES = 3;
-		}
+		die "using \$SKINNING without defining.\n";
 	}
 		
-	if( $NUM_BONES == 0 )
+	if( $SKINNING == 0 )
 	{
 		;
 		; 0 bone skinning (4 instructions)
@@ -733,80 +638,7 @@ sub SkinPosition
 		dp4 $worldPos.z, $vPos, $cModel2
 		mov $worldPos.w, $cOne
 	} 
-	elsif( $NUM_BONES == 1 )
-	{
-		;
-		; 1 bone skinning (6 instructions)
-		;
-
-		local( $boneIndices );
-		&AllocateRegister( \$boneIndices );
-
-		; Perform 1 bone skinning
-		; Transform position into world space
-		; denormalize d3dcolor to matrix index
-		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
-		{
-			&FixupXboxBoneIndex_1Bone( $boneIndices );
-		}
-		mov a0.x, $boneIndices.z
-
-		; position
-		dp4 $worldPos.x, $vPos, c[a0.x]
-		dp4 $worldPos.y, $vPos, c[a0.x + 1]
-		dp4 $worldPos.z, $vPos, c[a0.x + 2]
-		mov $worldPos.w, $cOne
-
-		&FreeRegister( \$boneIndices );
-	}
-	elsif( $NUM_BONES == 2 )
-	{
-		;
-		; 2 bone skinning (13 instructions)
-		;
-
-		local( $boneIndices );
-		local( $blendedMatrix0 );
-		local( $blendedMatrix1 );
-		local( $blendedMatrix2 );
-		&AllocateRegister( \$boneIndices );
-		&AllocateRegister( \$blendedMatrix0 );
-		&AllocateRegister( \$blendedMatrix1 );
-		&AllocateRegister( \$blendedMatrix2 );
-
-		; Transform position into world space using all bones
-		; denormalize d3dcolor to matrix index
-		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
-		{
-			&FixupXboxBoneIndex_2Bone( $boneIndices );
-		}
-		
-		; r11 = boneindices at this point
-		; first matrix
-		mov a0.x, $boneIndices.z
-		mul $blendedMatrix0, $vBoneWeights.x, c[a0.x]
-		mul $blendedMatrix1, $vBoneWeights.x, c[a0.x+1]
-		mul $blendedMatrix2, $vBoneWeights.x, c[a0.x+2]
-		; second matrix
-		mov a0.x, $boneIndices.y
-		mad $blendedMatrix0, $vBoneWeights.y, c[a0.x], $blendedMatrix0
-		mad $blendedMatrix1, $vBoneWeights.y, c[a0.x+1], $blendedMatrix1
-		mad $blendedMatrix2, $vBoneWeights.y, c[a0.x+2], $blendedMatrix2
-
-		; position
-		dp4 $worldPos.x, $vPos, $blendedMatrix0
-		dp4 $worldPos.y, $vPos, $blendedMatrix1
-		dp4 $worldPos.z, $vPos, $blendedMatrix2
-		mov $worldPos.w, $cOne
-
-		&FreeRegister( \$boneIndices );
-		&FreeRegister( \$blendedMatrix0 );
-		&FreeRegister( \$blendedMatrix1 );
-		&FreeRegister( \$blendedMatrix2 );
-	}
-	elsif( $NUM_BONES == 3 )
+	else
 	{
 		;
 		; 3 bone skinning  (19 instructions)
@@ -824,12 +656,9 @@ sub SkinPosition
 		; Transform position into world space using all bones
 		; denormalize d3dcolor to matrix index
 		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
+		if ( $g_x360 )
 		{
-			&FixupXboxBoneIndex_3Bone( $boneIndices );
-			&AllocateRegister( \$localPos );
-			mov $localPos, $vPos
-			mad $localPos.xyz, $SHADER_FLEXSCALE, $vPosFlex.xyz, $localPos.xyz
+			mov $boneIndices, $boneIndices.zyxw
 		}
 		
 		; r11 = boneindices at this point
@@ -856,21 +685,10 @@ sub SkinPosition
 		mad $blendedMatrix1, $boneIndices.w, c[a0.x+1], $blendedMatrix1
 		mad $blendedMatrix2, $boneIndices.w, c[a0.x+2], $blendedMatrix2
 		
-		if ( $g_xbox )
-		{
-			dp4 $worldPos.x, $localPos, $blendedMatrix0
-			dp4 $worldPos.y, $localPos, $blendedMatrix1
-			dp4 $worldPos.z, $localPos, $blendedMatrix2
-			mov $worldPos.w, $cOne
-			&FreeRegister( \$localPos );
-		}
-		else
-		{
-			dp4 $worldPos.x, $vPos, $blendedMatrix0
-			dp4 $worldPos.y, $vPos, $blendedMatrix1
-			dp4 $worldPos.z, $vPos, $blendedMatrix2
-			mov $worldPos.w, $cOne
-		}
+		dp4 $worldPos.x, $vPos, $blendedMatrix0
+		dp4 $worldPos.y, $vPos, $blendedMatrix1
+		dp4 $worldPos.z, $vPos, $blendedMatrix2
+		mov $worldPos.w, $cOne
 
 		&FreeRegister( \$boneIndices );
 		&FreeRegister( \$blendedMatrix0 );
@@ -882,27 +700,16 @@ sub SkinPosition
 
 sub SkinPositionAndNormal
 {
-#	print "\$NUM_BONES = $NUM_BONES\n";
+#	print "\$SKINNING = $SKINNING\n";
 	local( $worldPos ) = shift;
 	local( $worldNormal ) = shift;
 
-	if( !defined $NUM_BONES && !defined $SKINNING )
+	if( !defined $SKINNING )
 	{
-		die "using \$NUM_BONES or \$SKINNING without defining.\n";
-	}
-	if ( defined $SKINNING )
-	{
-		if( $SKINNING == 0 )
-		{
-			$NUM_BONES = 0;
-		}
-		else
-		{
-			$NUM_BONES = 3;
-		}
+		die "using \$SKINNING without defining.\n";
 	}
 
-	if( $NUM_BONES == 0 )
+	if( $SKINNING == 0 )
 	{
 		;
 		; 0 bone skinning (13 instructions)
@@ -918,89 +725,7 @@ sub SkinPositionAndNormal
 		dp3 $worldNormal.y, $vNormal, $cModel1
 		dp3 $worldNormal.z, $vNormal, $cModel2
 	}
-	elsif( $NUM_BONES == 1 )
-	{
-		;
-		; 1 bone skinning (17 instructions)
-		;
-
-		local( $boneIndices );
-		&AllocateRegister( \$boneIndices );
-
-		; Perform 1 bone skinning
-		; Transform position into world space
-		; denormalize d3dcolor to matrix index
-		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
-		{
-			&FixupXboxBoneIndex_1Bone( $boneIndices );
-		}
-		mov a0.x, $boneIndices.z
-
-		; position
-		dp4 $worldPos.x, $vPos, c[a0.x]
-		dp4 $worldPos.y, $vPos, c[a0.x + 1]
-		dp4 $worldPos.z, $vPos, c[a0.x + 2]
-		mov $worldPos.w, $cOne
-
-		; normal
-		dp3 $worldNormal.x, $vNormal, c[a0.x]
-		dp3 $worldNormal.y, $vNormal, c[a0.x + 1]
-		dp3 $worldNormal.z, $vNormal, c[a0.x + 2]
-
-		&FreeRegister( \$boneIndices );
-	}
-	elsif( $NUM_BONES == 2 )
-	{
-		;
-		; 2 bone skinning (16 instructions)
-		;
-
-		local( $boneIndices );
-		local( $blendedMatrix0 );
-		local( $blendedMatrix1 );
-		local( $blendedMatrix2 );
-		&AllocateRegister( \$boneIndices );
-		&AllocateRegister( \$blendedMatrix0 );
-		&AllocateRegister( \$blendedMatrix1 );
-		&AllocateRegister( \$blendedMatrix2 );
-
-		; Transform position into world space using all bones
-		; denormalize d3dcolor to matrix index
-		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
-		{
-			&FixupXboxBoneIndex_2Bone( $boneIndices );
-		}
-		; r11 = boneindices at this point
-		; first matrix
-		mov a0.x, $boneIndices.z
-		mul $blendedMatrix0, $vBoneWeights.x, c[a0.x]
-		mul $blendedMatrix1, $vBoneWeights.x, c[a0.x+1]
-		mul $blendedMatrix2, $vBoneWeights.x, c[a0.x+2]
-		; second matrix
-		mov a0.x, $boneIndices.y
-		mad $blendedMatrix0, $vBoneWeights.y, c[a0.x], $blendedMatrix0
-		mad $blendedMatrix1, $vBoneWeights.y, c[a0.x+1], $blendedMatrix1
-		mad $blendedMatrix2, $vBoneWeights.y, c[a0.x+2], $blendedMatrix2
-
-		; position
-		dp4 $worldPos.x, $vPos, $blendedMatrix0
-		dp4 $worldPos.y, $vPos, $blendedMatrix1
-		dp4 $worldPos.z, $vPos, $blendedMatrix2
-		mov $worldPos.w, $cOne
-
-		; normal
-		dp3 $worldNormal.x, $vNormal, $blendedMatrix0
-		dp3 $worldNormal.y, $vNormal, $blendedMatrix1
-		dp3 $worldNormal.z, $vNormal, $blendedMatrix2
-
-		&FreeRegister( \$boneIndices );
-		&FreeRegister( \$blendedMatrix0 );
-		&FreeRegister( \$blendedMatrix1 );
-		&FreeRegister( \$blendedMatrix2 );
-	}
-	elsif( $NUM_BONES == 3 )
+	else
 	{
 		local( $boneIndices );
 		local( $blendedMatrix0 );
@@ -1018,17 +743,11 @@ sub SkinPositionAndNormal
 		; Transform position into world space using all bones
 		; denormalize d3dcolor to matrix index
 		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
+		if ( $g_x360 )
 		{
-			&FixupXboxBoneIndex_3Bone( $boneIndices );
-			&AllocateRegister( \$localPos );
-			mov $localPos, $vPos
-			mad $localPos.xyz, $SHADER_FLEXSCALE, $vPosFlex.xyz, $localPos.xyz
-
-			&AllocateRegister( \$localNormal );
-			mov $localNormal, $vNormal
-			mad $localNormal.xyz, $SHADER_FLEXSCALE, $vNormalFlex.xyz, $localNormal.xyz
+			mov $boneIndices, $boneIndices.zyxw
 		}
+
 		; r11 = boneindices at this point
 		; first matrix
 		mov a0.x, $boneIndices.z
@@ -1053,43 +772,15 @@ sub SkinPositionAndNormal
 		mad $blendedMatrix1, $boneIndices.w, c[a0.x+1], $blendedMatrix1
 		mad $blendedMatrix2, $boneIndices.w, c[a0.x+2], $blendedMatrix2
 		
-		if ( $g_xbox )
-		{
-			dp4 $worldPos.x, $localPos, $blendedMatrix0
-			dp4 $worldPos.y, $localPos, $blendedMatrix1
-			dp4 $worldPos.z, $localPos, $blendedMatrix2
-			mov $worldPos.w, $cOne
-			&FreeRegister( \$localPos );
+		dp4 $worldPos.x, $vPos, $blendedMatrix0
+		dp4 $worldPos.y, $vPos, $blendedMatrix1
+		dp4 $worldPos.z, $vPos, $blendedMatrix2
+		mov $worldPos.w, $cOne
 
-			; normal
-			dp3 $worldNormal.x, $localNormal, $blendedMatrix0
-			dp3 $worldNormal.y, $localNormal, $blendedMatrix1
-			dp3 $worldNormal.z, $localNormal, $blendedMatrix2
-			
-			; renormalize after flex
-			&FreeRegister( \$localNormal );
-			&AllocateRegister( \$normalLength );
-			&AllocateRegister( \$ooNormalLength );
-
-			dp3 $normalLength, $worldNormal, $worldNormal
-			rsq $ooNormalLength.x, $normalLength.x
-			mul $worldNormal.xyz, $worldNormal.xyz, $ooNormalLength.x
-
-			&FreeRegister( \$normalLength );
-			&FreeRegister( \$ooNormalLength );
-		}
-		else
-		{
-			dp4 $worldPos.x, $vPos, $blendedMatrix0
-			dp4 $worldPos.y, $vPos, $blendedMatrix1
-			dp4 $worldPos.z, $vPos, $blendedMatrix2
-			mov $worldPos.w, $cOne
-
-			; normal
-			dp3 $worldNormal.x, $vNormal, $blendedMatrix0
-			dp3 $worldNormal.y, $vNormal, $blendedMatrix1
-			dp3 $worldNormal.z, $vNormal, $blendedMatrix2
-		}
+		; normal
+		dp3 $worldNormal.x, $vNormal, $blendedMatrix0
+		dp3 $worldNormal.y, $vNormal, $blendedMatrix1
+		dp3 $worldNormal.z, $vNormal, $blendedMatrix2
 
 		&FreeRegister( \$boneIndices );
 		&FreeRegister( \$blendedMatrix0 );
@@ -1097,9 +788,10 @@ sub SkinPositionAndNormal
 		&FreeRegister( \$blendedMatrix2 );
 	}	
 }
+
 sub SkinPositionNormalAndTangentSpace
 {
-#	print "\$NUM_BONES = $NUM_BONES\n";
+#	print "\$SKINNING = $SKINNING\n";
 	local( $worldPos ) = shift;
 	local( $worldNormal ) = shift;
 	local( $worldTangentS ) = shift;
@@ -1110,72 +802,48 @@ sub SkinPositionNormalAndTangentSpace
 	local( $normalLength );
 	local( $ooNormalLength );
 	
-	if( !defined $NUM_BONES && !defined $SKINNING )
+	if( !defined $SKINNING )
 	{
-		die "using \$NUM_BONES or \$SKINNING without defining.\n";
-	}
-	if ( defined $SKINNING )
-	{
-		if( $SKINNING == 0 )
-		{
-			$NUM_BONES = 0;
-		}
-		else
-		{
-			$NUM_BONES = 3;
-		}
+		die "using \$SKINNING without defining.\n";
 	}
 
-	if ( $g_xbox )
-	{
-		&AllocateRegister( \$userData );
-		; remap compressed range [0..1] to [-1..1]
-		mad $userData, $vUserData, $cTwo, -$cOne
-	}
+# X360TBD: needed for compressed vertex format
+#	if ( $g_x360 )
+#	{
+#		&AllocateRegister( \$userData );
+#		; remap compressed range [0..1] to [-1..1]
+#		mad $userData, $vUserData, $cTwo, -$cOne
+#	}
 
-	if( $NUM_BONES == 0 )
+	if( $SKINNING == 0 )
 	{
 		;
 		; 0 bone skinning (13 instructions)
 		;
 		; Transform position + normal + tangentS + tangentT into world space
-
-		if ( $g_xbox )
-		{
-			&AllocateRegister( \$localPos );
-			mov $localPos, $vPos
-			mad $localPos.xyz, $SHADER_FLEXSCALE, $vPosFlex.xyz, $localPos.xyz
-			dp4 $worldPos.x, $localPos, $cModel0
-			dp4 $worldPos.y, $localPos, $cModel1
-			dp4 $worldPos.z, $localPos, $cModel2
-			mov $worldPos.w, $cOne
-			&FreeRegister( \$localPos );
-		}
-		else
-		{
-			dp4 $worldPos.x, $vPos, $cModel0
-			dp4 $worldPos.y, $vPos, $cModel1
-			dp4 $worldPos.z, $vPos, $cModel2
-			mov $worldPos.w, $cOne
-		}
+		dp4 $worldPos.x, $vPos, $cModel0
+		dp4 $worldPos.y, $vPos, $cModel1
+		dp4 $worldPos.z, $vPos, $cModel2
+		mov $worldPos.w, $cOne
 
 		; normal
 		dp3 $worldNormal.x, $vNormal, $cModel0
 		dp3 $worldNormal.y, $vNormal, $cModel1
 		dp3 $worldNormal.z, $vNormal, $cModel2
-	
-		if ( $g_xbox )
-		{
-			; tangents
-			dp3 $worldTangentS.x, $userData, $cModel0
-			dp3 $worldTangentS.y, $userData, $cModel1
-			dp3 $worldTangentS.z, $userData, $cModel2
 
-			; calculate tangent t via cross( N, S ) * S[3]
-			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
-			mul $worldTangentT.xyz, $userData.w, $worldTangentT.xyz
-		}
-		else
+# X360TBD: needed for compressed vertex format
+#		if ( $g_x360 )
+#		{
+#			; tangents
+#			dp3 $worldTangentS.x, $userData, $cModel0
+#			dp3 $worldTangentS.y, $userData, $cModel1
+#			dp3 $worldTangentS.z, $userData, $cModel2
+#
+#			; calculate tangent t via cross( N, S ) * S[3]
+#			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
+#			mul $worldTangentT.xyz, $userData.w, $worldTangentT.xyz
+#		}
+#		else
 		{
 			; tangents
 			dp3 $worldTangentS.x, $vUserData, $cModel0
@@ -1187,67 +855,8 @@ sub SkinPositionNormalAndTangentSpace
 			mul $worldTangentT.xyz, $vUserData.w, $worldTangentT.xyz
 		}
 	}
-	elsif( $NUM_BONES == 1 )
+	else
 	{
-		;
-		; 1 bone skinning (17 instructions)
-		;
-
-		local( $boneIndices );
-		&AllocateRegister( \$boneIndices );
-
-		; Perform 1 bone skinning
-		; Transform position into world space
-		; denormalize d3dcolor to matrix index
-		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
-		{
-			&FixupXboxBoneIndex_1Bone( $boneIndices );
-		}
-		mov a0.x, $boneIndices.z
-
-		; position
-		dp4 $worldPos.x, $vPos, c[a0.x]
-		dp4 $worldPos.y, $vPos, c[a0.x + 1]
-		dp4 $worldPos.z, $vPos, c[a0.x + 2]
-		mov $worldPos.w, $cOne
-
-		; normal
-		dp3 $worldNormal.x, $vNormal, c[a0.x]
-		dp3 $worldNormal.y, $vNormal, c[a0.x + 1]
-		dp3 $worldNormal.z, $vNormal, c[a0.x + 2]
-
-		if ( $g_xbox )
-		{
-			; tangents
-			dp3 $worldTangentS.x, $userData, c[a0.x]
-			dp3 $worldTangentS.y, $userData, c[a0.x + 1]
-			dp3 $worldTangentS.z, $userData, c[a0.x + 2]
-
-			; calculate tangent t via cross( N, S ) * S[3]
-			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
-			mul $worldTangentT.xyz, $userData.w, $worldTangentT.xyz
-		}
-		else
-		{
-			; tangents
-			dp3 $worldTangentS.x, $vUserData, c[a0.x]
-			dp3 $worldTangentS.y, $vUserData, c[a0.x + 1]
-			dp3 $worldTangentS.z, $vUserData, c[a0.x + 2]
-
-			; calculate tangent t via cross( N, S ) * S[3]
-			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
-			mul $worldTangentT.xyz, $vUserData.w, $worldTangentT.xyz
-		}
-
-		&FreeRegister( \$boneIndices );
-	}
-	elsif( $NUM_BONES == 2 )
-	{
-		;
-		; 2 bone skinning (22 instructions)
-		;
-
 		local( $boneIndices );
 		local( $blendedMatrix0 );
 		local( $blendedMatrix1 );
@@ -1260,89 +869,11 @@ sub SkinPositionNormalAndTangentSpace
 		; Transform position into world space using all bones
 		; denormalize d3dcolor to matrix index
 		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
+		if ( $g_x360 )
 		{
-			&FixupXboxBoneIndex_2Bone( $boneIndices );
-		}
-		; r11 = boneindices at this point
-		; first matrix
-		mov a0.x, $boneIndices.z
-		mul $blendedMatrix0, $vBoneWeights.x, c[a0.x]
-		mul $blendedMatrix1, $vBoneWeights.x, c[a0.x+1]
-		mul $blendedMatrix2, $vBoneWeights.x, c[a0.x+2]
-		; second matrix
-		mov a0.x, $boneIndices.y
-		mad $blendedMatrix0, $vBoneWeights.y, c[a0.x], $blendedMatrix0
-		mad $blendedMatrix1, $vBoneWeights.y, c[a0.x+1], $blendedMatrix1
-		mad $blendedMatrix2, $vBoneWeights.y, c[a0.x+2], $blendedMatrix2
-
-		; position
-		dp4 $worldPos.x, $vPos, $blendedMatrix0
-		dp4 $worldPos.y, $vPos, $blendedMatrix1
-		dp4 $worldPos.z, $vPos, $blendedMatrix2
-		mov $worldPos.w, $cOne
-
-		; normal
-		dp3 $worldNormal.x, $vNormal, $blendedMatrix0
-		dp3 $worldNormal.y, $vNormal, $blendedMatrix1
-		dp3 $worldNormal.z, $vNormal, $blendedMatrix2
-
-		if ( $g_xbox )
-		{
-			; tangents
-			dp3 $worldTangentS.x, $userData, $blendedMatrix0
-			dp3 $worldTangentS.y, $userData, $blendedMatrix1
-			dp3 $worldTangentS.z, $userData, $blendedMatrix2
-
-			; calculate tangent t via cross( N, S ) * S[3]
-			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
-			mul $worldTangentT.xyz, $userData.w, $worldTangentT.xyz
-		}
-		else
-		{
-			; tangents
-			dp3 $worldTangentS.x, $vUserData, $blendedMatrix0
-			dp3 $worldTangentS.y, $vUserData, $blendedMatrix1
-			dp3 $worldTangentS.z, $vUserData, $blendedMatrix2
-
-			; calculate tangent t via cross( N, S ) * S[3]
-			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
-			mul $worldTangentT.xyz, $vUserData.w, $worldTangentT.xyz
-		}
-		
-		&FreeRegister( \$boneIndices );
-		&FreeRegister( \$blendedMatrix0 );
-		&FreeRegister( \$blendedMatrix1 );
-		&FreeRegister( \$blendedMatrix2 );
-	}
-	elsif( $NUM_BONES == 3 )
-	{
-		local( $boneIndices );
-		local( $blendedMatrix0 );
-		local( $blendedMatrix1 );
-		local( $blendedMatrix2 );
-		&AllocateRegister( \$boneIndices );
-		&AllocateRegister( \$blendedMatrix0 );
-		&AllocateRegister( \$blendedMatrix1 );
-		&AllocateRegister( \$blendedMatrix2 );
-		if ( $g_xbox )
-		{
-			&AllocateRegister( \$localPos );
-			mov $localPos, $vPos
-			mad $localPos.xyz, $SHADER_FLEXSCALE, $vPosFlex.xyz, $localPos.xyz
-
-			&AllocateRegister( \$localNormal );
-			mov $localNormal, $vNormal
-			mad $localNormal.xyz, $SHADER_FLEXSCALE, $vNormalFlex.xyz, $localNormal.xyz
+			mov $boneIndices, $boneIndices.zyxw
 		}
 
-		; Transform position into world space using all bones
-		; denormalize d3dcolor to matrix index
-		mad $boneIndices, $vBoneIndices, $cColorToIntScale, $cModel0Index
-		if ( $g_xbox )
-		{
-			&FixupXboxBoneIndex_3Bone( $boneIndices );
-		}
 		; r11 = boneindices at this point
 		; first matrix
 		mov a0.x, $boneIndices.z
@@ -1368,56 +899,29 @@ sub SkinPositionNormalAndTangentSpace
 		mad $blendedMatrix2, $boneIndices.w, c[a0.x+2], $blendedMatrix2
 		
 		; position
-		if ( $g_xbox )
-		{
-			dp4 $worldPos.x, $localPos, $blendedMatrix0
-			dp4 $worldPos.y, $localPos, $blendedMatrix1
-			dp4 $worldPos.z, $localPos, $blendedMatrix2
-			mov $worldPos.w, $cOne
-			&FreeRegister( \$localPos );
+		dp4 $worldPos.x, $vPos, $blendedMatrix0
+		dp4 $worldPos.y, $vPos, $blendedMatrix1
+		dp4 $worldPos.z, $vPos, $blendedMatrix2
+		mov $worldPos.w, $cOne
 
-			; normal
-			dp3 $worldNormal.x, $localNormal, $blendedMatrix0
-			dp3 $worldNormal.y, $localNormal, $blendedMatrix1
-			dp3 $worldNormal.z, $localNormal, $blendedMatrix2
-			
-			; renormalize after flex
-			&FreeRegister( \$localNormal );
-			&AllocateRegister( \$normalLength );
-			&AllocateRegister( \$ooNormalLength );
+		; normal
+		dp3 $worldNormal.x, $vNormal, $blendedMatrix0
+		dp3 $worldNormal.y, $vNormal, $blendedMatrix1
+		dp3 $worldNormal.z, $vNormal, $blendedMatrix2
 
-			dp3 $normalLength, $worldNormal, $worldNormal
-			rsq $ooNormalLength.x, $normalLength.x
-			mul $worldNormal.xyz, $worldNormal.xyz, $ooNormalLength.x
-
-			&FreeRegister( \$normalLength );
-			&FreeRegister( \$ooNormalLength );
-		}
-		else
-		{
-			dp4 $worldPos.x, $vPos, $blendedMatrix0
-			dp4 $worldPos.y, $vPos, $blendedMatrix1
-			dp4 $worldPos.z, $vPos, $blendedMatrix2
-			mov $worldPos.w, $cOne
-
-			; normal
-			dp3 $worldNormal.x, $vNormal, $blendedMatrix0
-			dp3 $worldNormal.y, $vNormal, $blendedMatrix1
-			dp3 $worldNormal.z, $vNormal, $blendedMatrix2
-		}
-
-		if ( $g_xbox )
-		{
-			; tangents
-			dp3 $worldTangentS.x, $userData, $blendedMatrix0
-			dp3 $worldTangentS.y, $userData, $blendedMatrix1
-			dp3 $worldTangentS.z, $userData, $blendedMatrix2
-
-			; calculate tangent t via cross( N, S ) * S[3]
-			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
-			mul $worldTangentT.xyz, $userData.w, $worldTangentT.xyz
-		}
-		else
+# X360TBD: needed for compressed vertex format
+#		if ( $g_x360 )
+#		{
+#			; tangents
+#			dp3 $worldTangentS.x, $userData, $blendedMatrix0
+#			dp3 $worldTangentS.y, $userData, $blendedMatrix1
+#			dp3 $worldTangentS.z, $userData, $blendedMatrix2
+#
+#			; calculate tangent t via cross( N, S ) * S[3]
+#			&Cross( $worldTangentT, $worldNormal, $worldTangentS );
+#			mul $worldTangentT.xyz, $userData.w, $worldTangentT.xyz
+#		}
+#		else
 		{
 			; tangents
 			dp3 $worldTangentS.x, $vUserData, $blendedMatrix0
@@ -1435,10 +939,11 @@ sub SkinPositionNormalAndTangentSpace
 		&FreeRegister( \$blendedMatrix2 );
 	}
 
-	if ( $g_xbox )
-	{
-		&FreeRegister( \$userData );
-	}
+# X360TBD: needed for compressed vertex format
+#	if ( $g_x360 )
+#	{
+#		&FreeRegister( \$userData );
+#	}
 }
 
 sub ColorClamp
@@ -1501,32 +1006,20 @@ sub DirectionalLight
 	; compute n dot l
 	dp3 $nDotL.x, -c[a0.x + 1], $worldNormal
 	
-	if ( $g_xbox )
+	if ( $HALF_LAMBERT == 0 )
 	{
-		; HALF LAMBERT
-		mad $nDotL.y, $nDotL.x, $cHalf, $cHalf  ; dot = (dot * 0.5 + 0.5)^2
-		mul $nDotL.y, $nDotL.y, $nDotL.y
-		max $nDotL.x, $nDotL.x, $cZero			; clamp to zero  
-		sub $nDotL.z, $nDotL.y, $nDotL.x
-		mad $nDotL.x, $SHADER_HALFLAMBERT, $nDotL.z, $nDotL.x
+		; lambert
+		max $nDotL.x, $nDotL.x, c0.x				; Clamp to zero
+	}
+	elsif ( $HALF_LAMBERT == 1 )
+	{
+		; half-lambert
+		mad $nDotL.x, $nDotL.x, $cHalf, $cHalf		; dot = (dot * 0.5 + 0.5)^2
+		mul $nDotL.x, $nDotL.x, $nDotL.x
 	}
 	else
 	{
-		if ( $HALF_LAMBERT == 0 )
-		{
-			; lambert
-			max $nDotL.x, $nDotL.x, c0.x				; Clamp to zero
-		}
-		elsif ( $HALF_LAMBERT == 1 )
-		{
-			; half-lambert
-			mad $nDotL.x, $nDotL.x, $cHalf, $cHalf		; dot = (dot * 0.5 + 0.5)^2
-			mul $nDotL.x, $nDotL.x, $nDotL.x
-		}
-		else
-		{
-			die "\$HALF_LAMBERT is hosed\n";
-		}
+		die "\$HALF_LAMBERT is hosed\n";
 	}
   
 	if( $add )
@@ -1587,32 +1080,20 @@ sub PointLight
 	; compute n dot l, fold in distance attenutation
 	dp3 $tmp.x, $lightDir, $worldNormal
 
-	if ( $g_xbox )
+	if ( $HALF_LAMBERT == 0 )
 	{
-		; HALF LAMBERT
-		mad $tmp.y, $tmp.x, $cHalf, $cHalf  ; dot = (dot * 0.5 + 0.5)^2
-		mul $tmp.y, $tmp.y, $tmp.y
-		max $tmp.x, $tmp.x, $cZero			; clamp to zero  
-		sub $tmp.z, $tmp.y, $tmp.x
-		mad $tmp.x, $SHADER_HALFLAMBERT, $tmp.z, $tmp.x
+		; lambert
+		max $tmp.x, $tmp.x, c0.x				; Clamp to zero
+	}
+	elsif ( $HALF_LAMBERT == 1 )
+	{
+		; half-lambert
+		mad $tmp.x, $tmp.x, $cHalf, $cHalf		; dot = (dot * 0.5 + 0.5)^2
+		mul $tmp.x, $tmp.x, $tmp.x
 	}
 	else
 	{
-		if ( $HALF_LAMBERT == 0 )
-		{
-			; lambert
-			max $tmp.x, $tmp.x, c0.x				; Clamp to zero
-		}
-		elsif ( $HALF_LAMBERT == 1 )
-		{
-			; half-lambert
-			mad $tmp.x, $tmp.x, $cHalf, $cHalf		; dot = (dot * 0.5 + 0.5)^2
-			mul $tmp.x, $tmp.x, $tmp.x
-		}
-		else
-		{
-			die "\$HALF_LAMBERT is hosed\n";
-		}
+		die "\$HALF_LAMBERT is hosed\n";
 	}
 	
 	mul $tmp.x, $tmp.x, $lightDir.w
@@ -1675,32 +1156,20 @@ sub SpotLight
 	; compute n dot l
 	dp3 $litSrc.x, $worldNormal, $lightDir
 	
-	if ( $g_xbox )
+	if ( $HALF_LAMBERT == 0 )
 	{
-		; HALF LAMBERT
-		mad $litSrc.y, $litSrc.x, $cHalf, $cHalf	; dot = (dot * 0.5 + 0.5)^2
-		mul $litSrc.y, $litSrc.y, $litSrc.y
-		max $litSrc.x, $litSrc.x, $cZero			; clamp to zero  
-		sub $litSrc.z, $litSrc.y, $litSrc.x
-		mad $litSrc.x, $SHADER_HALFLAMBERT, $litSrc.z, $litSrc.x
+		; lambert
+		max $litSrc.x, $litSrc.x, c0.x				; Clamp to zero
+	}
+	elsif ( $HALF_LAMBERT == 1 )
+	{
+		; half-lambert
+		mad $litSrc.x, $litSrc.x, $cHalf, $cHalf	; dot = (dot * 0.5 + 0.5) ^ 2
+		mul $litSrc.x, $litSrc.x, $litSrc.x
 	}
 	else
 	{
-		if ( $HALF_LAMBERT == 0 )
-		{
-			; lambert
-			max $litSrc.x, $litSrc.x, c0.x				; Clamp to zero
-		}
-		elsif ( $HALF_LAMBERT == 1 )
-		{
-			; half-lambert
-			mad $litSrc.x, $litSrc.x, $cHalf, $cHalf	; dot = (dot * 0.5 + 0.5) ^ 2
-			mul $litSrc.x, $litSrc.x, $litSrc.x
-		}
-		else
-		{
-			die "\$HALF_LAMBERT is hosed\n";
-		}
+		die "\$HALF_LAMBERT is hosed\n";
 	}
 
 	; compute angular attenuation
@@ -1768,7 +1237,7 @@ sub DoLighting
 	{
 		die "DoLighting called without using \$LIGHT_COMBO\n";
 	}
-	if ( !$g_xbox && !defined $HALF_LAMBERT )
+	if ( !defined $HALF_LAMBERT )
 	{
 		die "DoLighting called without using \$HALF_LAMBERT\n";
 	}
@@ -1790,6 +1259,8 @@ sub DoLighting
 	if( $staticLightType eq "none" && $ambientLightType eq "none" &&
 		$localLightType1 eq "none" && $localLightType2 eq "none" )
 	{
+		; Have to write something here since debug d3d runtime will barf otherwise.
+		mov oD0, $cOne
 		return;
 	}
 
@@ -1869,7 +1340,7 @@ sub DoDynamicLightingToLinear
 	{
 		die "DoLighting called without using \$LIGHT_COMBO\n";
 	}
-	if ( !g_xbox && !defined $HALF_LAMBERT )
+	if ( !defined $HALF_LAMBERT )
 	{
 		die "DoLighting called without using \$HALF_LAMBERT\n";
 	}

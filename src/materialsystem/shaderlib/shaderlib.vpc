@@ -8,7 +8,6 @@ $macro SRCDIR		"..\.."
 $Macro OUTLIBDIR	"$SRCDIR\lib\public"
 
 $include "$SRCDIR\vpc_scripts\source_lib_win32_base.vpc"	[$WIN32||$LINUX]
-$include "$SRCDIR\vpc_scripts\source_lib_x360_base.vpc"		[$X360]
 
 $Configuration
 {
@@ -42,7 +41,6 @@ $Project "shaderlib"
 		$File	"$SRCDIR\public\appframework\IAppSystem.h"
 		$File	"$SRCDIR\public\tier0\ICommandLine.h"
 		$File	"$SRCDIR\Public\icvar.h"
-		//$File	"$SRCDIR\Public\ImageLoader.h"
 		$File	"$SRCDIR\public\materialsystem\imaterial.h"
 		$File	"$SRCDIR\public\materialsystem\imaterialsystem.h"
 		$File	"$SRCDIR\public\materialsystem\imaterialsystemhardwareconfig.h"
@@ -53,7 +51,7 @@ $Project "shaderlib"
 		$File	"..\IShaderSystem.h"
 		$File	"$SRCDIR\public\materialsystem\itexture.h"
 		$File	"$SRCDIR\public\materialsystem\materialsystem_config.h"
-		//$File	"$SRCDIR\Public\MATHLIB.H"
+		$File	"$SRCDIR\Public\MATHLIB\MATHLIB.H"
 		$File	"$SRCDIR\public\tier0\memdbgoff.h"
 		$File	"$SRCDIR\public\tier0\memdbgon.h"
 		$File	"$SRCDIR\public\tier0\platform.h"
@@ -63,11 +61,6 @@ $Project "shaderlib"
 		$File	"$SRCDIR\public\tier1\strtools.h"
 		$File	"$SRCDIR\public\tier1\utlmemory.h"
 		$File	"$SRCDIR\public\tier1\utlvector.h"
-		//$File	"$SRCDIR\Public\vector.h"
-		//$File	"$SRCDIR\Public\vector2d.h"
-		//$File	"$SRCDIR\Public\vector4d.h"
-		//$File	"$SRCDIR\Public\vmatrix.h"
-		//$File	"$SRCDIR\Public\vplane.h"
 		$File	"$SRCDIR\public\vstdlib\vstdlib.h"
 	}
 }

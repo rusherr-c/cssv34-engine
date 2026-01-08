@@ -24,7 +24,7 @@
 #include "fmtstr.h"
 #include "exprevaluator.h"
 #include "tier1/interface.h"
-#include "p4lib/ip4.h"
+//#include "p4lib/ip4.h"
 #include "scriptsource.h"
 #include "logging.h"
 #ifdef STEAM

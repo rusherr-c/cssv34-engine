@@ -12,7 +12,7 @@
 #endif
 
 #include "mathlib/vector.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
 
 
 //-----------------------------------------------------------------------------

@@ -1,11 +1,10 @@
 vs.1.1
 
 # DYNAMIC: "DOWATERFOG"				"0..1"
-# DYNAMIC: "SKINNING"				"0..1"	[XBOX]
-# DYNAMIC: "NUM_BONES"				"0..3"	[PC]
+# DYNAMIC: "SKINNING"				"0..1"
 # STATIC: "TEETH"					"0..1"
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 local( $worldPos, $worldNormal, $projPos );
 
@@ -38,7 +37,7 @@ else
 {
 	&SkinPositionAndNormal( $worldPos, $worldNormal );
 
-	if( $NUM_BONES > 1 || $SKINNING == 1 )
+	if( $SKINNING == 1 )
 	{
 		&Normalize( $worldNormal );
 	}
@@ -77,7 +76,7 @@ local( $worldPosToLightVector, $distFactors );
 
 alloc $worldPosToLightVector
 
-sub $worldPosToLightVector, $cLight0Pos, $worldPos
+sub $worldPosToLightVector, $SHADER_SPECIFIC_CONST_0, $worldPos
 mov oT2, $worldPosToLightVector
 
 local( $distatten );
@@ -101,11 +100,10 @@ rcp $distatten.z, $distatten.z ; 1/distsquared
 local( $endFalloffFactor );
 alloc $endFalloffFactor
 
-; ( farZ - dist )
-sub $endFalloffFactor.x, $SHADER_SPECIFIC_CONST_5.w, $dist.x
-; 1 / ( .4 * farZ )
-rcp $endFalloffFactor.y, $cLight0Pos.w
-mul $endFalloffFactor, $endFalloffFactor.x, $endFalloffFactor.y
+; ( dist - farZ )
+sub $endFalloffFactor.x, $dist.x, $SHADER_SPECIFIC_CONST_5.w
+; 1 / ( (0.6f * farZ) - farZ)
+mul $endFalloffFactor, $endFalloffFactor.x, $SHADER_SPECIFIC_CONST_0.w
 max $endFalloffFactor, $endFalloffFactor, $cZero
 min $endFalloffFactor, $endFalloffFactor, $cOne
 
@@ -117,9 +115,9 @@ mul $vertAtten, $vertAtten, $endFalloffFactor
 if( $TEETH )
 {
 	alloc $mouthAtten
-	dp3 $mouthAtten, $worldNormal.xyz, $SHADER_SPECIFIC_CONST_0.xyz
+	dp3 $mouthAtten, $worldNormal.xyz, $SHADER_SPECIFIC_CONST_10.xyz
 	max $mouthAtten, $cZero, $mouthAtten
-	mul $mouthAtten, $mouthAtten, $SHADER_SPECIFIC_CONST_0.w
+	mul $mouthAtten, $mouthAtten, $SHADER_SPECIFIC_CONST_10.w
 	mul $vertAtten, $vertAtten, $mouthAtten
 	free $mouthAtten
 }

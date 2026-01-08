@@ -13,22 +13,22 @@ ps.1.1
 tex t0				; sample dudv map
 texbem t1, t0		; refraction
 
-#ifdef REFRACTTINTTEXTURE_1
+#if REFRACTTINTTEXTURE
 tex t2
 #endif
 
-#ifdef NORMALMAPALPHA_1
+#if NORMALMAPALPHA
 tex t3
 #endif
 
 ; refracttint
-#ifdef REFRACTTINTTEXTURE_1
+#if REFRACTTINTTEXTURE
 mul_x2 r0, t1, t2
 #else
 mov r0, t1
 #endif
 
-#ifdef NORMALMAPALPHA_1
+#if NORMALMAPALPHA
 mul r0.rgb, r0, c0 +
 mov r0.a, t3.a
 #else

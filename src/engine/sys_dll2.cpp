@@ -35,7 +35,7 @@
 #include "sys_dll.h"
 #include "materialsystem/materialsystem_config.h"
 #include "server.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
 #include "datacache/idatacache.h"
 #include "vphysics_interface.h"
 #include "inputsystem/iinputsystem.h"

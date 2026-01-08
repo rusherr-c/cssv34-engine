@@ -7,21 +7,16 @@
 
 
 #include "BaseVSShader.h"
-#include "VMatrix.h"
+#include "mathlib/VMatrix.h"
 
-#include "SDK_water_vs11.inc"
-#include "SDK_watercheappervertexfresnel_vs11.inc"
-#include "SDK_watercheap_vs11.inc"
+#include "water_vs11.inc"
+#include "watercheappervertexfresnel_vs11.inc"
+#include "watercheap_vs11.inc"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-#ifdef _XBOX
-DEFINE_FALLBACK_SHADER( SDK_Water, SDK_Water_DX80 )
-#endif
-
-
-BEGIN_VS_SHADER( SDK_Water_DX80, 
+BEGIN_VS_SHADER( Water_DX80, 
 			  "Help for Water_DX80" )
 
 	BEGIN_SHADER_PARAMS
@@ -92,7 +87,7 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 	{
 		if ( IsPC() && ( g_pHardwareConfig->GetDXSupportLevel() < 80 ||	!g_pHardwareConfig->HasProjectedBumpEnv() ) )
 		{
-			return "SDK_Water_DX60";
+			return "Water_DX60";
 		}
 		return 0;
 	}
@@ -142,44 +137,39 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 		SHADOW_STATE
 		{
 			SetInitialShadowState( );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
-#ifdef _XBOX
-			pShaderShadow->SetColorSign( SHADER_TEXTURE_STAGE0, true );
-#endif
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0, 0 );
+			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 			if( bBlendReflection )
 			{
 				EnableAlphaBlending( SHADER_BLEND_SRC_ALPHA, SHADER_BLEND_ONE_MINUS_SRC_ALPHA );
 			}
 
-			sdk_water_vs11_Static_Index vshIndex;
-			pShaderShadow->SetVertexShader( "SDK_Water_vs11", vshIndex.GetIndex() );
+			water_vs11_Static_Index vshIndex;
+			pShaderShadow->SetVertexShader( "Water_vs11", vshIndex.GetIndex() );
 
-			pShaderShadow->SetPixelShader( "SDK_WaterReflect_ps11", 0 );
+			pShaderShadow->SetPixelShader( "WaterReflect_ps11", 0 );
 
 			FogToFogColor();
 		}
 		DYNAMIC_STATE
 		{
 			pShaderAPI->SetDefaultState();
-#ifndef _XBOX
-			// The dx9.0c runtime says that we shouldn't have a non-zero dimension when using vertex and pixel shaders.
-			pShaderAPI->SetTextureTransformDimension( 1, 0, true );
-#else
-			// xboxissue - projected texture coord not available with texbem
-			// divide must be in vsh
-#endif
-			float fReflectionAmount = params[REFLECTAMOUNT]->GetFloatValue();
-			pShaderAPI->SetBumpEnvMatrix( 1, fReflectionAmount, 0.0f, 0.0f, fReflectionAmount );
 
-			BindTexture( SHADER_TEXTURE_STAGE0, BUMPMAP, BUMPFRAME );
-			BindTexture( SHADER_TEXTURE_STAGE1, REFLECTTEXTURE, -1 );
-			BindTexture( SHADER_TEXTURE_STAGE2, NORMALMAP, BUMPFRAME );
-			pShaderAPI->BindNormalizationCubeMap( SHADER_TEXTURE_STAGE3 );
+			// The dx9.0c runtime says that we shouldn't have a non-zero dimension when using vertex and pixel shaders.
+			pShaderAPI->SetTextureTransformDimension( SHADER_TEXTURE_STAGE1, 0, true );
+
+			float fReflectionAmount = params[REFLECTAMOUNT]->GetFloatValue();
+			pShaderAPI->SetBumpEnvMatrix( SHADER_TEXTURE_STAGE1, fReflectionAmount, 0.0f, 0.0f, fReflectionAmount );
+
+			BindTexture( SHADER_SAMPLER0, BUMPMAP, BUMPFRAME );
+			BindTexture( SHADER_SAMPLER1, REFLECTTEXTURE, -1 );
+			BindTexture( SHADER_SAMPLER2, NORMALMAP, BUMPFRAME );
+			pShaderAPI->BindStandardTexture( SHADER_SAMPLER3, TEXTURE_NORMALIZATION_CUBEMAP );
 			pShaderAPI->SetVertexShaderIndex( 0 );
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
@@ -190,7 +180,7 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 
 			SetPixelShaderConstant( 0, REFLECTTINT );
 
-			sdk_water_vs11_Dynamic_Index vshIndex;
+			water_vs11_Dynamic_Index vshIndex;
 			vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 			pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 		}
@@ -202,25 +192,25 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 	{
 		SHADOW_STATE
 		{
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0, 0 );
+			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
-			sdk_water_vs11_Static_Index vshIndex;
-			pShaderShadow->SetVertexShader( "SDK_Water_vs11", vshIndex.GetIndex() );
+			water_vs11_Static_Index vshIndex;
+			pShaderShadow->SetVertexShader( "Water_vs11", vshIndex.GetIndex() );
 
-			pShaderShadow->SetPixelShader( "SDK_WaterRefract_ps11", 0 );
+			pShaderShadow->SetPixelShader( "WaterRefract_ps11", 0 );
 			FogToFogColor();
 		}
 		DYNAMIC_STATE
 		{
 			// The dx9.0c runtime says that we shouldn't have a non-zero dimension when using vertex and pixel shaders.
-			pShaderAPI->SetTextureTransformDimension( 1, 0, true );
+			pShaderAPI->SetTextureTransformDimension( SHADER_TEXTURE_STAGE1, 0, true );
 			float fRefractionAmount = params[REFRACTAMOUNT]->GetFloatValue();
-			pShaderAPI->SetBumpEnvMatrix( 1, fRefractionAmount, 0.0f, 0.0f, fRefractionAmount );
-			BindTexture( SHADER_TEXTURE_STAGE0, BUMPMAP, BUMPFRAME );
-			BindTexture( SHADER_TEXTURE_STAGE1, REFRACTTEXTURE );
+			pShaderAPI->SetBumpEnvMatrix( SHADER_TEXTURE_STAGE1, fRefractionAmount, 0.0f, 0.0f, fRefractionAmount );
+			BindTexture( SHADER_SAMPLER0, BUMPMAP, BUMPFRAME );
+			BindTexture( SHADER_SAMPLER1, REFRACTTEXTURE );
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
 
@@ -230,7 +220,7 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 
 			SetPixelShaderConstant( 0, REFRACTTINT );
 
-			sdk_water_vs11_Dynamic_Index vshIndex;
+			water_vs11_Dynamic_Index vshIndex;
 			vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 			pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 		}
@@ -243,32 +233,30 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 		SHADOW_STATE
 		{
 			pShaderShadow->EnableAlphaWrites( true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
-#ifdef _XBOX
-			pShaderShadow->SetColorSign( SHADER_TEXTURE_STAGE0, true );
-#endif
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0, 0 );
+			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
-			sdk_water_vs11_Static_Index vshIndex;
-			pShaderShadow->SetVertexShader( "SDK_Water_vs11", vshIndex.GetIndex() );
+			water_vs11_Static_Index vshIndex;
+			pShaderShadow->SetVertexShader( "Water_vs11", vshIndex.GetIndex() );
 
-			pShaderShadow->SetPixelShader( "SDK_WaterRefractFresnel_ps11", 0 );
+			pShaderShadow->SetPixelShader( "WaterRefractFresnel_ps11", 0 );
 			FogToFogColor();
 		}
 		DYNAMIC_STATE
 		{
 			// The dx9.0c runtime says that we shouldn't have a non-zero dimension when using vertex and pixel shaders.
-			pShaderAPI->SetTextureTransformDimension( 1, 0, true );
+			pShaderAPI->SetTextureTransformDimension( SHADER_TEXTURE_STAGE1, 0, true );
 			float fRefractionAmount = params[REFRACTAMOUNT]->GetFloatValue();
-			pShaderAPI->SetBumpEnvMatrix( 1, fRefractionAmount, 0.0f, 0.0f, fRefractionAmount );
-			BindTexture( SHADER_TEXTURE_STAGE0, BUMPMAP, BUMPFRAME );
-			BindTexture( SHADER_TEXTURE_STAGE1, REFRACTTEXTURE );
-			BindTexture( SHADER_TEXTURE_STAGE2, NORMALMAP, BUMPFRAME );
-			s_pShaderAPI->BindNormalizationCubeMap( SHADER_TEXTURE_STAGE3 );
+			pShaderAPI->SetBumpEnvMatrix( SHADER_TEXTURE_STAGE1, fRefractionAmount, 0.0f, 0.0f, fRefractionAmount );
+			BindTexture( SHADER_SAMPLER0, BUMPMAP, BUMPFRAME );
+			BindTexture( SHADER_SAMPLER1, REFRACTTEXTURE );
+			BindTexture( SHADER_SAMPLER2, NORMALMAP, BUMPFRAME );
+			s_pShaderAPI->BindStandardTexture( SHADER_SAMPLER3, TEXTURE_NORMALIZATION_CUBEMAP );
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
 			SetCheapWaterFactors( params, pShaderAPI, VERTEX_SHADER_SHADER_SPECIFIC_CONST_3 );
@@ -279,7 +267,7 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 
 			SetPixelShaderConstant( 0, REFRACTTINT );
 
-			sdk_water_vs11_Dynamic_Index vshIndex;
+			water_vs11_Dynamic_Index vshIndex;
 			vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 			pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 		}
@@ -299,8 +287,8 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 				s_pShaderShadow->EnableCulling( false );
 			}
 
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 			if( bBlend )
 			{
 				if ( bBlendFresnel )
@@ -315,25 +303,25 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 
 			pShaderShadow->VertexShaderVertexFormat( 
 				VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S |
-				VERTEX_TANGENT_T, 1, 0, 0, 0 );
+				VERTEX_TANGENT_T, 1, 0, 0 );
 
 			if( bNoPerVertexFresnel )
 			{
-				sdk_watercheap_vs11_Static_Index vshIndex;
-				pShaderShadow->SetVertexShader( "SDK_WaterCheap_vs11", vshIndex.GetIndex() );
+				watercheap_vs11_Static_Index vshIndex;
+				pShaderShadow->SetVertexShader( "WaterCheap_vs11", vshIndex.GetIndex() );
 			}
 			else
 			{
-				sdk_watercheappervertexfresnel_vs11_Static_Index vshIndex;
-				pShaderShadow->SetVertexShader( "SDK_WaterCheapPerVertexFresnel_vs11", vshIndex.GetIndex() );
+				watercheappervertexfresnel_vs11_Static_Index vshIndex;
+				pShaderShadow->SetVertexShader( "WaterCheapPerVertexFresnel_vs11", vshIndex.GetIndex() );
 			}
 
 			static const char *s_pPixelShaderName[] = 
 			{
-				"SDK_WaterCheapOpaque_ps11",
-				"SDK_WaterCheap_ps11",
-				"SDK_WaterCheapNoFresnelOpaque_ps11",
-				"SDK_WaterCheapNoFresnel_ps11",
+				"WaterCheapOpaque_ps11",
+				"WaterCheap_ps11",
+				"WaterCheapNoFresnelOpaque_ps11",
+				"WaterCheapNoFresnel_ps11",
 			};
 
 			int nPshIndex = 0;
@@ -346,8 +334,8 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 		DYNAMIC_STATE
 		{
 			pShaderAPI->SetDefaultState();
-			BindTexture( SHADER_TEXTURE_STAGE0, NORMALMAP, BUMPFRAME );
-			BindTexture( SHADER_TEXTURE_STAGE3, ENVMAP, ENVMAPFRAME );
+			BindTexture( SHADER_SAMPLER0, NORMALMAP, BUMPFRAME );
+			BindTexture( SHADER_SAMPLER3, ENVMAP, ENVMAPFRAME );
 
 			if( bBlend && !bBlendFresnel )
 			{
@@ -366,13 +354,13 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 
 			if( bNoPerVertexFresnel )
 			{
-				sdk_watercheap_vs11_Dynamic_Index vshIndex;
+				watercheap_vs11_Dynamic_Index vshIndex;
 				vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 				pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 			}
 			else
 			{
-				sdk_watercheappervertexfresnel_vs11_Dynamic_Index vshIndex;
+				watercheappervertexfresnel_vs11_Dynamic_Index vshIndex;
 				vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 				pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 			}
@@ -393,11 +381,7 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 		bool bForceCheap = params[FORCECHEAP]->GetIntValue() != 0 || UsingEditor( params );
 		bool bForceExpensive = !bForceCheap && (params[FORCEEXPENSIVE]->GetIntValue() != 0);
 		bool bRefraction = params[REFRACTTEXTURE]->IsTexture();
-#ifndef _XBOX
 		bool bReflection = bForceExpensive && params[REFLECTTEXTURE]->IsTexture();
-#else
-		bool bReflection = false;
-#endif
 		bool bReflectionUseFresnel = false;
 
 		// Can't do fresnel when forcing cheap or if there's no refraction
@@ -408,25 +392,19 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 				// NOTE: Expensive reflection does the fresnel correctly per-pixel
 				if ( g_pHardwareConfig->HasDestAlphaBuffer() && !bReflection && !params[NOFRESNEL]->GetIntValue() )
 				{
-#ifndef _XBOX
 					DrawRefractionForFresnel( params, pShaderShadow, pShaderAPI );
-#endif
 					bReflectionUseFresnel = true;
 				}
 				else
 				{
-#ifndef _XBOX
 					DrawRefraction( params, pShaderShadow, pShaderAPI );
-#endif
 				}
 				bBlendReflection = true;
 			}
-#ifndef _XBOX
 			if( bReflection )
 			{
 				DrawReflection( params, pShaderShadow, pShaderAPI, bBlendReflection );
 			}
-#endif
 		}
 
 		// Use $decal to see if we are a decal or not. . if we are, then don't bother
@@ -435,26 +413,6 @@ BEGIN_VS_SHADER( SDK_Water_DX80,
 		{
 			bool bNoPerVertexFresnel = ( params[NOFRESNEL]->GetIntValue() || bReflectionUseFresnel || bForceCheap || !bRefraction );
 			DrawCheapWater( params, pShaderShadow, pShaderAPI, bBlendReflection, bReflectionUseFresnel, bNoPerVertexFresnel );
-		}
-		else
-		{
-			if ( !bForceCheap )
-			{
-#ifdef _XBOX
-				SHADOW_STATE
-				{
-					pShaderShadow->EnableAlphaWrites( false );
-					pShaderShadow->EnableColorWrites( false );
-					pShaderShadow->DepthFunc( SHADER_DEPTHFUNC_ALWAYS );
-					pShaderShadow->EnableDepthWrites( false );
-					pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION, 0, 0, 0, 0 );
-				}
-				DYNAMIC_STATE
-				{
-				}
-				Draw();
-#endif
-			}
 		}
 	}
 END_SHADER

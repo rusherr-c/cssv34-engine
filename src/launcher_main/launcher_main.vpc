@@ -9,7 +9,7 @@ $Macro OUTBINDIR	"$SRCDIR\..\game"
 
 // Must be built explicitly as "default" in order to build a compliant submittable Disc.
 // Renames will not work.
-$Macro OUTBINNAME	"default"
+$Macro OUTBINNAME	"hl2"
 
 $Include "$SRCDIR\vpc_scripts\source_exe_win_win32_base.vpc"	[$WIN32||$LINUX]
 $Include "$SRCDIR\vpc_scripts\source_xex_x360_base.vpc"			[$X360]
@@ -31,44 +31,6 @@ $Configuration
 	{
 		// General
 		$AdditionalSections			"4541080F=$SRCDIR\common\hl2orange.spa"
-	}
-
-	$PreBuildEvent
-	{
-		$CommandLine		"if EXIST $OUTBINDIR\hl2.exe for /f $QUOTEdelims=$QUOTE %%A in ('attrib $QUOTE$OUTBINDIR\hl2.exe$QUOTE') do set valveTmpIsReadOnly=$QUOTE%%A$QUOTE" "\n" \
-							"set valveTmpIsReadOnlyLetter=%valveTmpIsReadOnly:~6,1%" "\n" \
-							"if $QUOTE%valveTmpIsReadOnlyLetter%$QUOTE==$QUOTER$QUOTE del /q $QUOTE$(TargetDir)$QUOTE$(TargetFileName)" "\n" \
-							"$CRCCHECK"
-	}
-
-	$PostBuildEvent	[$X360]
-	{
-		// inherit and add
-		$CommandLine				"$BASE" \
-									"call $SRCDIR\vpc_scripts\valve_xbcp_wrapper.cmd $(TargetDir)$(TargetName).xex xE:\Valve\default.xex" "\n"
-	}
-
-	$PostBuildEvent	[$WIN32]
-	{
-		// override with specific behavior
-		$CommandLine				"call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $OUTBINDIR\hl2.exe $SRCDIR" "\n" \
-									"call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $OUTBINDIR\tf2.exe $SRCDIR" "\n" \
-									"copy $(TargetPath) $OUTBINDIR\hl2.exe" "\n"					\
-									"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
-									"copy $(TargetPath) $OUTBINDIR\tf2.exe" "\n"					\
-									"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
-									"if exist $(TargetDir)$(TargetName).map copy $(TargetDir)$(TargetName).map $OUTBINDIR\tf2.map" "\n" \
-									"if exist $(TargetDir)$(TargetName).map copy $(TargetDir)$(TargetName).map $OUTBINDIR\hl2.map" "\n" \
-									"call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $OUTBINDIR\tf2.dat $SRCDIR" "\n"								\
-									"call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $OUTBINDIR\hl2.dat $SRCDIR" "\n"								\
-									"$OUTBINDIR\bin\newdat $OUTBINDIR\tf2.exe" "\n"					\
-									"$OUTBINDIR\bin\newdat $OUTBINDIR\hl2.exe" "\n"					\
-									"goto BuildEventOK" "\n" \
-									":BuildEventFailed" "\n" \
-									"echo *** ERROR! PostBuildStep FAILED for $(ProjectName)! EXE or DLL is probably running. ***" "\n" \
-									"del /q $(TargetPath)" "\n" \
-									"exit 1" "\n" \
-									":BuildEventOK" "\n"
 	}
 }
 

@@ -1,15 +1,14 @@
 vs.1.1
 
 # DYNAMIC: "DOWATERFOG"				"0..1"
-# DYNAMIC: "SKINNING"				"0..1"	[XBOX]
-# DYNAMIC: "NUM_BONES"				"0..3"	[PC]
+# DYNAMIC: "SKINNING"				"0..1"
 
 ;------------------------------------------------------------------------------
 ; Shader specific constant:
 ;	 $SHADER_SPECIFIC_CONST_5	 = [sOffset, tOffset, 0, 0]
 ;------------------------------------------------------------------------------
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ;------------------------------------------------------------------------------
 ; Vertex blending

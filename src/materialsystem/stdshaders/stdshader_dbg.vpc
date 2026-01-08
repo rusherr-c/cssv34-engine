@@ -9,20 +9,19 @@ $Macro OUTBINDIR	"$SRCDIR\..\game\bin"
 
 $include "$SRCDIR\vpc_scripts\source_dll_win32_base.vpc"	[$WIN32||$LINUX]
 
+
 // Common Configuration
 $Configuration
 {
 	$Compiler
 	{
 		$AdditionalIncludeDirectories	"$BASE;fxctmp9;vshtmp9;..\..\dx9sdk\include"	[$WIN32]
-		$AdditionalIncludeDirectories	"$BASE;fxctmp9_360;vshtmp9_360"					[$X360]
 		$PreprocessorDefinitions		"$BASE;STDSHADER_DBG_DLL_EXPORT;FAST_MATERIALVAR_ACCESS"
 	}
 
 	$Linker
 	{
 		$AdditionalDependencies			"$BASE version.lib winmm.lib"	[$WIN32]
-		$ModuleDefinitionFile			"xbox\xbox_dbg.def"				[$X360]
 	}
 }
 
@@ -46,7 +45,6 @@ $Project "stdshader_dbg"
 		}
 	}
 
-
 	$Folder	"Header Files"
 	{
 		$File	"BaseVSShader.h"
@@ -66,4 +64,5 @@ $Project "stdshader_dbg"
 
 	$Shaders	"stdshader_dx9_20b.txt"
 	$Shaders	"stdshader_dx9_30.txt"
+	$Shaders	"stdshader_dx10.txt"
 }

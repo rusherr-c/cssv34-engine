@@ -8,17 +8,17 @@
 
 #include "BaseVSShader.h"
 
-#include "SDK_refract_model_vs11.inc"
-#include "SDK_refract_world_vs11.inc"
+#include "refract_model_vs11.inc"
+#include "refract_world_vs11.inc"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 #define MAXBLUR 1
 
-DEFINE_FALLBACK_SHADER( SDK_Refract, SDK_Refract_DX80 )
+DEFINE_FALLBACK_SHADER( Refract, Refract_DX80 )
 
-BEGIN_VS_SHADER( SDK_Refract_DX80, 
+BEGIN_VS_SHADER( Refract_DX80, 
 			  "Help for Refract_DX80" )
 
 	BEGIN_SHADER_PARAMS
@@ -41,7 +41,7 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 		SHADER_PARAM( ENVMAPSATURATION, SHADER_PARAM_TYPE_FLOAT, "1.0", "saturation 0 == greyscale 1 == normal" )
 		SHADER_PARAM( REFRACTTINTTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "models/shadertest/shield", "" )
 		SHADER_PARAM( REFRACTTINTTEXTUREFRAME, SHADER_PARAM_TYPE_INTEGER, "0", "" )
-		SHADER_PARAM( FRESNELREFLECTION, SHADER_PARAM_TYPE_FLOAT, "1.0", "0.0 == no fresnel, 1.0 == full fresnel" )
+		SHADER_PARAM( FRESNELREFLECTION, SHADER_PARAM_TYPE_FLOAT, "1.0", "1.0 == mirror, 0.0 == water" )
 		SHADER_PARAM( FALLBACK, SHADER_PARAM_TYPE_STRING, "", "Name of the fallback shader" )
 		SHADER_PARAM( FORCEREFRACT, SHADER_PARAM_TYPE_BOOL, "0", "Forces refraction on boards that have poor performance" )
 		SHADER_PARAM( NOWRITEZ, SHADER_PARAM_TYPE_INTEGER, "0", "0 == write z, 1 = no write z" )
@@ -50,6 +50,7 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 
 	SHADER_INIT_PARAMS()
 	{
+		SET_FLAGS2( MATERIAL_VAR2_SUPPORTS_HW_SKINNING );
 		SET_FLAGS2( MATERIAL_VAR2_NEEDS_TANGENT_SPACES );
 		SET_FLAGS( MATERIAL_VAR_TRANSLUCENT );
 		if( !params[ENVMAPTINT]->IsDefined() )
@@ -84,11 +85,7 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 		{
 			params[FADEOUTONSILHOUETTE]->SetIntValue( 0 );
 		}
-	}
-
-	bool NeedsPowerOfTwoFrameBufferTexture( IMaterialVar **params ) const
-	{
-		return !params[BASETEXTURE]->IsDefined();
+		SET_FLAGS2( MATERIAL_VAR2_NEEDS_POWER_OF_TWO_FRAME_BUFFER_TEXTURE );
 	}
 
 	SHADER_FALLBACK
@@ -98,7 +95,7 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 			const char *pFallback = (params && params[FALLBACK]->IsDefined()) ? params[FALLBACK]->GetStringValue() : "";
 			if (!pFallback[0])
 			{
-				pFallback = "SDK_Refract_DX60";
+				pFallback = "Refract_DX60";
 			}
 
 			if( g_pHardwareConfig->GetDXSupportLevel() < 80 || !g_pHardwareConfig->HasProjectedBumpEnv() )
@@ -179,54 +176,49 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 				SetDefaultBlendingShadowState( NORMALMAP, false );
 				if ( !bMasked && TextureIsTranslucent( NORMALMAP, false ) )
 				{
-					pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
+					pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 					bNormalMapAlpha = true;
 				}
 			}
 
 			// dudv map
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-#ifdef _XBOX
-			pShaderShadow->SetColorSign( SHADER_TEXTURE_STAGE0, true );
-#endif
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+
 			// renderable texture for refraction
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 
 			if( bRefractTintTexture )
 			{
 				// refract tint texture
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 			}
 
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL;
-			int numBoneWeights = 0;
 			int userDataSize = 0;
 			if( bIsModel )
 			{
-				numBoneWeights = 3;
 				userDataSize = 4;
-				fmt |= VERTEX_BONE_INDEX;
 			}
 			else
 			{
 				fmt |= VERTEX_TANGENT_S | VERTEX_TANGENT_T;
 			}
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, numBoneWeights, userDataSize );
+			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, userDataSize );
 
 			if( bIsModel )
 			{
-				sdk_refract_model_vs11_Static_Index vshIndex;
-				pShaderShadow->SetVertexShader( "SDK_Refract_model_vs11", vshIndex.GetIndex() );
+				refract_model_vs11_Static_Index vshIndex;
+				pShaderShadow->SetVertexShader( "Refract_model_vs11", vshIndex.GetIndex() );
 			}
 			else
 			{
-				sdk_refract_world_vs11_Static_Index vshIndex;
-				pShaderShadow->SetVertexShader( "SDK_Refract_world_vs11", vshIndex.GetIndex() );
+				refract_world_vs11_Static_Index vshIndex;
+				pShaderShadow->SetVertexShader( "Refract_world_vs11", vshIndex.GetIndex() );
 			}
 
 			int pshIndex;
 			pshIndex = ComputePixelShaderIndex( bRefractTintTexture, bNormalMapAlpha );
-			pShaderShadow->SetPixelShader( "SDK_Refract_ps11", pshIndex );
+			pShaderShadow->SetPixelShader( "Refract_ps11", pshIndex );
 
 			if( bMasked )
 			{
@@ -237,43 +229,40 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 		DYNAMIC_STATE
 		{
 			pShaderAPI->SetDefaultState();
-#ifndef _XBOX
+
 			// The dx9.0c runtime says that we shouldn't have a non-zero dimension when using vertex and pixel shaders.
-			pShaderAPI->SetTextureTransformDimension( 1, 0, true );
-#else
-			// xboxissue - projected texture coord not available with texbem
-			// divide must be in vsh
-#endif
+			pShaderAPI->SetTextureTransformDimension( SHADER_TEXTURE_STAGE1, 0, true );
+
 			if ( params[DUDVFRAME]->GetIntValue() == 0 )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE0, DUDVMAP, BUMPFRAME );
+				BindTexture( SHADER_SAMPLER0, DUDVMAP, BUMPFRAME );
 			}
 			else
 			{
-				BindTexture( SHADER_TEXTURE_STAGE0, DUDVMAP, DUDVFRAME );
+				BindTexture( SHADER_SAMPLER0, DUDVMAP, DUDVFRAME );
 			}
 
 			if ( params[BASETEXTURE]->IsTexture() )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE1, BASETEXTURE, FRAME );
+				BindTexture( SHADER_SAMPLER1, BASETEXTURE, FRAME );
 			}
 			else
 			{
-				pShaderAPI->BindFBTexture( SHADER_TEXTURE_STAGE1 );
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER1, TEXTURE_FRAME_BUFFER_FULL_TEXTURE_0 );
 			}
 
 			if( bRefractTintTexture )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE2, REFRACTTINTTEXTURE, REFRACTTINTTEXTUREFRAME );
+				BindTexture( SHADER_SAMPLER2, REFRACTTINTTEXTURE, REFRACTTINTTEXTUREFRAME );
 			}
 
 			if ( params[NORMALMAP]->IsTexture() )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE3, NORMALMAP, BUMPFRAME );
+				BindTexture( SHADER_SAMPLER3, NORMALMAP, BUMPFRAME );
 			}
 
 			float fRefractionAmount = params[REFRACTAMOUNT]->GetFloatValue();
-			pShaderAPI->SetBumpEnvMatrix( 1, fRefractionAmount, 0.0f, 0.0f, fRefractionAmount );
+			pShaderAPI->SetBumpEnvMatrix( SHADER_TEXTURE_STAGE1, fRefractionAmount, 0.0f, 0.0f, fRefractionAmount );
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
 
@@ -285,18 +274,14 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 			SetPixelShaderConstant( 0, REFRACTTINT );
 			if( bIsModel )
 			{
-				sdk_refract_model_vs11_Dynamic_Index vshIndex;
+				refract_model_vs11_Dynamic_Index vshIndex;
 				vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
-#if !defined( _XBOX )
-				vshIndex.SetNUM_BONES( pShaderAPI->GetCurrentNumBones() );
-#else
 				vshIndex.SetSKINNING( pShaderAPI->GetCurrentNumBones() > 0 );
-#endif
 				pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 			}
 			else
 			{
-				sdk_refract_world_vs11_Dynamic_Index vshIndex;
+				refract_world_vs11_Dynamic_Index vshIndex;
 				vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 				pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 			}
@@ -307,7 +292,7 @@ BEGIN_VS_SHADER( SDK_Refract_DX80,
 		if( bHasEnvmap )
 		{
 			bool bNoWriteZ = (params[NOWRITEZ]->GetIntValue() != 0);
-			const int bBlendSpecular = true;
+			const bool bBlendSpecular = true;
 			if( bIsModel )
 			{
 				DrawModelBumpedSpecularLighting( NORMALMAP, BUMPFRAME,

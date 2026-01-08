@@ -43,4 +43,7 @@ IShaderDLL *GetShaderDLL();
 ICvar *GetCVar();
 
 
+
+
+
 #endif // SHADERDLL_H

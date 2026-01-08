@@ -8,14 +8,14 @@
 
 #include "BaseVSShader.h"
 
-#include "SDK_lightmappedgeneric_decal.inc"
-#include "bumpvects.h"
+#include "lightmappedgeneric_decal.inc"
+#include "mathlib/bumpvects.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 
-BEGIN_VS_SHADER( SDK_LightmappedGeneric_Decal,
+BEGIN_VS_SHADER( LightmappedGeneric_Decal,
 			  "Help for LightmappedGeneric_Decal" )
 
 	BEGIN_SHADER_PARAMS
@@ -24,8 +24,14 @@ BEGIN_VS_SHADER( SDK_LightmappedGeneric_Decal,
 	// Set up anything that is necessary to make decisions in SHADER_FALLBACK.
 	SHADER_INIT_PARAMS()
 	{
-		// FLASHLIGHTFIXME
-		params[FLASHLIGHTTEXTURE]->SetStringValue( "effects/flashlight001" );
+		if ( g_pHardwareConfig->SupportsBorderColor() )
+		{
+			params[FLASHLIGHTTEXTURE]->SetStringValue( "effects/flashlight_border" );
+		}
+		else
+		{
+			params[FLASHLIGHTTEXTURE]->SetStringValue( "effects/flashlight001" );
+		}
 
 		// No texture means no self-illum or env mask in base alpha
 		if ( !params[BASETEXTURE]->IsDefined() )
@@ -70,24 +76,27 @@ BEGIN_VS_SHADER( SDK_LightmappedGeneric_Decal,
 	{
 		if( IsSnapshotting() )
 		{
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
+			// Be sure not to write to dest alpha
+			pShaderShadow->EnableAlphaWrites( false );
+
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 
 			SetNormalBlendingShadowState( BASETEXTURE, true ); 
 
 			int pTexCoords[3] = { 2, 2, 1 };
-			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION | VERTEX_COLOR, 3, pTexCoords, 0, 0 );
+			pShaderShadow->VertexShaderVertexFormat( VERTEX_POSITION | VERTEX_COLOR, 3, pTexCoords, 0 );
 
-			sdk_lightmappedgeneric_decal_Static_Index vshIndex;
-			pShaderShadow->SetVertexShader( "SDK_LightmappedGeneric_Decal", vshIndex.GetIndex() );
-			pShaderShadow->SetPixelShader( "SDK_LightmappedGeneric_Decal" );
+			lightmappedgeneric_decal_Static_Index vshIndex;
+			pShaderShadow->SetVertexShader( "LightmappedGeneric_Decal", vshIndex.GetIndex() );
+			pShaderShadow->SetPixelShader( "LightmappedGeneric_Decal" );
 			FogToFogColor();
 		}
 		else
 		{
-			BindTexture( SHADER_TEXTURE_STAGE0, BASETEXTURE, FRAME );
+			BindTexture( SHADER_SAMPLER0, BASETEXTURE, FRAME );
 
 			// Load the z^2 components of the lightmap coordinate axes only
 			// This is (N dot basis)^2
@@ -100,11 +109,11 @@ BEGIN_VS_SHADER( SDK_LightmappedGeneric_Decal,
 			basis[2].Init( vecZValues.z, vecZValues.z, vecZValues.z, 0.0f );
 			pShaderAPI->SetPixelShaderConstant( 0, (float*)basis, 3 );
 
-			pShaderAPI->BindBumpLightmap( SHADER_TEXTURE_STAGE1 );
+			pShaderAPI->BindStandardTexture( SHADER_SAMPLER1, TEXTURE_LIGHTMAP_BUMPED );
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, BASETEXTURETRANSFORM );
 			SetModulationPixelShaderDynamicState( 3 );
 
-			sdk_lightmappedgeneric_decal_Dynamic_Index vshIndex;
+			lightmappedgeneric_decal_Dynamic_Index vshIndex;
 			vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
 			pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 		}

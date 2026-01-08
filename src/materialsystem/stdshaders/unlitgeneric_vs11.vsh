@@ -5,9 +5,9 @@ vs.1.1
 # STATIC:  "ENVMAPCAMERASPACE"		"0..0"
 # STATIC:  "ENVMAPSPHERE"			"0..1"
 # STATIC:  "VERTEXCOLOR"			"0..1"
+# STATIC:  "SEPARATEDETAILUVS"		"0..1"
 # DYNAMIC: "DOWATERFOG"				"0..1"
-# DYNAMIC: "SKINNING"				"0..1"	[XBOX]
-# DYNAMIC: "NUM_BONES"				"0..3"	[PC]
+# DYNAMIC: "SKINNING"				"0..1"
 
 # can't have envmapshere or envmapcameraspace without envmap
 # SKIP: !$ENVMAP && ( $ENVMAPSPHERE || $ENVMAPCAMERASPACE )
@@ -15,6 +15,9 @@ vs.1.1
 # can't have both envmapsphere and envmapcameraspace
 # SKIP: $ENVMAPSPHERE && $ENVMAPCAMERASPACE
 
-#include "SDK_UnlitGeneric_inc.vsh"
+# SKIP: !$DETAIL && $SEPARATEDETAILUVS
 
-&UnlitGeneric( $DETAIL, $ENVMAP, $ENVMAPCAMERASPACE, $ENVMAPSPHERE, $VERTEXCOLOR );
+
+#include "UnlitGeneric_inc.vsh"
+
+&UnlitGeneric( $DETAIL, $ENVMAP, $ENVMAPCAMERASPACE, $ENVMAPSPHERE, $VERTEXCOLOR, $SEPARATEDETAILUVS );

@@ -17,7 +17,7 @@
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "datacache/idatacache.h"
 #include "datacache/imdlcache.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
 #include "movieobjects/idmemakefileutils.h"
 #include "vphysics_interface.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"

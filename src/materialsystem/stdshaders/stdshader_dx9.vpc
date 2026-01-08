@@ -15,14 +15,12 @@ $Configuration
 	$Compiler
 	{
 		$AdditionalIncludeDirectories	"$BASE;fxctmp9;vshtmp9;..\..\dx9sdk\include"	[$WIN32]
-		$AdditionalIncludeDirectories	"$BASE;fxctmp9_360;vshtmp9_360"					[$X360]
 		$PreprocessorDefinitions		"$BASE;STDSHADER_DX9_DLL_EXPORT;FAST_MATERIALVAR_ACCESS"
 	}
 
 	$Linker
 	{
 		$AdditionalDependencies			"$BASE version.lib winmm.lib"	[$WIN32]
-		$ModuleDefinitionFile			"xbox\xbox_dx9.def"				[$X360]
 	}
 }
 
@@ -134,20 +132,6 @@ $Project "stdshader_dx9"
 			$File	"..\shader_dll_verify.h"
 		}
 
-		// 360 collapes stdshader_dbg.dll into stdshader_dx9.dll
-		$Folder	"stdshader_dbg Files" [$X360]
-		{
-			$File	"debugdepth.cpp"
-			$File	"DebugDrawEnvmapMask.cpp"
-			$File	"debugluxel.cpp"
-			$File	"debugnormalmap.cpp"
-			$File	"debugtangentspace.cpp"
-			$File	"fillrate.cpp"
-			$File	"fillrate_dx6.cpp"
-
-			// dead shader, but hl2 models have it
-			$File	"eyeball.cpp"
-		}
 	}
 
 	$Folder	"Header Files"
@@ -183,8 +167,6 @@ $Project "stdshader_dx9"
 	$File	"$SRCDIR\devtools\bin\fxc_prep.pl"
 	$File	"$SRCDIR\devtools\bin\updateshaders.pl"
 	$File	"$SRCDIR\devtools\bin\copyshaders.pl"
-	//$File	"$SRCDIR\devtools\bin\p4autocheckout.pl"
-	//$File	"$SRCDIR\devtools\bin\p4revertshadertargets.pl"
 	$File	"$SRCDIR\devtools\bin\valve_perl_helpers.pl"
 	$File	"$SRCDIR\devtools\bin\checkshaderchecksums.pl"
 	$File	"buildallshaders.bat"
@@ -192,5 +174,4 @@ $Project "stdshader_dx9"
 
 	$Shaders	"stdshader_dx9_20b.txt"
 	$Shaders	"stdshader_dx9_30.txt"
-	//$Shaders	"stdshader_dx10.txt"
 }

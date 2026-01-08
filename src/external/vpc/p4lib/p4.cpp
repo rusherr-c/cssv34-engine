@@ -6,7 +6,7 @@
 
 // prevent Error function from being defined, since it inteferes with the P4 API
 #define Error Warning
-#include "p4lib/ip4.h"
+//#include "p4lib/ip4.h"
 #include "tier1/utlvector.h"
 #include "tier1/utlsymbol.h"
 #include "tier1/utlbuffer.h"

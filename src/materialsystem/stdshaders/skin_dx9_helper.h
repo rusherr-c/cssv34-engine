@@ -20,9 +20,9 @@ class IMaterialVar;
 class IShaderDynamicAPI;
 class IShaderShadow;
 
-void InitParamsSkin_DX9( CBaseVSShader *pShader, IMaterialVar** params, const char *pMaterialName, bool bSkin, VertexLitGeneric_DX9_Vars_t &info );
-void InitSkin_DX9( CBaseVSShader *pShader, IMaterialVar** params, bool bSkin, VertexLitGeneric_DX9_Vars_t &info );
-void DrawSkin_DX9( CBaseVSShader *pShader, IMaterialVar** params, 
-	IShaderDynamicAPI *pShaderAPI, IShaderShadow* pShaderShadow, bool bSkin, VertexLitGeneric_DX9_Vars_t &info );
+void InitParamsSkin_DX9( CBaseVSShader *pShader, IMaterialVar** params, const char *pMaterialName, VertexLitGeneric_DX9_Vars_t &info );
+void InitSkin_DX9( CBaseVSShader *pShader, IMaterialVar** params, VertexLitGeneric_DX9_Vars_t &info );
+void DrawSkin_DX9( CBaseVSShader *pShader, IMaterialVar** params, IShaderDynamicAPI *pShaderAPI, IShaderShadow* pShaderShadow,
+				  VertexLitGeneric_DX9_Vars_t &info, VertexCompressionType_t vertexCompression );
 
 #endif // SKIN_DX9_HELPER_H

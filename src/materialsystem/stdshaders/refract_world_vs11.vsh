@@ -17,7 +17,7 @@ vs.1.1
 ;	 $vTexCoord0.xy = TexCoord0
 ;------------------------------------------------------------------------------
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ; Vertex components
 ;    $vPos		= Position

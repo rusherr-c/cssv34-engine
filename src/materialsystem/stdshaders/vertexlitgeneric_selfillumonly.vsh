@@ -1,10 +1,9 @@
 vs.1.1
 
 # DYNAMIC: "DOWATERFOG"				"0..1"
-# DYNAMIC: "SKINNING"				"0..1"	[XBOX]
-# DYNAMIC: "NUM_BONES"				"0..3"	[PC]
+# DYNAMIC: "SKINNING"				"0..1"
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ;------------------------------------------------------------------------------
 ; Vertex blending

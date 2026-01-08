@@ -1,5 +1,5 @@
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 sub UnlitTwoTexture
 {
@@ -34,11 +34,22 @@ sub UnlitTwoTexture
 	;------------------------------------------------------------------------------
 	; Texture coordinates (use world-space normal for envmap, tex transform for mask)
 	;------------------------------------------------------------------------------
+
 	dp4 oT0.x, $vTexCoord0, $SHADER_SPECIFIC_CONST_0
 	dp4 oT0.y, $vTexCoord0, $SHADER_SPECIFIC_CONST_1
+	if ( $g_x360 )
+	{
+		; must write xyzw to match read in pixelshader
+		mov oT0.zw, $cZero
+	}
 
 	dp4 oT1.x, $vTexCoord0, $SHADER_SPECIFIC_CONST_2
 	dp4 oT1.y, $vTexCoord0, $SHADER_SPECIFIC_CONST_3
+	if ( $g_x360 )
+	{
+		; must write xyzw to match read in pixelshader
+		mov oT1.zw, $cZero
+	}
 
 	if( $vertexcolor )
 	{

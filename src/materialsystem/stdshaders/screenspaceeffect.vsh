@@ -15,7 +15,7 @@ vs.1.1
 ;    $SHADER_SPECIFIC_CONST_2-$SHADER_SPECIFIC_CONST_3 = Mask texture transform
 ;------------------------------------------------------------------------------
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ;------------------------------------------------------------------------------
 ; No vertex blending required. Input vertex data is in screen space

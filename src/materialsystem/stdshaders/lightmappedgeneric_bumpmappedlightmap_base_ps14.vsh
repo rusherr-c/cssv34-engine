@@ -2,7 +2,7 @@ vs.1.1
 
 # DYNAMIC: "DOWATERFOG"				"0..1"
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ;------------------------------------------------------------------------------
 ; Vertex blending

@@ -21,6 +21,18 @@ $Configuration
 {
 	$PreBuildEvent
 	{
+		$CommandLine		"if EXIST $OUTLIBDIR\$(TargetName).lib for /f $QUOTEdelims=$QUOTE %%A in ('attrib $QUOTE$OUTLIBDIR\$(TargetName).lib$QUOTE') do set valveTmpIsReadOnly=$QUOTE%%A$QUOTE" "\n" \
+							"set valveTmpIsReadOnlyLetter=%valveTmpIsReadOnly:~6,1%" "\n" \
+							"if $QUOTE%valveTmpIsReadOnlyLetter%$QUOTE==$QUOTER$QUOTE (" "\n" \
+							"    attrib -r $OUTLIBDIR\$(TargetName).lib" "\n" \
+							"    $SRCDIR\devtools\bin\gnu\touch.exe -d $QUOTE1999-01-01$QUOTE $OUTLIBDIR\$(TargetName).lib" "\n" \
+							"    attrib +r $OUTLIBDIR\$(TargetName).lib" "\n" \
+							")" "\n" \
+							"$CRCCHECK"
+	}
+
+	$PreLinkEvent
+	{
 		$CommandLine
 	}
 }

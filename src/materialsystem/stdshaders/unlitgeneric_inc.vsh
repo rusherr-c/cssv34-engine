@@ -1,4 +1,4 @@
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ;------------------------------------------------------------------------------
 ;	 $SHADER_SPECIFIC_CONST_0-$SHADER_SPECIFIC_CONST_1 = Base texture transform
@@ -13,6 +13,7 @@ sub UnlitGeneric
 	local( $envmapcameraspace ) = shift;
 	local( $envmapsphere ) = shift;
 	local( $vertexcolor ) = shift;
+	local( $separatedetailuvs ) = shift;
 
 	local( $worldPos, $worldNormal, $projPos, $reflectionVector );
 
@@ -53,13 +54,16 @@ sub UnlitGeneric
 		&FreeRegister( \$worldPos );
 	}
 
-
-	
 	;------------------------------------------------------------------------------
 	; Texture coordinates (use world-space normal for envmap, tex transform for mask)
 	;------------------------------------------------------------------------------
 	dp4 oT0.x, $vTexCoord0, $SHADER_SPECIFIC_CONST_0
 	dp4 oT0.y, $vTexCoord0, $SHADER_SPECIFIC_CONST_1
+	if ( $g_x360 )
+	{
+		; must write xyzw to match read in pixelshader
+		mov oT0.zw, $cZero
+	}
 
 	if( $envmap )
 	{
@@ -72,6 +76,11 @@ sub UnlitGeneric
 			dp3 oT1.x, $reflectionVector, $cViewModel0
 			dp3 oT1.y, $reflectionVector, $cViewModel1
 			dp3 oT1.z, $reflectionVector, $cViewModel2
+			if ( $g_x360 )
+			{
+				; must write xyzw to match read in pixelshader
+				mov oT1.w, $cZero
+			}
 
 			&FreeRegister( \$reflectionVector );
 		}
@@ -91,6 +100,11 @@ sub UnlitGeneric
 		; envmap mask
 		dp4 oT2.x, $vTexCoord0, $SHADER_SPECIFIC_CONST_2
 		dp4 oT2.y, $vTexCoord0, $SHADER_SPECIFIC_CONST_3
+		if ( $g_x360 )
+		{
+			; must write xyzw to match read in pixelshader
+			mov oT2.zw, $cZero
+		}
 
 		&FreeRegister( \$worldPos );
 		&FreeRegister( \$worldNormal );
@@ -98,8 +112,21 @@ sub UnlitGeneric
 
 	if( $detail )
 	{
-		dp4 oT3.x, $vTexCoord0, $SHADER_SPECIFIC_CONST_4
-		dp4 oT3.y, $vTexCoord0, $SHADER_SPECIFIC_CONST_5
+		if ( $separatedetailuvs )
+		{
+			mov oT3, $vTexCoord1
+		}
+		else
+		{
+			dp4 oT3.x, $vTexCoord0, $SHADER_SPECIFIC_CONST_4
+			dp4 oT3.y, $vTexCoord0, $SHADER_SPECIFIC_CONST_5
+		}
+
+		if ( $g_x360 )
+		{
+			; must write xyzw to match read in pixelshader
+			mov oT3.zw, $cZero
+		}
 	}
 
 	if( $vertexcolor )

@@ -4,7 +4,7 @@
 //
 //=============================================================================//
 
-#include "../thirdparty/bzip2/bzlib.h"
+#include "../utils/bzip2/bzlib.h"
 #include "net_chan.h"
 #include "tier1/strtools.h"
 #include "filesystem_engine.h"

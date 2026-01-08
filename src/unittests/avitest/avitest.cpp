@@ -21,7 +21,7 @@
 #include "VGuiMatSurface/IMatSystemSurface.h"
 #include "vgui/ILocalize.h"
 #include "vgui/IScheme.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
 #include "tier3/tier3.h"
 
 

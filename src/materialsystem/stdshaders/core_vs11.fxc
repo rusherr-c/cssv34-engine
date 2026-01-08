@@ -1,8 +1,8 @@
-// DYNAMIC: "NUMBONES"					"0..3"
+// DYNAMIC: "SKINNING"					"0..1"
 
 #include "common_vs_fxc.h"
 
-static const int g_NumBones			= NUMBONES;
+static const bool g_bSkinning		= SKINNING ? true : false;
 
 const float4 cBumpTexCoordTransform[2]	: register( SHADER_SPECIFIC_CONST_1 );
 const float g_CoreColorTexCoordOffset	: register( SHADER_SPECIFIC_CONST_3 );
@@ -91,7 +91,7 @@ VS_OUTPUT main( const VS_INPUT v )
 	float3 worldNormal, worldPos, worldTangentS, worldTangentT;
 
 	SkinPositionNormalAndTangentSpace( 
-			g_NumBones, 
+			g_bSkinning, 
 			v.vPos, v.vNormal, v.vUserData,
 			v.vBoneWeights, v.vBoneIndices,
 			worldPos, worldNormal, worldTangentS, worldTangentT );

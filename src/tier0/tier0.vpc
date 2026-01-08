@@ -44,19 +44,6 @@ $Configuration
 		$AdditionalOptions				"$BASE /AUTODEF:xbox\xbox.def"			[$X360]
 	}
 
-	$PreLinkEvent
-	{
-		$CommandLine	"call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $SRCDIR\lib\public\$(TargetName).lib $SRCDIR" "\n" \
-						"$BASE"
-	}
-	
-	$PreLinkEvent [$X360]
-	{
-		// Run a pre-link event to clean the .def file from the last link
-		$CommandLine					"if exist xbox\xbox.def del xbox\xbox.def" "\n" \
-										"$BASE"
-	}
-
 	$PostBuildEvent [$X360]
 	{
 		// Publish the import lib

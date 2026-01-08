@@ -20,7 +20,7 @@
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "materialsystem/materialsystem_config.h"
 #include "gl_rsurf.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
 #include "materialsystem/itexture.h"
 #include "Overlay.h"
 #include "utldict.h"

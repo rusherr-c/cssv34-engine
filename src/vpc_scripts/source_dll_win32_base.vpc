@@ -33,37 +33,61 @@ $Configuration
 	{
 		$TargetName	"$OUTBINNAME"
 	}
-	
+
 	$Compiler
 	{
 		$PreprocessorDefinitions			"$BASE;PLATFORM_64BITS;WIN64;_WIN64;COMPILER_MSVC64" [$WIN64]
 		$PreprocessorDefinitions			"$BASE;COMPILER_MSVC32" [$WIN32]		
 		$PreprocessorDefinitions			"$BASE;COMPILER_MSVC;_DLL_EXT=$_DLL_EXT"
 		$PreprocessorDefinitions			"$BASE;DLLNAME=$OUTBINNAME"		
-		$PreprocessorDefinitions			"_CRT_NO_VA_START_VALIDATION"
+	}
+
+	$Compiler [$WIN32]
+	{
+		$EnableEnhancedInstructionSet	"Streaming SIMD Extensions (/arch:SSE)"
 	}
 
 	$Linker
 	{
-		$AdditionalDependencies				"$BASE shell32.lib user32.lib advapi32.lib gdi32.lib comdlg32.lib ole32.lib" [$WIN32||$WIN64]
-		$AdditionalDependencies				"legacy_stdio_definitions.lib" [!$VS2010 && !$VS2013]
+		$AdditionalDependencies				"$BASE shell32.lib user32.lib advapi32.lib gdi32.lib comdlg32.lib ole32.lib" [$WIN32]
+		$AdditionalDependencies				"$BASE legacy_stdio_definitions.lib" [!$VS2015 && !$VS2013]
 		$TargetMachine						"MachineX86 (/MACHINE:X86)"	[$WIN32]
 		$TargetMachine						"MachineX64 (/MACHINE:X64)"	[$WIN64]
+		// NXCOMPAT (also known as DEP or Data Access Protection) should be enabled for all
+		// executables for security and debugging reasons.
+		$AdditionalOptions					"/NXCOMPAT"
 		// Suppress this pointless warning using the undocumented /ignore linker switch
 		// schemalib.lib(schemaclassinfo.obj) : warning LNK4221: This object file does not define any previously undefined public symbols, so it will not be used by any link operation that consumes this library
 		$AdditionalOptions					"$BASE /ignore:4221"
 	}
 
+	$Linker [$WIN32]
+	{
+		$AdditionalOptions		"$BASE /SAFESEH:NO"
+	}
+
 	$PreBuildEvent
 	{
-		$CommandLine
+		$CommandLine		"if EXIST $OUTBINDIR\$(TargetFileName) for /f $QUOTEdelims=$QUOTE %%A in ('attrib $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE') do set valveTmpIsReadOnly=$QUOTE%%A$QUOTE" "\n" \
+							"set valveTmpIsReadOnlyLetter=%valveTmpIsReadOnly:~6,1%" "\n" \
+							"if $QUOTE%valveTmpIsReadOnlyLetter%$QUOTE==$QUOTER$QUOTE del /q $QUOTE$(TargetDir)$QUOTE$(TargetFileName)" "\n" \
+							"$CRCCHECK"
 	}
 
 	$PostBuildEvent
 	{
-		$CommandLine
-		$Description
-		$ExcludedFromBuild					"No"
+		$CommandLine		"copy $QUOTE$(TargetDir)$QUOTE$(TargetFileName) $OUTBINDIR\$(TargetFileName)" "\n" \
+							"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
+							"copy $QUOTE$(TargetDir)$QUOTE$(TargetName).pdb $OUTBINDIR\$(TargetName).pdb" "\n" \
+							"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
+							"goto BuildEventOK" "\n" \
+							":BuildEventFailed" "\n" \
+							"echo *** ERROR! PostBuildStep FAILED for $(ProjectName)! EXE or DLL is probably running. ***" "\n" \
+							"del /q $QUOTE$(TargetDir)$QUOTE$(TargetFileName)" "\n" \
+							"exit 1" "\n" \
+							":BuildEventOK" "\n" \
+		$Description		"Publishing to $OUTBINDIR"
+		$ExcludedFromBuild	"No"
 	}
 }
 

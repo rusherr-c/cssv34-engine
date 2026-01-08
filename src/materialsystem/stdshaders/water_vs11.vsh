@@ -17,7 +17,7 @@ vs.1.1
 ;	 $vTexCoord0.xy = TexCoord0
 ;------------------------------------------------------------------------------
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ; Vertex components
 ;    $vPos		= Position
@@ -89,12 +89,6 @@ mov oPos, $projPos
 mul $projPos.y, $projPos.y, $SHADER_SPECIFIC_CONST_4.w
 add $projPos.xy, $projPos.xy, $projPos.w
 mul $projPos.xy, $projPos.xy, $cHalf
-
-#ifdef _XBOX
-; divide out w
-rcp $newProjPos.w, $projPos.w
-mul $projPos.xy, $projPos.xy, $newProjPos.w
-#endif
 
 mov oT1.xy, $projPos.xy
 mov oT1.z, $cZero

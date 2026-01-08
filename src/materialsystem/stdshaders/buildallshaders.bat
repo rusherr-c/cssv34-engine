@@ -1,77 +1,27 @@
 @echo off
 setlocal
 
-set TTEXE=..\..\devtools\bin\timeprecise.exe
-if not exist %TTEXE% goto no_ttexe
-goto no_ttexe_end
-
-:no_ttexe
-set TTEXE=time /t
-:no_ttexe_end
+rem ================================
+rem ==== MOD PATH CONFIGURATIONS ===
 
 
-rem echo.
-rem echo ~~~~~~ buildallshaders %* ~~~~~~
-%TTEXE% -cur-Q
-set tt_all_start=%ERRORLEVEL%
-set tt_all_chkpt=%tt_start%
+set SOURCEDIR=..\..
+set GAMEDIR__=%cd%\..\..\..\game\mod_hl2
+set SDKBINDIR__=%cd%\..\..\..\game\bin
 
+rem ==== Convert paths to 8.3 format
+FOR %%I IN (%GAMEDIR__%) DO SET GAMEDIR=%%~sI
+FOR %%I IN (%SDKBINDIR__%) DO SET SDKBINDIR=%%~sI
 
+rem ==== MOD PATH CONFIGURATIONS END ===
+rem ====================================
 
-set sourcedir="shaders"
-set targetdir="..\..\..\game\hl2\shaders"
+echo SET 8.3 VARS
+echo GAMEDIR: %gamedir%
+echo SOURCEDIR: %sourcedir%
+echo SDKBINDIR: %sdkbindir%
 
-set BUILD_SHADER=call buildshaders.bat
+call buildsdkshaders.bat
 
-set ARG_X360=-x360
-set ARG_EXTRA=
-
-
-
-REM ****************
-REM usage: buildallshaders [-pc | -x360]
-REM ****************
-set ALLSHADERS_CONFIG=pc
-if /i "%1" == "-x360" goto shcfg_x360
-goto shcfg_end
-:shcfg_x360
-           set ALLSHADERS_CONFIG=x360
-:shcfg_end
-
-
-REM ****************
-REM PC SHADERS
-REM ****************
-if /i "%ALLSHADERS_CONFIG%" == "pc" (
-  %BUILD_SHADER% stdshader_dx9_20b
-  %BUILD_SHADER% stdshader_dx9_20b_new	-dx9_30
-  %BUILD_SHADER% stdshader_dx9_30		-dx9_30	-force30
-  rem %BUILD_SHADER% stdshader_dx10     -dx10
-)
-
-REM ****************
-REM X360 SHADERS
-REM ****************
-if /i "%ALLSHADERS_CONFIG%" == "x360" (
-  %BUILD_SHADER% stdshader_dx9_20b      %ARG_X360% %ARG_EXTRA%
-  %BUILD_SHADER% stdshader_dx9_20b_new	%ARG_X360% %ARG_EXTRA%
-  rem %BUILD_SHADER% stdshader_dx9_30   %ARG_X360% %ARG_EXTRA%
-  rem %BUILD_SHADER% stdshader_dx10     %ARG_X360% %ARG_EXTRA%
-)
-
-REM ****************
-REM END
-REM ****************
-:end
-
-
-
-rem echo.
-if not "%dynamic_shaders%" == "1" (
-  rem echo Finished full buildallshaders %*
-) else (
-  rem echo Finished dynamic buildallshaders %*
-)
-
-rem %TTEXE% -diff %tt_all_start% -cur
-rem echo.
+@echo Finished building shaders
+@pause

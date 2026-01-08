@@ -1,10 +1,11 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
-//=============================================================================//
+//===========================================================================//
 
 #include "icvar.h"
+#include "tier1/tier1.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -12,30 +13,21 @@
 // ------------------------------------------------------------------------------------------- //
 // ConVar stuff.
 // ------------------------------------------------------------------------------------------- //
-static ICvar *s_pCVar;
-
 class CShaderLibConVarAccessor : public IConCommandBaseAccessor
 {
 public:
 	virtual bool	RegisterConCommandBase( ConCommandBase *pCommand )
 	{
-		// Mark for easy removal
-		pCommand->AddFlags( FCVAR_MATERIAL_SYSTEM );
-
-		// Unlink from shaderlib only list
-		pCommand->SetNext( 0 );
-
 		// Link to engine's list instead
-		s_pCVar->RegisterConCommandBase( pCommand );
+		g_pCVar->RegisterConCommand( pCommand );
 
-		char const *pValue = s_pCVar->GetCommandLineValue( pCommand->GetName() );
+		char const *pValue = g_pCVar->GetCommandLineValue( pCommand->GetName() );
 		if( pValue && !pCommand->IsCommand() )
 		{
 			( ( ConVar * )pCommand )->SetValue( pValue );
 		}
 		return true;
 	}
-
 };
 
 CShaderLibConVarAccessor g_ConVarAccessor;
@@ -43,14 +35,8 @@ CShaderLibConVarAccessor g_ConVarAccessor;
 
 void InitShaderLibCVars( CreateInterfaceFn cvarFactory )
 {
-	s_pCVar = (ICvar*)cvarFactory( VENGINE_CVAR_INTERFACE_VERSION, NULL );
-	if ( s_pCVar )
+	if ( g_pCVar )
 	{
-		ConCommandBaseMgr::OneTimeInit( &g_ConVarAccessor );
+		ConVar_Register( 0, &g_ConVarAccessor );
 	}
-}
-
-ICvar *GetCVar()
-{
-	return s_pCVar;
 }

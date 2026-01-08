@@ -1,8 +1,7 @@
 vs.1.1
 
 # DYNAMIC: "DOWATERFOG"				"0..1"
-# DYNAMIC: "SKINNING"				"0..1"	[XBOX]
-# DYNAMIC: "NUM_BONES"				"0..3"	[PC]
+# DYNAMIC: "SKINNING"				"0..1"
 
 ;------------------------------------------------------------------------------
 ; Constants specified by the app
@@ -19,7 +18,7 @@ vs.1.1
 ;	 $vTexCoord0.xy = TexCoord0
 ;------------------------------------------------------------------------------
 
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 ; Vertex components
 ;    $vPos		= Position
@@ -90,19 +89,11 @@ add $projPos.xy, $projPos.xy, $projPos.w
 ; We'll end up dividing by w in the pixel shader to get to [0,1]
 mul $projPos.xy, $projPos.xy, $cHalf
 
-#ifdef _XBOX
-; divide out w
-rcp $projPos.w, $projPos.w
-mul $projPos.xy, $projPos.xy, $projPos.w
-#endif
-
 mov oT1.xy, $projPos.xy
 
-#ifndef _XBOX
 ; emit w to both z and w in case the driver screws up and divides by z
 mov oT1.z, $projPos.w
 mov oT1.w, $projPos.w
-#endif
 
 free $projPos
 free $worldPos

@@ -7,7 +7,7 @@
 #include "vpc.h"
 #include "baseprojectdatacollector.h"
 #include "tier1/utlstack.h"
-#include "p4lib/ip4.h"
+//#include "p4lib/ip4.h"
 
 static const char * const s_rgsAmbiguousPropertyNames[] =
 {

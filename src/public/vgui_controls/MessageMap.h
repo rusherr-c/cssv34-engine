@@ -40,7 +40,6 @@ enum DataType_t
 	DATATYPE_UINT64,
 	DATATYPE_HANDLE,  // It's an int, really
 };
-
 #ifdef WIN32
 class __virtual_inheritance Panel;
 #else

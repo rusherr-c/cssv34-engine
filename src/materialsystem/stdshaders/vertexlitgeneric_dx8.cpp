@@ -8,21 +8,25 @@
 
 #include "BaseVSShader.h"
 
-#include "SDK_vertexlitgeneric_vs11.inc"
-#include "SDK_vertexlitgeneric_selfillumonly.inc"
+#include "vertexlitgeneric_vs11.inc"
+#include "vertexlitgeneric_selfillumonly.inc"
+#include "emissive_scroll_blended_pass_helper.h"
+#include "flesh_interior_blended_pass_helper.h"
+#include "cloak_blended_pass_helper.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-DEFINE_FALLBACK_SHADER( SDK_VertexLitGeneric, SDK_VertexLitGeneric_DX8 )
-DEFINE_FALLBACK_SHADER( SDK_Skin_DX9, SDK_VertexLitGeneric_DX8 )
+DEFINE_FALLBACK_SHADER( VertexLitGeneric, VertexLitGeneric_DX8 )
+DEFINE_FALLBACK_SHADER( Skin_DX9, VertexLitGeneric_DX8 )
 
-BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8, 
+BEGIN_VS_SHADER( VertexLitGeneric_DX8, 
 				"Help for VertexLitGeneric" )
 	BEGIN_SHADER_PARAMS
 		SHADER_PARAM( SELFILLUMTINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "Self-illumination tint" )
 		SHADER_PARAM( DETAIL, SHADER_PARAM_TYPE_TEXTURE, "shadertest/detail", "detail texture" )
 		SHADER_PARAM( DETAILSCALE, SHADER_PARAM_TYPE_FLOAT, "4", "scale of the detail texture" )
+		SHADER_PARAM( DETAILFRAME, SHADER_PARAM_TYPE_INTEGER, "0", "frame number for $detail" )
 		SHADER_PARAM( ENVMAP, SHADER_PARAM_TYPE_TEXTURE, "shadertest/shadertest_env", "envmap" )
 		SHADER_PARAM( ENVMAPFRAME, SHADER_PARAM_TYPE_INTEGER, "0", "envmap frame number" )
 		SHADER_PARAM( ENVMAPMASK, SHADER_PARAM_TYPE_TEXTURE, "shadertest/shadertest_envmask", "envmap mask" )
@@ -36,7 +40,129 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 		SHADER_PARAM( ENVMAPSATURATION, SHADER_PARAM_TYPE_FLOAT, "1.0", "saturation 0 == greyscale 1 == normal" )
 		SHADER_PARAM( ENVMAPOPTIONAL, SHADER_PARAM_TYPE_BOOL, "0", "Make the envmap only apply to dx9 and higher hardware" )
 		SHADER_PARAM( FORCEBUMP, SHADER_PARAM_TYPE_BOOL, "0", "0 == Do bumpmapping if the card says it can handle it. 1 == Always do bumpmapping." )
+		SHADER_PARAM( ALPHATESTREFERENCE, SHADER_PARAM_TYPE_FLOAT, "0.0", "" )	
+
+	    SHADER_PARAM( DETAILBLENDMODE, SHADER_PARAM_TYPE_INTEGER, "0", "mode for combining detail texture with base. 0=normal, 1= additive, 2=alpha blend detail over base, 3=crossfade" )
+		SHADER_PARAM( DETAILBLENDFACTOR, SHADER_PARAM_TYPE_FLOAT, "1", "blend amount for detail texture." )
+
+		// Emissive Scroll Pass
+		SHADER_PARAM( EMISSIVEBLENDENABLED, SHADER_PARAM_TYPE_BOOL, "0", "Enable emissive blend pass" )
+		SHADER_PARAM( EMISSIVEBLENDBASETEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "self-illumination map" )
+		SHADER_PARAM( EMISSIVEBLENDSCROLLVECTOR, SHADER_PARAM_TYPE_VEC2, "[0.11 0.124]", "Emissive scroll vec" )
+		SHADER_PARAM( EMISSIVEBLENDSTRENGTH, SHADER_PARAM_TYPE_FLOAT, "1.0", "Emissive blend strength" )
+		SHADER_PARAM( EMISSIVEBLENDTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "self-illumination map" )
+		SHADER_PARAM( EMISSIVEBLENDTINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "Self-illumination tint" )
+		SHADER_PARAM( TIME, SHADER_PARAM_TYPE_FLOAT, "0.0", "Needs CurrentTime Proxy" )
+
+		// Cloak Pass
+		SHADER_PARAM( CLOAKPASSENABLED, SHADER_PARAM_TYPE_BOOL, "0", "Enables cloak render in a second pass" )
+		SHADER_PARAM( CLOAKFACTOR, SHADER_PARAM_TYPE_FLOAT, "0.0", "" )
+		SHADER_PARAM( CLOAKCOLORTINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "Cloak color tint" )
+		SHADER_PARAM( REFRACTAMOUNT, SHADER_PARAM_TYPE_FLOAT, "2", "" )
+
+		// Flesh Interior Pass
+		SHADER_PARAM( FLESHINTERIORENABLED, SHADER_PARAM_TYPE_BOOL, "0", "Enable Flesh interior blend pass" )
+		SHADER_PARAM( FLESHINTERIORTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "Flesh color texture" )
+		SHADER_PARAM( FLESHINTERIORNOISETEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "Flesh noise texture" )
+		SHADER_PARAM( FLESHBORDERTEXTURE1D, SHADER_PARAM_TYPE_TEXTURE, "", "Flesh border 1D texture" )
+		SHADER_PARAM( FLESHNORMALTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "Flesh normal texture" )
+		SHADER_PARAM( FLESHSUBSURFACETEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "Flesh subsurface texture" )
+		SHADER_PARAM( FLESHCUBETEXTURE, SHADER_PARAM_TYPE_TEXTURE, "", "Flesh cubemap texture" )
+		SHADER_PARAM( FLESHBORDERNOISESCALE, SHADER_PARAM_TYPE_FLOAT, "1.5", "Flesh Noise UV scalar for border" )
+		SHADER_PARAM( FLESHDEBUGFORCEFLESHON, SHADER_PARAM_TYPE_BOOL, "0", "Flesh Debug full flesh" )
+		SHADER_PARAM( FLESHEFFECTCENTERRADIUS1, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0.001]", "Flesh effect center and radius" )
+		SHADER_PARAM( FLESHEFFECTCENTERRADIUS2, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0.001]", "Flesh effect center and radius" )
+		SHADER_PARAM( FLESHEFFECTCENTERRADIUS3, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0.001]", "Flesh effect center and radius" )
+		SHADER_PARAM( FLESHEFFECTCENTERRADIUS4, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0.001]", "Flesh effect center and radius" )
+		SHADER_PARAM( FLESHSUBSURFACETINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "Subsurface Color" )
+		SHADER_PARAM( FLESHBORDERWIDTH, SHADER_PARAM_TYPE_FLOAT, "0.3", "Flesh border" )
+		SHADER_PARAM( FLESHBORDERSOFTNESS, SHADER_PARAM_TYPE_FLOAT, "0.42", "Flesh border softness (> 0.0 && <= 0.5)" )
+		SHADER_PARAM( FLESHBORDERTINT, SHADER_PARAM_TYPE_COLOR, "[1 1 1]", "Flesh border Color" )
+		SHADER_PARAM( FLESHGLOBALOPACITY, SHADER_PARAM_TYPE_FLOAT, "1.0", "Flesh global opacity" )
+		SHADER_PARAM( FLESHGLOSSBRIGHTNESS, SHADER_PARAM_TYPE_FLOAT, "0.66", "Flesh gloss brightness" )
+		SHADER_PARAM( FLESHSCROLLSPEED, SHADER_PARAM_TYPE_FLOAT, "1.0", "Flesh scroll speed" )
 	END_SHADER_PARAMS
+
+	// Cloak Pass
+	void SetupVarsCloakBlendedPass( CloakBlendedPassVars_t &info )
+	{
+		info.m_nCloakFactor = CLOAKFACTOR;
+		info.m_nCloakColorTint = CLOAKCOLORTINT;
+		info.m_nRefractAmount = REFRACTAMOUNT;
+
+		// Delete these lines if not bump mapping!
+		info.m_nBumpmap = BUMPMAP;
+		info.m_nBumpFrame = BUMPFRAME;
+		info.m_nBumpTransform = BUMPTRANSFORM;
+	}
+
+	bool NeedsPowerOfTwoFrameBufferTexture( IMaterialVar **params, bool bCheckSpecificToThisFrame ) const 
+	{ 
+		if ( params[CLOAKPASSENABLED]->GetIntValue() ) // If material supports cloaking
+		{
+			if ( bCheckSpecificToThisFrame == false ) // For setting model flag at load time
+				return true;
+			else if ( ( params[CLOAKFACTOR]->GetFloatValue() > 0.0f ) && ( params[CLOAKFACTOR]->GetFloatValue() < 1.0f ) ) // Per-frame check
+				return true;
+			// else, not cloaking this frame, so check flag2 in case the base material still needs it
+		}
+
+		// Check flag2 if not drawing cloak pass
+		return IS_FLAG2_SET( MATERIAL_VAR2_NEEDS_POWER_OF_TWO_FRAME_BUFFER_TEXTURE ); 
+	}
+
+	bool IsTranslucent( IMaterialVar **params ) const
+	{
+		if ( params[CLOAKPASSENABLED]->GetIntValue() ) // If material supports cloaking
+		{
+			if ( ( params[CLOAKFACTOR]->GetFloatValue() > 0.0f ) && ( params[CLOAKFACTOR]->GetFloatValue() < 1.0f ) ) // Per-frame check
+				return true;
+			// else, not cloaking this frame, so check flag in case the base material still needs it
+		}
+
+		// Check flag if not drawing cloak pass
+		return IS_FLAG_SET( MATERIAL_VAR_TRANSLUCENT ); 
+	}
+
+	// Emissive Scroll Pass
+	void SetupVarsEmissiveScrollBlendedPass( EmissiveScrollBlendedPassVars_t &info )
+	{
+		info.m_nBlendStrength = EMISSIVEBLENDSTRENGTH;
+		info.m_nBaseTexture = EMISSIVEBLENDBASETEXTURE;
+		info.m_nFlowTexture = -1; // Not used in DX8
+		info.m_nEmissiveTexture = EMISSIVEBLENDTEXTURE;
+		info.m_nEmissiveTint = EMISSIVEBLENDTINT;
+		info.m_nEmissiveScrollVector = EMISSIVEBLENDSCROLLVECTOR;
+		info.m_nTime = TIME;
+	}
+
+	// Flesh Interior Pass
+	void SetupVarsFleshInteriorBlendedPass( FleshInteriorBlendedPassVars_t &info )
+	{
+		info.m_nFleshTexture = FLESHINTERIORTEXTURE;
+		info.m_nFleshNoiseTexture = FLESHINTERIORNOISETEXTURE;
+		info.m_nFleshBorderTexture1D = FLESHBORDERTEXTURE1D;
+		info.m_nFleshNormalTexture = FLESHNORMALTEXTURE;
+		info.m_nFleshSubsurfaceTexture = FLESHSUBSURFACETEXTURE;
+		info.m_nFleshCubeTexture = FLESHCUBETEXTURE;
+
+		info.m_nflBorderNoiseScale = FLESHBORDERNOISESCALE;
+		info.m_nflDebugForceFleshOn = FLESHDEBUGFORCEFLESHON;
+		info.m_nvEffectCenterRadius1 = FLESHEFFECTCENTERRADIUS1;
+		info.m_nvEffectCenterRadius2 = FLESHEFFECTCENTERRADIUS2;
+		info.m_nvEffectCenterRadius3 = FLESHEFFECTCENTERRADIUS3;
+		info.m_nvEffectCenterRadius4 = FLESHEFFECTCENTERRADIUS4;
+
+		info.m_ncSubsurfaceTint = FLESHSUBSURFACETINT;
+		info.m_nflBorderWidth = FLESHBORDERWIDTH;
+		info.m_nflBorderSoftness = FLESHBORDERSOFTNESS;
+		info.m_ncBorderTint = FLESHBORDERTINT;
+		info.m_nflGlobalOpacity = FLESHGLOBALOPACITY;
+		info.m_nflGlossBrightness = FLESHGLOSSBRIGHTNESS;
+		info.m_nflScrollSpeed = FLESHSCROLLSPEED;
+
+		info.m_nTime = TIME;
+	}
 
 	SHADER_INIT_PARAMS()
 	{
@@ -51,9 +177,7 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 //			CLEAR_FLAGS( MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK );
 //			params[ENVMAP]->SetUndefined();
 //		}
-		// default to 'MODEL' mode...
-		if (!IS_FLAG_DEFINED( MATERIAL_VAR_MODEL ))
-			SET_FLAGS( MATERIAL_VAR_MODEL );
+		SET_FLAGS2( MATERIAL_VAR2_SUPPORTS_HW_SKINNING );
 
 		if( !params[ENVMAPMASKSCALE]->IsDefined() )
 			params[ENVMAPMASKSCALE]->SetFloatValue( 1.0f );
@@ -70,6 +194,12 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 		if( !params[DETAILSCALE]->IsDefined() )
 			params[DETAILSCALE]->SetFloatValue( 4.0f );
 
+		if( !params[DETAILBLENDFACTOR]->IsDefined() )
+			params[DETAILBLENDFACTOR]->SetFloatValue( -1.0f );
+
+		if( !params[DETAILBLENDMODE]->IsDefined() )
+			params[DETAILBLENDMODE]->SetFloatValue( 0 );
+
 		if( !params[ENVMAPCONTRAST]->IsDefined() )
 			params[ENVMAPCONTRAST]->SetFloatValue( 0.0f );
 		
@@ -81,6 +211,9 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 
 		if( !params[BUMPFRAME]->IsDefined() )
 			params[BUMPFRAME]->SetIntValue( 0 );
+
+		if( !params[ALPHATESTREFERENCE]->IsDefined() )
+			params[ALPHATESTREFERENCE]->SetFloatValue( 0.0f );
 
 		// No texture means no self-illum or env mask in base alpha
 		if ( !params[BASETEXTURE]->IsDefined() )
@@ -120,6 +253,42 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 		{
 			params[BUMPMAP]->SetUndefined();
 		}
+
+		// Cloak Pass
+		if ( !params[CLOAKPASSENABLED]->IsDefined() )
+		{
+			params[CLOAKPASSENABLED]->SetIntValue( 0 );
+		}
+		else if ( params[CLOAKPASSENABLED]->GetIntValue() )
+		{
+			CloakBlendedPassVars_t info;
+			SetupVarsCloakBlendedPass( info );
+			InitParamsCloakBlendedPass( this, params, pMaterialName, info );
+		}
+
+		// Emissive Scroll Pass
+		if ( !params[EMISSIVEBLENDENABLED]->IsDefined() )
+		{
+			params[EMISSIVEBLENDENABLED]->SetIntValue( 0 );
+		}
+		else if ( params[EMISSIVEBLENDENABLED]->GetIntValue() )
+		{
+			EmissiveScrollBlendedPassVars_t info;
+			SetupVarsEmissiveScrollBlendedPass( info );
+			InitParamsEmissiveScrollBlendedPass( this, params, pMaterialName, info );
+		}
+
+		// Flesh Interior Pass
+		if ( !params[FLESHINTERIORENABLED]->IsDefined() )
+		{
+			params[FLESHINTERIORENABLED]->SetIntValue( 0 );
+		}
+		else if ( params[FLESHINTERIORENABLED]->GetIntValue() )
+		{
+			FleshInteriorBlendedPassVars_t info;
+			SetupVarsFleshInteriorBlendedPass( info );
+			InitParamsFleshInteriorBlendedPass( this, params, pMaterialName, info );
+		}
 	}
 
 	SHADER_FALLBACK
@@ -127,13 +296,13 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 		if ( IsPC() )
 		{
 			if ( g_pHardwareConfig->GetDXSupportLevel() < 70)
-				return "SDK_VertexLitGeneric_DX6";
+				return "VertexLitGeneric_DX6";
 
 			if ( g_pHardwareConfig->GetDXSupportLevel() < 80)
-				return "SDK_VertexLitGeneric_DX7";
+				return "VertexLitGeneric_DX7";
 
 			if ( g_pHardwareConfig->PreferReducedFillrate() )
-				return "SDK_VertexLitGeneric_NoBump_DX8";
+				return "VertexLitGeneric_NoBump_DX8";
 		}
 		return 0;
 	}
@@ -190,38 +359,62 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 				LoadTexture( ENVMAPMASK );
 			}
 		}
+
+		// Cloak Pass
+		if ( params[CLOAKPASSENABLED]->GetIntValue() )
+		{
+			CloakBlendedPassVars_t info;
+			SetupVarsCloakBlendedPass( info );
+			InitCloakBlendedPass( this, params, info );
+		}
+
+		// Emissive Scroll Pass
+		if ( params[EMISSIVEBLENDENABLED]->GetIntValue() )
+		{
+			EmissiveScrollBlendedPassVars_t info;
+			SetupVarsEmissiveScrollBlendedPass( info );
+			InitEmissiveScrollBlendedPass( this, params, info );
+		}
+
+		// Flesh Interior Pass
+		if ( params[FLESHINTERIORENABLED]->GetIntValue() )
+		{
+			FleshInteriorBlendedPassVars_t info;
+			SetupVarsFleshInteriorBlendedPass( info );
+			InitFleshInteriorBlendedPass( this, params, info );
+		}
 	}
 
 	inline const char *GetUnbumpedPixelShaderName( IMaterialVar** params, bool bSkipEnvmap )
 	{
 		static char const* s_pPixelShaders[] = 
 		{
-			"SDK_VertexLitGeneric_EnvmapV2",
-			"SDK_VertexLitGeneric_SelfIlluminatedEnvmapV2",
+			"VertexLitGeneric_EnvmapV2",
+			"VertexLitGeneric_SelfIlluminatedEnvmapV2",
 
-			"SDK_VertexLitGeneric_BaseAlphaMaskedEnvmapV2",
-			"SDK_VertexLitGeneric_SelfIlluminatedEnvmapV2",
+			"VertexLitGeneric_BaseAlphaMaskedEnvmapV2",
+			"VertexLitGeneric_SelfIlluminatedEnvmapV2",
 
 			// Env map mask
-			"SDK_VertexLitGeneric_MaskedEnvmapV2",
-			"SDK_VertexLitGeneric_SelfIlluminatedMaskedEnvmapV2",
+			"VertexLitGeneric_MaskedEnvmapV2",
+			"VertexLitGeneric_SelfIlluminatedMaskedEnvmapV2",
 
-			"SDK_VertexLitGeneric_MaskedEnvmapV2",
-			"SDK_VertexLitGeneric_SelfIlluminatedMaskedEnvmapV2",
+			"VertexLitGeneric_MaskedEnvmapV2",
+			"VertexLitGeneric_SelfIlluminatedMaskedEnvmapV2",
 
 			// Detail
-			"SDK_VertexLitGeneric_DetailEnvmapV2",
-			"SDK_VertexLitGeneric_DetailSelfIlluminatedEnvmapV2",
+			"VertexLitGeneric_DetailEnvmapV2",
+			"VertexLitGeneric_DetailSelfIlluminatedEnvmapV2",
 
-			"SDK_VertexLitGeneric_DetailBaseAlphaMaskedEnvmapV2",
-			"SDK_VertexLitGeneric_DetailSelfIlluminatedEnvmapV2",
+			"VertexLitGeneric_DetailBaseAlphaMaskedEnvmapV2",
+			"VertexLitGeneric_DetailSelfIlluminatedEnvmapV2",
 
 			// Env map mask
-			"SDK_VertexLitGeneric_DetailMaskedEnvmapV2",
-			"SDK_VertexLitGeneric_DetailSelfIlluminatedMaskedEnvmapV2",
+			"VertexLitGeneric_DetailMaskedEnvmapV2",
+			"VertexLitGeneric_DetailSelfIlluminatedMaskedEnvmapV2",
 
-			"SDK_VertexLitGeneric_DetailMaskedEnvmapV2",
-			"SDK_VertexLitGeneric_DetailSelfIlluminatedMaskedEnvmapV2",
+			"VertexLitGeneric_DetailMaskedEnvmapV2",
+			"VertexLitGeneric_DetailSelfIlluminatedMaskedEnvmapV2",
 		};
 
 		if (!params[BASETEXTURE]->IsTexture())
@@ -230,22 +423,22 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 			{
 				if (!params[ENVMAPMASK]->IsTexture())
 				{
-					return "SDK_VertexLitGeneric_EnvmapNoTexture";
+					return "VertexLitGeneric_EnvmapNoTexture";
 				}
 				else
 				{
-					return "SDK_VertexLitGeneric_MaskedEnvmapNoTexture";
+					return "VertexLitGeneric_MaskedEnvmapNoTexture";
 				}
 			}
 			else
 			{
 				if (params[DETAIL]->IsTexture())
 				{
-					return "SDK_VertexLitGeneric_DetailNoTexture";
+					return "VertexLitGeneric_DetailNoTexture";
 				}
 				else
 				{
-					return "SDK_VertexLitGeneric_NoTexture";
+					return "VertexLitGeneric_NoTexture";
 				}
 			}
 		}
@@ -269,15 +462,33 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 				if (IS_FLAG_SET(MATERIAL_VAR_SELFILLUM))
 				{
 					if (params[DETAIL]->IsTexture())
-						return "SDK_VertexLitGeneric_DetailSelfIlluminated";
+						return "VertexLitGeneric_DetailSelfIlluminated";
 					else
-						return "SDK_VertexLitGeneric_SelfIlluminated";
+						return "VertexLitGeneric_SelfIlluminated";
+				}
+				else if ( params[DETAIL]->IsTexture() )
+				{
+					switch( params[DETAILBLENDMODE]->GetIntValue() )
+					{
+						case 0:
+							return "VertexLitGeneric_Detail";
+
+						case 1:								// additive modes
+							return "VertexLitGeneric_Detail_Additive";
+
+						case 5:
+						case 6:
+							return "VertexLitGeneric_Detail_Additive_selfillum";
+							break;
+							
+						default:
+							return "VertexLitGeneric_Detail_LerpBase";
+					}
 				}
 				else
-					if (params[DETAIL]->IsTexture())
-						return "SDK_VertexLitGeneric_Detail";
-					else
-						return "SDK_VertexLitGeneric";
+				{
+					return "VertexLitGeneric";
+				}
 			}
 		}
 	}
@@ -286,10 +497,15 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 	{
 		SHADOW_STATE
 		{
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			pShaderShadow->EnableAlphaTest( IS_FLAG_SET(MATERIAL_VAR_ALPHATEST) );
 
-			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_BONE_INDEX;
+			if ( params[ALPHATESTREFERENCE]->GetFloatValue() > 0.0f )
+			{
+				pShaderShadow->AlphaFunc( SHADER_ALPHAFUNC_GEQUAL, params[ALPHATESTREFERENCE]->GetFloatValue() );
+			}
+
+			int fmt = VERTEX_POSITION | VERTEX_NORMAL;
 
 			// FIXME: We could enable this, but we'd never get it working on dx7 or lower
 			// FIXME: This isn't going to work until we make more vertex shaders that
@@ -302,12 +518,12 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 			if (params[ENVMAP]->IsTexture() && !bSkipEnvmap )
 			{
 				// envmap on stage 1
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 
 				// envmapmask on stage 2
 				if (params[ENVMAPMASK]->IsTexture() || IS_FLAG_SET(MATERIAL_VAR_BASEALPHAENVMAPMASK ) )
 				{
-					pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
+					pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 				}
 			}
 
@@ -321,16 +537,14 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 			}
 
  			if (params[DETAIL]->IsTexture())
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 3, 0 );
+			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
 			// Set up the vertex shader index.
-			sdk_vertexlitgeneric_vs11_Static_Index vshIndex;
-#ifndef _XBOX
+			vertexlitgeneric_vs11_Static_Index vshIndex;
 			vshIndex.SetHALF_LAMBERT( IS_FLAG_SET( MATERIAL_VAR_HALFLAMBERT ) );
-#endif
-			vshIndex.SetDETAIL( params[DETAIL]->IsTexture() );
+			//vshIndex.SetDETAIL( params[DETAIL]->IsTexture() );
 			if( params[ENVMAP]->IsTexture() && !bSkipEnvmap )
 			{
 				vshIndex.SetENVMAP( true );
@@ -350,7 +564,7 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 				vshIndex.SetENVMAPCAMERASPACE( false );
 				vshIndex.SetENVMAPSPHERE( false );
 			}
-			pShaderShadow->SetVertexShader( "SDK_vertexlitgeneric_vs11", vshIndex.GetIndex() );
+			pShaderShadow->SetVertexShader( "vertexlitgeneric_vs11", vshIndex.GetIndex() );
 
 			const char *pshName = GetUnbumpedPixelShaderName( params, bSkipEnvmap );
 			pShaderShadow->SetPixelShader( pshName );
@@ -360,21 +574,21 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 		{
 			if (params[BASETEXTURE]->IsTexture())
 			{
-				BindTexture( SHADER_TEXTURE_STAGE0, BASETEXTURE, FRAME );
+				BindTexture( SHADER_SAMPLER0, BASETEXTURE, FRAME );
 				SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_0, BASETEXTURETRANSFORM );
 			}
 
 //			if (params[ENVMAP]->IsTexture())
 			if (params[ENVMAP]->IsTexture() && !bSkipEnvmap )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE1, ENVMAP, ENVMAPFRAME );
+				BindTexture( SHADER_SAMPLER1, ENVMAP, ENVMAPFRAME );
 
 				if (params[ENVMAPMASK]->IsTexture() || IS_FLAG_SET(MATERIAL_VAR_BASEALPHAENVMAPMASK) )
 				{
 					if (params[ENVMAPMASK]->IsTexture() )
-						BindTexture( SHADER_TEXTURE_STAGE2, ENVMAPMASK, ENVMAPMASKFRAME );
+						BindTexture( SHADER_SAMPLER2, ENVMAPMASK, ENVMAPMASKFRAME );
 					else
-						BindTexture( SHADER_TEXTURE_STAGE2, BASETEXTURE, FRAME );
+						BindTexture( SHADER_SAMPLER2, BASETEXTURE, FRAME );
 		
 					SetVertexShaderTextureScaledTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_2, BASETEXTURETRANSFORM, ENVMAPMASKSCALE );
 				}
@@ -389,26 +603,25 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 
 			if (params[DETAIL]->IsTexture())
 			{
-				BindTexture( SHADER_TEXTURE_STAGE3, DETAIL, FRAME );
+				BindTexture( SHADER_SAMPLER3, DETAIL, DETAILFRAME );
 				SetVertexShaderTextureScaledTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_4, BASETEXTURETRANSFORM, DETAILSCALE );
 			}
-#ifdef _XBOX
-			float c[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			c[0] = IS_FLAG_SET( MATERIAL_VAR_HALFLAMBERT ) ? 1.0f : 0.0f;
-			pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_HALFLAMBERT, c, 1 );
-#endif
+
 			SetAmbientCubeDynamicStateVertexShader();
 			SetModulationPixelShaderDynamicState( 3 );
 			EnablePixelShaderOverbright( 0, true, true );
 			SetPixelShaderConstant( 1, SELFILLUMTINT );
 
-			sdk_vertexlitgeneric_vs11_Dynamic_Index vshIndex;
+			if ( params[DETAIL]->IsTexture() && ( ! IS_FLAG_SET( MATERIAL_VAR_SELFILLUM ) ) )
+			{
+				float c1[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				c1[0] = c1[1] = c1[2] = c1[3] = params[DETAILBLENDFACTOR]->GetFloatValue();
+				pShaderAPI->SetPixelShaderConstant( 1, c1, 1 );
+			}
+
+			vertexlitgeneric_vs11_Dynamic_Index vshIndex;
 			vshIndex.SetDOWATERFOG( pShaderAPI->GetSceneFogMode() == MATERIAL_FOG_LINEAR_BELOW_FOG_Z );
-#if !defined( _XBOX )
-			vshIndex.SetNUM_BONES( pShaderAPI->GetCurrentNumBones() );
-#else
 			vshIndex.SetSKINNING( pShaderAPI->GetCurrentNumBones() > 0 );
-#endif
 			vshIndex.SetLIGHT_COMBO( pShaderAPI->GetCurrentLightCombo() );
 			pShaderAPI->SetVertexShaderIndex( vshIndex.GetIndex() );
 		}
@@ -417,32 +630,105 @@ BEGIN_VS_SHADER( SDK_VertexLitGeneric_DX8,
 
 	SHADER_DRAW
 	{
-		// FLASHLIGHTFIXME: need to make these the same.
-		bool hasFlashlight = UsingFlashlight( params );
-		bool bBump = g_pConfig->UseBumpmapping() && params[BUMPMAP]->IsTexture();
-
-		if( hasFlashlight )
+		// Skip the standard rendering if cloak pass is fully opaque
+		bool bDrawStandardPass = true;
+		if ( params[CLOAKPASSENABLED]->GetIntValue() && ( pShaderShadow == NULL ) ) // && not snapshotting
 		{
-			DrawFlashlight_dx80( params, pShaderAPI, pShaderShadow, bBump, BUMPMAP, BUMPFRAME, BUMPTRANSFORM, 
-				FLASHLIGHTTEXTURE, FLASHLIGHTTEXTUREFRAME, false, false, 0, -1, -1 );
-		}
-		else if( bBump )
-		{
-			bool bSkipEnvmap = true;
-			DrawUnbumpedUsingVertexShader( params, pShaderAPI, pShaderShadow, bSkipEnvmap );
-
-			// specular pass
-			bool bBlendSpecular = true;
-			if( params[ENVMAP]->IsTexture() )
+			CloakBlendedPassVars_t info;
+			SetupVarsCloakBlendedPass( info );
+			if ( CloakBlendedPassIsFullyOpaque( params, info ) )
 			{
-				DrawModelBumpedSpecularLighting( BUMPMAP, BUMPFRAME, ENVMAP, ENVMAPFRAME,
-					ENVMAPTINT, ALPHA, ENVMAPCONTRAST, ENVMAPSATURATION, BUMPTRANSFORM, bBlendSpecular );
+				// There is some strangeness in DX8 when trying to skip the main pass, so leave this alone for now
+				//bDrawStandardPass = false;
+			}
+		}
+
+		// Standard rendering pass
+		if ( bDrawStandardPass )
+		{
+			// FLASHLIGHTFIXME: need to make these the same.
+			bool hasFlashlight = UsingFlashlight( params );
+			bool bBump = g_pConfig->UseBumpmapping() && params[BUMPMAP]->IsTexture();
+
+			if( hasFlashlight )
+			{
+				DrawFlashlight_dx80( params, pShaderAPI, pShaderShadow, bBump, BUMPMAP, BUMPFRAME, BUMPTRANSFORM, 
+					FLASHLIGHTTEXTURE, FLASHLIGHTTEXTUREFRAME, false, false, 0, -1, -1 );
+			}
+			else if( bBump )
+			{
+				bool bSkipEnvmap = true;
+				DrawUnbumpedUsingVertexShader( params, pShaderAPI, pShaderShadow, bSkipEnvmap );
+
+				// specular pass
+				bool bBlendSpecular = true;
+				if( params[ENVMAP]->IsTexture() )
+				{
+					DrawModelBumpedSpecularLighting( BUMPMAP, BUMPFRAME, ENVMAP, ENVMAPFRAME,
+						ENVMAPTINT, ALPHA, ENVMAPCONTRAST, ENVMAPSATURATION, BUMPTRANSFORM, bBlendSpecular );
+				}
+			}
+			else
+			{
+				bool bSkipEnvmap = false;
+				DrawUnbumpedUsingVertexShader( params, pShaderAPI, pShaderShadow, bSkipEnvmap );
 			}
 		}
 		else
 		{
-			bool bSkipEnvmap = false;
-			DrawUnbumpedUsingVertexShader( params, pShaderAPI, pShaderShadow, bSkipEnvmap );
+			// Skip this pass!
+			Draw( false );
+		}
+
+		// Cloak Pass
+		if ( params[CLOAKPASSENABLED]->GetIntValue() )
+		{
+			// If ( snapshotting ) or ( we need to draw this frame )
+			if ( ( pShaderShadow != NULL ) || ( ( params[CLOAKFACTOR]->GetFloatValue() > 0.0f ) && ( params[CLOAKFACTOR]->GetFloatValue() < 1.0f ) ) )
+			{
+				CloakBlendedPassVars_t info;
+				SetupVarsCloakBlendedPass( info );
+				DrawCloakBlendedPass( this, params, pShaderAPI, pShaderShadow, info, vertexCompression );
+			}
+			else // We're not snapshotting and we don't need to draw this frame
+			{
+				// Skip this pass!
+				Draw( false );
+			}
+		}
+
+		// Emissive Scroll Pass
+		if ( params[EMISSIVEBLENDENABLED]->GetIntValue() )
+		{
+			// If ( snapshotting ) or ( we need to draw this frame )
+			if ( ( pShaderShadow != NULL ) || ( params[EMISSIVEBLENDSTRENGTH]->GetFloatValue() > 0.0f ) )
+			{
+				EmissiveScrollBlendedPassVars_t info;
+				SetupVarsEmissiveScrollBlendedPass( info );
+				DrawEmissiveScrollBlendedPass( this, params, pShaderAPI, pShaderShadow, info, vertexCompression );
+			}
+			else // We're not snapshotting and we don't need to draw this frame
+			{
+				// Skip this pass!
+				Draw( false );
+			}
+		}
+
+		// Flesh Interior Pass
+		if ( params[FLESHINTERIORENABLED]->GetIntValue() )
+		{
+			// If ( snapshotting ) or ( we need to draw this frame )
+			if ( ( pShaderShadow != NULL ) || ( true ) )
+			{
+				FleshInteriorBlendedPassVars_t info;
+				SetupVarsFleshInteriorBlendedPass( info );
+				DrawFleshInteriorBlendedPass( this, params, pShaderAPI, pShaderShadow, info, vertexCompression );
+			}
+			else // We're not snapshotting and we don't need to draw this frame
+			{
+				// Skip this pass!
+				Draw( false );
+			}
 		}
 	}
 END_SHADER
@@ -451,16 +737,16 @@ END_SHADER
 //-----------------------------------------------------------------------------
 // Version that doesn't do bumpmapping
 //-----------------------------------------------------------------------------
-BEGIN_INHERITED_SHADER( SDK_VertexLitGeneric_NoBump_DX8, SDK_VertexLitGeneric_DX8,
-			  "Help for SDK_VertexLitGeneric_NoBump_DX8" )
+BEGIN_INHERITED_SHADER( VertexLitGeneric_NoBump_DX8, VertexLitGeneric_DX8,
+			  "Help for VertexLitGeneric_NoBump_DX8" )
 
 	SHADER_FALLBACK
 	{
 		if (g_pConfig->bSoftwareLighting)
-			return "SDK_VertexLitGeneric_DX6";
+			return "VertexLitGeneric_DX6";
 
 		if (!g_pHardwareConfig->SupportsVertexAndPixelShaders())
-			return "SDK_VertexLitGeneric_DX7";
+			return "VertexLitGeneric_DX7";
 
 		return 0;
 	}

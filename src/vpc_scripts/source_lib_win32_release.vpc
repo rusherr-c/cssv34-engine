@@ -65,7 +65,7 @@ $Configuration "Release"
 		$WholeProgramOptimization
 
 		// Preprocessor
-		$PreprocessorDefinitions			"WIN32;_WIN32;NDEBUG;_LIB;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS"
+		$PreprocessorDefinitions			"WIN32;_WIN32;NDEBUG;_LIB;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE"
 		$IgnoreStandardIncludePath
 		$GeneratePreprocessedFile
 		$KeepComments
@@ -131,7 +131,7 @@ $Configuration "Release"
 	{
 		// General
 		$OutputFile							"$OUTLIBDIR\$OUTLIBNAME.lib"
-		$AdditionalDependencies				"user32.lib;shell32.lib"
+		$AdditionalDependencies
 		$AdditionalLibraryDirectories
 		$SuppressStartupBanner				"Yes (/NOLOGO)"
 		$ModuleDefinitionFileName

@@ -13,11 +13,11 @@ ps.1.4
 ; sample normal map
 texld r3, t0
 
-#ifdef REFLECT_1
+#if REFLECT
 ; reflection coords
 texcrd r4.xy, t1_dw.xyw
 #endif
-#ifdef REFRACT_1
+#if REFRACT
 ; refraction coords
 texcrd r2.xy, t2_dw.xyw
 #endif
@@ -29,44 +29,44 @@ texcrd r0.xyz, t4.xyz
 ; perturb coords by constant displacement 
 ; and by normal map alpha (which has 1/(2**miplevel in it)
 mul r0.rg, r0, r3.a
-#ifdef REFLECT_1
+#if REFLECT
 mad r4.rg, r3_bx2, r0.x, r4
 #endif
 
-#ifdef REFRACT_1
+#if REFRACT
 mad r2.rg, r3_bx2, r0.y, r2
 #endif
 
 ; stuff something into z so that texld will deal
-#ifdef REFLECT_1
+#if REFLECT
 mov r4.b, c5
 #endif
-#ifdef REFRACT_1
+#if REFRACT
 mov r2.b, c5
 #endif
 
 phase
 
-#ifdef REFLECT_1
+#if REFLECT
 ; reflection
 texld r4, r4
 #endif
-#ifdef REFRACT_1
+#if REFRACT
 ; refraction
 texld r2, r2
 #endif
 
-#ifdef REFLECT_1
+#if REFLECT
 ; N.V
 dp3_sat r1.a, r3_bx2, r1_bx2
 #endif
 
-#ifdef REFRACT_1
+#if REFRACT
 ; tint refraction
 mul r2.rgb, r2, c1
 #endif
 
-#ifdef REFLECT_1
+#if REFLECT
 ; tint reflction
 mul r4.rgb, r4, c4
 
@@ -76,29 +76,21 @@ mul r0.a, r0.a, r0.a
 mul_sat r0.a, r0.a, 1-r1.a
 #endif
 
-#ifdef REFLECT_0
-#ifdef REFRACT_0
+#if !REFLECT && !REFRACT
 ; This is wrong!!!!
 mov r0.rgba, c0
 #endif
-#endif
 
-#ifdef REFLECT_0
-#ifdef REFRACT_1
+#if !REFLECT && REFRACT
 mov r0.rgba, r2
 #endif
-#endif
 
-#ifdef REFLECT_1
-#ifdef REFRACT_0
+#if REFLECT && !REFRACT
 mov r0.rgba, r4
 #endif
-#endif
 
-#ifdef REFLECT_1
-#ifdef REFRACT_1
+#if REFLECT && REFRACT
 ; reflection * fresnel + refraction * ( 1 - fresnel )
 lrp r0.rgba, r0.a, r4, r2
-#endif
 #endif
 

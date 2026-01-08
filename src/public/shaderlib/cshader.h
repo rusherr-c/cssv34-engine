@@ -31,6 +31,8 @@
 #include "materialsystem/materialsystem_config.h"
 #include "shaderlib/ShaderDLL.h"
 
+// make "local variable is initialized but not referenced" warnings errors for combo checking macros
+#pragma warning ( error : 4189 )
 
 //-----------------------------------------------------------------------------
 // Global interfaces
@@ -72,6 +74,26 @@ inline bool CShader_IsFlagSet( IMaterialVar **params, MaterialVarFlags_t _flag )
 #define CLEAR_FLAGS( _flag )	params[FLAGS]->SetIntValue( params[FLAGS]->GetIntValue() & ~(_flag) )
 #define IS_FLAG_SET( _flag )	CShader_IsFlagSet( params, _flag )
 #define IS_FLAG_DEFINED( _flag ) ((params[FLAGS_DEFINED]->GetIntValue() & (_flag) ) != 0)
+
+#define IS_PARAM_DEFINED( _param ) ( ( ( _param >= 0 ) && ( params[_param]->IsDefined() ) ) )
+
+#define SET_PARAM_STRING_IF_NOT_DEFINED( nParamIndex, kDefaultValue )     \
+	if ( ( nParamIndex != -1 ) && ( !params[nParamIndex]->IsDefined() ) ) \
+	{																	  \
+		params[nParamIndex]->SetStringValue( kDefaultValue );			  \
+	}
+
+#define SET_PARAM_FLOAT_IF_NOT_DEFINED( nParamIndex, kDefaultValue )      \
+	if ( ( nParamIndex != -1 ) && ( !params[nParamIndex]->IsDefined() ) ) \
+	{																	  \
+		params[nParamIndex]->SetFloatValue( kDefaultValue );			  \
+	}
+
+#define SET_PARAM_VEC_IF_NOT_DEFINED( nParamIndex, kDefaultValue, nSize ) \
+	if ( ( nParamIndex != -1 ) && ( !params[nParamIndex]->IsDefined() ) ) \
+	{																	  \
+		params[nParamIndex]->SetVecValue( kDefaultValue, nSize );		  \
+	}
 
 // Typesafe flag setting
 inline void CShader_SetFlags2( IMaterialVar **params, MaterialVarFlags2_t _flag )
@@ -247,7 +269,7 @@ inline bool CShader_IsFlag2Set( IMaterialVar **params, MaterialVarFlags2_t _flag
 	void OnInitShaderInstance( IMaterialVar **params, IShaderInit *pShaderInit, const char *pMaterialName )
 
 #define SHADER_DRAW \
-	void OnDrawElements( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI )
+	void OnDrawElements( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI, VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContextDataPtr )
 
 #define SHADOW_STATE if (pShaderShadow)
 #define DYNAMIC_STATE if (pShaderAPI)
@@ -310,8 +332,6 @@ inline bool CShader_IsFlag2Set( IMaterialVar **params, MaterialVarFlags2_t _flag
 
 #define BEGIN_INHERITED_SHADER( _name, _base, _help ) BEGIN_INHERITED_SHADER_FLAGS( _name, _base, _help, 0 )
 #define END_INHERITED_SHADER END_SHADER }
-
-#ifdef _DEBUG
 
 // psh ## shader is used here to generate a warning if you don't ever call SET_DYNAMIC_PIXEL_SHADER
 #define DECLARE_DYNAMIC_PIXEL_SHADER( shader ) \
@@ -394,6 +414,15 @@ inline bool CShader_IsFlag2Set( IMaterialVar **params, MaterialVarFlags2_t _flag
 	psh ## shader = psh ## shader; \
 	pShaderAPI->SetPixelShaderIndex( _pshIndex.GetIndex() )
 
+#define SET_DYNAMIC_PIXEL_SHADER_CMD( cmdstream, shader ) \
+	int dynamicpixshader_ ## shader ## _missingcurlybraces = 0; \
+	dynamicpixshader_ ## shader ## _missingcurlybraces = dynamicpixshader_ ## shader ## _missingcurlybraces; \
+	int psh_testAllCombos = shaderDynamicTest_ ## shader; \
+	psh_testAllCombos = psh_testAllCombos; \
+	psh ## shader = psh ## shader; \
+	cmdstream.SetPixelShaderIndex( _pshIndex.GetIndex() )
+
+
 // vsh_testAllCombos adds up all of the vsh_forgot_to_set_dynamic_ ## var's from 
 // SET_DYNAMIC_VERTEX_SHADER_COMBO so that an error is generated if they aren't set.
 // vsh_testAllCombos is set to itself to avoid an unused variable warning.
@@ -407,6 +436,13 @@ inline bool CShader_IsFlag2Set( IMaterialVar **params, MaterialVarFlags2_t _flag
 	vsh ## shader = vsh ## shader; \
 	pShaderAPI->SetVertexShaderIndex( _vshIndex.GetIndex() )
 
+#define SET_DYNAMIC_VERTEX_SHADER_CMD( cmdstream, shader ) \
+	int dynamicvertshader_ ## shader ## _missingcurlybraces = 0; \
+	dynamicvertshader_ ## shader ## _missingcurlybraces = dynamicvertshader_ ## shader ## _missingcurlybraces; \
+	int vsh_testAllCombos = shaderDynamicTest_ ## shader; \
+	vsh_testAllCombos = vsh_testAllCombos; \
+	vsh ## shader = vsh ## shader; \
+	cmdstream.SetVertexShaderIndex( _vshIndex.GetIndex() )
 
 
 // psh_testAllCombos adds up all of the psh_forgot_to_set_static_ ## var's from 
@@ -434,51 +470,5 @@ inline bool CShader_IsFlag2Set( IMaterialVar **params, MaterialVarFlags2_t _flag
 	vsh_testAllCombos = vsh_testAllCombos; \
 	vsh ## shader = vsh ## shader; \
 	pShaderShadow->SetVertexShader( #shader, _vshIndex.GetIndex() )
-
-#else // #ifdef _DEBUG
-
-#define DECLARE_DYNAMIC_PIXEL_SHADER( shader ) \
-	shader ## _Dynamic_Index _pshIndex
-
-#define DECLARE_DYNAMIC_VERTEX_SHADER( shader ) \
-	shader ## _Dynamic_Index _vshIndex
-
-
-#define DECLARE_STATIC_PIXEL_SHADER( shader ) \
-	shader ## _Static_Index _pshIndex
-
-#define DECLARE_STATIC_VERTEX_SHADER( shader ) \
-	shader ## _Static_Index _vshIndex
-
-
-#define SET_DYNAMIC_PIXEL_SHADER_COMBO( var, val ) \
-	_pshIndex.Set ## var( ( val ) )
-
-#define SET_DYNAMIC_VERTEX_SHADER_COMBO( var, val ) \
-	_vshIndex.Set ## var( ( val ) )
-
-
-#define SET_STATIC_PIXEL_SHADER_COMBO( var, val ) \
-	_pshIndex.Set ## var( ( val ) )
-
-#define SET_STATIC_VERTEX_SHADER_COMBO( var, val ) \
-	_vshIndex.Set ## var( ( val ) )
-
-
-#define SET_DYNAMIC_PIXEL_SHADER( shader ) \
-	pShaderAPI->SetPixelShaderIndex( _pshIndex.GetIndex() )
-
-#define SET_DYNAMIC_VERTEX_SHADER( shader ) \
-	pShaderAPI->SetVertexShaderIndex( _vshIndex.GetIndex() )
-
-
-
-#define SET_STATIC_PIXEL_SHADER( shader ) \
-	pShaderShadow->SetPixelShader( #shader, _pshIndex.GetIndex() )
-
-#define SET_STATIC_VERTEX_SHADER( shader ) \
-	pShaderShadow->SetVertexShader( #shader, _vshIndex.GetIndex() )
-
-#endif
 
 #endif // CSHADER_H

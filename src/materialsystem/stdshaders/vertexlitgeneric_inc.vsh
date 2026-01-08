@@ -1,4 +1,4 @@
-#include "SDK_macros.vsh"
+#include "macros.vsh"
 
 sub VertexLitGeneric
 {
@@ -45,7 +45,7 @@ sub VertexLitGeneric
 	{
 		&SkinPositionAndNormal( $worldPos, $worldNormal );
 
-		if( $NUM_BONES > 1 || $SKINNING == 1 )
+		if( $SKINNING == 1 )
 		{
 			&Normalize( $worldNormal );
 		}

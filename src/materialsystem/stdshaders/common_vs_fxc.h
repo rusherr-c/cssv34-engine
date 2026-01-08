@@ -1,11 +1,16 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
-// Purpose: 
+// Purpose: This is where all common code for vertex shaders go.
 //
 // $NoKeywords: $
 //
-//=============================================================================//
-// This is where all common code for pixel shaders go.
+//===========================================================================//
+
+
+
+#ifndef COMMON_VS_FXC_H_
+#define COMMON_VS_FXC_H_
+
 #include "common_fxc.h"
 
 // Put global skip commands here. . make sure and check that the appropriate vars are defined
@@ -15,43 +20,27 @@
 //	SKIP: defined $LIGHTING_PREVIEW && defined $FASTPATH && $LIGHTING_PREVIEW && $FASTPATH
 // --------------------------------------------------------------------------------
 
-#define LIGHTTYPE_NONE				0
-#define LIGHTTYPE_STATIC			1
-#define LIGHTTYPE_SPOT				2
-#define LIGHTTYPE_POINT				3
-#define LIGHTTYPE_DIRECTIONAL		4
-#define LIGHTTYPE_AMBIENT			5
 
-static const int g_StaticLightTypeArray[22] = {
-	LIGHTTYPE_NONE, LIGHTTYPE_STATIC, 
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, 
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, 
-	LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, 
-	LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, LIGHTTYPE_STATIC, LIGHTTYPE_STATIC
-};
- 
-static const int g_AmbientLightTypeArray[22] = {
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, 
-	LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, 
-	LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, 
-	LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, 
-	LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT, LIGHTTYPE_AMBIENT
-};
+#ifndef COMPRESSED_VERTS
+// Default to no vertex compression
+#define COMPRESSED_VERTS 0
+#endif
 
-static const int g_LocalLightType0Array[22] = {
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, 
-	LIGHTTYPE_NONE, LIGHTTYPE_SPOT,  LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL, LIGHTTYPE_SPOT, LIGHTTYPE_SPOT, 
-	LIGHTTYPE_SPOT, LIGHTTYPE_POINT, LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL,
-	LIGHTTYPE_NONE, LIGHTTYPE_SPOT,  LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL, LIGHTTYPE_SPOT, LIGHTTYPE_SPOT, 
-	LIGHTTYPE_SPOT, LIGHTTYPE_POINT, LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL
-};
+#if ( !defined( SHADER_MODEL_VS_2_0 ) && !defined( SHADER_MODEL_VS_3_0 ) )
+#if COMPRESSED_VERTS == 1
+#error "Vertex compression is only for DX9 and up!"
+#endif
+#endif
 
-static const int g_LocalLightType1Array[22] = {
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, 
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_SPOT, LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL, LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL, LIGHTTYPE_DIRECTIONAL,
-	LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_NONE, LIGHTTYPE_SPOT, LIGHTTYPE_POINT, 
-	LIGHTTYPE_DIRECTIONAL, LIGHTTYPE_POINT, LIGHTTYPE_DIRECTIONAL, LIGHTTYPE_DIRECTIONAL
-};
+// We're testing 2 normal compression methods
+// One compressed normals+tangents into a SHORT2 each (8 bytes total)
+// The other compresses them together, into a single UBYTE4 (4 bytes total)
+// FIXME: pick one or the other, compare lighting quality in important cases
+#define COMPRESSED_NORMALS_SEPARATETANGENTS_SHORT2	0
+#define COMPRESSED_NORMALS_COMBINEDTANGENTS_UBYTE4	1
+//#define COMPRESSED_NORMALS_TYPE						COMPRESSED_NORMALS_SEPARATETANGENTS_SHORT2
+#define COMPRESSED_NORMALS_TYPE					COMPRESSED_NORMALS_COMBINEDTANGENTS_UBYTE4
+
 
 #define FOGTYPE_RANGE				0
 #define FOGTYPE_HEIGHT				1
@@ -61,21 +50,26 @@ static const int g_LocalLightType1Array[22] = {
 // -------------------------
 // CONSTANTS
 // -------------------------
-//const float4 cConstants0				: register(c0);
-
-#define cZero	0.0f
-#define cOne	1.0f
-#define cTwo	2.0f
-#define cHalf	0.5f
 
 #pragma def ( vs, c0, 0.0f, 1.0f, 2.0f, 0.5f )
-//const float4 cMathConstants0			: register(c0);
 
 const float4 cConstants1				: register(c1);
 #define cOOGamma			cConstants1.x
 #define cOverbright			2.0f
 #define cOneThird			cConstants1.z
 #define cOOOverbright		( 1.0f / 2.0f )
+
+
+// The g_bLightEnabled registers and g_nLightCountRegister hold the same information regarding
+// enabling lights, but callers internal to this file tend to use the loops, while external
+// callers will end up using the booleans
+const bool g_bLightEnabled[4]			: register(b0);
+										// through b3
+
+const int g_nLightCountRegister			: register(i0);
+
+
+#define g_nLightCount					g_nLightCountRegister.x
 
 const float4 cEyePosWaterZ				: register(c2);
 #define cEyePos			cEyePosWaterZ.xyz
@@ -85,7 +79,6 @@ const float4 cObsoleteLightIndex		: register(c3);
 
 const float4x4 cModelViewProj			: register(c4);
 const float4x4 cViewProj				: register(c8);
-const float4x4 cModelView				: register(c12);
 
 // Only cFlexScale.x is used
 // It is a binary value used to switch on/off the addition of the flex delta stream
@@ -94,24 +87,38 @@ const float4 cFlexScale					: register(c13);
 const float4 cFogParams					: register(c16);
 #define cFogEndOverFogRange cFogParams.x
 #define cFogOne cFogParams.y
-// NOTE cFogParams.z is unused!
+#define cFogMaxDensity cFogParams.z
 #define cOOFogRange cFogParams.w
 
 const float4x4 cViewModel				: register(c17);
 
-const float3 cAmbientCube[6]			: register(c21);
+const float3 cAmbientCubeX [ 2 ] : register ( c21 ) ;
+const float3 cAmbientCubeY [ 2 ] : register ( c23 ) ;
+const float3 cAmbientCubeZ [ 2 ] : register ( c25 ) ;
+
+#ifdef SHADER_MODEL_VS_3_0
+const float4 cFlexWeights [ 512 ] : register ( c1024 ) ;
+#endif
 
 struct LightInfo
 {
-	float4 color;
-	float4 dir;
+	float4 color;						// {xyz} is color	w is light type code (see comment below)
+	float4 dir;							// {xyz} is dir		w is light type code
 	float4 pos;
 	float4 spotParams;
 	float4 atten;
 };
 
-LightInfo cLightInfo[2]					: register(c27);
-#define LIGHT_0_POSITION_REG						c29
+// w components of color and dir indicate light type:
+// 1x - directional
+// 01 - spot
+// 00 - point
+
+// Four lights x 5 constants each = 20 constants
+LightInfo cLightInfo[4]					: register(c27);
+#define LIGHT_0_POSITION_REG					   c29
+
+#ifdef SHADER_MODEL_VS_1_1
 
 const float4 cModulationColor			: register(c37);
 
@@ -125,52 +132,385 @@ const float4 cModulationColor			: register(c37);
 #define SHADER_SPECIFIC_CONST_7 c45
 #define SHADER_SPECIFIC_CONST_8 c46
 #define SHADER_SPECIFIC_CONST_9 c47
+#define SHADER_SPECIFIC_CONST_10 c14
+#define SHADER_SPECIFIC_CONST_11 c15
 
 static const int cModel0Index = 48;
 const float4x3 cModel[16]					: register(c48);
-// last cmodel is c95 for dx80, c204 for dx90
+// last cmodel is c105 for dx80, c214 for dx90
+
+#else // DX9 shaders (vs20 and beyond)
+
+const float4 cModulationColor			: register( c47 );
+
+#define SHADER_SPECIFIC_CONST_0 c48
+#define SHADER_SPECIFIC_CONST_1 c49
+#define SHADER_SPECIFIC_CONST_2 c50
+#define SHADER_SPECIFIC_CONST_3 c51
+#define SHADER_SPECIFIC_CONST_4 c52
+#define SHADER_SPECIFIC_CONST_5 c53
+#define SHADER_SPECIFIC_CONST_6 c54
+#define SHADER_SPECIFIC_CONST_7 c55
+#define SHADER_SPECIFIC_CONST_8 c56
+#define SHADER_SPECIFIC_CONST_9 c57
+#define SHADER_SPECIFIC_CONST_10 c14
+#define SHADER_SPECIFIC_CONST_11 c15
+
+static const int cModel0Index = 58;
+const float4x3 cModel[53]					: register( c58 );
+// last cmodel is c105 for dx80, c214 for dx90
+
+#define SHADER_SPECIFIC_BOOL_CONST_0 b4
+#define SHADER_SPECIFIC_BOOL_CONST_1 b5
+#define SHADER_SPECIFIC_BOOL_CONST_2 b6
+#define SHADER_SPECIFIC_BOOL_CONST_3 b7
+#define SHADER_SPECIFIC_BOOL_CONST_4 b8
+#define SHADER_SPECIFIC_BOOL_CONST_5 b9
+#define SHADER_SPECIFIC_BOOL_CONST_6 b10
+#define SHADER_SPECIFIC_BOOL_CONST_7 b11
+#endif // vertex shader model constant packing changes
 
 
-#define DOT_PRODUCT_FACTORS_CONST c240
-const float4 cDotProductFactors[4]			: register( DOT_PRODUCT_FACTORS_CONST );
+//=======================================================================================
+// Methods to decompress vertex normals
+//=======================================================================================
 
-#define MORPH_FACTORS_CONST c244
-const float4 cMorphFactors[8]				: register( MORPH_FACTORS_CONST );
-
-#define VERTEX_TEXTURE_DIM_CONST c252
-const float2 cVertexTextureDim[4]			: register( VERTEX_TEXTURE_DIM_CONST );
-
-
-//-----------------------------------------------------------------------------
-// Methods to sample specific fields of the vertex textures.
-// Note that x and y are *unnormalized*
-//-----------------------------------------------------------------------------
-float SampleVertexTexture( sampler2D vt, int stage, float flElement, float flField )
+//-----------------------------------------------------------------------------------
+// Decompress a normal from two-component compressed format
+// We expect this data to come from a signed SHORT2 stream in the range of -32768..32767
+//
+// -32678 and 0 are invalid encodings
+// w contains the sign to use in the cross product when generating a binormal
+void _DecompressShort2Tangent( float2 inputTangent, out float4 outputTangent )
 {
-	// Compute normalized x + y values. 
-	// Note that pixel centers are at integer coords, *not* at 0.5!
+	float2 ztSigns		= sign( inputTangent );				// sign bits for z and tangent (+1 or -1)
+	float2 xyAbs		= abs(  inputTangent );				// 1..32767
+	outputTangent.xy	= (xyAbs - 16384.0f) / 16384.0f;	// x and y
+	outputTangent.z		= ztSigns.x * sqrt( saturate( 1.0f - dot( outputTangent.xy, outputTangent.xy ) ) );
+	outputTangent.w		= ztSigns.y;
+}
+
+//-----------------------------------------------------------------------------------
+// Same code as _DecompressShort2Tangent, just one returns a float4, one a float3
+void _DecompressShort2Normal( float2 inputNormal, out float3 outputNormal )
+{
+	float4 result;
+	_DecompressShort2Tangent( inputNormal, result );
+	outputNormal = result.xyz;
+}
+
+//-----------------------------------------------------------------------------------
+// Decompress normal+tangent together
+void _DecompressShort2NormalTangent( float2 inputNormal, float2 inputTangent, out float3 outputNormal, out float4 outputTangent )
+{
+	// FIXME: if we end up sticking with the SHORT2 format, pack the normal and tangent into a single SHORT4 element
+	//        (that would make unpacking normal+tangent here together much cheaper than the sum of their parts)
+	_DecompressShort2Normal(  inputNormal,  outputNormal  );
+	_DecompressShort2Tangent( inputTangent, outputTangent );
+}
+
+//=======================================================================================
+// Decompress a normal and tangent from four-component compressed format
+// We expect this data to come from an unsigned UBYTE4 stream in the range of 0..255
+// The final vTangent.w contains the sign to use in the cross product when generating a binormal
+void _DecompressUByte4NormalTangent( float4 inputNormal,
+									out float3 outputNormal,   // {nX, nY, nZ}
+									out float4 outputTangent )   // {tX, tY, tZ, sign of binormal}
+{
+	float fOne   = 1.0f;
+
+	float4 ztztSignBits	= ( inputNormal - 128.0f ) < 0;						// sign bits for zs and binormal (1 or 0)  set-less-than (slt) asm instruction
+	float4 xyxyAbs		= abs( inputNormal - 128.0f ) - ztztSignBits;		// 0..127
+	float4 xyxySignBits	= ( xyxyAbs - 64.0f ) < 0;							// sign bits for xs and ys (1 or 0)
+	float4 normTan		= (abs( xyxyAbs - 64.0f ) - xyxySignBits) / 63.0f;	// abs({nX, nY, tX, tY})
+	outputNormal.xy		= normTan.xy;										// abs({nX, nY, __, __})
+	outputTangent.xy	= normTan.zw;										// abs({tX, tY, __, __})
+
+	float4 xyxySigns	= 1 - 2*xyxySignBits;								// Convert sign bits to signs
+	float4 ztztSigns	= 1 - 2*ztztSignBits;								// ( [1,0] -> [-1,+1] )
+
+	outputNormal.z		= 1.0f - outputNormal.x - outputNormal.y;			// Project onto x+y+z=1
+	outputNormal.xyz	= normalize( outputNormal.xyz );					// Normalize onto unit sphere
+	outputNormal.xy	   *= xyxySigns.xy;										// Restore x and y signs
+	outputNormal.z	   *= ztztSigns.x;										// Restore z sign
+
+	outputTangent.z		= 1.0f - outputTangent.x - outputTangent.y;			// Project onto x+y+z=1
+	outputTangent.xyz	= normalize( outputTangent.xyz );					// Normalize onto unit sphere
+	outputTangent.xy   *= xyxySigns.zw;										// Restore x and y signs
+	outputTangent.z	   *= ztztSigns.z;										// Restore z sign
+	outputTangent.w		= ztztSigns.w;										// Binormal sign
+}
+
+
+//-----------------------------------------------------------------------------------
+// Decompress just a normal from four-component compressed format (same as above)
+// We expect this data to come from an unsigned UBYTE4 stream in the range of 0..255
+// [ When compiled, this works out to approximately 17 asm instructions ]
+void _DecompressUByte4Normal( float4 inputNormal,
+							out float3 outputNormal)					// {nX, nY, nZ}
+{
+	float fOne			= 1.0f;
+
+	float2 ztSigns		= ( inputNormal.xy - 128.0f ) < 0;				// sign bits for zs and binormal (1 or 0)  set-less-than (slt) asm instruction
+	float2 xyAbs		= abs( inputNormal.xy - 128.0f ) - ztSigns;		// 0..127
+	float2 xySigns		= ( xyAbs -  64.0f ) < 0;						// sign bits for xs and ys (1 or 0)
+	outputNormal.xy		= ( abs( xyAbs - 64.0f ) - xySigns ) / 63.0f;	// abs({nX, nY})
+
+	outputNormal.z		= 1.0f - outputNormal.x - outputNormal.y;		// Project onto x+y+z=1
+	outputNormal.xyz	= normalize( outputNormal.xyz );				// Normalize onto unit sphere
+
+	outputNormal.xy	   *= lerp( fOne.xx, -fOne.xx, xySigns   );			// Restore x and y signs
+	outputNormal.z	   *= lerp( fOne.x,  -fOne.x,  ztSigns.x );			// Restore z sign
+}
+
+
+void DecompressVertex_Normal( float4 inputNormal, out float3 outputNormal )
+{
+	if ( COMPRESSED_VERTS == 1 )
+	{
+		if ( COMPRESSED_NORMALS_TYPE == COMPRESSED_NORMALS_SEPARATETANGENTS_SHORT2 )
+		{
+			_DecompressShort2Normal( inputNormal.xy, outputNormal );
+		}
+		else // ( COMPRESSED_NORMALS_TYPE == COMPRESSED_NORMALS_COMBINEDTANGENTS_UBYTE4 )
+		{
+			_DecompressUByte4Normal( inputNormal, outputNormal );
+		}
+	}
+	else
+	{
+		outputNormal = inputNormal.xyz;
+	}
+}
+
+void DecompressVertex_NormalTangent( float4 inputNormal,  float4 inputTangent, out float3 outputNormal, out float4 outputTangent )
+{
+	if ( COMPRESSED_VERTS == 1 )
+	{
+		if ( COMPRESSED_NORMALS_TYPE == COMPRESSED_NORMALS_SEPARATETANGENTS_SHORT2 )
+		{
+			_DecompressShort2NormalTangent( inputNormal.xy, inputTangent.xy, outputNormal, outputTangent );
+		}
+		else // ( COMPRESSED_NORMALS_TYPE == COMPRESSED_NORMALS_COMBINEDTANGENTS_UBYTE4 )
+		{
+			_DecompressUByte4NormalTangent( inputNormal, outputNormal, outputTangent );
+		}
+	}
+	else
+	{
+		outputNormal  = inputNormal.xyz;
+		outputTangent = inputTangent;
+	}
+}
+
+
+#ifdef SHADER_MODEL_VS_3_0
+
+//-----------------------------------------------------------------------------
+// Methods to sample morph data from a vertex texture
+// NOTE: vMorphTargetTextureDim.x = width, cVertexTextureDim.y = height, cVertexTextureDim.z = # of float4 fields per vertex
+// For position + normal morph for example, there will be 2 fields.
+//-----------------------------------------------------------------------------
+float4 SampleMorphDelta( sampler2D vt, const float3 vMorphTargetTextureDim, const float4 vMorphSubrect, const float flVertexID, const float flField )
+{
+	float flColumn = floor( flVertexID / vMorphSubrect.w );
+
 	float4 t;
-	t.x = flField / ( cVertexTextureDim[stage].y - 1.0f );
-	t.y = flElement / ( cVertexTextureDim[stage].x - 1.0f );
+	t.x = vMorphSubrect.x + vMorphTargetTextureDim.z * flColumn + flField + 0.5f;
+	t.y = vMorphSubrect.y + flVertexID - flColumn * vMorphSubrect.w + 0.5f;
+	t.xy /= vMorphTargetTextureDim.xy;	
 	t.z = t.w = 0.f;
-	return tex2Dlod( vt, t ).x;
+
+	return tex2Dlod( vt, t );
 }
 
-
-//-----------------------------------------------------------------------------
-// Returns the factor associated w/ a morph target
-//-----------------------------------------------------------------------------
-float GetMorphFactor( float flMorphTargetId )
+// Optimized version which reads 2 deltas
+void SampleMorphDelta2( sampler2D vt, const float3 vMorphTargetTextureDim, const float4 vMorphSubrect, const float flVertexID, out float4 delta1, out float4 delta2 )
 {
-	float flMorphIndex = flMorphTargetId / 4;
-	float flMorphComponent = fmod( flMorphTargetId, 4 );
-	return dot( cMorphFactors[flMorphIndex], cDotProductFactors[flMorphComponent] );
+	float flColumn = floor( flVertexID / vMorphSubrect.w );
+
+	float4 t;
+	t.x = vMorphSubrect.x + vMorphTargetTextureDim.z * flColumn + 0.5f;
+	t.y = vMorphSubrect.y + flVertexID - flColumn * vMorphSubrect.w + 0.5f;
+	t.xy /= vMorphTargetTextureDim.xy;	
+	t.z = t.w = 0.f;
+
+	delta1 = tex2Dlod( vt, t );
+	t.x += 1.0f / vMorphTargetTextureDim.x;
+	delta2 = tex2Dlod( vt, t );
 }
+
+#endif // SHADER_MODEL_VS_3_0
+
+//-----------------------------------------------------------------------------
+// Method to apply morphs
+//-----------------------------------------------------------------------------
+bool ApplyMorph( float3 vPosFlex, inout float3 vPosition )
+{
+	// Flexes coming in from a separate stream
+	float3 vPosDelta = vPosFlex.xyz * cFlexScale.x;
+	vPosition.xyz += vPosDelta;
+	return true;
+}
+
+bool ApplyMorph( float3 vPosFlex, float3 vNormalFlex, inout float3 vPosition, inout float3 vNormal )
+{
+	// Flexes coming in from a separate stream
+	float3 vPosDelta = vPosFlex.xyz * cFlexScale.x;
+	float3 vNormalDelta = vNormalFlex.xyz * cFlexScale.x;
+	vPosition.xyz += vPosDelta;
+	vNormal       += vNormalDelta;
+	return true;
+}
+
+bool ApplyMorph( float3 vPosFlex, float3 vNormalFlex, 
+	inout float3 vPosition, inout float3 vNormal, inout float3 vTangent )
+{
+	// Flexes coming in from a separate stream
+	float3 vPosDelta = vPosFlex.xyz * cFlexScale.x;
+	float3 vNormalDelta = vNormalFlex.xyz * cFlexScale.x;
+	vPosition.xyz += vPosDelta;
+	vNormal       += vNormalDelta;
+	vTangent.xyz  += vNormalDelta;
+	return true;
+}
+
+bool ApplyMorph( float4 vPosFlex, float3 vNormalFlex, 
+	inout float3 vPosition, inout float3 vNormal, inout float3 vTangent, out float flWrinkle )
+{
+	// Flexes coming in from a separate stream
+	float3 vPosDelta = vPosFlex.xyz * cFlexScale.x;
+	float3 vNormalDelta = vNormalFlex.xyz * cFlexScale.x;
+	flWrinkle = vPosFlex.w * cFlexScale.y;
+	vPosition.xyz += vPosDelta;
+	vNormal       += vNormalDelta;
+	vTangent.xyz  += vNormalDelta;
+	return true;
+}
+
+#ifdef SHADER_MODEL_VS_3_0
+
+bool ApplyMorph( sampler2D morphSampler, const float3 vMorphTargetTextureDim, const float4 vMorphSubrect, 
+				const float flVertexID, const float3 vMorphTexCoord,
+				inout float3 vPosition )
+{
+#if MORPHING
+
+#if !DECAL
+	// Flexes coming in from a separate stream
+	float4 vPosDelta = SampleMorphDelta( morphSampler, vMorphTargetTextureDim, vMorphSubrect, flVertexID, 0 );
+	vPosition	+= vPosDelta.xyz;
+#else
+	float4 t = float4( vMorphTexCoord.x, vMorphTexCoord.y, 0.0f, 0.0f );
+	float3 vPosDelta = tex2Dlod( morphSampler, t );
+	vPosition	+= vPosDelta.xyz * vMorphTexCoord.z;
+#endif // DECAL
+
+	return true;
+
+#else // !MORPHING
+	return false;
+#endif
+}
+ 
+bool ApplyMorph( sampler2D morphSampler, const float3 vMorphTargetTextureDim, const float4 vMorphSubrect, 
+				const float flVertexID, const float3 vMorphTexCoord, 
+				inout float3 vPosition, inout float3 vNormal )
+{
+#if MORPHING
+
+#if !DECAL
+	float4 vPosDelta, vNormalDelta;
+	SampleMorphDelta2( morphSampler, vMorphTargetTextureDim, vMorphSubrect, flVertexID, vPosDelta, vNormalDelta );
+	vPosition	+= vPosDelta.xyz;
+	vNormal		+= vNormalDelta.xyz;
+#else
+	float4 t = float4( vMorphTexCoord.x, vMorphTexCoord.y, 0.0f, 0.0f );
+	float3 vPosDelta = tex2Dlod( morphSampler, t );
+	t.x += 1.0f / vMorphTargetTextureDim.x;
+	float3 vNormalDelta = tex2Dlod( morphSampler, t );
+	vPosition	+= vPosDelta.xyz * vMorphTexCoord.z;
+	vNormal		+= vNormalDelta.xyz * vMorphTexCoord.z;
+#endif // DECAL
+
+	return true;
+
+#else // !MORPHING
+	return false;
+#endif
+}
+
+bool ApplyMorph( sampler2D morphSampler, const float3 vMorphTargetTextureDim, const float4 vMorphSubrect, 
+				const float flVertexID, const float3 vMorphTexCoord, 
+				inout float3 vPosition, inout float3 vNormal, inout float3 vTangent )
+{
+#if MORPHING
+
+#if !DECAL
+	float4 vPosDelta, vNormalDelta;
+	SampleMorphDelta2( morphSampler, vMorphTargetTextureDim, vMorphSubrect, flVertexID, vPosDelta, vNormalDelta );
+	vPosition	+= vPosDelta.xyz;
+	vNormal		+= vNormalDelta.xyz;
+	vTangent	+= vNormalDelta.xyz;
+#else
+	float4 t = float4( vMorphTexCoord.x, vMorphTexCoord.y, 0.0f, 0.0f );
+	float3 vPosDelta = tex2Dlod( morphSampler, t );
+	t.x += 1.0f / vMorphTargetTextureDim.x;
+	float3 vNormalDelta = tex2Dlod( morphSampler, t );
+	vPosition	+= vPosDelta.xyz * vMorphTexCoord.z;
+	vNormal		+= vNormalDelta.xyz * vMorphTexCoord.z;
+	vTangent	+= vNormalDelta.xyz * vMorphTexCoord.z;
+#endif // DECAL
+
+	return true;
+
+#else // MORPHING
+
+	return false;
+#endif
+}
+
+bool ApplyMorph( sampler2D morphSampler, const float3 vMorphTargetTextureDim, const float4 vMorphSubrect,
+	const float flVertexID, const float3 vMorphTexCoord,
+	inout float3 vPosition, inout float3 vNormal, inout float3 vTangent, out float flWrinkle )
+{
+#if MORPHING
+
+#if !DECAL
+	float4 vPosDelta, vNormalDelta;
+	SampleMorphDelta2( morphSampler, vMorphTargetTextureDim, vMorphSubrect, flVertexID, vPosDelta, vNormalDelta );
+	vPosition	+= vPosDelta.xyz;
+	vNormal		+= vNormalDelta.xyz;
+	vTangent	+= vNormalDelta.xyz;
+	flWrinkle = vPosDelta.w;
+#else
+	float4 t = float4( vMorphTexCoord.x, vMorphTexCoord.y, 0.0f, 0.0f );
+	float4 vPosDelta = tex2Dlod( morphSampler, t );
+	t.x += 1.0f / vMorphTargetTextureDim.x;
+	float3 vNormalDelta = tex2Dlod( morphSampler, t );
+
+	vPosition	+= vPosDelta.xyz * vMorphTexCoord.z;
+	vNormal		+= vNormalDelta.xyz * vMorphTexCoord.z;
+	vTangent	+= vNormalDelta.xyz * vMorphTexCoord.z;
+	flWrinkle	= vPosDelta.w * vMorphTexCoord.z;
+#endif // DECAL
+
+	return true;
+
+#else // MORPHING
+
+	flWrinkle = 0.0f;
+	return false;
+
+#endif
+}
+
+#endif   // SHADER_MODEL_VS_3_0
 
 
 float RangeFog( const float3 projPos )
 {
-	return -projPos.z * cOOFogRange + cFogEndOverFogRange;
+	return max( cFogMaxDensity, ( -projPos.z * cOOFogRange + cFogEndOverFogRange ) );
 }
 
 float WaterFog( const float3 worldPos, const float3 projPos )
@@ -185,7 +525,7 @@ float WaterFog( const float3 worldPos, const float3 projPos )
 	// if $tmp.x < 0, then set it to 0
 	// This is the equivalent of moving the vert to the water surface if it's above the water surface
 	
-	tmp.x = max( cZero, tmp.x );
+	tmp.x = max( 0.0f, tmp.x );
 
 	// $tmp.w = $tmp.x / $tmp.y
 	tmp.w = tmp.x / tmp.y;
@@ -194,11 +534,16 @@ float WaterFog( const float3 worldPos, const float3 projPos )
 
 	// $tmp.w is now the distance that we see through water.
 
-	return -tmp.w * cOOFogRange + cFogOne;
+	return max( cFogMaxDensity, ( -tmp.w * cOOFogRange + cFogOne ) );
 }
 
 float CalcFog( const float3 worldPos, const float3 projPos, const int fogType )
 {
+#if defined( _X360 )
+	// 360 only does pixel fog
+	return 1.0f;
+#endif
+
 	if( fogType == FOGTYPE_RANGE )
 	{
 		return RangeFog( projPos );
@@ -214,205 +559,188 @@ float CalcFog( const float3 worldPos, const float3 projPos, const int fogType )
 	}
 }
 
-void SkinPosition( int numBones, const float4 modelPos, 
+float CalcFog( const float3 worldPos, const float3 projPos, const bool bWaterFog )
+{
+#if defined( _X360 )
+	// 360 only does pixel fog
+	return 1.0f;
+#endif
+
+	float flFog;
+	if( !bWaterFog )
+	{
+		flFog = RangeFog( projPos );
+	}
+	else
+	{
+#if SHADERMODEL_VS_2_0 == 1
+		// We do this work in the pixel shader in dx9, so don't do any fog here.
+		flFog = 1.0f;
+#else
+		flFog = WaterFog( worldPos, projPos );
+#endif
+	}
+
+	return flFog;
+}
+
+float4 DecompressBoneWeights( const float4 weights )
+{
+	float4 result = weights;
+
+	if ( COMPRESSED_VERTS )
+	{
+		// Decompress from SHORT2 to float. In our case, [-1, +32767] -> [0, +1]
+		// NOTE: we add 1 here so we can divide by 32768 - which is exact (divide by 32767 is not).
+		//       This avoids cracking between meshes with different numbers of bone weights.
+		//       We use SHORT2 instead of SHORT2N for a similar reason - the GPU's conversion
+		//       from [-32768,+32767] to [-1,+1] is imprecise in the same way.
+		result += 1;
+		result /= 32768;
+	}
+
+	return result;
+}
+
+void SkinPosition( bool bSkinning, const float4 modelPos, 
                    const float4 boneWeights, float4 fBoneIndices,
 				   out float3 worldPos )
 {
+#if !defined( _X360 )
 	int3 boneIndices = D3DCOLORtoUBYTE4( fBoneIndices );
+#else
+	int3 boneIndices = fBoneIndices;
+#endif
 
-	if( numBones == 0 )
-	{
-		worldPos = mul4x3( modelPos, cModel[0] );
-	}
-	else if( numBones == 1 )
-	{
-		worldPos = mul4x3( modelPos, cModel[boneIndices[0]] );
-	}
-	else if( numBones == 2 )
-	{
-		float4x3 blendMatrix = cModel[boneIndices[0]] * boneWeights[0] +
-							   cModel[boneIndices[1]] * boneWeights[1];
-		worldPos = mul4x3( modelPos, blendMatrix );
-	}
-	else // if( numBones == 3 )
-	{
-		float4x3 mat1 = cModel[boneIndices[0]];
-		float4x3 mat2 = cModel[boneIndices[1]];
-		float4x3 mat3 = cModel[boneIndices[2]];
+	// Needed for invariance issues caused by multipass rendering
+#if defined( _X360 )
+	[isolate] 
+#endif
+	{ 
+		if ( !bSkinning )
+		{
+			worldPos = mul4x3( modelPos, cModel[0] );
+		}
+		else // skinning - always three bones
+		{
+			float4x3 mat1 = cModel[boneIndices[0]];
+			float4x3 mat2 = cModel[boneIndices[1]];
+			float4x3 mat3 = cModel[boneIndices[2]];
 
-		float weight2 = 1.0f - boneWeights[0] - boneWeights[1];
+			float3 weights = DecompressBoneWeights( boneWeights ).xyz;
+			weights[2] = 1 - (weights[0] + weights[1]);
 
-		float4x3 blendMatrix = mat1 * boneWeights[0] + mat2 * boneWeights[1] + mat3 * weight2;
-		worldPos = mul4x3( modelPos, blendMatrix );
+			float4x3 blendMatrix = mat1 * weights[0] + mat2 * weights[1] + mat3 * weights[2];
+			worldPos = mul4x3( modelPos, blendMatrix );
+		}
 	}
 }
 
-void SkinPositionAndNormal( int numBones, const float4 modelPos, const float3 modelNormal,
+void SkinPositionAndNormal( bool bSkinning, const float4 modelPos, const float3 modelNormal,
                             const float4 boneWeights, float4 fBoneIndices,
 						    out float3 worldPos, out float3 worldNormal )
 {
-	int3 boneIndices = D3DCOLORtoUBYTE4( fBoneIndices );
+	// Needed for invariance issues caused by multipass rendering
+#if defined( _X360 )
+	[isolate] 
+#endif
+	{ 
 
-	if( numBones == 0 )
-	{
-		worldPos = mul4x3( modelPos, cModel[0] );
-		worldNormal = mul3x3( modelNormal, ( const float3x3 )cModel[0] );
-	}
-	else if( numBones == 1 )
-	{
-		worldPos = mul4x3( modelPos, cModel[boneIndices[0]] );
-		worldNormal = mul3x3( modelNormal, ( const float3x3 )cModel[boneIndices[0]] );
-	}
-	else if( numBones == 2 )
-	{
-		float4x3 blendMatrix = cModel[boneIndices[0]] * boneWeights[0] +
-							   cModel[boneIndices[1]] * boneWeights[1];
-		worldPos = mul4x3( modelPos, blendMatrix );
-		worldNormal = mul3x3( modelNormal, ( float3x3 )blendMatrix );
-	}
-	else // if( numBones == 3 )
-	{
-		float4x3 mat1 = cModel[boneIndices[0]];
-		float4x3 mat2 = cModel[boneIndices[1]];
-		float4x3 mat3 = cModel[boneIndices[2]];
+#if !defined( _X360 )
+		int3 boneIndices = D3DCOLORtoUBYTE4( fBoneIndices );
+#else
+		int3 boneIndices = fBoneIndices;
+#endif
 
-		float weight2 = 1.0f - boneWeights[0] - boneWeights[1];
+		if ( !bSkinning )
+		{
+			worldPos = mul4x3( modelPos, cModel[0] );
+			worldNormal = mul3x3( modelNormal, ( const float3x3 )cModel[0] );
+		}
+		else // skinning - always three bones
+		{
+			float4x3 mat1 = cModel[boneIndices[0]];
+			float4x3 mat2 = cModel[boneIndices[1]];
+			float4x3 mat3 = cModel[boneIndices[2]];
 
-		float4x3 blendMatrix = mat1 * boneWeights[0] + mat2 * boneWeights[1] + mat3 * weight2;
-		worldPos = mul4x3( modelPos, blendMatrix );
-		worldNormal = mul3x3( modelNormal, ( float3x3 )blendMatrix );
-	}
+			float3 weights = DecompressBoneWeights( boneWeights ).xyz;
+			weights[2] = 1 - (weights[0] + weights[1]);
+
+			float4x3 blendMatrix = mat1 * weights[0] + mat2 * weights[1] + mat3 * weights[2];
+			worldPos = mul4x3( modelPos, blendMatrix );
+			worldNormal = mul3x3( modelNormal, ( float3x3 )blendMatrix );
+		}
+
+	} // end [isolate]
 }
 
 // Is it worth keeping SkinPosition and SkinPositionAndNormal around since the optimizer
 // gets rid of anything that isn't used?
 void SkinPositionNormalAndTangentSpace( 
-#ifdef USE_CONDITIONALS
-						   bool bZeroBones, bool bOneBone, bool bTwoBones,
-#else
-						   int numBones, 
-#endif
+							bool bSkinning,
 						    const float4 modelPos, const float3 modelNormal, 
 							const float4 modelTangentS,
                             const float4 boneWeights, float4 fBoneIndices,
 						    out float3 worldPos, out float3 worldNormal, 
 							out float3 worldTangentS, out float3 worldTangentT )
 {
+#if !defined( _X360 )
 	int3 boneIndices = D3DCOLORtoUBYTE4( fBoneIndices );
-
-#ifdef USE_CONDITIONALS
-	if( bZeroBones )
 #else
-	if( numBones == 0 )
+	int3 boneIndices = fBoneIndices;
 #endif
-	{
-//		worldPos = mul( float4( modelPos, 1.0f ), cModel[0] );
-		worldPos = mul4x3( modelPos, cModel[0] );
-		worldNormal = mul3x3( modelNormal, ( const float3x3 )cModel[0] );
-		worldTangentS = mul3x3( ( float3 )modelTangentS, ( const float3x3 )cModel[0] );
-	}
-#ifdef USE_CONDITIONALS
-	else if( bOneBone )
-#else
-	else if( numBones == 1 )
-#endif
-	{
-		worldPos = mul4x3( modelPos, cModel[boneIndices[0]] );
-		worldNormal = mul3x3( modelNormal, ( const float3x3 )cModel[boneIndices[0]] );
-		worldTangentS = mul3x3( ( float3 )modelTangentS, ( const float3x3 )cModel[boneIndices[0]] );
-	}
-#ifdef USE_CONDITIONALS
-	else if( bTwoBones )
-#else
-	else if( numBones == 2 )
-#endif
-	{
-		float4x3 blendMatrix = cModel[boneIndices[0]] * boneWeights[0] +
-							   cModel[boneIndices[1]] * boneWeights[1];
-		worldPos = mul4x3( modelPos, blendMatrix );
-		worldNormal = mul3x3( modelNormal, ( float3x3 )blendMatrix );
-		worldTangentS = mul3x3( ( float3 )modelTangentS, ( const float3x3 )blendMatrix );
-	}
-	else // if( numBones == 3 )
-	{
-		float4x3 mat1 = cModel[boneIndices[0]];
-		float4x3 mat2 = cModel[boneIndices[1]];
-		float4x3 mat3 = cModel[boneIndices[2]];
 
-		float weight2 = 1.0f - boneWeights[0] - boneWeights[1];
+	// Needed for invariance issues caused by multipass rendering
+#if defined( _X360 )
+	[isolate] 
+#endif
+	{ 
+		if ( !bSkinning )
+		{
+			worldPos = mul4x3( modelPos, cModel[0] );
+			worldNormal = mul3x3( modelNormal, ( const float3x3 )cModel[0] );
+			worldTangentS = mul3x3( ( float3 )modelTangentS, ( const float3x3 )cModel[0] );
+		}
+		else // skinning - always three bones
+		{
+			float4x3 mat1 = cModel[boneIndices[0]];
+			float4x3 mat2 = cModel[boneIndices[1]];
+			float4x3 mat3 = cModel[boneIndices[2]];
 
-		float4x3 blendMatrix = mat1 * boneWeights[0] + mat2 * boneWeights[1] + mat3 * weight2;
-		worldPos = mul4x3( modelPos, blendMatrix );
-		worldNormal = mul3x3( modelNormal, ( float3x3 )blendMatrix );
-		worldTangentS = mul3x3( ( float3 )modelTangentS, ( const float3x3 )blendMatrix );
+			float3 weights = DecompressBoneWeights( boneWeights ).xyz;
+			weights[2] = 1 - (weights[0] + weights[1]);
+
+			float4x3 blendMatrix = mat1 * weights[0] + mat2 * weights[1] + mat3 * weights[2];
+			worldPos = mul4x3( modelPos, blendMatrix );
+			worldNormal = mul3x3( modelNormal, ( const float3x3 )blendMatrix );
+			worldTangentS = mul3x3( ( float3 )modelTangentS, ( const float3x3 )blendMatrix );
+		}
+		worldTangentT = cross( worldNormal, worldTangentS ) * modelTangentS.w;
 	}
-	worldTangentT = cross( worldNormal, worldTangentS ) * modelTangentS.w;
 }
 
 
 //-----------------------------------------------------------------------------
-//
 // Lighting helper functions
-//
 //-----------------------------------------------------------------------------
+
 float3 AmbientLight( const float3 worldNormal )
 {
 	float3 nSquared = worldNormal * worldNormal;
 	int3 isNegative = ( worldNormal < 0.0 );
 	float3 linearColor;
-	linearColor = nSquared.x * cAmbientCube[isNegative.x] +
-	              nSquared.y * cAmbientCube[isNegative.y+2] +
-	              nSquared.z * cAmbientCube[isNegative.z+4];
+	linearColor = nSquared.x * cAmbientCubeX[isNegative.x] +
+	              nSquared.y * cAmbientCubeY[isNegative.y] +
+	              nSquared.z * cAmbientCubeZ[isNegative.z];
 	return linearColor;
 }
-  
-float3 SpotLight( const float3 worldPos, const float3 worldNormal, int lightNum, bool bHalfLambert )
+
+// The following "internal" routines are called "privately" by other routines in this file which
+// handle the particular flavor of vs20 control flow appropriate to the original caller
+float VertexAttenInternal( const float3 worldPos, int lightNum )
 {
-	// Direct mapping of current code
-	float3 lightDir = cLightInfo[lightNum].pos - worldPos;
+	float result = 0.0f;
 
-	// normalize light direction, maintain temporaries for attenuation
-	float lightDistSquared = dot( lightDir, lightDir );
-	float ooLightDist = rsqrt( lightDistSquared );
-	lightDir *= ooLightDist;
-	
-	float3 attenuationFactors;
-	attenuationFactors = dst( lightDistSquared, ooLightDist );
-
-	float flDistanceAttenuation = dot( attenuationFactors, cLightInfo[lightNum].atten );
-	flDistanceAttenuation = 1.0f / flDistanceAttenuation;
-	
-	// There's an additional falloff we need to make to get the edges looking good
-	// and confine the light within a sphere.
-	float flLinearFactor = saturate( 1.0f - lightDistSquared * cLightInfo[lightNum].atten.w ); 
-	flDistanceAttenuation *= flLinearFactor;
-
-	float nDotL;
-	if (!bHalfLambert)
-	{
-		// compute n dot l
-		nDotL = dot( worldNormal, lightDir );
-		nDotL = max( cZero, nDotL );
-	}
-	else
-	{
-		// half-lambert
-		nDotL = dot( worldNormal, lightDir ) * 0.5 + 0.5;
-		nDotL = nDotL * nDotL;
-	}
-	
-	// compute angular attenuation
-	float flCosTheta = dot( cLightInfo[lightNum].dir, -lightDir );
-	float flAngularAtten = (flCosTheta - cLightInfo[lightNum].spotParams.z) * cLightInfo[lightNum].spotParams.w;
-	flAngularAtten = max( cZero, flAngularAtten );
-	flAngularAtten = pow( flAngularAtten, cLightInfo[lightNum].spotParams.x );
-	flAngularAtten = min( cOne, flAngularAtten );
-
-	return cLightInfo[lightNum].color * flDistanceAttenuation * flAngularAtten * nDotL;
-}
-
-float3 PointLight( const float3 worldPos, const float3 worldNormal, int lightNum, bool bHalfLambert )
-{
 	// Get light direction
 	float3 lightDir = cLightInfo[lightNum].pos - worldPos;
 
@@ -425,197 +753,155 @@ float3 PointLight( const float3 worldPos, const float3 worldNormal, int lightNum
 	// Normalize light direction
 	lightDir *= ooLightDist;
 
-	// compute distance attenuation factors.
-	float3 attenuationFactors;
-	attenuationFactors.x = 1.0f;
-	attenuationFactors.y = lightDistSquared * ooLightDist;
-	attenuationFactors.z = lightDistSquared;
+	float3 vDist;
+#	if defined( _X360 )
+	{
+		//X360 dynamic compile hits an internal compiler error using dst(), this is the breakdown of how dst() works from the 360 docs.
+		vDist.x = 1;
+		vDist.y = lightDistSquared * ooLightDist;
+		vDist.z = lightDistSquared;
+		//flDist.w = ooLightDist;
+	}
+#	else
+	{
+		vDist = dst( lightDistSquared, ooLightDist );
+	}
+#	endif
 
-	float flDistanceAtten = 1.0f / dot( cLightInfo[lightNum].atten.xyz, attenuationFactors );
+	float flDistanceAtten = 1.0f / dot( cLightInfo[lightNum].atten.xyz, vDist );
 
-	// There's an additional falloff we need to make to get the edges looking good
-	// and confine the light within a sphere.
-	float flLinearFactor = saturate( 1.0f - lightDistSquared * cLightInfo[lightNum].atten.w ); 
-	flDistanceAtten *= flLinearFactor;
+	// Spot attenuation
+	float flCosTheta = dot( cLightInfo[lightNum].dir.xyz, -lightDir );
+	float flSpotAtten = (flCosTheta - cLightInfo[lightNum].spotParams.z) * cLightInfo[lightNum].spotParams.w;
+	flSpotAtten = max( 0.0001f, flSpotAtten );
+	flSpotAtten = pow( flSpotAtten, cLightInfo[lightNum].spotParams.x );
+	flSpotAtten = saturate( flSpotAtten );
 
-	float NDotL;
+	// Select between point and spot
+	float flAtten = lerp( flDistanceAtten, flDistanceAtten * flSpotAtten, cLightInfo[lightNum].dir.w );
+
+	// Select between above and directional (no attenuation)
+	result = lerp( flAtten, 1.0f, cLightInfo[lightNum].color.w );
+
+	return result;
+}
+
+float CosineTermInternal( const float3 worldPos, const float3 worldNormal, int lightNum, bool bHalfLambert )
+{
+	// Calculate light direction assuming this is a point or spot
+	float3 lightDir = normalize( cLightInfo[lightNum].pos - worldPos );
+
+	// Select the above direction or the one in the structure, based upon light type
+	lightDir = lerp( lightDir, -cLightInfo[lightNum].dir, cLightInfo[lightNum].color.w );
+
+	// compute N dot L
+	float NDotL = dot( worldNormal, lightDir );
+
 	if ( !bHalfLambert )
 	{
-		// compute n dot l
-		NDotL = dot( worldNormal, lightDir );
-		NDotL = max( cZero, NDotL );
+		NDotL = max( 0.0f, NDotL );
 	}
-	else
+	else	// Half-Lambert
 	{
-		// half-lambert
-		NDotL = dot( worldNormal, lightDir ) * 0.5 + 0.5;
+		NDotL = NDotL * 0.5 + 0.5;
 		NDotL = NDotL * NDotL;
 	}
-
-	return cLightInfo[lightNum].color * NDotL * flDistanceAtten;
+	return NDotL;
 }
 
-
-float3 DirectionalLight( const float3 worldNormal, int lightNum, bool bHalfLambert )
+// This routine uses booleans to do early-outs and is meant to be called by routines OUTSIDE of this file
+float GetVertexAttenForLight( const float3 worldPos, int lightNum )
 {
-	float NDotL;
-	if ( !bHalfLambert )
+	float result = 0.0f;
+	if ( g_bLightEnabled[lightNum] )
 	{
-		// compute n dot l
-		NDotL = dot( worldNormal, -cLightInfo[lightNum].dir );
-		NDotL = max( cZero, NDotL );
+		result = VertexAttenInternal( worldPos, lightNum );
 	}
-	else
-	{
-		// half-lambert
-		NDotL = dot( worldNormal, -cLightInfo[lightNum].dir ) * 0.5 + 0.5;
-		NDotL = NDotL * NDotL;
-	}
-	return cLightInfo[lightNum].color * NDotL;
+
+	return result;
 }
 
-float3 DoLight( const float3 worldPos, const float3 worldNormal, 
-				int lightNum, int lightType, bool bHalfLambert )
+// This routine uses booleans to do early-outs and is meant to be called by routines OUTSIDE of this file
+float CosineTerm( const float3 worldPos, const float3 worldNormal, int lightNum, bool bHalfLambert )
 {
-	float3 color = 0.0f;
-	if( lightType == LIGHTTYPE_SPOT )
+	float flResult = 0.0f;
+	if ( g_bLightEnabled[lightNum] )
 	{
-		color = SpotLight( worldPos, worldNormal, lightNum, bHalfLambert );
+		flResult = CosineTermInternal( worldPos, worldNormal, lightNum, bHalfLambert );
 	}
-	else if( lightType == LIGHTTYPE_POINT )
-	{
-		color = PointLight( worldPos, worldNormal, lightNum, bHalfLambert );
-	}
-	else if( lightType == LIGHTTYPE_DIRECTIONAL )
-	{
-		color = DirectionalLight( worldNormal, lightNum, bHalfLambert );
-	}
-	return color;
+
+	return flResult;
 }
 
-float3 DoLightingLinear( const float3 worldPos, const float3 worldNormal,
-				   const float3 staticLightingColor, const int staticLightType,
-				   const int ambientLightType, const int localLightType0,
-				   const int localLightType1, bool bHalfLambert )
+float3 DoLightInternal( const float3 worldPos, const float3 worldNormal, int lightNum, bool bHalfLambert )
 {
-	float3 linearColor = 0.0f;
-	if( staticLightType == LIGHTTYPE_STATIC )
+	return cLightInfo[lightNum].color *
+		CosineTermInternal( worldPos, worldNormal, lightNum, bHalfLambert ) *
+		VertexAttenInternal( worldPos, lightNum );
+}
+
+// This routine
+float3 DoLighting( const float3 worldPos, const float3 worldNormal,
+				   const float3 staticLightingColor, const bool bStaticLight,
+				   const bool bDynamicLight, bool bHalfLambert )
+{
+	float3 linearColor = float3( 0.0f, 0.0f, 0.0f );
+
+	if( bStaticLight )			// Static light
 	{
-		// The static lighting comes in in gamma space and has also been premultiplied by $cOOOverbright
-		// need to get it into
-		// linear space so that we can do adds.
-		linearColor += GammaToLinear( staticLightingColor * cOverbright );
+		float3 col = staticLightingColor * cOverbright;
+#if defined ( _X360 )
+		linearColor += col * col;
+#else
+		linearColor += GammaToLinear( col );
+#endif
 	}
 
-	if( ambientLightType == LIGHTTYPE_AMBIENT )
+	if( bDynamicLight )			// Dynamic light
 	{
-		linearColor += AmbientLight( worldNormal );
+		for (int i = 0; i < g_nLightCount; i++)
+		{
+			linearColor += DoLightInternal( worldPos, worldNormal, i, bHalfLambert );
+		}		
 	}
 
-	if( localLightType0 != LIGHTTYPE_NONE )
+	if( bDynamicLight )
 	{
-		linearColor += DoLight( worldPos, worldNormal, 0, localLightType0, bHalfLambert );
-	}
-
-	if( localLightType1 != LIGHTTYPE_NONE )
-	{
-		linearColor += DoLight( worldPos, worldNormal, 1, localLightType1, bHalfLambert );
+		linearColor += AmbientLight( worldNormal ); //ambient light is already remapped
 	}
 
 	return linearColor;
 }
 
-
-float3 DoLighting( const float3 worldPos, const float3 worldNormal,
-				   const float3 staticLightingColor, const int staticLightType,
-				   const int ambientLightType, const int localLightType0,
-				   const int localLightType1, const float modulation, bool bHalfLambert )
+float3 DoLightingUnrolled( const float3 worldPos, const float3 worldNormal,
+				  const float3 staticLightingColor, const bool bStaticLight,
+				  const bool bDynamicLight, bool bHalfLambert, const int nNumLights )
 {
-	float3 returnColor;
+	float3 linearColor = float3( 0.0f, 0.0f, 0.0f );
 
-	// special case for no lighting
-	if( staticLightType == LIGHTTYPE_NONE && 
-		ambientLightType == LIGHTTYPE_NONE &&
-		localLightType0 == LIGHTTYPE_NONE &&
-		localLightType1 == LIGHTTYPE_NONE )
+	if( bStaticLight )			// Static light
 	{
-		returnColor = float3( 0.0f, 0.0f, 0.0f );
-	}
-	else if( staticLightType == LIGHTTYPE_NONE && 
-			 ambientLightType == LIGHTTYPE_AMBIENT &&
-			 localLightType0 == LIGHTTYPE_NONE &&
-			 localLightType1 == LIGHTTYPE_NONE )
-	{
-		returnColor = AmbientLight( worldNormal );
-	}
-	else if( staticLightType == LIGHTTYPE_STATIC && 
-			 ambientLightType == LIGHTTYPE_NONE &&
-			 localLightType0 == LIGHTTYPE_NONE &&
-			 localLightType1 == LIGHTTYPE_NONE )
-	{
-		returnColor = GammaToLinear( staticLightingColor * cOverbright );
-	}
-	else
-	{
-		float3 linearColor = DoLightingLinear( worldPos, worldNormal, staticLightingColor, 
-			staticLightType, ambientLightType, localLightType0, localLightType1, bHalfLambert );
-
-		if (modulation != 1.0f)
-		{
-			linearColor *= modulation;
-		}
-
-		// for dx9, we don't need to scale back down to 0..1 for overbrighting.
-		// FIXME: But we're going to because there's some visual difference between dx8 + dx9 if we don't
-		// gotta look into that later.
-//		returnColor = HuePreservingColorClamp( cOOOverbright * LinearToGamma( linearColor ) );
-		returnColor = linearColor;
+		linearColor += GammaToLinear( staticLightingColor * cOverbright );
 	}
 
-	return returnColor;
-}
-
-
-
-// returns a linear HDR light value
-float3 DoLightingHDR( const float3 worldPos, const float3 worldNormal,
-				   const float3 staticLightingColor, const int staticLightType,
-				   const int ambientLightType, const int localLightType0,
-				   const int localLightType1, const float modulation, bool bHalfLambert )
-{
-	float3 returnColor;
-
-	// special case for no lighting
-	if( staticLightType == LIGHTTYPE_NONE && 
-		ambientLightType == LIGHTTYPE_NONE &&
-		localLightType0 == LIGHTTYPE_NONE &&
-		localLightType1 == LIGHTTYPE_NONE )
+	if( bDynamicLight )			// Ambient light
 	{
-		returnColor = float3( 0.0f, 0.0f, 0.0f );
-	}
-	else if( staticLightType == LIGHTTYPE_STATIC && 
-			 ambientLightType == LIGHTTYPE_NONE &&
-			 localLightType0 == LIGHTTYPE_NONE &&
-			 localLightType1 == LIGHTTYPE_NONE )
-	{
-		// special case for static lighting only
-		// FIXME!!  Should store HDR values per vertex for static prop lighting.
-		returnColor = GammaToLinear( staticLightingColor * cOverbright );
-	}
-	else
-	{
-		float3 linearColor = DoLightingLinear( worldPos, worldNormal, staticLightingColor, 
-			staticLightType, ambientLightType, localLightType0, localLightType1, bHalfLambert );
-
-		if (modulation != 1.0f)
-		{
-			linearColor *= modulation;
-		}
-
-		returnColor = linearColor;
+		if ( nNumLights >= 1 )
+			linearColor += DoLightInternal( worldPos, worldNormal, 0, bHalfLambert );
+		if ( nNumLights >= 2 )
+			linearColor += DoLightInternal( worldPos, worldNormal, 1, bHalfLambert );
+		if ( nNumLights >= 3 )
+			linearColor += DoLightInternal( worldPos, worldNormal, 2, bHalfLambert );
+		if ( nNumLights >= 4 )
+			linearColor += DoLightInternal( worldPos, worldNormal, 3, bHalfLambert );
 	}
 
-	return returnColor;
+	if( bDynamicLight )
+	{
+		linearColor += AmbientLight( worldNormal ); //ambient light is already remapped
+	}
+
+	return linearColor;
 }
 
 int4 FloatToInt( in float4 floats )
@@ -638,94 +924,24 @@ float2 ComputeSphereMapTexCoords( in float3 reflectionVector )
 	// tmp = tmp/|tmp| + 1
 	tmp.xy = ooLen * tmp.xy + 1.0f;
 
-	return tmp.xy * cHalf;
+	return tmp.xy * 0.5f;
 }
 
-//-----------------------------------------------------------------------------
-//
-// Bumped lighting helper functions
-//
-//-----------------------------------------------------------------------------
 
-float3 Compute_SpotLightVertexColor( const float3 worldPos, const float3 worldNormal, int lightNum )
+#define DEFORMATION_CLAMP_TO_BOX_IN_WORLDSPACE 1
+							// minxyz.minsoftness / maxxyz.maxsoftness
+float3 ApplyDeformation( float3 worldpos, int deftype, float4 defparms0, float4 defparms1,
+						 float4 defparms2, float4 defparms3 )
 {
-	// Direct mapping of current code
-	float3 lightDir = cLightInfo[lightNum].pos - worldPos;
-
-	// normalize light direction, maintain temporaries for attenuation
-	float lightDistSquared = dot( lightDir, lightDir );
-	float ooLightDist = rsqrt( lightDistSquared );
-	lightDir *= ooLightDist;
-	
-	float3 attenuationFactors;
-	attenuationFactors = dst( lightDistSquared, ooLightDist );
-
-	float flDistanceAttenuation = dot( attenuationFactors, cLightInfo[lightNum].atten );
-	flDistanceAttenuation = 1.0f / flDistanceAttenuation;
-	
-	// There's an additional falloff we need to make to get the edges looking good
-	// and confine the light within a sphere.
-	float flLinearFactor = saturate( 1.0f - lightDistSquared * cLightInfo[lightNum].atten.w ); 
-	flDistanceAttenuation *= flLinearFactor;
-
-	float flCosTheta = dot( cLightInfo[lightNum].dir, -lightDir );
-	float flAngularAtten = (flCosTheta - cLightInfo[lightNum].spotParams.z) * cLightInfo[lightNum].spotParams.w;
-	flAngularAtten = max( 0.0f, flAngularAtten );
-	flAngularAtten = pow( flAngularAtten, cLightInfo[lightNum].spotParams.x );
-	flAngularAtten = min( 1.0f, flAngularAtten );
-
-	return flDistanceAttenuation * flAngularAtten * cLightInfo[lightNum].color;
-}
-
-float3 Compute_PointLightVertexColor( const float3 worldPos, const float3 worldNormal, int lightNum )
-{
-	// Get light direction
-	float3 lightDir = cLightInfo[lightNum].pos - worldPos;
-
-	// Get light distance squared.
-	float lightDistSquared = dot( lightDir, lightDir );
-
-	// Get 1/lightDistance
-	float ooLightDist = rsqrt( lightDistSquared );
-
-	// Normalize light direction
-	lightDir *= ooLightDist;
-
-	// compute distance attenuation factors.
-	float3 attenuationFactors;
-	attenuationFactors.x = 1.0f;
-	attenuationFactors.y = lightDistSquared * ooLightDist;
-	attenuationFactors.z = lightDistSquared;
-
-	float flDistanceAtten = 1.0f / dot( cLightInfo[lightNum].atten.xyz, attenuationFactors );
-
-	// There's an additional falloff we need to make to get the edges looking good
-	// and confine the light within a sphere.
-	float flLinearFactor = saturate( 1.0f - lightDistSquared * cLightInfo[lightNum].atten.w ); 
-	flDistanceAtten *= flLinearFactor;
-
-	return flDistanceAtten * cLightInfo[lightNum].color;
-}
-
-float3 ComputeDirectionalLightVertexColor( const float3 worldNormal, int lightNum )
-{
-	return cLightInfo[lightNum].color;
-}
-
-float3 GetVertexColorForLight( const float3 worldPos, const float3 worldNormal, 
-				int lightNum, int lightType )
-{
-	if( lightType == LIGHTTYPE_SPOT )
+	float3 ret = worldpos;
+	if ( deftype == DEFORMATION_CLAMP_TO_BOX_IN_WORLDSPACE )
 	{
-		return Compute_SpotLightVertexColor( worldPos, worldNormal, lightNum );
+		ret=max( ret, defparms2.xyz );
+		ret=min( ret, defparms3.xyz );
 	}
-	else if( lightType == LIGHTTYPE_POINT )
-	{
-		return Compute_PointLightVertexColor( worldPos, worldNormal, lightNum );
-	}
-	else if( lightType == LIGHTTYPE_DIRECTIONAL )
-	{
-		return ComputeDirectionalLightVertexColor( worldNormal, lightNum );
-	}
-	return float3( 0.0f, 0.0f, 0.0f );
+
+	return ret;
 }
+
+
+#endif //#ifndef COMMON_VS_FXC_H_

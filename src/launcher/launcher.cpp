@@ -36,7 +36,7 @@
 #include "vphysics_interface.h"
 #include "filesystem_init.h"
 #include "vstdlib/iprocessutils.h"
-#include "video/iavi.h"
+#include "avi/iavi.h"
 #include "tier1/tier1.h"
 #include "tier2/tier2.h"
 #include "tier3/tier3.h"

@@ -6,21 +6,25 @@
 //=============================================================================//
 
 #include "BaseVSShader.h"
-#include "VMatrix.h"
+#include "mathlib/VMatrix.h"
 #include "common_hlsl_cpp_consts.h" // hack hack hack!
 #include "convar.h"
 
-#include "SDK_watercheap_vs20.inc"
-#include "SDK_watercheap_ps20.inc"
-#include "SDK_water_vs20.inc"
-#include "SDK_water_ps20.inc"
+#include "watercheap_vs20.inc"
+#include "watercheap_ps20.inc"
+#include "watercheap_ps20b.inc"
+#include "water_vs20.inc"
+#include "water_ps20.inc"
+#include "water_ps20b.inc"
 
+#ifndef _X360
 static ConVar r_waterforceexpensive( "r_waterforceexpensive", "0" );
+#endif
 
-DEFINE_FALLBACK_SHADER( SDK_Water, SDK_Water_DX9_HDR )
+DEFINE_FALLBACK_SHADER( Water, Water_DX9_HDR )
 
-BEGIN_VS_SHADER( SDK_Water_DX90, 
-			  "Help for SDK_Water" )
+BEGIN_VS_SHADER( Water_DX90, 
+			  "Help for Water" )
 
 	BEGIN_SHADER_PARAMS
 		SHADER_PARAM( REFRACTTEXTURE, SHADER_PARAM_TYPE_TEXTURE, "_rt_WaterRefraction", "" )
@@ -51,12 +55,14 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		SHADER_PARAM( NOLOWENDLIGHTMAP, SHADER_PARAM_TYPE_BOOL, "0", "" )
 		SHADER_PARAM( SCROLL1, SHADER_PARAM_TYPE_COLOR, "", "" )
 		SHADER_PARAM( SCROLL2, SHADER_PARAM_TYPE_COLOR, "", "" )
+		SHADER_PARAM( BLURREFRACT, SHADER_PARAM_TYPE_BOOL, "0", "Cause the refraction to be blurry on ps2b hardware" )
 	END_SHADER_PARAMS
 
 	SHADER_INIT_PARAMS()
 	{
 		if( !params[ABOVEWATER]->IsDefined() )
 		{
+			Warning( "***need to set $abovewater for material %s\n", pMaterialName );
 			params[ABOVEWATER]->SetIntValue( 1 );
 		}
 		SET_FLAGS2( MATERIAL_VAR2_NEEDS_TANGENT_SPACES );
@@ -94,10 +100,14 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			params[REFLECTBLENDFACTOR]->SetFloatValue( 1.0f );
 		}
 
-		// By default, we're force expensive on dx9
+		// By default, we're force expensive on dx9.  NO WE DON'T!!!!
 		if( !params[FORCEEXPENSIVE]->IsDefined() )
 		{
+#ifdef _X360
+			params[FORCEEXPENSIVE]->SetIntValue( 0 );
+#else
 			params[FORCEEXPENSIVE]->SetIntValue( 1 );
+#endif
 		}
 		if( params[FORCEEXPENSIVE]->GetIntValue() && params[FORCECHEAP]->GetIntValue() )
 		{
@@ -110,13 +120,18 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			SET_FLAGS2( MATERIAL_VAR2_LIGHTING_LIGHTMAP );
 		}
 
+		SET_FLAGS2( MATERIAL_VAR2_LIGHTING_LIGHTMAP );
+		if( g_pConfig->UseBumpmapping() && params[NORMALMAP]->IsDefined() )
+		{
+			SET_FLAGS2( MATERIAL_VAR2_LIGHTING_BUMPED_LIGHTMAP );
+		}
 	}
 
 	SHADER_FALLBACK
 	{
 		if( g_pHardwareConfig->GetDXSupportLevel() < 90 )
 		{
-			return "SDK_Water_DX81";
+			return "Water_DX81";
 		}
 		return 0;
 	}
@@ -140,6 +155,10 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		if ( params[NORMALMAP]->IsDefined() )
 		{
 			LoadBumpMap( NORMALMAP );
+		}
+		if( params[BASETEXTURE]->IsDefined() )
+		{
+			LoadTexture( BASETEXTURE );
 		}
 	}
 
@@ -165,77 +184,117 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			SetInitialShadowState( );
 			if( bRefraction )
 			{
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
-				if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
-				{
-					pShaderShadow->EnableSRGBRead( SHADER_TEXTURE_STAGE0, true );
-				}
+				// refract sampler
+				pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER0, true );
 			}
 			if( bReflection )
 			{
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
-				if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
+				// reflect sampler
+				pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, true );
+				if( params[BASETEXTURE]->IsTexture() )
 				{
-					pShaderShadow->EnableSRGBRead( SHADER_TEXTURE_STAGE2, true );
+					// BASETEXTURE
+					pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
+					pShaderShadow->EnableSRGBRead( SHADER_SAMPLER1, true );
+					// LIGHTMAP
+					pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
+					pShaderShadow->EnableSRGBRead( SHADER_SAMPLER3, true );
 				}
 			}
 			// normal map
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE4, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );
 			// Normalizing cube map
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE5, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER5, true );
 
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0, 0 );
+
+			// texcoord0 : base texcoord
+			// texcoord1 : lightmap texcoord
+			// texcoord2 : lightmap texcoord offset
+			int numTexCoords = 1;
+			if( params[BASETEXTURE]->IsTexture() )
+			{
+				numTexCoords = 3;
+			}
+			pShaderShadow->VertexShaderVertexFormat( fmt, numTexCoords, 0, 0 );
 			
-			DECLARE_STATIC_VERTEX_SHADER( sdk_water_vs20 );
-			SET_STATIC_VERTEX_SHADER( sdk_water_vs20 );
+			Vector4D Scroll1;
+			params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
+
+			NormalDecodeMode_t nNormalDecodeMode = NORMAL_DECODE_NONE;
+			if ( params[NORMALMAP]->IsTexture() && g_pHardwareConfig->SupportsNormalMapCompression() )
+			{
+				ITexture *pNormalMap = params[NORMALMAP]->GetTextureValue();
+				if ( pNormalMap )
+				{
+					// Clamp this to 0 or 1 since that's how we've authored the water shader (i.e. no separate alpha map/channel)
+					nNormalDecodeMode = pNormalMap->GetNormalDecodeMode() == NORMAL_DECODE_NONE ? NORMAL_DECODE_NONE : NORMAL_DECODE_ATI2N;
+				}
+			}
+
+			DECLARE_STATIC_VERTEX_SHADER( water_vs20 );
+			SET_STATIC_VERTEX_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
+			SET_STATIC_VERTEX_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
+			SET_STATIC_VERTEX_SHADER( water_vs20 );
 
 			// "REFLECT" "0..1"
 			// "REFRACT" "0..1"
 			
-			DECLARE_STATIC_PIXEL_SHADER( sdk_water_ps20 );
-			SET_STATIC_PIXEL_SHADER_COMBO( REFLECT,  bReflection );
-			SET_STATIC_PIXEL_SHADER_COMBO( REFRACT,  bRefraction );
-			SET_STATIC_PIXEL_SHADER_COMBO( ABOVEWATER,  params[ABOVEWATER]->GetIntValue() );
-			SET_STATIC_PIXEL_SHADER_COMBO( HDRTYPE,  g_pHardwareConfig->GetHDRType() );
-			Vector4D Scroll1;
-			params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
-			SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
-			SET_STATIC_PIXEL_SHADER( sdk_water_ps20 );
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			{
+				DECLARE_STATIC_PIXEL_SHADER( water_ps20b );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFLECT,  bReflection );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFRACT,  bRefraction );
+				SET_STATIC_PIXEL_SHADER_COMBO( ABOVEWATER,  params[ABOVEWATER]->GetIntValue() );
+				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
+				SET_STATIC_PIXEL_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
+				SET_STATIC_PIXEL_SHADER_COMBO( BLURRY_REFRACT, params[BLURREFRACT]->GetIntValue() );
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER( water_ps20b );
+			}
+			else
+			{
+				DECLARE_STATIC_PIXEL_SHADER( water_ps20 );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFLECT,  bReflection );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFRACT,  bRefraction );
+				SET_STATIC_PIXEL_SHADER_COMBO( ABOVEWATER,  params[ABOVEWATER]->GetIntValue() );
+				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
+				SET_STATIC_PIXEL_SHADER_COMBO( BASETEXTURE, params[BASETEXTURE]->IsTexture() );
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER( water_ps20 );
+			}
 
 			FogToFogColor();
 
-			if( g_pHardwareConfig->GetHDRType() != HDR_TYPE_NONE )
-			{
-				// we are writing linear values from this shader.
-				pShaderShadow->EnableSRGBWrite( true );
-			}
+			// we are writing linear values from this shader.
+			pShaderShadow->EnableSRGBWrite( true );
+
+			pShaderShadow->EnableAlphaWrites( true );
 		}
 		DYNAMIC_STATE
 		{
-			bool bHDREnabled = IsHDREnabled();
 			pShaderAPI->SetDefaultState();
 			if( bRefraction )
 			{
 				// HDRFIXME: add comment about binding.. Specify the number of MRTs in the enable
-				BindTexture( SHADER_TEXTURE_STAGE0, REFRACTTEXTURE, -1 );
+				BindTexture( SHADER_SAMPLER0, REFRACTTEXTURE, -1 );
 			}
 			if( bReflection )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE2, REFLECTTEXTURE, -1 );
+				BindTexture( SHADER_SAMPLER2, REFLECTTEXTURE, -1 );
 			}
-			BindTexture( SHADER_TEXTURE_STAGE4, NORMALMAP, BUMPFRAME );
-			pShaderAPI->BindSignedNormalizationCubeMap( SHADER_TEXTURE_STAGE5 );
+			BindTexture( SHADER_SAMPLER4, NORMALMAP, BUMPFRAME );
+			if( params[BASETEXTURE]->IsTexture() )
+			{
+				BindTexture( SHADER_SAMPLER1, BASETEXTURE, FRAME );
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER3, TEXTURE_LIGHTMAP );
+			}
 
-			DECLARE_DYNAMIC_VERTEX_SHADER( sdk_water_vs20 );
-			SET_DYNAMIC_VERTEX_SHADER( sdk_water_vs20 );
-			
-			DECLARE_DYNAMIC_PIXEL_SHADER( sdk_water_ps20 );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED, bHDREnabled );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( FOGTYPE, pShaderAPI->GetSceneFogMode() );
-			SET_DYNAMIC_PIXEL_SHADER( sdk_water_ps20 );
+			pShaderAPI->BindStandardTexture( SHADER_SAMPLER5, TEXTURE_NORMALIZATION_CUBEMAP_SIGNED );
 			
 			// Refraction tint
 			if( bRefraction )
@@ -245,7 +304,23 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 			// Reflection tint
 			if( bReflection )
 			{
-				SetPixelShaderConstantGammaToLinear( 4, REFLECTTINT );
+				if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
+				{
+					// Need to multiply by 4 in linear space since we premultiplied into
+					// the render target by .25 to get overbright data in the reflection render target.
+					float gammaReflectTint[3];
+					params[REFLECTTINT]->GetVecValue( gammaReflectTint, 3 );
+					float linearReflectTint[4];
+					linearReflectTint[0] = GammaToLinear( gammaReflectTint[0] ) * 4.0f;
+					linearReflectTint[1] = GammaToLinear( gammaReflectTint[1] ) * 4.0f;
+					linearReflectTint[2] = GammaToLinear( gammaReflectTint[2] ) * 4.0f;
+					linearReflectTint[3] = 1.0f;
+					pShaderAPI->SetPixelShaderConstant( 4, linearReflectTint, 1 );
+				}
+				else
+				{
+					SetPixelShaderConstantGammaToLinear( 4, REFLECTTINT );
+				}
 			}
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
@@ -275,18 +350,40 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				params[REFRACTAMOUNT]->GetFloatValue(), params[REFRACTAMOUNT]->GetFloatValue() };
 			pShaderAPI->SetPixelShaderConstant( 5, c5, 1 );
 
-			SetPixelShaderConstant( 6, FOGCOLOR );
+			SetPixelShaderConstantGammaToLinear( 6, FOGCOLOR );
 
-			float c7[4] = { 
+			float c7[4] = 
+			{ 
 				params[FOGSTART]->GetFloatValue(), 
 				params[FOGEND]->GetFloatValue() - params[FOGSTART]->GetFloatValue(), 
-				1.0f, 0.0f };
-
+				1.0f, 
+				0.0f 
+			};
 			if (g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
-				c7[2]=4.0;									// water overbright factor
-
+			{
+				// water overbright factor
+				c7[2] = 4.0;
+			}
 			pShaderAPI->SetPixelShaderConstant( 7, c7, 1 );
 
+			pShaderAPI->SetPixelShaderFogParams( 8 );
+
+			DECLARE_DYNAMIC_VERTEX_SHADER( water_vs20 );
+			SET_DYNAMIC_VERTEX_SHADER( water_vs20 );
+			
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( water_ps20b );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( WRITE_DEPTH_TO_DESTALPHA, pShaderAPI->ShouldWriteDepthToDestAlpha() );
+				SET_DYNAMIC_PIXEL_SHADER( water_ps20b );
+			}
+			else
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( water_ps20 );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+				SET_DYNAMIC_PIXEL_SHADER( water_ps20 );
+			}
 		}
 		Draw();
 	}
@@ -309,32 +406,61 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				EnableAlphaBlending( SHADER_BLEND_SRC_ALPHA, SHADER_BLEND_ONE_MINUS_SRC_ALPHA );
 			}
 			// envmap
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE0, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
 			// normal map
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE1, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER1, true );
 			if( bRefraction && bBlend )
 			{
 				// refraction map (used for alpha)
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 			}
 			// Normalizing cube map
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE6, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );
 			int fmt = VERTEX_POSITION | VERTEX_NORMAL | VERTEX_TANGENT_S | VERTEX_TANGENT_T;
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0, 0 );
+			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, 0 );
 
-			DECLARE_STATIC_VERTEX_SHADER( sdk_watercheap_vs20 );
+			NormalDecodeMode_t nNormalDecodeMode = NORMAL_DECODE_NONE;
+			if ( params[NORMALMAP]->IsTexture() && g_pHardwareConfig->SupportsNormalMapCompression() )
+			{
+				ITexture *pNormalMap = params[NORMALMAP]->GetTextureValue();
+				if ( pNormalMap )
+				{
+					// Clamp this to 0 or 1 since that's how we've authored the water shader (i.e. no separate alpha map/channel)
+					nNormalDecodeMode = pNormalMap->GetNormalDecodeMode() == NORMAL_DECODE_NONE ? NORMAL_DECODE_NONE : NORMAL_DECODE_ATI2N;
+				}
+			}
+
+			DECLARE_STATIC_VERTEX_SHADER( watercheap_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( BLEND,  bBlend && bRefraction );
-			SET_STATIC_VERTEX_SHADER( sdk_watercheap_vs20 );
+			SET_STATIC_VERTEX_SHADER( watercheap_vs20 );
 
-			DECLARE_STATIC_PIXEL_SHADER( sdk_watercheap_ps20 );
-			SET_STATIC_PIXEL_SHADER_COMBO( FRESNEL,  params[NOFRESNEL]->GetIntValue() == 0 );
-			SET_STATIC_PIXEL_SHADER_COMBO( BLEND,  bBlend );
-			SET_STATIC_PIXEL_SHADER_COMBO( REFRACTALPHA,  bRefraction );
-			SET_STATIC_PIXEL_SHADER_COMBO( HDRTYPE,  g_pHardwareConfig->GetHDRType() );
-			Vector4D Scroll1;
-			params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
-			SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
-			SET_STATIC_PIXEL_SHADER( sdk_watercheap_ps20 );
+			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			{
+				DECLARE_STATIC_PIXEL_SHADER( watercheap_ps20b );
+				SET_STATIC_PIXEL_SHADER_COMBO( FRESNEL,  params[NOFRESNEL]->GetIntValue() == 0 );
+				SET_STATIC_PIXEL_SHADER_COMBO( BLEND,  bBlend );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFRACTALPHA,  bRefraction );
+				SET_STATIC_PIXEL_SHADER_COMBO( HDRTYPE,  g_pHardwareConfig->GetHDRType() );
+				Vector4D Scroll1;
+				params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
+				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER( watercheap_ps20b );
+			}
+			else
+			{
+				DECLARE_STATIC_PIXEL_SHADER( watercheap_ps20 );
+				SET_STATIC_PIXEL_SHADER_COMBO( FRESNEL,  params[NOFRESNEL]->GetIntValue() == 0 );
+				SET_STATIC_PIXEL_SHADER_COMBO( BLEND,  bBlend );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFRACTALPHA,  bRefraction );
+				SET_STATIC_PIXEL_SHADER_COMBO( HDRTYPE,  g_pHardwareConfig->GetHDRType() );
+				Vector4D Scroll1;
+				params[SCROLL1]->GetVecValue( Scroll1.Base(), 4 );
+				SET_STATIC_PIXEL_SHADER_COMBO( MULTITEXTURE,fabs(Scroll1.x) > 0.0);
+				SET_STATIC_PIXEL_SHADER_COMBO( NORMAL_DECODE_MODE, (int) nNormalDecodeMode );
+				SET_STATIC_PIXEL_SHADER( watercheap_ps20 );
+			}
+
 			// HDRFIXME: test cheap water!
 			if( g_pHardwareConfig->GetHDRType() != HDR_TYPE_NONE )
 			{
@@ -347,14 +473,17 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		DYNAMIC_STATE
 		{
 			pShaderAPI->SetDefaultState();
-			BindTexture( SHADER_TEXTURE_STAGE0, ENVMAP, ENVMAPFRAME );
-			BindTexture( SHADER_TEXTURE_STAGE1, NORMALMAP, BUMPFRAME );
+
+			BindTexture( SHADER_SAMPLER0, ENVMAP, ENVMAPFRAME );
+			BindTexture( SHADER_SAMPLER1, NORMALMAP, BUMPFRAME );
 			if( bRefraction && bBlend )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE2, REFRACTTEXTURE, -1 );
+				BindTexture( SHADER_SAMPLER2, REFRACTTEXTURE, -1 );
 			}
-			pShaderAPI->BindSignedNormalizationCubeMap( SHADER_TEXTURE_STAGE6 );
+			pShaderAPI->BindStandardTexture( SHADER_SAMPLER6, TEXTURE_NORMALIZATION_CUBEMAP_SIGNED );
+
 			SetPixelShaderConstant( 0, FOGCOLOR );
+
 			float cheapWaterStartDistance = params[CHEAPWATERSTARTDISTANCE]->GetFloatValue();
 			float cheapWaterEndDistance = params[CHEAPWATERENDDISTANCE]->GetFloatValue();
 			float cheapWaterParams[4] = 
@@ -365,6 +494,7 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				cheapWaterStartDistance / ( cheapWaterEndDistance - cheapWaterStartDistance ),
 			};
 			pShaderAPI->SetPixelShaderConstant( 1, cheapWaterParams );
+
 			if( g_pConfig->bShowSpecular )
 			{
 				SetPixelShaderConstant( 2, REFLECTTINT, REFLECTBLENDFACTOR );
@@ -374,6 +504,8 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				float zero[4] = { 0.0f, 0.0f, 0.0f, params[REFLECTBLENDFACTOR]->GetFloatValue() };
 				pShaderAPI->SetPixelShaderConstant( 2, zero );
 			}
+		
+			pShaderAPI->SetPixelShaderFogParams( 3 );
 
 			if( params[SCROLL1]->IsDefined())
 			{
@@ -389,13 +521,23 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 				pShaderAPI->SetVertexShaderConstant( VERTEX_SHADER_SHADER_SPECIFIC_CONST_3, vc0, 1 );
 			}
 
-			DECLARE_DYNAMIC_VERTEX_SHADER( sdk_watercheap_vs20 );
-			SET_DYNAMIC_VERTEX_SHADER( sdk_watercheap_vs20 );
+			DECLARE_DYNAMIC_VERTEX_SHADER( watercheap_vs20 );
+			SET_DYNAMIC_VERTEX_SHADER( watercheap_vs20 );
 
-			DECLARE_DYNAMIC_PIXEL_SHADER( sdk_watercheap_ps20 );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED,  IsHDREnabled() );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( FOGTYPE, pShaderAPI->GetSceneFogMode() );
-			SET_DYNAMIC_PIXEL_SHADER( sdk_watercheap_ps20 );
+			if( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( watercheap_ps20b );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED,  IsHDREnabled() );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+				SET_DYNAMIC_PIXEL_SHADER( watercheap_ps20b );
+			}
+			else
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( watercheap_ps20 );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( HDRENABLED,  IsHDREnabled() );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+				SET_DYNAMIC_PIXEL_SHADER( watercheap_ps20 );
+			}
 		}
 		Draw();
 	}
@@ -404,7 +546,11 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 	{
 		// TODO: fit the cheap water stuff into the water shader so that we don't have to do
 		// 2 passes.
+#ifdef _X360
+		bool bForceExpensive = false;
+#else
 		bool bForceExpensive = r_waterforceexpensive.GetBool();
+#endif
 		bool bForceCheap = (params[FORCECHEAP]->GetIntValue() != 0) || UsingEditor( params );
 		if ( bForceCheap )
 		{
@@ -417,7 +563,11 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 		Assert( !( bForceCheap && bForceExpensive ) );
 
 		bool bRefraction = params[REFRACTTEXTURE]->IsTexture();
+#ifdef _X360
+		bool bReflection = params[REFLECTTEXTURE]->IsTexture();
+#else
 		bool bReflection = bForceExpensive && params[REFLECTTEXTURE]->IsTexture();
+#endif
 		bool bDrewSomething = false;
 		if ( !bForceCheap && ( bReflection || bRefraction ) )
 		{
@@ -427,7 +577,11 @@ BEGIN_VS_SHADER( SDK_Water_DX90,
 
 		// Use $decal to see if we are a decal or not. . if we are, then don't bother
 		// drawing the cheap version for now since we don't have access to env_cubemap
+#ifdef _X360
+		if( params[ENVMAP]->IsTexture() && !IS_FLAG_SET( MATERIAL_VAR_DECAL ) && !bForceExpensive )
+#else
 		if( !bReflection && params[ENVMAP]->IsTexture() && !IS_FLAG_SET( MATERIAL_VAR_DECAL ) )
+#endif
 		{
 			bDrewSomething = true;
 			DrawCheapWater( params, pShaderShadow, pShaderAPI, !bForceCheap, bRefraction );
@@ -445,14 +599,14 @@ END_SHADER
 //-----------------------------------------------------------------------------
 // This allows us to use a block labelled 'Water_DX9_HDR' in the water materials
 //-----------------------------------------------------------------------------
-BEGIN_INHERITED_SHADER( SDK_Water_DX9_HDR, SDK_Water_DX90,
+BEGIN_INHERITED_SHADER( Water_DX9_HDR, Water_DX90,
 			  "Help for Water_DX9_HDR" )
 
 	SHADER_FALLBACK
 	{
 		if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_NONE )
 		{
-			return "SDK_WATER_DX90";
+			return "WATER_DX90";
 		}
 		return 0;
 	}

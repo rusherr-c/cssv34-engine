@@ -6,15 +6,16 @@
 //=============================================================================//
 
 #include "BaseVSShader.h"
-#include "SDK_core_vs20.inc"
-#include "SDK_core_ps20.inc"
+#include "core_vs20.inc"
+#include "core_ps20.inc"
+#include "core_ps20b.inc"
 
 #define MAXBLUR 1
 
-DEFINE_FALLBACK_SHADER( SDK_Core, SDK_Core_DX90 )
+DEFINE_FALLBACK_SHADER( Core, Core_DX90 )
 
-BEGIN_VS_SHADER( SDK_Core_DX90, 
-			  "Help for SDK_Core" )
+BEGIN_VS_SHADER( Core_DX90, 
+			  "Help for Core" )
 
 	BEGIN_SHADER_PARAMS
 		SHADER_PARAM_OVERRIDE( COLOR, SHADER_PARAM_TYPE_COLOR, "{255 255 255}", "unused", SHADER_PARAM_NOT_EDITABLE )
@@ -57,17 +58,16 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 		{
 			params[ENVMAPFRAME]->SetIntValue( 0 );
 		}
-	}
-
-	bool NeedsPowerOfTwoFrameBufferTexture( IMaterialVar **params ) const
-	{
-		return !params[BASETEXTURE]->IsDefined();
+		if( !params[BASETEXTURE]->IsDefined() )
+		{
+			SET_FLAGS2( MATERIAL_VAR2_NEEDS_POWER_OF_TWO_FRAME_BUFFER_TEXTURE );
+		}
 	}
 
 	SHADER_FALLBACK
 	{
 		if( g_pHardwareConfig->GetDXSupportLevel() < 90 )
-			return "SDK_Core_dx80";
+			return "Core_dx80";
 
 		return 0;
 	}
@@ -82,27 +82,28 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 		{
 			LoadBumpMap( NORMALMAP );
 		}
-		if( params[ENVMAP]->IsDefined() )
+		if ( params[ENVMAP]->IsDefined() )
 		{
 			LoadCubeMap( ENVMAP );
 		}
-		if( params[FLOWMAP]->IsDefined() )
+		if ( params[FLOWMAP]->IsDefined() )
 		{
 			LoadTexture( FLOWMAP );
 		}
-		if( params[CORECOLORTEXTURE]->IsDefined() )
+		if ( params[CORECOLORTEXTURE]->IsDefined() )
 		{
 			LoadTexture( CORECOLORTEXTURE );
 		}
 	}
 
 	inline void DrawPass( IMaterialVar **params, IShaderShadow* pShaderShadow,
-		IShaderDynamicAPI* pShaderAPI, int nPass ) 
+		IShaderDynamicAPI* pShaderAPI, int nPass, VertexCompressionType_t vertexCompression ) 
 	{
 		bool bIsModel = IS_FLAG_SET( MATERIAL_VAR_MODEL );
 		bool bHasEnvmap = params[ENVMAP]->IsTexture();
 		bool bHasFlowmap = params[FLOWMAP]->IsTexture();
 		bool bHasCoreColorTexture = params[CORECOLORTEXTURE]->IsTexture();
+
 		SHADOW_STATE
 		{
 			SetInitialShadowState( );
@@ -126,32 +127,32 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 			}
 
 			// source render target that contains the image that we are warping.
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE2, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER2, true );
 			if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
 			{
-				pShaderShadow->EnableSRGBRead( SHADER_TEXTURE_STAGE2, true );
+				pShaderShadow->EnableSRGBRead( SHADER_SAMPLER2, true );
 			}
 
 			// normal map
-			pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE3, true );
+			pShaderShadow->EnableTexture( SHADER_SAMPLER3, true );
 			if( bHasEnvmap )
 			{
 				// envmap
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE4, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER4, true );
 				if( g_pHardwareConfig->GetHDRType() == HDR_TYPE_INTEGER )
 				{
-					pShaderShadow->EnableSRGBRead( SHADER_TEXTURE_STAGE4, true );
+					pShaderShadow->EnableSRGBRead( SHADER_SAMPLER4, true );
 				}
 			}
 
 			if( bHasFlowmap )
 			{
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE6, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER6, true );
 			}
 
 			if( bHasCoreColorTexture )
 			{
-				pShaderShadow->EnableTexture( SHADER_TEXTURE_STAGE7, true );
+				pShaderShadow->EnableTexture( SHADER_SAMPLER7, true );
 			}
 
 			if( g_pHardwareConfig->GetHDRType() != HDR_TYPE_NONE )
@@ -159,31 +160,46 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 				pShaderShadow->EnableSRGBWrite( true );
 			}
 
-			int fmt = VERTEX_POSITION | VERTEX_NORMAL;
-			int numBoneWeights = 0;
+			unsigned int flags = VERTEX_POSITION | VERTEX_NORMAL;
 			int userDataSize = 0;
+			int nTexCoordCount = 1;
 			if( bIsModel )
 			{
-				numBoneWeights = 3;
 				userDataSize = 4;
-				fmt |= VERTEX_BONE_INDEX;
 			}
 			else
 			{
-				fmt |= VERTEX_TANGENT_S | VERTEX_TANGENT_T;
+				flags |= VERTEX_TANGENT_S | VERTEX_TANGENT_T;
 			}
-			pShaderShadow->VertexShaderVertexFormat( fmt, 1, 0, numBoneWeights, userDataSize );
 
-			DECLARE_STATIC_VERTEX_SHADER( sdk_core_vs20 );
+			// This shader supports compressed vertices, so OR in that flag:
+			flags |= VERTEX_FORMAT_COMPRESSED;
+
+			pShaderShadow->VertexShaderVertexFormat( flags, nTexCoordCount, NULL, userDataSize );
+
+			DECLARE_STATIC_VERTEX_SHADER( core_vs20 );
 			SET_STATIC_VERTEX_SHADER_COMBO( MODEL,  bIsModel );
-			SET_STATIC_VERTEX_SHADER( sdk_core_vs20 );
+			SET_STATIC_VERTEX_SHADER( core_vs20 );
 
-			DECLARE_STATIC_PIXEL_SHADER( sdk_core_ps20 );
-			SET_STATIC_PIXEL_SHADER_COMBO( CUBEMAP,  bHasEnvmap && ( nPass == 1 ) );
-			SET_STATIC_PIXEL_SHADER_COMBO( FLOWMAP, bHasFlowmap );
-			SET_STATIC_PIXEL_SHADER_COMBO( CORECOLORTEXTURE, bHasCoreColorTexture && ( nPass == 0 ) );
-			SET_STATIC_PIXEL_SHADER_COMBO( REFRACT, nPass == 0 );
-			SET_STATIC_PIXEL_SHADER( sdk_core_ps20 );
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			{
+				DECLARE_STATIC_PIXEL_SHADER( core_ps20b );
+				SET_STATIC_PIXEL_SHADER_COMBO( CUBEMAP,  bHasEnvmap && ( nPass == 1 ) );
+				SET_STATIC_PIXEL_SHADER_COMBO( FLOWMAP, bHasFlowmap );
+				SET_STATIC_PIXEL_SHADER_COMBO( CORECOLORTEXTURE, bHasCoreColorTexture && ( nPass == 0 ) );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFRACT, nPass == 0 );
+				SET_STATIC_PIXEL_SHADER( core_ps20b );
+			}
+			else
+			{
+				DECLARE_STATIC_PIXEL_SHADER( core_ps20 );
+				SET_STATIC_PIXEL_SHADER_COMBO( CUBEMAP,  bHasEnvmap && ( nPass == 1 ) );
+				SET_STATIC_PIXEL_SHADER_COMBO( FLOWMAP, bHasFlowmap );
+				SET_STATIC_PIXEL_SHADER_COMBO( CORECOLORTEXTURE, bHasCoreColorTexture && ( nPass == 0 ) );
+				SET_STATIC_PIXEL_SHADER_COMBO( REFRACT, nPass == 0 );
+				SET_STATIC_PIXEL_SHADER( core_ps20 );
+			}
+
 			DefaultFog();
 		}
 		DYNAMIC_STATE
@@ -192,39 +208,47 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 
 			if ( params[BASETEXTURE]->IsTexture() )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE2, BASETEXTURE, FRAME );
+				BindTexture( SHADER_SAMPLER2, BASETEXTURE, FRAME );
 			}
 			else
 			{
-				pShaderAPI->BindFBTexture( SHADER_TEXTURE_STAGE2 );
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER2, TEXTURE_FRAME_BUFFER_FULL_TEXTURE_0 );
 			}
 
-			BindTexture( SHADER_TEXTURE_STAGE3, NORMALMAP, BUMPFRAME );
+			BindTexture( SHADER_SAMPLER3, NORMALMAP, BUMPFRAME );
 
 			if( bHasEnvmap )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE4, ENVMAP, ENVMAPFRAME );
+				BindTexture( SHADER_SAMPLER4, ENVMAP, ENVMAPFRAME );
 			}
 
 			if( bHasFlowmap )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE6, FLOWMAP, FLOWMAPFRAME );
+				BindTexture( SHADER_SAMPLER6, FLOWMAP, FLOWMAPFRAME );
 			}
 
 			if( bHasCoreColorTexture )
 			{
-				BindTexture( SHADER_TEXTURE_STAGE7, CORECOLORTEXTURE, CORECOLORTEXTUREFRAME );
+				BindTexture( SHADER_SAMPLER7, CORECOLORTEXTURE, CORECOLORTEXTUREFRAME );
 			}
 
-			int numBones	= pShaderAPI->GetCurrentNumBones();
+			DECLARE_DYNAMIC_VERTEX_SHADER( core_vs20 );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( SKINNING,  pShaderAPI->GetCurrentNumBones() > 0 );
+			SET_DYNAMIC_VERTEX_SHADER_COMBO( COMPRESSED_VERTS, (int)vertexCompression );
+			SET_DYNAMIC_VERTEX_SHADER( core_vs20 );
 
-			DECLARE_DYNAMIC_VERTEX_SHADER( sdk_core_vs20 );
-			SET_DYNAMIC_VERTEX_SHADER_COMBO( NUMBONES,  numBones );
-			SET_DYNAMIC_VERTEX_SHADER( sdk_core_vs20 );
-
-			DECLARE_DYNAMIC_PIXEL_SHADER( sdk_core_ps20 );
-			SET_DYNAMIC_PIXEL_SHADER_COMBO( FOGTYPE, pShaderAPI->GetSceneFogMode() );
-			SET_DYNAMIC_PIXEL_SHADER( sdk_core_ps20 );
+			if ( g_pHardwareConfig->SupportsPixelShaders_2_b() )
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( core_ps20b );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+				SET_DYNAMIC_PIXEL_SHADER( core_ps20b );
+			}
+			else
+			{
+				DECLARE_DYNAMIC_PIXEL_SHADER( core_ps20 );
+				SET_DYNAMIC_PIXEL_SHADER_COMBO( PIXELFOGTYPE, pShaderAPI->GetPixelFogCombo() );
+				SET_DYNAMIC_PIXEL_SHADER( core_ps20 );
+			}
 
 			SetVertexShaderTextureTransform( VERTEX_SHADER_SHADER_SPECIFIC_CONST_1, BUMPTRANSFORM );
 
@@ -244,6 +268,13 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 				params[REFRACTAMOUNT]->GetFloatValue(), 0.0f, 0.0f };
 			pShaderAPI->SetPixelShaderConstant( 5, c5, 1 );
 
+			float eyePos[4];
+			s_pShaderAPI->GetWorldSpaceCameraPosition( eyePos );
+			s_pShaderAPI->SetPixelShaderConstant( 8, eyePos, 1 );
+			pShaderAPI->SetPixelShaderFogParams( 11 );
+
+
+
 			if( bHasFlowmap )
 			{
 				float curTime = pShaderAPI->CurrentTime();
@@ -251,10 +282,6 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 				pShaderAPI->SetPixelShaderConstant( 6, timeVec, 1 );
 
 				SetPixelShaderConstant( 7, FLOWMAPSCROLLRATE );
-
-				float eyePos[4];
-				s_pShaderAPI->GetWorldSpaceCameraPosition( eyePos );
-				s_pShaderAPI->SetPixelShaderConstant( 8, eyePos, 1 );
 
 				SetPixelShaderConstant( 9, FLOWMAPTEXCOORDOFFSET );
 			}
@@ -264,8 +291,8 @@ BEGIN_VS_SHADER( SDK_Core_DX90,
 
 	SHADER_DRAW
 	{
-		DrawPass( params, pShaderShadow, pShaderAPI, 0 );
-		DrawPass( params, pShaderShadow, pShaderAPI, 1 );
+		DrawPass( params, pShaderShadow, pShaderAPI, 0, vertexCompression );
+		DrawPass( params, pShaderShadow, pShaderAPI, 1, vertexCompression );
 	}
 END_SHADER
 

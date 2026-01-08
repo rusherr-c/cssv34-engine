@@ -65,7 +65,7 @@ $Configuration "Release"
 		$WholeProgramOptimization
 
 		// Preprocessor
-		$PreprocessorDefinitions			"WIN32;_WIN32;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS"
+		$PreprocessorDefinitions			"$BASE;WIN32;_WIN32;NDEBUG;_WINDOWS;_USRDLL;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE"
 		$IgnoreStandardIncludePath
 		$GeneratePreprocessedFile
 		$KeepComments
@@ -215,8 +215,6 @@ $Configuration "Release"
 		$DelaySign
 		$ErrorReporting						"Prompt Immediately (/ERRORREPORT:PROMPT)"
 		$CLRUnmanagedCodeCheck
-		// Most DLLs cannot yet handle SafeSEH
-		$ImageHasSafeExceptionHandlers		"false"
 
 		// Command Line
 		$AdditionalOptions						
@@ -275,7 +273,7 @@ $Configuration "Release"
 	$Resources
 	{
 		// General
-		$PreprocessorDefinitions			"NDEBUG;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE"
+		$PreprocessorDefinitions			"$BASE;NDEBUG;_CRT_SECURE_NO_DEPRECATE;_CRT_NONSTDC_NO_DEPRECATE"
 		$Culture							"English (United States) (0x409)"
 		$AdditionalIncludeDirectories
 		$IgnoreStandardIncludePath
@@ -302,21 +300,9 @@ $Configuration "Release"
 
 	$PostBuildEvent
 	{
-		$CommandLine		"md $OUTBINDIR" "\n" \
-							"copy $QUOTE$(OutDir)$OUTBINNAME.dll$QUOTE $QUOTE$OUTBINDIR\$OUTBINNAME.dll$QUOTE" "\n" \
-							"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
-							"if exist $QUOTE$(OutDir)$OUTBINNAME.map$QUOTE copy $QUOTE$(OutDir)$OUTBINNAME.map$QUOTE $QUOTE$OUTBINDIR\$OUTBINNAME.map$QUOTE" "\n" \
-							"copy $QUOTE$(OutDir)$(TargetName).pdb$QUOTE $QUOTE$OUTBINDIR\$OUTBINNAME.pdb$QUOTE" "\n" \
-							"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
-							"goto BuildEventOK" "\n" \
-							":BuildEventFailed" "\n" \
-							"echo *** ERROR! PostBuildStep FAILED for $(ProjectName)! EXE or DLL is probably running. ***" "\n" \
-							"del /q $QUOTE$(OutDir)$OUTBINNAME.dll$QUOTE" "\n" \
-							"exit 1" "\n" \
-							":BuildEventOK" "\n" \
-							"call $SRCDIR\devtools\bin\vsign.bat -noforcewritable $OUTBINDIR\$(TargetFileName)" "\n"
-		$Description		"Publishing to $OUTBINDIR"
-		$ExcludedFromBuild	"No"
+		$CommandLine
+		$Description
+		$ExcludedFromBuild					"No"
 	}
 
 	$CustomBuildStep

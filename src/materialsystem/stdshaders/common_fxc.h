@@ -1,10 +1,14 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2007, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //
 //=============================================================================//
+#ifndef COMMON_FXC_H_
+#define COMMON_FXC_H_
+
+#include "common_pragmas.h"
 #include "common_hlsl_cpp_consts.h"
 
 #ifdef NV3X
@@ -39,6 +43,11 @@ static const HALF3 bumpBasisTranspose[3] = {
 	HALF3(  0.0f, 0.70710676908493042f, -0.7071068286895752f ),
 	HALF3(  OO_SQRT_3, OO_SQRT_3, OO_SQRT_3 )
 };
+
+#if defined( _X360 )
+#define REVERSE_DEPTH_ON_X360 //uncomment to use D3DFMT_D24FS8 with an inverted depth viewport for better performance. Keep this in sync with the same named #define in public/shaderapi/shareddefs.h
+//Note that the reversal happens in the viewport. So ONLY reading back from a depth texture should be affected. Projected math is unaffected.
+#endif
 
 HALF3 CalcReflectionVectorNormalized( HALF3 normal, HALF3 eyeVector )
 {
@@ -117,12 +126,22 @@ void ComputeBumpedLightmapCoordinates( HALF4 Lightmap1and2Coord, HALF2 Lightmap3
 
 float3 mul3x3(float3 v, float3x3 m)
 {
+#if !defined( _X360 )
     return float3(dot(v, transpose(m)[0]), dot(v, transpose(m)[1]), dot(v, transpose(m)[2]));
+#else
+	// xbox360 fxc.exe (new back end) borks with transposes, generates bad code
+	return mul( v, m );
+#endif
 }
 
 float3 mul4x3(float4 v, float4x3 m)
 {
-    return float3(dot(v, transpose(m)[0]), dot(v, transpose(m)[1]), dot(v, transpose(m)[2]));
+#if !defined( _X360 )
+	return float3(dot(v, transpose(m)[0]), dot(v, transpose(m)[1]), dot(v, transpose(m)[2]));
+#else
+	// xbox360 fxc.exe (new back end) borks with transposes, generates bad code
+	return mul( v, m );
+#endif
 }
 
 float3 DecompressHDR( float4 input )
@@ -152,20 +171,19 @@ float4 CompressHDR( float3 input )
 }
 
 
-
-float3 LinearToGamma( const float3 linear )
+float3 LinearToGamma( const float3 f3linear )
 {
-	return pow( linear, 1.0f / 2.2f );
+	return pow( f3linear, 1.0f / 2.2f );
 }
 
-float4 LinearToGamma( const float4 linear )
+float4 LinearToGamma( const float4 f4linear )
 {
-	return float4( pow( linear.xyz, 1.0f / 2.2f ), linear.w );
+	return float4( pow( f4linear.xyz, 1.0f / 2.2f ), f4linear.w );
 }
 
-float LinearToGamma( const float linear )
+float LinearToGamma( const float f1linear )
 {
-	return pow( linear, 1.0f / 2.2f );
+	return pow( f1linear, 1.0f / 2.2f );
 }
 
 float3 GammaToLinear( const float3 gamma )
@@ -183,4 +201,126 @@ float GammaToLinear( const float gamma )
 	return pow( gamma, 2.2f );
 }
 
+// These two functions use the actual sRGB math
+float SrgbGammaToLinear( float flSrgbGammaValue )
+{
+	float x = saturate( flSrgbGammaValue );
+	return ( x <= 0.04045f ) ? ( x / 12.92f ) : ( pow( ( x + 0.055f ) / 1.055f, 2.4f ) );
+}
 
+float SrgbLinearToGamma( float flLinearValue )
+{
+	float x = saturate( flLinearValue );
+	return ( x <= 0.0031308f ) ? ( x * 12.92f ) : ( 1.055f * pow( x, ( 1.0f / 2.4f ) ) ) - 0.055f;
+}
+
+// These twofunctions use the XBox 360's exact piecewise linear algorithm
+float X360GammaToLinear( float fl360GammaValue )
+{
+	float flLinearValue;
+
+	fl360GammaValue = saturate( fl360GammaValue );
+	if ( fl360GammaValue < ( 96.0f / 255.0f ) )
+	{
+		if ( fl360GammaValue < ( 64.0f / 255.0f ) )
+		{
+			flLinearValue = fl360GammaValue * 255.0f;
+		}
+		else
+		{
+			flLinearValue = fl360GammaValue * ( 255.0f * 2.0f ) - 64.0f;
+			flLinearValue += floor( flLinearValue * ( 1.0f / 512.0f ) );
+		}
+	}
+	else
+	{
+		if( fl360GammaValue < ( 192.0f / 255.0f ) )
+		{
+			flLinearValue = fl360GammaValue * ( 255.0f * 4.0f ) - 256.0f;
+			flLinearValue += floor( flLinearValue * ( 1.0f / 256.0f ) );
+		}
+		else
+		{
+			flLinearValue = fl360GammaValue * ( 255.0f * 8.0f ) - 1024.0f;
+			flLinearValue += floor( flLinearValue * ( 1.0f / 128.0f ) );
+		}
+	}
+
+	flLinearValue *= 1.0f / 1023.0f;
+
+	flLinearValue = saturate( flLinearValue );
+	return flLinearValue;
+}
+
+float X360LinearToGamma( float flLinearValue )
+{
+	float fl360GammaValue;
+
+	flLinearValue = saturate( flLinearValue );
+	if ( flLinearValue < ( 128.0f / 1023.0f ) )
+	{
+		if ( flLinearValue < ( 64.0f / 1023.0f ) )
+		{
+			fl360GammaValue = flLinearValue * ( 1023.0f * ( 1.0f / 255.0f ) );
+		}
+		else
+		{
+			fl360GammaValue = flLinearValue * ( ( 1023.0f / 2.0f ) * ( 1.0f / 255.0f ) ) + ( 32.0f / 255.0f );
+		}
+	}
+	else
+	{
+		if ( flLinearValue < ( 512.0f / 1023.0f ) )
+		{
+			fl360GammaValue = flLinearValue * ( ( 1023.0f / 4.0f ) * ( 1.0f / 255.0f ) ) + ( 64.0f / 255.0f );
+		}
+		else
+		{
+			fl360GammaValue = flLinearValue * ( ( 1023.0f /8.0f ) * ( 1.0f / 255.0f ) ) + ( 128.0f /255.0f ); // 1.0 -> 1.0034313725490196078431372549016
+			if ( fl360GammaValue > 1.0f )
+			{
+				fl360GammaValue = 1.0f;
+			}
+		}
+	}
+
+	fl360GammaValue = saturate( fl360GammaValue );
+	return fl360GammaValue;
+}
+
+float SrgbGammaTo360Gamma( float flSrgbGammaValue )
+{
+	float flLinearValue = SrgbGammaToLinear( flSrgbGammaValue );
+	float fl360GammaValue = X360LinearToGamma( flLinearValue );
+	return fl360GammaValue;
+}
+
+float3 Vec3WorldToTangent( float3 iWorldVector, float3 iWorldNormal, float3 iWorldTangent, float3 iWorldBinormal )
+{
+	float3 vTangentVector;
+	vTangentVector.x = dot( iWorldVector.xyz, iWorldTangent.xyz );
+	vTangentVector.y = dot( iWorldVector.xyz, iWorldBinormal.xyz );
+	vTangentVector.z = dot( iWorldVector.xyz, iWorldNormal.xyz );
+	return vTangentVector.xyz; // Return without normalizing
+}
+
+float3 Vec3WorldToTangentNormalized( float3 iWorldVector, float3 iWorldNormal, float3 iWorldTangent, float3 iWorldBinormal )
+{
+	return normalize( Vec3WorldToTangent( iWorldVector, iWorldNormal, iWorldTangent, iWorldBinormal ) );
+}
+
+float3 Vec3TangentToWorld( float3 iTangentVector, float3 iWorldNormal, float3 iWorldTangent, float3 iWorldBinormal )
+{
+	float3 vWorldVector;
+	vWorldVector.xyz = iTangentVector.x * iWorldTangent.xyz;
+	vWorldVector.xyz += iTangentVector.y * iWorldBinormal.xyz;
+	vWorldVector.xyz += iTangentVector.z * iWorldNormal.xyz;
+	return vWorldVector.xyz; // Return without normalizing
+}
+
+float3 Vec3TangentToWorldNormalized( float3 iTangentVector, float3 iWorldNormal, float3 iWorldTangent, float3 iWorldBinormal )
+{
+	return normalize( Vec3TangentToWorld( iTangentVector, iWorldNormal, iWorldTangent, iWorldBinormal ) );
+}
+
+#endif //#ifndef COMMON_FXC_H_

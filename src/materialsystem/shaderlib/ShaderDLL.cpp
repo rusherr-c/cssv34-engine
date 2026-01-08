@@ -1,22 +1,20 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
-// $Header: $
-// $NoKeywords: $
-//=============================================================================//
-
+//===========================================================================//
 
 #include "shaderlib/ShaderDLL.h"
 #include "materialsystem/IShader.h"
-#include "utlvector.h"
+#include "tier1/utlvector.h"
 #include "tier0/dbg.h"
 #include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "materialsystem/materialsystem_config.h"
 #include "IShaderSystem.h"
 #include "materialsystem/ishaderapi.h"
 #include "shaderlib_cvar.h"
-#include "mathlib.h"
+#include "mathlib/mathlib.h"
+#include "tier1/tier1.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -36,6 +34,8 @@ public:
 	virtual IShader *GetShader( int nShader );
 
 	// methods of IShaderDLLInternal
+	virtual bool Connect( CreateInterfaceFn factory, bool bIsMaterialSystem );
+	virtual void Disconnect( bool bIsMaterialSystem );
 	virtual void InsertShader( IShader *pShader );
 
 private:
@@ -88,9 +88,7 @@ IShaderDLLInternal *GetShaderDLLInternal()
 //-----------------------------------------------------------------------------
 // Singleton interface
 //-----------------------------------------------------------------------------
-#ifndef _XBOX
 EXPOSE_INTERFACE_FN( (InstantiateInterfaceFn)GetShaderDLLInternal, IShaderDLLInternal, SHADER_DLL_INTERFACE_VERSION );
-#endif
 
 //-----------------------------------------------------------------------------
 // Connect, disconnect...
@@ -104,21 +102,42 @@ CShaderDLL::CShaderDLL()
 //-----------------------------------------------------------------------------
 // Connect, disconnect...
 //-----------------------------------------------------------------------------
-bool CShaderDLL::Connect( CreateInterfaceFn factory )
+bool CShaderDLL::Connect( CreateInterfaceFn factory, bool bIsMaterialSystem )
 {
 	g_pHardwareConfig =  (IMaterialSystemHardwareConfig*)factory( MATERIALSYSTEM_HARDWARECONFIG_INTERFACE_VERSION, NULL );
 	g_pConfig = (const MaterialSystem_Config_t*)factory( MATERIALSYSTEM_CONFIG_VERSION, NULL );
 	g_pSLShaderSystem =  (IShaderSystem*)factory( SHADERSYSTEM_INTERFACE_VERSION, NULL );
-  	InitShaderLibCVars( factory );
+
+	if ( !bIsMaterialSystem )
+	{
+		ConnectTier1Libraries( &factory, 1 );
+  		InitShaderLibCVars( factory );
+	}
 
 	return ( g_pConfig != NULL ) && (g_pHardwareConfig != NULL) && ( g_pSLShaderSystem != NULL );
 }
 
-void CShaderDLL::Disconnect()
+void CShaderDLL::Disconnect( bool bIsMaterialSystem )
 {
+	if ( !bIsMaterialSystem )
+	{
+		ConVar_Unregister();
+		DisconnectTier1Libraries();
+	}
+
 	g_pHardwareConfig = NULL;
 	g_pConfig = NULL;
 	g_pSLShaderSystem = NULL;
+}
+
+bool CShaderDLL::Connect( CreateInterfaceFn factory )
+{
+	return Connect( factory, false );
+}
+
+void CShaderDLL::Disconnect()
+{
+	Disconnect( false );
 }
 
 

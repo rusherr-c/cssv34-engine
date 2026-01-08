@@ -16,10 +16,5 @@ tex t1
 ; Blend between grey and lightmap color based on total alpha
 
 mul_x2 r1.rgb, c0, t1		; Apply overbright to lightmap
-#ifndef _XBOX
 + mul_sat r1.a, t0, v0		; base times vertex alpha
 lrp r0, r1.a, r1, c2		; interpolate between white + color
-#else
-+ mul r1.a, t0, v0			; base times vertex alpha
-lrp r0, r1_sat.a, r1, c2	; interpolate between white + color
-#endif

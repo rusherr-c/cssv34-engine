@@ -88,7 +88,7 @@ static void SetDepthFlashlightParams( CBaseVSShader *pShader, IShaderDynamicAPI 
 	// Tweaks associated with a given flashlight
 	tweaks[0] = ShadowFilterFromState( flashlightState );
 	tweaks[1] = ShadowAttenFromState( flashlightState );
-	pShader->HashShadow2DJitter( flashlightState.m_flShadowJitterSeed, &tweaks[2], &tweaks[3] );
+	pShader->HashShadow2DJitter( (const float)flashlightState.m_flShadowJitterSeed, &tweaks[2], &tweaks[3] );
 	pShaderAPI->SetPixelShaderConstant( PSREG_ENVMAP_TINT__SHADOW_TWEAKS, tweaks, 1 );
 
 	// Dimensions of screen, used for screen-space noise map sampling

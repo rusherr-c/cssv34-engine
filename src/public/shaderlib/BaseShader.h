@@ -1,10 +1,10 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 // This is what all shaders inherit from.
-//=============================================================================//
+//===========================================================================//
 
 #ifndef BASESHADER_H
 #define BASESHADER_H
@@ -16,6 +16,7 @@
 #include "materialsystem/IShader.h"
 #include "materialsystem/imaterialvar.h"
 #include "materialsystem/ishaderapi.h"
+#include "materialsystem/imaterialsystemhardwareconfig.h"
 #include "shaderlib/BaseShader.h"
 
 //-----------------------------------------------------------------------------
@@ -40,8 +41,50 @@ enum ShaderMaterialVars_t
 	BASETEXTURETRANSFORM,
 	FLASHLIGHTTEXTURE,
 	FLASHLIGHTTEXTUREFRAME,
+	COLOR2,
+	SRGBTINT,
 
 	NUM_SHADER_MATERIAL_VARS
+};
+
+
+// Alpha belnd mode enums. Moved from basevsshader
+enum BlendType_t
+{
+	// no alpha blending
+	BT_NONE = 0,
+
+
+
+	// src * srcAlpha + dst * (1-srcAlpha)
+	// two passes for HDR:
+	//		pass 1:
+	//			color: src * srcAlpha + dst * (1-srcAlpha)
+	//			alpha: srcAlpha * zero + dstAlpha * (1-srcAlpha)
+	//		pass 2:
+	//			color: none
+	//			alpha: srcAlpha * one + dstAlpha * one
+	//
+	BT_BLEND,
+
+
+	
+	// src * one + dst * one
+	// one pass for HDR
+	BT_ADD,
+
+
+	
+	// Why do we ever use this instead of using premultiplied alpha?
+	// src * srcAlpha + dst * one
+	// two passes for HDR
+	//		pass 1:
+	//			color: src * srcAlpha + dst * one
+	//			alpha: srcAlpha * one + dstAlpha * one
+	//		pass 2:
+	//			color: none
+	//			alpha: srcAlpha * one + dstAlpha * one
+	BT_BLENDADD
 };
 
 
@@ -65,27 +108,27 @@ public:
 
 	virtual void InitShaderParams( IMaterialVar** ppParams, const char *pMaterialName );
 	virtual void InitShaderInstance( IMaterialVar** ppParams, IShaderInit *pShaderInit, const char *pMaterialName, const char *pTextureGroupName );
-	virtual void DrawElements( IMaterialVar **params, int nModulationFlags, 
-		IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI );
-#ifndef _XBOX
+	virtual void DrawElements( IMaterialVar **params, int nModulationFlags, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI,
+								VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContext );
+
 	virtual	const SoftwareVertexShader_t GetSoftwareVertexShader() const { return m_SoftwareVertexShader; }
-#endif
+
 	virtual int ComputeModulationFlags( IMaterialVar** params, IShaderDynamicAPI* pShaderAPI );
-	virtual bool NeedsPowerOfTwoFrameBufferTexture( IMaterialVar **params ) const { return false; }
-	virtual bool NeedsFullFrameBufferTexture( IMaterialVar **params ) const { return false; }
+	virtual bool NeedsPowerOfTwoFrameBufferTexture( IMaterialVar **params, bool bCheckSpecificToThisFrame = true ) const;
+	virtual bool NeedsFullFrameBufferTexture( IMaterialVar **params, bool bCheckSpecificToThisFrame = true ) const;
+	virtual bool IsTranslucent( IMaterialVar **params ) const;
 
 public:
 	// These functions must be implemented by the shader
 	virtual void OnInitShaderParams( IMaterialVar** ppParams, const char *pMaterialName ) {}
 	virtual void OnInitShaderInstance( IMaterialVar** ppParams, IShaderInit *pShaderInit, const char *pMaterialName ) = 0;
-	virtual void OnDrawElements( IMaterialVar **params, 
-		IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI ) = 0;
+	virtual void OnDrawElements( IMaterialVar **params, IShaderShadow* pShaderShadow, IShaderDynamicAPI* pShaderAPI, VertexCompressionType_t vertexCompression, CBasePerMaterialContextData **pContextDataPtr ) = 0;
 
 	// Sets the default shadow state
 	void SetInitialShadowState( );
  
 	// Draws a snapshot
-	void Draw( );
+	void Draw( bool bMakeActualDrawCall = true );
 
 	// Are we currently taking a snapshot?
 	bool IsSnapshotting() const;
@@ -114,9 +157,15 @@ public:
 	// Loads a cubemap
 	void LoadCubeMap( int nTextureVar );
 
+	// get the shaderapi handle for a texture. BE CAREFUL WITH THIS. 
+	ShaderAPITextureHandle_t GetShaderAPITextureBindHandle( int nTextureVar, int nFrameVar, int nTextureChannel = 0 );
+
+
 	// Binds a texture
-	void BindTexture( TextureStage_t stage, int nTextureVar, int nFrameVar = -1 );
-	void BindTexture( TextureStage_t stage, ITexture *pTexture, int nFrame = 0 );
+	void BindTexture( Sampler_t sampler1, Sampler_t sampler2, int nTextureVar, int nFrameVar = -1 );
+	void BindTexture( Sampler_t sampler1, int nTextureVar, int nFrameVar = -1 );
+	void BindTexture( Sampler_t sampler1, ITexture *pTexture, int nFrame = 0 );
+	void BindTexture( Sampler_t sampler1, Sampler_t sampler2, ITexture *pTexture, int nFrame = 0 );
 
 	// Is the texture translucent?
 	bool TextureIsTranslucent( int textureVar, bool isBaseTexture );
@@ -139,6 +188,9 @@ public:
 	// Helpers for alpha blending
 	void EnableAlphaBlending( ShaderBlendFactor_t src, ShaderBlendFactor_t dst );
 	void DisableAlphaBlending();
+
+	void SetBlendingShadowState( BlendType_t nMode );
+
 	void SetNormalBlendingShadowState( int textureVar = -1, bool isBaseTexture = true );
 	void SetAdditiveBlendingShadowState( int textureVar = -1, bool isBaseTexture = true );
 	void SetDefaultBlendingShadowState( int textureVar = -1, bool isBaseTexture = true );
@@ -175,7 +227,7 @@ public:
 		int baseTextureTransformVar, int detailVar, int detailScaleVar );
 
 	// Fixed function Self illumination pass
-	void FixedFunctionSelfIlluminationPass( TextureStage_t stage, 
+	void FixedFunctionSelfIlluminationPass( Sampler_t sampler, 
 		int baseTextureVar, int frameVar, int baseTextureTransformVar, int selfIllumTintVar );
 
 	// Masked environment map
@@ -212,12 +264,15 @@ public:
 
 	void SetFlashlightFixedFunctionTextureTransform( MaterialMatrixMode_t matrix );
 
-protected:
-#ifndef _XBOX
-	SoftwareVertexShader_t m_SoftwareVertexShader;
-#endif
-	static const char *s_pTextureGroupName; // Current material's texture group name.
+	void GetColorParameter( IMaterialVar** params, float *pColorOut ) const; // return tint color (color*color2)
+	void ApplyColor2Factor( float *pColorOut ) const;		// (*pColorOut) *= COLOR2
+
 	static IMaterialVar **s_ppParams;
+
+protected:
+	SoftwareVertexShader_t m_SoftwareVertexShader;
+
+	static const char *s_pTextureGroupName; // Current material's texture group name.
 	static IShaderShadow *s_pShaderShadow;
 	static IShaderDynamicAPI *s_pShaderAPI;
 	static IShaderInit *s_pShaderInit;
@@ -261,6 +316,24 @@ inline bool CBaseShader::IsWhite( int colorVar )
 }
 
 
+class CBasePerMaterialContextData								// shaders can keep per material data in classes descended from this
+{
+ public:
+	uint32 m_nVarChangeID;
+	bool m_bMaterialVarsChanged;							// set by mat system when material vars change. shader should rehtink and then clear the var
+
+	FORCEINLINE CBasePerMaterialContextData( void )
+	{
+		m_bMaterialVarsChanged = true;
+		m_nVarChangeID = 0xffffffff;
+	}
+
+	// virtual destructor so that derived classes can have their own data to be cleaned up on
+	// delete of material
+	virtual ~CBasePerMaterialContextData( void )
+	{
+	}
+};
 
 
 #endif // BASESHADER_H
