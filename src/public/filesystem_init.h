@@ -52,13 +52,13 @@ class CFSSteamSetupInfo
 public:
 	CFSSteamSetupInfo();
 
-// Inputs.
+	// Inputs.
 public:
 	// If this is set, then the init code will look in this directory up to the root for gameinfo.txt.
 	// It must be set for FileSystem_LoadSearchPaths to work.
 	//
 	// (default: null)
-	const char		*m_pDirectoryName;
+	const char* m_pDirectoryName;
 
 	// If this is true, then it won't look at -vproject, -game, or the vproject environment variable
 	// to find gameinfo.txt. If this is true, then m_pDirectoryName must be set.
@@ -91,31 +91,31 @@ public:
 	// (default: false)
 	bool			m_bNoGameInfo;
 
-// Outputs (if it returns FS_OK).
+	// Outputs (if it returns FS_OK).
 public:
 	char			m_GameInfoPath[512];	// The directory that gameinfo.txt lives in.
-};	
+};
 
 
-class CFSLoadModuleInfo	: public CFSSteamSetupInfo
+class CFSLoadModuleInfo : public CFSSteamSetupInfo
 {
 public:
 	CFSLoadModuleInfo();
 
-// Inputs.
+	// Inputs.
 public:
 	// Full path to the file system DLL (gotten from FileSystem_GetFileSystemDLLName).
-	const char		*m_pFileSystemDLLName;
+	const char* m_pFileSystemDLLName;
 
 	// Passed to IFileSystem::Connect.
 	CreateInterfaceFn	m_ConnectFactory;
 
-// Outputs (if it returns FS_OK).
+	// Outputs (if it returns FS_OK).
 public:
 	// The filesystem you got from FileSystem_LoadFileSystemModule.
-	IFileSystem		*m_pFileSystem;
-	CSysModule		*m_pModule;
-};	
+	IFileSystem* m_pFileSystem;
+	CSysModule* m_pModule;
+};
 
 
 class CFSMountContentInfo
@@ -123,7 +123,7 @@ class CFSMountContentInfo
 public:
 	CFSMountContentInfo();
 
-// Inputs.
+	// Inputs.
 public:
 
 	// See CFSLoadModuleInfo::m_bToolsMode (this valid should always be the same as you passed to CFSLoadModuleInfo::m_bToolsMode).
@@ -131,10 +131,10 @@ public:
 
 	// This specifies the directory where gameinfo.txt is. This must be set.
 	// It can come from CFSLoadModuleInfo::m_GameInfoPath.
-	const char			*m_pDirectoryName;
+	const char* m_pDirectoryName;
 
 	// Gotten from CFSLoadModuleInfo::m_pFileSystem.
-	IFileSystem			*m_pFileSystem;
+	IFileSystem* m_pFileSystem;
 };
 
 
@@ -143,63 +143,63 @@ class CFSSearchPathsInit
 public:
 	CFSSearchPathsInit();
 
-// Inputs.
+	// Inputs.
 public:
 	// This specifies the directory where gameinfo.txt is. This must be set.
-	const char		*m_pDirectoryName;
+	const char* m_pDirectoryName;
 
 	// If this is set, then any search paths with a _english will be replaced with _m_pLanguage and added before the
 	// _english path
 	// (default: null)
-	const char		*m_pLanguage;
+	const char* m_pLanguage;
 
 	// This is the filesystem FileSystem_LoadSearchPaths is talking to.
-	IFileSystem		*m_pFileSystem;
+	IFileSystem* m_pFileSystem;
 
 	bool m_bMountHDContent;
 	bool m_bLowViolence;
 
-// Outputs.
+	// Outputs.
 public:
 	// This is the location of the first search path called "game", which also becomes your "mod" search path.
 	char			m_ModPath[512];
 };
 
 
-const char *GetVProjectCmdLineValue();
+const char* GetVProjectCmdLineValue();
 
 
 // Call this to use a bin directory relative to VPROJECT
-void FileSystem_UseVProjectBinDir( bool bEnable );
+void FileSystem_UseVProjectBinDir(bool bEnable);
 
 // This is used by all things that use the application framework:
 // Note that the application framework automatically takes care of step 1 if you use CSteamApplication.
 // Step 1: Ask filesystem_init for the name of the filesystem DLL to load
-FSReturnCode_t FileSystem_GetFileSystemDLLName( char *pFileSystemDLL, int nMaxLen, bool &bSteam );
+FSReturnCode_t FileSystem_GetFileSystemDLLName(char* pFileSystemDLL, int nMaxLen, bool& bSteam);
 
 // Step 2: Use filesystem framework to load/connect/init that filesystem DLL
 // -or- just set up the steam environment and get back the gameinfo.txt path
 // The second method is used by the application framework, which wants to connect/init the filesystem itself
-FSReturnCode_t FileSystem_LoadFileSystemModule( CFSLoadModuleInfo &info );
-FSReturnCode_t FileSystem_SetupSteamEnvironment( CFSSteamSetupInfo &info );
+FSReturnCode_t FileSystem_LoadFileSystemModule(CFSLoadModuleInfo& info);
+FSReturnCode_t FileSystem_SetupSteamEnvironment(CFSSteamSetupInfo& info);
 
 // Step 3: Ask filesystem_init to set up the executable search path, and mount the steam content based on the mod gameinfo.txt file
-FSReturnCode_t FileSystem_MountContent( CFSMountContentInfo &fsInfo );
+FSReturnCode_t FileSystem_MountContent(CFSMountContentInfo& fsInfo);
 
 // Step 4: Load the search paths out of pGameDirectory\gameinfo.txt.
-FSReturnCode_t FileSystem_LoadSearchPaths( CFSSearchPathsInit &initInfo );
+FSReturnCode_t FileSystem_LoadSearchPaths(CFSSearchPathsInit& initInfo);
 
 // This is automatically done during step 3, but if you want to redo all the search
 // paths (like Hammer does), you can call this to reset executable_path.
-FSReturnCode_t FileSystem_SetBasePaths( IFileSystem *pFileSystem );
+FSReturnCode_t FileSystem_SetBasePaths(IFileSystem* pFileSystem);
 
 // Utility function to add the PLATFORM search path.
-void FileSystem_AddSearchPath_Core( IFileSystem *pFileSystem, const char *szGameInfoPath );
+void FileSystem_AddSearchPath_Platform(IFileSystem* pFileSystem, const char* szGameInfoPath);
 
 // See FSErrorMode_t. If you don't specify one here, then the default is FS_ERRORMODE_VCONFIG.
-void FileSystem_SetErrorMode( FSErrorMode_t errorMode = FS_ERRORMODE_VCONFIG );
+void FileSystem_SetErrorMode(FSErrorMode_t errorMode = FS_ERRORMODE_VCONFIG);
 
-bool FileSystem_GetExecutableDir( char *exedir, int exeDirLen );
+bool FileSystem_GetExecutableDir(char* exedir, int exeDirLen);
 
 // Clear SteamAppUser, SteamUserPassphrase, and SteamAppId from this process's environment.
 // TODO: always do this after LoadFileSysteModule.. there's no reason it should be
@@ -207,11 +207,11 @@ bool FileSystem_GetExecutableDir( char *exedir, int exeDirLen );
 void FileSystem_ClearSteamEnvVars();
 
 // Find the steam.cfg above you for optional stuff
-FSReturnCode_t GetSteamCfgPath( char *steamCfgPath, int steamCfgPathLen );
+FSReturnCode_t GetSteamCfgPath(char* steamCfgPath, int steamCfgPathLen);
 
 // Returns the last error.
-const char *FileSystem_GetLastErrorString();
+const char* FileSystem_GetLastErrorString();
 
-void Q_getwd( char *out, int outSize );
+void Q_getwd(char* out, int outSize);
 
 #endif // FILESYSTEM_INIT_H

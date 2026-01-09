@@ -147,7 +147,7 @@ LINK_ENTITY_TO_CLASS( game_score, CGameScore );
 
 BEGIN_DATADESC( CGameScore )
 	// Inputs
-	DEFINE_INPUTFUNC( FIELD_VOID, "ApplyScore", InputApplyScore ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "ApplySplatform", InputApplyScore ),
 END_DATADESC()
 
 void CGameScore::Spawn( void )

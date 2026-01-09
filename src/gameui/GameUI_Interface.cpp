@@ -445,7 +445,7 @@ void CGameUI::Start()
 		// user dialog configuration
 		vgui::system()->SetUserConfigFile("InGameDialogConfig.vdf", "CONFIG");
 
-		g_pFullFileSystem->AddSearchPath( "core", "CORE" );
+		g_pFullFileSystem->AddSearchPath( "platform", "PLATFORM" );
 	}
 
 	// localization
@@ -543,7 +543,7 @@ bool CGameUI::FindCoreDirectory(char *coreDir, int bufferSize)
 		{
 			// xbox fetches the platform path from exisiting platform search path
 			// path to executeable is not correct for xbox remote configuration
-			if ( g_pFullFileSystem->GetSearchPath( "CORE", false, coreDir, bufferSize ) )
+			if ( g_pFullFileSystem->GetSearchPath( "PLATFORM", false, coreDir, bufferSize ) )
 			{
 				char *pSeperator = strchr(coreDir, ';');
 				if ( pSeperator )

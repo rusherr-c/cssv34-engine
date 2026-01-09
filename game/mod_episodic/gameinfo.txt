@@ -44,6 +44,7 @@
 			game				hl2/hl2_textures.vpk
 			game				hl2/hl2_sound_misc.vpk
 			game				hl2/hl2_misc.vpk
+			platform			platform/platform_misc.vpk
 
 			game				hl2
 			game 				episodic

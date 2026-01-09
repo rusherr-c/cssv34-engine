@@ -3,6 +3,7 @@ import os
 
 TARGET_EXTENSIONS = {
     ".vpc_crc",
+    ".sentinel",
     ".sln",
     ".vcproj",
     ".vcxproj",

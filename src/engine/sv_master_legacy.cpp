@@ -27,7 +27,7 @@
 #include "tier0/memdbgon.h"
 
 
-ConVar sv_master_legacy_mode( "sv_master_legacy_mode", "0", 0, "Use old (outside-of-Steam) code to communicate with master servers." );
+ConVar sv_master_legacy_mode( "sv_master_legacy_mode", "1", 0, "Use old (outside-of-Steam) code to communicate with master servers." );
 extern ConVar sv_region;
 extern ConVar sv_visiblemaxplayers;
 extern ConVar sv_lan;
@@ -56,11 +56,7 @@ extern int g_iSteamAppID;
 
 bool IsUsingMasterLegacyMode()
 {
-#ifndef NO_STEAM
-	return sv_master_legacy_mode.GetBool() || !SteamMasterServerUpdater();
-#else
 	return true;
-#endif
 }
 
 

@@ -14,7 +14,7 @@ $Configuration
 {
 	$Linker [$WIN32]
 	{
-		$AdditionalDependencies			"Winmm.lib"
+		$AdditionalDependencies			"$BASE winmm.lib"
 	}
 }
 

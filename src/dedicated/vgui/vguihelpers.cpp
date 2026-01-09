@@ -42,7 +42,7 @@ int StartVGUI( CreateInterfaceFn dedicatedFactory )
 	// the "base dir" so we can scan mod name
 	g_pFullFileSystem->AddSearchPath(".", "MAIN");	
 	// the main platform dir
-	g_pFullFileSystem->AddSearchPath( "core", "CORE", PATH_ADD_TO_HEAD);
+	g_pFullFileSystem->AddSearchPath( "platform", "PLATFORM", PATH_ADD_TO_HEAD);
 	
 	vgui::ivgui()->SetSleep(false);
 
@@ -59,7 +59,7 @@ int StartVGUI( CreateInterfaceFn dedicatedFactory )
 		// we're not running steam, so just put the config dir under the platform
 		Q_strncpy( szConfigDir, "core/config", sizeof(szConfigDir));
 	}
-	g_pFullFileSystem->CreateDirHierarchy("config", "CORE");
+	g_pFullFileSystem->CreateDirHierarchy("config", "PLATFORM");
 	g_pFullFileSystem->AddSearchPath(szConfigDir, "CONFIG", PATH_ADD_TO_HEAD);
 
 	// initialize the user configuration file

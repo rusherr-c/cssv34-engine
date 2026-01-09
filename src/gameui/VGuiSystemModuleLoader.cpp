@@ -136,7 +136,7 @@ bool CVGuiSystemModuleLoader::LoadPlatformModules(CreateInterfaceFn *factorylist
 
 	// load platform menu
 	KeyValues *kv = new KeyValues("Platform");
-	if (!kv->LoadFromFile(g_pFullFileSystem, "steam/games/PlatformMenu.vdf", "CORE"))
+	if (!kv->LoadFromFile(g_pFullFileSystem, "steam/games/PlatformMenu.vdf", "PLATFORM"))
 	{
 		kv->deleteThis();
 		return false;

@@ -123,7 +123,7 @@ bool CPanelZooApp::PreInit()
 		return false;
 	}
 
-	g_pFullFileSystem->AddSearchPath( "core", "CORE" );
+	g_pFullFileSystem->AddSearchPath( "platform", "PLATFORM" );
 	return true;
 }
 

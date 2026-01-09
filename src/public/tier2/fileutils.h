@@ -131,6 +131,26 @@ public:
 		return ( m_FileHandle != FILESYSTEM_INVALID_HANDLE) &&
 			( g_pFullFileSystem->IsOk( m_FileHandle ) );
 	}
+
+	// Source SDK 2013 defs
+
+	void Seek(int pos, FileSystemSeek_t nSeekType = FILESYSTEM_SEEK_HEAD)
+	{
+		g_pFullFileSystem->Seek(m_FileHandle, pos, nSeekType);
+	}
+
+	unsigned int Tell()
+	{
+		return g_pFullFileSystem->Tell(m_FileHandle);
+	}
+
+	unsigned int Size(void)
+	{
+		Assert(IsOk());
+		return g_pFullFileSystem->Size(m_FileHandle);
+	}
+
+	void ReadFile(CUtlBuffer& dataBuf);
 };
 
 class COutputFile : public CBaseFile

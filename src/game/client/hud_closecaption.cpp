@@ -28,6 +28,8 @@
 
 #define CC_INSET		12
 
+using namespace vgui;
+
 extern ISoundEmitterSystemBase *soundemitterbase;
 
 // Marked as FCVAR_USERINFO so that the server can cull CC messages before networking them down to us!!!

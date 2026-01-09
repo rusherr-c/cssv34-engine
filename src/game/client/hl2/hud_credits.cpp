@@ -4,7 +4,6 @@
 //
 //=============================================================================//
 
-#include "cbase.h"
 #include "hudelement.h"
 #include "hud_numericdisplay.h"
 #include <vgui_controls/Panel.h>

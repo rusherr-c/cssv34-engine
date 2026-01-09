@@ -64,7 +64,7 @@ bool C_HopwireExplosion::SetupEmitters( void )
 	// Setup the basic core emitter
 	if ( m_pSimpleEmitter.IsValid() == false )
 	{
-		m_pSimpleEmitter = CSimpleEmitter::Create( "hopwirecore" );
+		m_pSimpleEmitter = CSimpleEmitter::Create( "hopwireplatform" );
 
 		if ( m_pSimpleEmitter.IsValid() == false )
 			return false;

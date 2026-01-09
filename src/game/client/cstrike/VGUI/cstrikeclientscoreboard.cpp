@@ -35,10 +35,10 @@ CCSClientScoreBoardDialog::CCSClientScoreBoardDialog( IViewPort *pViewPort ) : C
 	m_pPlayerListCT = new SectionedListPanel( this, "PlayerListCT" );
 
 	m_pPlayerCountLabel_T = new Label( this, "T_PlayerCount", "" );
-	m_pScoreLabel_T = new Label( this, "T_Score", "" );
+	m_pScoreLabel_T = new Label( this, "T_Splatform", "" );
 	m_pPingLabel_T = new Label( this, "T_Latency", "" );
 	m_pPlayerCountLabel_CT = new Label( this, "CT_PlayerCount", "" );
-	m_pScoreLabel_CT = new Label( this, "CT_Score", "" );
+	m_pScoreLabel_CT = new Label( this, "CT_Splatform", "" );
 	m_pPingLabel_CT = new Label( this, "CT_Latency", "" );
 
 	ListenForGameEvent( "server_spawn" );
@@ -232,13 +232,13 @@ void CCSClientScoreBoardDialog::UpdateTeamInfo()
 			switch ( teamIndex ) {
 				case TEAM_TERRORIST:
 					teamName = g_pVGuiLocalize->Find( "#Cstrike_ScoreBoard_Ter" );
-					pDialogVarTeamScore = "t_teamscore";
+					pDialogVarTeamScore = "t_teamsplatform";
 					pDialogVarTeamPlayerCount = "t_teamplayercount";
 					pDialogVarTeamPing = "t_teamping";
 					break;
 				case TEAM_CT:
 					teamName = g_pVGuiLocalize->Find( "#Cstrike_ScoreBoard_CT" );
-					pDialogVarTeamScore = "ct_teamscore";
+					pDialogVarTeamScore = "ct_teamsplatform";
 					pDialogVarTeamPlayerCount = "ct_teamplayercount";
 					pDialogVarTeamPing = "ct_teamping";
 					break;

@@ -10,8 +10,8 @@ $Configuration
 {
 	$Compiler
 	{
-		//$PreprocessorDefinitions		"$BASE"
-		$AdditionalIncludeDirectories	"$BASE;;$SRCDIR/external;$SRCDIR/external/crypto++-5.6.3"
+		$PreprocessorDefinitions		"$BASE;VPKLIB"
+		$AdditionalIncludeDirectories	"$BASE;$SRCDIR/external;$SRCDIR/external/crypto++-5.6.3"
 	}
 }
 

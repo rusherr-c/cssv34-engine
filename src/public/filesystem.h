@@ -13,6 +13,7 @@
 #include "tier1/utlsymbol.h"
 #include "appframework/IAppSystem.h"
 #include "tier1/checksum_crc.h"
+#include "tier1/checksum_md5.h"
 
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
@@ -338,6 +339,42 @@ struct FileAsyncRequest_t
 	FSAllocFunc_t			pfnAlloc;			// custom allocator. can be null. not compatible with FSASYNC_FLAGS_FREEDATAPTR
 };
 
+struct FileHash_t
+{
+	enum EFileHashType_t
+	{
+		k_EFileHashTypeUnknown = 0,
+		k_EFileHashTypeEntireFile = 1,
+		k_EFileHashTypeIncompleteFile = 2,
+	};
+	FileHash_t()
+	{
+		m_eFileHashType = FileHash_t::k_EFileHashTypeUnknown;
+		m_cbFileLen = 0;
+		m_PackFileID = 0;
+		m_nPackFileNumber = 0;
+	}
+	int m_eFileHashType;
+	CRC32_t m_crcIOSequence;
+	MD5Value_t m_md5contents;
+	int m_cbFileLen;
+	int m_PackFileID;
+	int m_nPackFileNumber;
+
+	bool operator==(const FileHash_t& src) const
+	{
+		return m_crcIOSequence == src.m_crcIOSequence &&
+			m_md5contents == src.m_md5contents &&
+			m_eFileHashType == src.m_eFileHashType;
+	}
+	bool operator!=(const FileHash_t& src) const
+	{
+		return m_crcIOSequence != src.m_crcIOSequence ||
+			m_md5contents != src.m_md5contents ||
+			m_eFileHashType != src.m_eFileHashType;
+	}
+
+};
 
 class CUnverifiedCRCFile
 {
@@ -354,6 +391,14 @@ public:
 #define WHITELIST_SPEW_RELOAD_FILES			0x0002	// show files the filesystem is telling the engine to reload
 #define WHITELIST_SPEW_DONT_RELOAD_FILES	0x0004	// show files the filesystem is NOT telling the engine to reload
 
+// This interface is for VPK files to communicate with FileTracker
+abstract_class IThreadedFileMD5Processor
+{
+public:
+	virtual int				SubmitThreadedMD5Request(uint8 * pubBuffer, int cubBuffer, int PackFileID, int nPackFileNumber, int nPackFileFraction) = 0;
+	virtual bool			BlockUntilMD5RequestComplete(int iRequest, MD5Value_t* pMd5ValueOut) = 0;
+	virtual bool			IsMD5RequestComplete(int iRequest, MD5Value_t* pMd5ValueOut) = 0;
+};
 
 //-----------------------------------------------------------------------------
 // Base file system interface

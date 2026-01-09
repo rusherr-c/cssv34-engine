@@ -345,7 +345,7 @@ void FX_CS_BloodSpray( const Vector &origin, const Vector &normal, float flDamag
 	pSimple->SetGravity( 0 );
 
 	// Blood impact
-	PMaterialHandle	hMaterial = ParticleMgr()->GetPMaterial( "effects/blood_core" );
+	PMaterialHandle	hMaterial = ParticleMgr()->GetPMaterial( "effects/blood_platform" );
 
 	SimpleParticle *pParticle;
 

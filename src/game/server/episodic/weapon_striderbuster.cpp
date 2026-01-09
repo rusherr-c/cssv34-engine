@@ -211,15 +211,15 @@ void CWeaponStriderBuster::Precache( void )
 
 	PrecacheModel("sprites/orangeflare1.vmt");
 
-	UTIL_PrecacheOther( "env_citadel_energy_core" );
+	UTIL_PrecacheOther( "env_citadel_energy_platform" );
 	UTIL_PrecacheOther( "sparktrail" );
 
 	m_nRingTexture = PrecacheModel( "sprites/lgtning.vmt" );
 
 	PrecacheParticleSystem( "striderbuster_attach" );
 	PrecacheParticleSystem( "striderbuster_attached_pulse" );
-	PrecacheParticleSystem( "striderbuster_explode_core" );
-	PrecacheParticleSystem( "striderbuster_explode_dummy_core" );
+	PrecacheParticleSystem( "striderbuster_explode_platform" );
+	PrecacheParticleSystem( "striderbuster_explode_dummy_platform" );
 	PrecacheParticleSystem( "striderbuster_break_flechette" );
 	PrecacheParticleSystem( "striderbuster_trail" );
 	PrecacheParticleSystem( "striderbuster_shotdown_trail" );
@@ -536,7 +536,7 @@ void CWeaponStriderBuster::CreateDestroyedEffect( void )
 		DispatchSpawn( pTrail );
 	}
 	
-	DispatchParticleEffect( "striderbuster_explode_core", GetAbsOrigin(), GetAbsAngles() );
+	DispatchParticleEffect( "striderbuster_explode_platform", GetAbsOrigin(), GetAbsAngles() );
 
 	// Create liquid fountain gushtacular effect here!
 	CEffectData	data;
@@ -668,7 +668,7 @@ void CWeaponStriderBuster::Detonate( void )
 	}
 	else
 	{
-		DispatchParticleEffect( "striderbuster_explode_dummy_core", GetAbsOrigin(), GetAbsAngles() );
+		DispatchParticleEffect( "striderbuster_explode_dummy_platform", GetAbsOrigin(), GetAbsAngles() );
 		EmitSound( "Weapon_StriderBuster.Dud_Detonate" );
 	}
 

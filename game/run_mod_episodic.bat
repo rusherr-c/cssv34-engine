@@ -2,7 +2,7 @@
 
 set cmd_line=-console -sw -noborder -game mod_episodic
 
-start "" bin\win32\quiver.exe %cmd_line%
-echo bin\win32\quiver.exe %cmd_line%
+start "" hl2.exe %cmd_line%
+echo hl2.exe %cmd_line%
 
 timeout 5

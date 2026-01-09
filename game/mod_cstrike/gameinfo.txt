@@ -49,6 +49,7 @@
 			game				hl2/hl2_misc.vpk
 
             		game				cstrike/cstrike_pak.vpk
+			platform			platform/platform_misc.vpk
 
 			game 				cstrike
 			game				hl2

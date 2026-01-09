@@ -34,8 +34,8 @@ ConVar blob_batchpercent( "blob_batchpercent", "100" );
 
 ConVar blob_radius( "blob_radius", "160" );
 
-ConVar blob_min_element_speed( "blob_min_element_speed", "50" );
-ConVar blob_max_element_speed( "blob_max_element_speed", "250" );
+//ConVar blob_min_element_speed( "blob_min_element_speed", "50" );
+//ConVar blob_max_element_speed( "blob_max_element_speed", "250" );
 
 ConVar npc_blob_use_threading( "npc_blob_use_threading", "1" );
 
@@ -1371,7 +1371,7 @@ void CNPC_Blob::RecomputeIdealElementDist()
 
 	//Msg("Area of blob is: %f\n", area );
 
-	m_flMinElementDist =  2.75f * sqrt( area / m_iNumElements );
+	//m_flMinElementDist =  2.75f * sqrt( area / m_iNumElements );
 	m_flMinElementDist =  M_PI * sqrt( area / m_iNumElements );
 
 	//Msg("New element dist: %f\n", m_flMinElementDist );
