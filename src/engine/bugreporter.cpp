@@ -778,17 +778,17 @@ void CBugUIPanel::Init()
 			}
 			else
 			{
-				ConColorMsg( clr, "Couldn't get interface '%s' from '%s'\n", INTERFACEVERSION_BUGREPORTER, m_sDllName.Get() );
+				ConColorMsg( clr, "Couldn't get interface '%s' from '%s'\n", INTERFACEVERSION_BUGREPORTER, m_sDllName );
 			}
 		}
 		else
 		{
-			ConColorMsg( clr, "Couldn't get factory '%s'\n", m_sDllName.Get() );
+			ConColorMsg( clr, "Couldn't get factory '%s'\n", m_sDllName );
 		}
 	}
 	else
 	{
-		ConColorMsg( clr, "Couldn't load '%s'\n", m_sDllName.Get() );
+		ConColorMsg( clr, "Couldn't load '%s'\n", m_sDllName );
 	}
 
 	if ( m_bCanSubmit )
@@ -1896,7 +1896,7 @@ void CBugUIPanel::OnSubmit()
 	m_pBugReporter->SetExeName( "hl2.exe" );
 	m_pBugReporter->SetGameDirectory( com_gamedir );
 
-	const CPUInformation& pi = *GetCPUInformation();
+	const CPUInformation& pi = GetCPUInformation();
 
 	m_pBugReporter->SetRAM( GetRam() );
 

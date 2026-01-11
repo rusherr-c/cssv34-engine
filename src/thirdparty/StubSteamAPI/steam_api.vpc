@@ -1,0 +1,42 @@
+//-----------------------------------------------------------------------------
+//	STEAM_API.VPC
+//
+//	Project Script
+//-----------------------------------------------------------------------------
+
+$Macro SRCDIR		"..\.."
+$Macro OUTBINDIR	"$SRCDIR\..\game\bin"
+
+$Include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
+
+$Configuration
+{
+	$Linker
+	{
+		// pc publishes the import library directly
+		$ImportLibrary					"$LIBPUBLIC\$(TargetName).lib"				[$WINDOWS]
+	}
+}
+
+$Project
+{
+	$Folder	"Source Files"
+	{
+		-$File	"$SRCDIR\public\tier0\memoverride.cpp"
+	}
+
+	$Folder	"Link Libraries"
+	{
+		-$ImpLib tier0
+		-$Lib	 tier1
+		-$Implib vstdlib
+	}
+}
+
+$Project "steam_api"
+{
+	$Folder "Source Files"
+	{
+		$File	"steam_api.cpp"
+	}
+}

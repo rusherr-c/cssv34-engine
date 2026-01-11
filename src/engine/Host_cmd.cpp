@@ -86,7 +86,7 @@ ConVar voice_inputfromfile("voice_inputfromfile", "0", 0, "Get voice input from 
 
 char gpszVersionString[32];
 char gpszProductString[32];
-int g_iSteamAppID = 218;	// defaults to Source SDK Base (215) if no steam.inf can be found.
+int g_iSteamAppID = 215;	// defaults to Source SDK Base (215) if no steam.inf can be found.
 
 // Globals
 int	gHostSpawnCount = 0;
@@ -446,6 +446,50 @@ CON_COMMAND( ping, "Display ping to server." )
 //-----------------------------------------------------------------------------
 extern void GetPlatformMapPath( const char *pMapPath, char *pPlatformMapPath, int maxLength );
 
+bool CL_HL2Demo_MapCheck( const char *name )
+{
+	if ( IsPC() && CL_IsHL2Demo() && !sv.IsDedicated() )
+	{
+		if (    !Q_stricmp( name, "d1_trainstation_01" ) || 
+				!Q_stricmp( name, "d1_trainstation_02" ) || 
+				!Q_stricmp( name, "d1_town_01" ) || 
+				!Q_stricmp( name, "d1_town_01a" ) || 
+				!Q_stricmp( name, "d1_town_02" ) || 
+				!Q_stricmp( name, "d1_town_03" ) ||
+				!Q_stricmp( name, "background01" ) ||
+				!Q_stricmp( name, "background03" ) 
+			)
+		{
+			return true;
+		}
+		return false;
+	}
+
+	return true;
+}
+
+bool CL_PortalDemo_MapCheck( const char *name )
+{
+	if ( IsPC() && CL_IsPortalDemo() && !sv.IsDedicated() )
+	{
+		if (    !Q_stricmp( name, "testchmb_a_00" ) || 
+				!Q_stricmp( name, "testchmb_a_01" ) || 
+				!Q_stricmp( name, "testchmb_a_02" ) || 
+				!Q_stricmp( name, "testchmb_a_03" ) || 
+				!Q_stricmp( name, "testchmb_a_04" ) || 
+				!Q_stricmp( name, "testchmb_a_05" ) ||
+				!Q_stricmp( name, "testchmb_a_06" ) ||
+				!Q_stricmp( name, "background1" ) 
+			)
+		{
+			return true;
+		}
+		return false;
+	}
+
+	return true;
+}
+
 void Host_Map_Helper( const CCommand &args, bool bEditmode, bool bBackground, bool bCommentary )
 {
 	int		i;
@@ -496,6 +540,18 @@ void Host_Map_Helper( const CCommand &args, bool bEditmode, bool bBackground, bo
 	{
 		Warning( "map load failed: %s not found or invalid\n", name );
 		return;
+	}
+
+	if ( !CL_HL2Demo_MapCheck( name ) )
+	{
+		Warning( "map load failed: %s not found or invalid\n", name );
+		return;	
+	}
+
+	if ( !CL_PortalDemo_MapCheck( name ) )
+	{
+		Warning( "map load failed: %s not found or invalid\n", name );
+		return;	
 	}
 
 	// Stop demo loop
@@ -593,6 +649,18 @@ CON_COMMAND( restart, "Restart the game on the same level (add setpos to jump to
 
 	Host_Disconnect(false);	// stop old game
 
+	if ( !CL_HL2Demo_MapCheck( sv.GetMapName() ) )
+	{
+		Warning( "map load failed: %s not found or invalid\n", sv.GetMapName() );
+		return;	
+	}
+
+	if ( !CL_PortalDemo_MapCheck( sv.GetMapName() ) )
+	{
+		Warning( "map load failed: %s not found or invalid\n", sv.GetMapName() );
+		return;	
+	}
+
 	HostState_NewGame( sv.GetMapName(), bRememberLocation, false );
 }
 
@@ -645,6 +713,18 @@ CON_COMMAND( reload, "Reload the most recent saved game (add setpos to jump to c
 	else
 #endif
 	{
+		if ( !CL_HL2Demo_MapCheck( host_map.GetString() ) )
+		{
+			Warning( "map load failed: %s not found or invalid\n", host_map.GetString() );
+			return;	
+		}
+
+		if ( !CL_PortalDemo_MapCheck( host_map.GetString() ) )
+		{
+			Warning( "map load failed: %s not found or invalid\n", host_map.GetString() );
+			return;	
+		} 
+
 		HostState_NewGame( host_map.GetString(), remember_location, false );
 	}
 }
@@ -674,6 +754,18 @@ void Host_Changelevel_f( const CCommand &args )
 		return;
 	}
 
+	if ( !CL_HL2Demo_MapCheck(args[1]) )
+	{
+		Warning( "changelevel failed: %s not found\n", args[1] );
+		return;	
+	}
+
+	if ( !CL_PortalDemo_MapCheck(args[1]) )
+	{
+		Warning( "changelevel failed: %s not found\n", args[1] );
+		return;	
+	}
+
 	HostState_ChangeLevelMP( args[1], args[2] );
 }
 
@@ -696,8 +788,44 @@ void Host_Changelevel2_f( const CCommand &args )
 
 	if ( !g_pVEngineServer->IsMapValid( args[1] ) )
 	{
-		Warning( "changelevel2 failed: %s not found\n", args[1] );
-		return;
+		if ( !CL_IsHL2Demo() || (CL_IsHL2Demo() && !(!Q_stricmp( args[1], "d1_trainstation_03" ) || !Q_stricmp( args[1], "d1_town_02a" ))) )	
+		{
+			Warning( "changelevel2 failed: %s not found\n", args[1] );
+			return;
+		}
+	}
+
+#if !defined(SWDS)
+	// needs to be before CL_HL2Demo_MapCheck() check as d1_trainstation_03 isn't a valid map
+	if ( IsPC() && CL_IsHL2Demo() && !sv.IsDedicated() && !Q_stricmp( args[1], "d1_trainstation_03" ) ) 
+	{
+		void CL_DemoTransitionFromTrainstation();
+		CL_DemoTransitionFromTrainstation();
+		return; 
+	}
+
+	// needs to be before CL_HL2Demo_MapCheck() check as d1_trainstation_03 isn't a valid map
+	if ( IsPC() && CL_IsHL2Demo() && !sv.IsDedicated() && !Q_stricmp( args[1], "d1_town_02a" ) && !Q_stricmp( args[2], "d1_town_02_02a" )) 
+	{
+		void CL_DemoTransitionFromRavenholm();
+		CL_DemoTransitionFromRavenholm();
+		return; 
+	}
+
+	if ( IsPC() && CL_IsPortalDemo() && !sv.IsDedicated() && !Q_stricmp( args[1], "testchmb_a_07" ) ) 
+	{
+		void CL_DemoTransitionFromTestChmb();
+		CL_DemoTransitionFromTestChmb();
+		return; 
+	}
+
+#endif
+
+	// allow a level transition to d1_trainstation_03 so the Host_Changelevel() can act on it
+	if ( !CL_HL2Demo_MapCheck( args[1] ) ) 
+	{
+		Warning( "changelevel failed: %s not found\n", args[1] );
+		return;	
 	}
 
 	HostState_ChangeLevelSP( args[1], args[2] );
@@ -740,8 +868,8 @@ CON_COMMAND( disconnect, "Disconnect game from server." )
 #define VERSION_KEY "PatchVersion="
 #define PRODUCT_KEY "ProductName="
 #define APPID_KEY "AppID="
-#define PRODUCT_STRING "Source"
-#define VERSION_STRING "1.3.3.7"
+#define PRODUCT_STRING "valve"
+#define VERSION_STRING "1.0.1.0"
 
 void Host_Version( void )
 {
@@ -819,7 +947,7 @@ void Host_Version( void )
 CON_COMMAND( version, "Print version info string." )
 {
 	ConMsg( "Protocol version %i\nExe version %s (%s)\n", PROTOCOL_VERSION, gpszVersionString, gpszProductString );
-	ConMsg( "Exe build: %i (" __DATE__ " " __TIME__ ") \n", build_number() );
+	ConMsg( "Exe build: "__TIME__" "__DATE__" (%i)\n", build_number() );
 }
 
 

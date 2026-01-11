@@ -84,7 +84,7 @@
 
 class INetChannel;
 
-enum
+typedef enum
 {
 	NS_CLIENT = 0,	// client socket
 	NS_SERVER,	// server socket

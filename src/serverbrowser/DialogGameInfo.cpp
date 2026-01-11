@@ -32,8 +32,8 @@ bool QueryLessFunc( const struct challenge_s &item1, const struct challenge_s &i
 	else if ( item1.addr.GetPort() > item2.addr.GetPort() )
 		return false;
 
-	int ip1 = item1.addr.GetIPNetworkByteOrder();
-	int ip2 = item2.addr.GetIPNetworkByteOrder();
+	int ip1 = item1.addr.GetIP();
+	int ip2 = item2.addr.GetIP();
 
 	return ip1 < ip2;
 }

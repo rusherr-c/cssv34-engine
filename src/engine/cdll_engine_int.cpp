@@ -1507,7 +1507,6 @@ bool ClientDLL_Load()
 
 	// loads the client.dll, but ensures that the client dll is running under Steam
 	// this will have to be undone when we want mods to be able to run
-	// !!! THIS METHOD STINKS, JUST AUTO-ADD SUBDIRS TO THE GAMEBIN PATH
 	g_ClientDLLModule = g_pFileSystem->LoadModule( "client", "GAMEBIN", false );
 	if ( g_ClientDLLModule )
 	{

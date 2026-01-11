@@ -1,0 +1,59 @@
+//-----------------------------------------------------------------------------
+//	VPK.VPC
+//
+//	Project Script
+//-----------------------------------------------------------------------------
+
+$Macro SRCDIR		"..\.."
+$Macro OUTBINDIR	"..\..\..\game\bin"
+
+$Include "$SRCDIR\vpc_scripts\source_exe_con_base.vpc"
+
+$Configuration
+{
+	$Linker
+	{
+		// I'm not sure why this is set in source_dll_win32_debug/release.vpc but not for
+		// the corresponding .exe VPC files. vpk now needs this for cryptlib.
+		$AdditionalLibraryDirectories		"$LIBCOMMON;$LIBPUBLIC"
+    }
+
+}
+
+$Configuration	"Debug"
+{
+	$Compiler
+	{
+		$AdditionalIncludeDirectories		"$BASE,..\common"
+	}
+
+	$Linker
+	{
+		$DebuggableAssembly					"Runtime tracking and disable optimizations (/ASSEMBLYDEBUG)"
+	}
+}
+
+$Configuration	"Release"
+{
+	$Compiler
+	{
+		$AdditionalIncludeDirectories		"$BASE,..\common"
+	}
+}
+
+$Project "Vpk"
+{
+	$Folder "Source Files"
+	{
+		$File	"packtest.cpp"
+	}
+
+	$Folder	"Link Libraries"
+	{
+		$Lib	bitmap
+		$Lib	mathlib
+		$Lib	tier2
+		$Lib	vpklib
+	}
+}
+

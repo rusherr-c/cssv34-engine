@@ -1,9 +1,7 @@
 //========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
-// Purpose: This file should go away eventually.
+// Purpose:
 //
-// $Workfile:     $
-// $Date:         $
 // $NoKeywords: $
 //=============================================================================//
 #include "quakedef.h"
@@ -56,7 +54,11 @@ extern int g_iSteamAppID;
 
 bool IsUsingMasterLegacyMode()
 {
+#ifndef NO_STEAM
+	return sv_master_legacy_mode.GetBool() || !SteamMasterServerUpdater();
+#else
 	return true;
+#endif
 }
 
 

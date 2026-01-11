@@ -728,7 +728,7 @@ static bool Host_ValidGame( void )
 	// No multi-client single player games
 	if ( sv.IsMultiplayer() )
 	{
-		if ( deathmatch.GetBool() || coop.GetBool() )
+		if ( deathmatch.GetInt() )
 			return true;
 	}
 	else

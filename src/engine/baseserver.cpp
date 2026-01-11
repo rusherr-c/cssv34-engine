@@ -74,7 +74,7 @@ static void SvTagsChangeCallback( IConVar *pConVar, const char *pOldValue, float
 #ifndef NO_STEAM
 	if ( SteamGameServer() )
 	{
-		SteamGameServer()->SetGameTags( var.GetString() );
+		SteamGameServer()->GSSetGameType( var.GetString() );
 	}
 #endif
 }
@@ -115,7 +115,7 @@ bool AllowDebugDedicatedServerOutsideSteam()
 }
 
 
-static void SetMasterServerKeyValue( ISteamGameServer *pUpdater, IConVar *pConVar )
+static void SetMasterServerKeyValue( ISteamMasterServerUpdater *pUpdater, IConVar *pConVar )
 {
 	ConVarRef var( pConVar );
 #ifndef NO_STEAM
@@ -151,7 +151,7 @@ static void ServerNotifyVarChangeCallback( IConVar *pConVar, const char *pOldVal
 	if ( !pConVar->IsFlagSet( FCVAR_NOTIFY ) )
 		return;
 #ifndef NO_STEAM
-	ISteamGameServer *pUpdater = SteamGameServer();
+	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
 	if ( !pUpdater )
 	{
 		// This will force it to send all the rules whenever the master server updater is there.
@@ -358,7 +358,7 @@ once for a player each game, not once for each level change.
 ================
 */
 IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge, int authProtocol, 
-							    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen, CSteamID steamid )
+							    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen )
 {
 	COM_TimestampedLog( "CBaseServer::ConnectClient" );
 
@@ -417,13 +417,13 @@ IClient *CBaseServer::ConnectClient ( netadr_t &adr, int protocol, int challenge
 	COM_TimestampedLog( "CBaseServer::ConnectClient:  GetFreeClient" );
 
 	CBaseClient	*client = GetFreeClient( adr );
+
 	if ( !client )
 	{
 		RejectConnection( adr, "Server is full.\n" );
 		return NULL;	// no free slot found
 	}
 
-	client->SetSteamID( steamid );
 	int nNextUserID = GetNextUserID();
 	if ( !CheckChallengeType( client, nNextUserID, adr, authProtocol, hashedCDkey, cdKeyLen ) ) // we use the client pointer to track steam requests
 	{
@@ -585,7 +585,7 @@ bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 		case A2S_SERVERQUERY_GETCHALLENGE: ReplyServerChallenge( packet->from );
 							break;
 
-		case C2S_CONNECT :	{	char AuthTicket[1024];
+		case C2S_CONNECT :	{	char cdkey[STEAM_KEYSIZE];
 								char name[256];
 								char password[256];
 								
@@ -597,23 +597,22 @@ bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 								msg.ReadString( password, sizeof(password) );
 								if ( authProtocol == PROTOCOL_STEAM )
 								{
-									int AuthTicketLength = msg.ReadShort();
-									if ( AuthTicketLength < 0 || AuthTicketLength > sizeof( AuthTicket ) )
+									int keyLen = msg.ReadShort();
+									if ( keyLen < 0 || keyLen > sizeof(cdkey) )
 									{
-										RejectConnection( packet->from, "Invalid Auth Ticket length\n" );
+										RejectConnection( packet->from, "Invalid Steam key length\n" );
 										break;
 									}
-									msg.ReadBytes( AuthTicket, AuthTicketLength );
+									msg.ReadBytes( cdkey, keyLen );
 
 									ConnectClient( packet->from, protocol, 
-										challengeNr, authProtocol, name, password, AuthTicket, AuthTicketLength, CSteamID(msg.ReadVarInt64()) );	// cd key is actually a raw encrypted key	
+										challengeNr, authProtocol, name, password, cdkey, keyLen );	// cd key is actually a raw encrypted key	
 								}
 								else
 								{
-									char cdkey[STEAM_KEYSIZE];
 									msg.ReadString( cdkey, sizeof(cdkey) );
 									ConnectClient( packet->from, protocol, 
-										challengeNr, authProtocol, name, password, cdkey, strlen(cdkey), CSteamID() );
+										challengeNr, authProtocol, name, password, cdkey, strlen(cdkey) );
 								}
 
 							}
@@ -624,14 +623,22 @@ bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 							
 		default:
 		{
+			if ( IsUsingMasterLegacyMode() )
+			{
+				CGameServer *pThis = NULL;
+				if ( !IsHLTV() )
+					pThis = (CGameServer*)this;
+					
+				master->HandleUnknown( packet, this, pThis );
+			}
 #ifndef NO_STEAM
 			// We don't understand it, let the master server updater at it.
-			if ( SteamGameServer() && Steam3Server().IsMasterServerUpdaterSharingGameSocket() )
+			else if ( SteamMasterServerUpdater() && Steam3Server().IsMasterServerUpdaterSharingGameSocket() )
 			{
-				SteamGameServer()->HandleIncomingPacket( 
+				SteamMasterServerUpdater()->HandleIncomingPacket( 
 					packet->message.GetBasePointer(), 
 					packet->message.TotalBytesAvailable(),
-					BigLong( packet->from.GetIPNetworkByteOrder() ),
+					BigLong( packet->from.GetIP() ),
 					packet->from.GetPort()
 					);
 			
@@ -843,6 +850,53 @@ void CBaseServer::ReplyChallenge(netadr_t &adr)
 #if !defined( NO_STEAM ) //#ifndef _XBOX
 	if ( authprotocol == PROTOCOL_STEAM )
 	{
+		unsigned int encryptionsize = 0;
+		char szEncryptionKey[ STEAM_KEYSIZE ];
+		if ( !SteamGameServer() )
+		{
+			Warning( "SteamGetEncryptionKeyToSendToNewClient:  Library not loaded!\n" );
+			RejectConnection( adr, "Failed to get server encryption key\n" );
+			return;
+		}
+
+		if ( !SteamGameServer()->GSGetSteam2GetEncryptionKeyToSendToNewClient( szEncryptionKey, &encryptionsize, sizeof(szEncryptionKey) ) 
+			|| encryptionsize == 0 )
+		{
+			Warning( "SteamGetEncryptionKeyToSendToNewClient:  Returned NULL!\n" );
+			RejectConnection( adr, "Failed to get server encryption key\n" );
+			return;
+		}
+#if !defined( NO_VCR )
+		// Support VCR mode.
+		if ( VCRGetMode() == VCR_Record )
+		{
+			VCRGenericRecord( "a", &encryptionsize, sizeof( encryptionsize ) );
+			if ( encryptionsize )
+			{
+				VCRGenericRecord( "b", szEncryptionKey, encryptionsize );
+			}
+		}
+		else if ( VCRGetMode() == VCR_Playback )
+		{
+			VCRGenericPlayback( "a", &encryptionsize, sizeof( encryptionsize ), true );
+			if ( encryptionsize )
+			{
+				VCRGenericPlayback( "b", szEncryptionKey, encryptionsize, true );
+			}			
+		}
+#endif
+		if ( encryptionsize > STEAM_KEYSIZE )
+		{
+			Warning( "SteamGetEncryptionKeyToSendToNewClient:  Key size too big (%i/%i)\n",
+				encryptionsize, STEAM_KEYSIZE );
+			RejectConnection( adr, "Failed to get server encryption key\n" );
+			return;
+		}
+		msg.WriteShort( encryptionsize );
+		msg.WriteBytes( szEncryptionKey, encryptionsize );
+		CSteamID steamID = Steam3Server().GetGSSteamID();
+		uint64 unSteamID = steamID.ConvertToUint64();
+		msg.WriteBytes( &unSteamID, sizeof(unSteamID) );
 		msg.WriteByte( SteamGameServer()->BSecure() );
 	}
 #else
@@ -1372,16 +1426,22 @@ bool CBaseServer::CheckChallengeType( CBaseClient * client, int nNewUserID, neta
 // 		}
 
 		client->m_NetworkID.idtype = IDTYPE_STEAM;
-		Q_memset( &client->m_NetworkID.steamid, 0x0, sizeof(client->m_NetworkID.steamid) );
+		Q_memset( &client->m_NetworkID.uid.steamid, 0x0, sizeof(client->m_NetworkID.uid.steamid) );
 		// Convert raw certificate back into data
-
+#ifndef NO_STEAM
+		if ( cbCookie <= 0 || cbCookie >= STEAM_KEYSIZE )
+		{
+			RejectConnection( adr, "STEAM certificate length error! %i/%i\n", cbCookie, STEAM_KEYSIZE );
+			return false;
+		}
+#endif
 		netadr_t checkAdr = adr;
 		if ( adr.GetType() == NA_LOOPBACK || adr.IsLocalhost() )
 		{
-			checkAdr.SetIP( net_local_adr.GetIPNetworkByteOrder() );
+			checkAdr.SetIP( net_local_adr.addr_htonl() );
 		}
 #ifndef NO_STEAM
-		if ( !Steam3Server().NotifyClientConnect( client, checkAdr, pchLogonCookie, cbCookie ) 
+		if ( !Steam3Server().NotifyClientConnect( client, nNewUserID, checkAdr, pchLogonCookie, cbCookie ) 
 			&& !Steam3Server().BLanOnly() ) // the userID isn't alloc'd yet so we need to fill it in manually
 		{
 			RejectConnection( adr, "STEAM validation rejected\n" );
@@ -1650,7 +1710,7 @@ bool CBaseServer::ShouldUpdateMasterServer()
 void CBaseServer::CheckMasterServerRequestRestart()
 {
 #ifndef NO_STEAM
-	if ( !SteamGameServer() || !SteamGameServer()->WasRestartRequested() )
+	if ( !SteamMasterServerUpdater() || !SteamMasterServerUpdater()->WasRestartRequested() )
 		return;
 #else
 	return;
@@ -1690,8 +1750,14 @@ void CBaseServer::UpdateMasterServer()
 #ifndef NO_STEAM
 	if ( !ShouldUpdateMasterServer() )
 		return;
+
+	if ( IsUsingMasterLegacyMode() )
+	{
+		master->CheckHeartbeat( this );
+		return;
+	}
 	
-	if ( !SteamGameServer() )
+	if ( !SteamMasterServerUpdater() )
 		return;
 	
 	// Only update every so often.
@@ -1723,14 +1789,15 @@ void CBaseServer::UpdateMasterServer()
 	bool bActive = IsActive() && IsMultiplayer() && g_bEnableMasterServerUpdater;
 	if ( serverGameDLL && serverGameDLL->ShouldHideServer() )
 		bActive = false;
-
-	SteamGameServer()->EnableHeartbeats( bActive );
+	
+	SteamMasterServerUpdater()->SetActive( bActive );
 
 	if ( !bActive )
 		return;
 
 	UpdateMasterServerRules();
 	UpdateMasterServerPlayers();
+	UpdateMasterServerBasicData();
 #endif
 }
 
@@ -1742,7 +1809,7 @@ void CBaseServer::UpdateMasterServerRules()
 	if ( !m_bMasterServerRulesDirty )
 		return;
 
-	ISteamGameServer *pUpdater = SteamGameServer();
+	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
 	if ( !pUpdater )
 		return;
 		
@@ -1774,10 +1841,33 @@ void CBaseServer::UpdateMasterServerRules()
 }
 
 
+void CBaseServer::UpdateMasterServerBasicData()
+{
+#ifndef NO_STEAM
+	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
+
+	Assert( SteamMasterServerUpdater() != NULL );
+
+	unsigned short nMaxReportedClients = GetMaxClients();
+	if ( sv_visiblemaxplayers.GetInt() > 0 && sv_visiblemaxplayers.GetInt() < GetMaxClients() )
+		nMaxReportedClients = sv_visiblemaxplayers.GetInt();
+
+	pUpdater->SetBasicServerData(
+		PROTOCOL_VERSION,
+		IsDedicated(),
+		sv_region.GetString(),
+		gpszProductString,
+		nMaxReportedClients,
+		(GetPassword() != NULL),
+		serverGameDLL->GetGameDescription() );
+#endif
+}
+
+
 void CBaseServer::ForwardPacketsFromMasterServerUpdater()
 {
 #ifndef NO_STEAM
-	ISteamGameServer *p = SteamGameServer();
+	ISteamMasterServerUpdater *p = SteamMasterServerUpdater();
 	if ( !p )
 		return;
 	
@@ -1994,6 +2084,16 @@ void CBaseServer::Shutdown( void )
 
 	// clear everthing
 	Clear();
+
+#ifndef _XBOX
+#ifndef NO_STEAM
+	//  Tell master we are shutting down
+	if ( SteamMasterServerUpdater() )
+		SteamMasterServerUpdater()->NotifyShutdown();
+
+	master->ShutdownConnection( this );
+#endif
+#endif
 }
 
 //-----------------------------------------------------------------------------

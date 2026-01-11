@@ -18,6 +18,7 @@
 #include "netmessages.h"
 #include "net.h"
 #include "event_system.h"
+#include "steam/isteammasterserverupdater.h"
 
 class CNetworkStringTableContainer;
 class PackedEntity;
@@ -155,7 +156,7 @@ public: // IConnectionlessPacketHandler implementation
 protected:
 
 	virtual IClient *ConnectClient ( netadr_t &adr, int protocol, int challenge, int authProtocol, 
-					    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen, CSteamID steamid );
+					    const char *name, const char *password, const char *hashedCDkey, int cdKeyLen );
 	
 	virtual CBaseClient *GetFreeClient( netadr_t &adr );
 
@@ -185,6 +186,7 @@ protected:
 	void			UpdateMasterServer();
 	void			UpdateMasterServerRules();
 	virtual void	UpdateMasterServerPlayers() {}
+	void			UpdateMasterServerBasicData();
 	void			ForwardPacketsFromMasterServerUpdater();
 
 	void SetRestartOnLevelChange(bool state)  { m_bRestartOnLevelChange = state; }

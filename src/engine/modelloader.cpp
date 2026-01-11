@@ -21,6 +21,7 @@
 #include "materialsystem/materialsystem_config.h"
 #include "gl_rsurf.h"
 #include "avi/iavi.h"
+#include "avi/ibik.h"
 #include "materialsystem/itexture.h"
 #include "Overlay.h"
 #include "utldict.h"
@@ -123,7 +124,7 @@ class CModelLoader : public IModelLoader
 {
 // Implement IModelLoader interface
 public:
-	CModelLoader() : m_ModelPool( sizeof( model_t ), MAX_KNOWN_MODELS, CUtlMemoryPool::GROW_FAST, "CModelLoader::m_ModelPool" ),
+	CModelLoader() : m_ModelPool( sizeof( model_t ), MAX_KNOWN_MODELS, CMemoryPool::GROW_FAST, "CModelLoader::m_ModelPool" ),
 					m_Models( 0, 0, Model_LessFunc )
 	{
 	}
@@ -249,7 +250,7 @@ private:
 
 	CUtlMap< FileNameHandle_t, ModelEntry_t >	m_Models;
 
-	CUtlMemoryPool			m_ModelPool;
+	CMemoryPool			m_ModelPool;
 
 	CUtlVector<model_t>	m_InlineModels;
 
@@ -393,22 +394,6 @@ void CMapLoadHelper::Init( model_t *pMapModel, const char *loadname )
 
 	s_pMap = &g_ModelLoader.m_worldBrushData;
 
-	// lump_t fix for l4d2 maps
-	if ( s_MapHeader.version == 21 && s_MapHeader.lumps[0].fileofs == 0 )
-	{
-		DevMsg( "Detected l4d2 bsp, fixing lump struct order for compatibility\n" );
-
-		for ( int iLump = 0; iLump < HEADER_LUMPS; iLump++ )
-		{
-			l4d2_lump_t l4d2lump;
-			V_memcpy( &l4d2lump, &s_MapHeader.lumps[iLump], sizeof( lump_t ) );
-
-			s_MapHeader.lumps[iLump].version = l4d2lump.version;
-			s_MapHeader.lumps[iLump].filelen = l4d2lump.filelen;
-			s_MapHeader.lumps[iLump].fileofs = l4d2lump.fileofs;
-		}
-	}
-
 	if ( IsPC() )
 	{
 		// Now find and open our lump files, and create the master list of them.
@@ -503,22 +488,6 @@ void CMapLoadHelper::InitFromMemory( model_t *pMapModel, const void *pData, int 
 #endif
 
 	s_pMap = &g_ModelLoader.m_worldBrushData;
-
-	// lump_t fix for l4d2 maps
-	if ( s_MapHeader.version == 21 && s_MapHeader.lumps[0].fileofs == 0 )
-	{
-		DevMsg( "Detected l4d2 bsp, fixing lump struct order for compatibility\n" );
-
-		for ( int iLump = 0; iLump < HEADER_LUMPS; iLump++ )
-		{
-			l4d2_lump_t l4d2lump;
-			V_memcpy( &l4d2lump, &s_MapHeader.lumps[iLump], sizeof( lump_t ) );
-
-			s_MapHeader.lumps[iLump].version = l4d2lump.version;
-			s_MapHeader.lumps[iLump].filelen = l4d2lump.filelen;
-			s_MapHeader.lumps[iLump].fileofs = l4d2lump.fileofs;
-		}
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1074,28 +1043,9 @@ void Mod_LoadWorldlights( CMapLoadHelper &lh, bool bIsHDR )
 		lh.GetMap()->worldlights = NULL;
 		return;
 	}
-	
-	// dworldlight_t fix for previous bsp versions
-	if ( s_MapHeader.version < BSPVERSION )
-	{
-		DevMsg( "Detected bsp version lower than 21, fixing dworldlight_t struct order for compatibility\n" );
-
-		lh.GetMap()->numworldlights = lh.LumpSize() / ( sizeof( dworldlight_t ) - sizeof( Vector ) );
-		lh.GetMap()->worldlights = ( dworldlight_t* )Hunk_AllocName( lh.GetMap()->numworldlights * sizeof( dworldlight_t ), va( "%s [%s]", lh.GetLoadName(), "worldlights" ) );
-		for ( int iLight = 0; iLight < lh.GetMap()->numworldlights; iLight++ )
-		{
-			memcpy( &lh.GetMap()->worldlights[iLight], lh.LumpBase() + iLight * ( sizeof( dworldlight_t ) - sizeof( Vector ) ), sizeof( Vector ) * 3 );
-			lh.GetMap()->worldlights[iLight].shadow_cast_offset = lh.GetMap()->worldlights[iLight].origin;
-			memcpy( (byte*)&lh.GetMap()->worldlights[iLight] + sizeof( Vector ) * 4, lh.LumpBase() + iLight * ( sizeof( dworldlight_t ) - sizeof( Vector ) ) + sizeof( Vector ) * 3, sizeof( dworldlight_t ) - sizeof( Vector ) * 4 );
-		}
-	}
-	else
-	{
-		lh.GetMap()->numworldlights = lh.LumpSize() / sizeof( dworldlight_t );
-		lh.GetMap()->worldlights = ( dworldlight_t* )Hunk_AllocName( lh.LumpSize(), va( "%s [%s]", lh.GetLoadName(), "worldlights" ) );
-		memcpy ( lh.GetMap()->worldlights, lh.LumpBase(), lh.LumpSize() );
-	}
-	
+	lh.GetMap()->numworldlights = lh.LumpSize() / sizeof( dworldlight_t );
+	lh.GetMap()->worldlights = (dworldlight_t *)Hunk_AllocName( lh.LumpSize(), va( "%s [%s]", lh.GetLoadName(), "worldlights" ) );
+	memcpy (lh.GetMap()->worldlights, lh.LumpBase(), lh.LumpSize());
 #if !defined( SWDS )
 	if ( r_lightcache_zbuffercache.GetInt() )
 	{
@@ -3568,14 +3518,15 @@ model_t	*CModelLoader::LoadModel( model_t *mod, REFERENCETYPE *pReferencetype )
 //-----------------------------------------------------------------------------
 // Purpose: Creates the name of the sprite
 //-----------------------------------------------------------------------------
-static void BuildSpriteLoadName( const char *pName, char *pOut, int outLen, bool &bIsAVI )
+static void BuildSpriteLoadName( const char *pName, char *pOut, int outLen, bool &bIsAVI, bool &bIsBIK )
 {
 	// If it's a .vmt and they put a path in there, then use the path.
 	// Otherwise, use the old method of prepending the sprites directory.
 	const char *pExt = V_GetFileExtension( pName );
 	bIsAVI = !Q_stricmp( pExt, "avi" );
+	bIsBIK = !Q_stricmp( pExt, "bik" );
 	bool bIsVMT = !Q_stricmp( pExt, "vmt" );
-	if ( ( bIsAVI || bIsVMT ) && ( strchr( pName, '/' ) || strchr( pName, '\\' ) ) )
+	if ( ( bIsAVI || bIsBIK || bIsVMT ) && ( strchr( pName, '/' ) || strchr( pName, '\\' ) ) )
 	{
 		// The material system cannot handle a prepended "materials" dir
 		// Keep .avi extensions on the material to load avi-based materials
@@ -4565,7 +4516,7 @@ void CModelLoader::Map_UnloadModel( model_t *mod )
 //-----------------------------------------------------------------------------
 // Computes dimensions + frame count of a material 
 //-----------------------------------------------------------------------------
-static void GetSpriteInfo( const char *pName, bool bIsAVI, int &nWidth, int &nHeight, int &nFrameCount )
+static void GetSpriteInfo( const char *pName, bool bIsAVI, bool bIsBIK, int &nWidth, int &nHeight, int &nFrameCount )
 {
 	nFrameCount = 1;
 	nWidth = nHeight = 1;
@@ -4575,6 +4526,7 @@ static void GetSpriteInfo( const char *pName, bool bIsAVI, int &nWidth, int &nHe
 	// is that this code gets run on dedicated servers also.
 	IMaterial *pMaterial = NULL;
 	AVIMaterial_t hAVIMaterial = AVIMATERIAL_INVALID; 
+	BIKMaterial_t hBIKMaterial = BIKMATERIAL_INVALID; 
 	if ( bIsAVI )
 	{
 		hAVIMaterial = avi->CreateAVIMaterial( pName, pName, "GAME" );
@@ -4583,6 +4535,16 @@ static void GetSpriteInfo( const char *pName, bool bIsAVI, int &nWidth, int &nHe
 		if ( hAVIMaterial != AVIMATERIAL_INVALID )
 		{
 			pMaterial = avi->GetMaterial( hAVIMaterial );
+		}
+	}
+	else if ( bIsBIK )
+	{
+		hBIKMaterial = bik->CreateMaterial( pName, pName, "GAME" );
+		if (hBIKMaterial != BIKMATERIAL_INVALID )
+		{
+			bik->GetFrameSize( hBIKMaterial, &nWidth, &nHeight );
+			nFrameCount = bik->GetFrameCount( hBIKMaterial );
+			pMaterial = bik->GetMaterial( hBIKMaterial );
 		}
 	}
 	else
@@ -4605,6 +4567,11 @@ static void GetSpriteInfo( const char *pName, bool bIsAVI, int &nWidth, int &nHe
 	if ( hAVIMaterial != AVIMATERIAL_INVALID )
 	{
 		avi->DestroyAVIMaterial( hAVIMaterial );
+	}
+
+	if ( hBIKMaterial != BIKMATERIAL_INVALID )
+	{
+		bik->DestroyMaterial( hBIKMaterial );
 	}
 }
 
@@ -4642,9 +4609,9 @@ void CModelLoader::Sprite_LoadModel( model_t *mod )
 
 	// Figure out the real load name..
 	char loadName[MAX_PATH];
-	bool bIsAVI;
-	BuildSpriteLoadName( mod->szName, loadName, MAX_PATH, bIsAVI );
-	GetSpriteInfo( loadName, bIsAVI, mod->sprite.width, mod->sprite.height, mod->sprite.numframes );
+	bool bIsAVI, bIsBIK;
+	BuildSpriteLoadName( mod->szName, loadName, MAX_PATH, bIsAVI, bIsBIK );
+	GetSpriteInfo( loadName, bIsAVI, bIsBIK, mod->sprite.width, mod->sprite.height, mod->sprite.numframes );
 
 #ifndef SWDS
 	if ( g_ClientDLL && mod->sprite.sprite )
@@ -4664,8 +4631,8 @@ void CModelLoader::Sprite_UnloadModel( model_t *mod )
 	mod->nLoadFlags &= ~FMODELLOADER_LOADED;
 
 	char loadName[MAX_PATH];
-	bool bIsAVI;
-	BuildSpriteLoadName( mod->szName, loadName, sizeof( loadName ), bIsAVI );
+	bool bIsAVI, bIsBIK;
+	BuildSpriteLoadName( mod->szName, loadName, sizeof( loadName ), bIsAVI, bIsBIK );
 
 	IMaterial *mat = materials->FindMaterial( loadName, TEXTURE_GROUP_OTHER );
 	if ( !IsErrorMaterial( mat ) )

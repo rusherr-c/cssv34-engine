@@ -257,7 +257,7 @@ public:
 
 
 ConVar r_worldlights	("r_worldlights", "4", 0, "number of world lights to use per vertex" );
-ConVar r_radiosity		("r_radiosity", "2", FCVAR_CHEAT, "0: no radiosity\n1: radiosity with ambient cube (6 samples)\n2: radiosity with 162 samples\n3: 162 samples for static props, 6 samples for everything else" );
+ConVar r_radiosity		("r_radiosity", "4", FCVAR_CHEAT, "0: no radiosity\n1: radiosity with ambient cube (6 samples)\n2: radiosity with 162 samples\n3: 162 samples for static props, 6 samples for everything else" );
 ConVar r_worldlightmin	("r_worldlightmin", "0.0002" );
 ConVar r_avglight		("r_avglight", "1", FCVAR_CHEAT);
 static ConVar r_drawlightcache		("r_drawlightcache", "0", FCVAR_CHEAT, "0: off\n1: draw light cache entries\n2: draw rays\n");
@@ -1422,8 +1422,8 @@ static const byte *AddWorldLightToLightingState( dworldlight_t* pWorldLight,
 			// convinced it's any better of a metric though, so ratios for now...
 
 			// found a light was was dimmer, swap it with the current light
-			V_swap( pWorldLight, lightingState.locallight[minLightIndex] );
-			V_swap( illum, info.m_pIllum[minLightIndex] );
+			swap( pWorldLight, lightingState.locallight[minLightIndex] );
+			swap( illum, info.m_pIllum[minLightIndex] );
 
 			// FIXME: Avoid these recomputations 
 			// But I don't know how to do it without storing a ton of data
@@ -1745,8 +1745,8 @@ static void	AddWorldLightToLightingStateForStaticProps( dworldlight_t* pWorldLig
 			// convinced it's any better of a metric though, so ratios for now...
 
 			// found a light was was dimmer, swap it with the current light
-			V_swap( pWorldLight, lightingState.locallight[minLightIndex] );
-			V_swap( illum, info.m_pIllum[minLightIndex] );
+			swap( pWorldLight, lightingState.locallight[minLightIndex] );
+			swap( illum, info.m_pIllum[minLightIndex] );
 
 			// FIXME: Avoid these recomputations 
 			// But I don't know how to do it without storing a ton of data

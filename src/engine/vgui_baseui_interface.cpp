@@ -561,20 +561,11 @@ bool CEngineVGui::SetVGUIDirectories()
 //-----------------------------------------------------------------------------
 void CEngineVGui::Init()
 {
+	COM_TimestampedLog( "Loading gameui.dll" );
+
 	// load the GameUI dll
 	const char *szDllName = "gameui";
-
-	if ( CommandLine()->FindParm( "-gameui" ) )
-	{
-		COM_TimestampedLog( "Loading Mod gameui.dll" );
-		m_hStaticGameUIModule = g_pFileSystem->LoadModule( szDllName, "GAMEBIN", true ); // LoadModule() does a GetLocalCopy() call
-	}
-	else
-	{
-		COM_TimestampedLog( "Loading gameui.dll" );
-		m_hStaticGameUIModule = g_pFileSystem->LoadModule( szDllName, "EXECUTABLE_PATH", true ); // LoadModule() does a GetLocalCopy() call
-	}
-
+	m_hStaticGameUIModule = g_pFileSystem->LoadModule(szDllName, "EXECUTABLE_PATH", true); // LoadModule() does a GetLocalCopy() call
 	m_GameUIFactory = Sys_GetFactory(m_hStaticGameUIModule);
 	if ( !m_GameUIFactory )
 	{

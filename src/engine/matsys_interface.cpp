@@ -37,6 +37,12 @@
 #include "game/client/iclientrendertargets.h"
 #include "tier2/tier2.h"
 #include "LoadScreenUpdate.h"
+#if defined( _X360 )
+#include "xbox/xbox_launch.h"
+#endif
+
+//X360TEMP
+#include "materialsystem/itexture.h"
 
 extern IFileSystem *g_pFileSystem;
 #ifndef SWDS
@@ -115,14 +121,20 @@ static ConVar mat_monitorgamma_tv_range_min( "mat_monitorgamma_tv_range_min", "1
 static ConVar mat_monitorgamma_tv_range_max( "mat_monitorgamma_tv_range_max", "255" );
 // TV's generally have a 2.5 gamma, so we need to convert our 2.2 frame buffer into a 2.5 frame buffer for display on a TV
 static ConVar mat_monitorgamma_tv_exp( "mat_monitorgamma_tv_exp", "2.5", 0, "", true, 1.0f, true, 4.0f );
+#ifdef _X360
+static ConVar mat_monitorgamma_tv_enabled( "mat_monitorgamma_tv_enabled", "1", FCVAR_ARCHIVE, "" );
+#else
 static ConVar mat_monitorgamma_tv_enabled( "mat_monitorgamma_tv_enabled", "0", FCVAR_ARCHIVE, "" );
+#endif
 				  
 ConVar r_drawbrushmodels( "r_drawbrushmodels", "1", FCVAR_CHEAT, "Render brush models. 0=Off, 1=Normal, 2=Wireframe" );
 
 ConVar r_shadowrendertotexture( "r_shadowrendertotexture", "0" );
 ConVar r_flashlightdepthtexture( "r_flashlightdepthtexture", "1" );
-ConVar r_waterforceexpensive( "r_waterforceexpensive", "1" );
-ConVar r_waterforcereflectentities( "r_waterforcereflectentities", "1" );
+#ifndef _X360
+ConVar r_waterforceexpensive( "r_waterforceexpensive", "0" );
+#endif
+ConVar r_waterforcereflectentities( "r_waterforcereflectentities", "0" );
 ConVar mat_motion_blur_enabled( "mat_motion_blur_enabled", "1" );
 
 // Note: this is only here so we can ship an update without changing materialsystem.dll.
@@ -146,6 +158,12 @@ static void NukeModeSwitchSaveGames( void )
 
 void mat_hdr_level_Callback( IConVar *var, const char *pOldString, float flOldValue )
 {
+	if ( IsX360() )
+	{
+		// can't support, expected to be static
+		return;
+	}
+
 	// Can do any reloading that is necessary here upon change.
 	// FIXME: should check if there is actually going to be a change here (ie. are we able to run in HDR
 	// given the current map and hardware.
@@ -194,7 +212,7 @@ static const char *s_pRegistryConVars[] =
 {
 	"mat_forceaniso",
 	"mat_picmip",
-	"mat_dxlevel",
+//	"mat_dxlevel",
 	"mat_trilinear",
 	"mat_vsync",
 	"mat_forcehardwaresync",
@@ -202,7 +220,9 @@ static const char *s_pRegistryConVars[] =
 	"mat_reducefillrate",
 	"r_shadowrendertotexture",
 	"r_rootlod",
+#ifndef _X360
 	"r_waterforceexpensive",
+#endif
 	"r_waterforcereflectentities",
 	"mat_antialias",
 	"mat_aaquality",
@@ -221,6 +241,8 @@ static const char *s_pRegistryConVars[] =
 static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &config )
 {
 #ifndef SWDS
+	if ( IsX360() )
+		return;
 
 #define READ_VIDCFG_ENTRY(name,entry) \
 	if( registry->ReadInt( name, -1 ) != -1 ) \
@@ -301,6 +323,8 @@ static void ReadMaterialSystemConfigFromRegistry( MaterialSystem_Config_t &confi
 static void WriteMaterialSystemConfigToRegistry( const MaterialSystem_Config_t &config )
 {
 #ifndef SWDS
+	if ( IsX360() )
+		return;
 
 #define WRITE_VIDCFG_ENTRY(name,entry) \
 	registry->WriteInt( name, entry )
@@ -334,6 +358,13 @@ static void WriteMaterialSystemConfigToRegistry( const MaterialSystem_Config_t &
 //-----------------------------------------------------------------------------
 static void OverrideMaterialSystemConfigFromCommandLine( MaterialSystem_Config_t &config )
 {
+	if ( IsX360() )
+	{
+		// these overrides cannot be supported
+		// the console configuration is explicit
+		return;
+	}
+
 	if ( CommandLine()->FindParm( "-dxlevel" ) )
 	{
 		config.dxSupportLevel = CommandLine()->ParmValue( "-dxlevel", config.dxSupportLevel );
@@ -559,7 +590,7 @@ void GetMaterialSystemConfigForBenchmarkUpload(KeyValues *dataToUpload)
 	dataToUpload->SetInt( "deviceID", driverInfo.m_DeviceID );
 	dataToUpload->SetInt( "ram", GetRam() );
 
-	const CPUInformation& pi = *GetCPUInformation();
+	const CPUInformation& pi = GetCPUInformation();
 	double fFrequency = pi.m_Speed / 1000000.0;
 	dataToUpload->SetInt( "cpu_speed", (int)fFrequency );
 	dataToUpload->SetString( "cpu", pi.m_szProcessorID );
@@ -585,7 +616,9 @@ void GetMaterialSystemConfigForBenchmarkUpload(KeyValues *dataToUpload)
 	dataToUpload->SetInt( "ReduceFillRate", (g_pMaterialSystemConfig->m_Flags & MATSYS_VIDCFG_FLAGS_REDUCE_FILLRATE) ? 1 : 0 );
 	dataToUpload->SetInt( "RenderToTextureShadows", r_shadowrendertotexture.GetInt() ? 1 : 0 );
 	dataToUpload->SetInt( "FlashlightDepthTexture", r_flashlightdepthtexture.GetInt() ? 1 : 0 );
+#ifndef _X360
 	dataToUpload->SetInt( "RealtimeWaterReflection", r_waterforceexpensive.GetInt() ? 1 : 0 );
+#endif
 	dataToUpload->SetInt( "WaterReflectEntities", r_waterforcereflectentities.GetInt() ? 1 : 0 );
 #endif
 }
@@ -605,7 +638,6 @@ void PrintMaterialSystemConfig( const MaterialSystem_Config_t &config )
 	Warning( "dxSupportLevel: %d\n", config.dxSupportLevel );
 	Warning( "monitorGamma: %f\n", config.m_fMonitorGamma );
 	Warning( "MATSYS_VIDCFG_FLAGS_WINDOWED: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_WINDOWED ) ? "true" : "false" );
-	Warning( "MATSYS_VIDCFG_FLAGS_NOBORDER: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_NOBORDERWINDOW ) ? "true" : "false" );
 	Warning( "MATSYS_VIDCFG_FLAGS_FORCE_TRILINEAR: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_FORCE_TRILINEAR ) ? "true" : "false" );
 	Warning( "MATSYS_VIDCFG_FLAGS_FORCE_HWSYNC: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_FORCE_HWSYNC ) ? "true" : "false" );
 	Warning( "MATSYS_VIDCFG_FLAGS_DISABLE_SPECULAR: %s\n", ( config.m_Flags & MATSYS_VIDCFG_FLAGS_DISABLE_SPECULAR ) ? "true" : "false" );
@@ -615,7 +647,9 @@ void PrintMaterialSystemConfig( const MaterialSystem_Config_t &config )
 	Warning( "r_shadowrendertotexture: %s\n", r_shadowrendertotexture.GetInt() ? "true" : "false" );
 	Warning( "motionblur: %s\n", config.m_bMotionBlur ? "true" : "false" );
 	Warning( "shadowdepthtexture: %s\n", config.m_bShadowDepthTexture ? "true" : "false" );
+#ifndef _X360
 	Warning( "r_waterforceexpensive: %s\n", r_waterforceexpensive.GetInt() ? "true" : "false" );
+#endif
 	Warning( "r_waterforcereflectentities: %s\n", r_waterforcereflectentities.GetInt() ? "true" : "false" );
 }
 
@@ -625,26 +659,17 @@ CON_COMMAND( mat_configcurrent, "show the current video control panel config for
 	PrintMaterialSystemConfig( config );
 }
 
-#if !defined(SWDS)
+#if !defined(SWDS) && !defined( _X360 )
 CON_COMMAND( mat_setvideomode, "sets the width, height, windowed state of the material system" )
 {
-	if ( args.ArgC() < 4 )
-	{
-		ConMsg ( "usage: width, height, windowed\n" );
+	if ( args.ArgC() != 4 )
 		return;
-	}
 
 	int nWidth = Q_atoi( args[1] );
 	int nHeight = Q_atoi( args[2] );
 	bool bWindowed = Q_atoi( args[3] ) > 0 ? true : false;
-	bool isNoBorder = videomode->IsNoborderWindowMode();
 
-	if (args.ArgC() >= 5)
-	{
-		isNoBorder = Q_atoi(args[4]) > 0 ? true : false;
-	}
-
-	videomode->SetMode( nWidth, nHeight, bWindowed, isNoBorder );
+	videomode->SetMode( nWidth, nHeight, bWindowed );
 }
 #endif
 
@@ -691,6 +716,9 @@ CON_COMMAND_F( mat_suppress, "Supress a material from drawing", FCVAR_CHEAT )
 
 static ITexture *CreatePowerOfTwoFBTexture( void )
 {
+	if ( IsX360() )
+		return NULL;
+
 	return materials->CreateNamedRenderTargetTextureEx2( 
 		"_rt_PowerOfTwoFB",
 		1024, 1024, RT_SIZE_DEFAULT,
@@ -788,7 +816,11 @@ static ITexture *CreateFullFrameFBTexture( int textureIndex, int iExtraFlags = 0
 	}
 
 	int rtFlags = iExtraFlags | CREATERENDERTARGETFLAGS_HDR;
-	
+	if ( IsX360() )
+	{
+		// just make the system memory texture only
+		rtFlags |= CREATERENDERTARGETFLAGS_NOEDRAM;
+	}
 	return materials->CreateNamedRenderTargetTextureEx2(
 		textureName,
 		1, 1, RT_SIZE_FULL_FRAME_BUFFER, materials->GetBackBufferFormat(), 
@@ -799,7 +831,18 @@ static ITexture *CreateFullFrameFBTexture( int textureIndex, int iExtraFlags = 0
 
 static ITexture *CreateFullFrameDepthTexture( void )
 {
-	materials->AddTextureAlias( "_rt_FullFrameDepth", "_rt_PowerOfTwoFB" );
+	if ( IsX360() )
+	{
+		return materials->CreateNamedRenderTargetTextureEx2( "_rt_FullFrameDepth", 1, 1, 
+			RT_SIZE_FULL_FRAME_BUFFER, materials->GetShadowDepthTextureFormat(), MATERIAL_RT_DEPTH_NONE,
+			TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_POINTSAMPLE,
+			CREATERENDERTARGETFLAGS_NOEDRAM );
+
+	}
+	else
+	{
+		materials->AddTextureAlias( "_rt_FullFrameDepth", "_rt_PowerOfTwoFB" );
+	}
 	return NULL;
 }
 
@@ -841,7 +884,10 @@ void InitWellKnownRenderTargets( void )
 
 		// Used in Bloom effects
 		g_QuarterSizedFBTexture0.Init( CreateQuarterSizedFBTexture( 0, 0 ) );
-		g_QuarterSizedFBTexture1.Init( CreateQuarterSizedFBTexture( 1, 0 ) );			
+		if( IsX360() )
+			materials->AddTextureAlias( "_rt_SmallFB1", "_rt_SmallFB0" ); //an alias is good enough on the 360 since we don't have a texture lock problem during post processing
+		else
+			g_QuarterSizedFBTexture1.Init( CreateQuarterSizedFBTexture( 1, 0 ) );			
 	}
 
 	if ( IsPC() )
@@ -853,6 +899,11 @@ void InitWellKnownRenderTargets( void )
 
 	g_FullFrameFBTexture0.Init( CreateFullFrameFBTexture( 0 ) );
 	g_FullFrameFBTexture1.Init( CreateFullFrameFBTexture( 1 ) );
+
+	if ( IsX360() )
+	{
+		g_FullFrameFBTexture2.Init( CreateFullFrameFBTexture( 2, CREATERENDERTARGETFLAGS_TEMP ) );
+	}
 
 	g_FullFrameDepth.Init( CreateFullFrameDepthTexture() );
 
@@ -885,6 +936,14 @@ void InitWellKnownRenderTargets( void )
 void ShutdownWellKnownRenderTargets( void )
 {
 #if !defined( SWDS )
+	if ( IsX360() )
+	{
+		// cannot allowing RT's to reconstruct, causes other fatal problems
+		// many other 360 systems have been coded with this expected constraint
+		Assert( 0 );
+		return;
+	}
+
 	if ( IsPC() && mat_debugalttab.GetBool() )
 	{
 		Warning( "mat_debugalttab: ShutdownWellKnownRenderTargets\n" );
@@ -895,14 +954,20 @@ void ShutdownWellKnownRenderTargets( void )
 		
 	g_QuarterSizedFBTexture0.Shutdown();
 	
-	g_QuarterSizedFBTexture1.Shutdown();
+	if( IsX360() )
+		materials->RemoveTextureAlias( "_rt_SmallFB1" );
+	else
+		g_QuarterSizedFBTexture1.Shutdown();
 	
 	g_TeenyFBTexture0.Shutdown();
 	g_TeenyFBTexture1.Shutdown();
 	g_TeenyFBTexture2.Shutdown();
 	g_FullFrameFBTexture0.Shutdown();
 	g_FullFrameFBTexture1.Shutdown();
-	
+	if ( IsX360() )
+	{
+		g_FullFrameFBTexture2.Shutdown();
+	}
 	CMatRenderContextPtr pRenderContext( g_pMaterialSystem );
 	pRenderContext->SetNonInteractiveTempFullscreenBuffer( NULL, MATERIAL_NON_INTERACTIVE_MODE_LEVEL_LOAD );
 
@@ -1060,10 +1125,16 @@ void InitStartupScreen()
 	if ( !IsX360() )
 		return;
 
+#ifdef _X360
+	XVIDEO_MODE videoMode;
+	XGetVideoMode( &videoMode );
+	bool bIsWidescreen = videoMode.fIsWideScreen != FALSE;
+#else
 	int width, height;
 	materials->GetBackBufferDimensions( width, height );
 	float aspectRatio = (float)width/(float)height;
 	bool bIsWidescreen = aspectRatio >= 1.5999f;
+#endif
 
 	// NOTE: Brutal hackery, this code is duplicated in gameui.dll
 	// but I have to do this prior to gameui being loaded.
@@ -1159,6 +1230,9 @@ void ReleaseMaterialSystemObjects()
 
 void RestoreMaterialSystemObjects( int nChangeFlags )
 {
+	if ( IsX360() )
+		return;
+
 	g_LostVideoMemory = false;
 
 	if ( nChangeFlags & MATERIAL_RESTORE_VERTEX_FORMAT_CHANGED )

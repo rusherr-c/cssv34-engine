@@ -736,6 +736,11 @@ $Project "SDKLauncher"
 	"sdklauncher\SDKLauncher.vpc" [$WIN32]
 }
 
+$Project "steam_api"
+{
+	"thirdparty\StubSteamAPI\steam_api.vpc" [$WIN32||$LINUX]
+}
+
 $Project "ServerBrowser"
 {
 	"ServerBrowser\ServerBrowser.vpc" [$WIN32||$X360]
@@ -1319,7 +1324,12 @@ $Project "vstdlib"
 
 $Project "vpklib"
 {
-	"vpklib\vpklib.vpc"		[$WIN32 || $X360]
+	"vpklib\vpklib.vpc"		[$WIN32]
+}
+
+$Project "vpk"
+{
+	"utils\vpk\vpk.vpc"		[$WIN32]
 }
 
 $Project "vstutils_maya7"

@@ -107,7 +107,7 @@ struct loopback_t
 
 #include "tier0/memdbgon.h"
 
-DEFINE_FIXEDSIZE_ALLOCATOR( loopback_t, 2, CUtlMemoryPool::GROW_SLOW );
+DEFINE_FIXEDSIZE_ALLOCATOR( loopback_t, 2, CMemoryPool::GROW_SLOW );
 
 // Split long packets.  Anything over 1460 is failing on some routers
 typedef struct
@@ -1373,7 +1373,7 @@ bool NET_ReceiveDatagram ( const int sock, netpacket_t * packet )
 					bufVoice.EnsureCapacity( unDecompressedVoice );
 
 					// Decompress it
-					lzss.SafeUncompress( pVoice, (byte *)bufVoice.Base(), bufVoice.Count() );
+					lzss.Uncompress( pVoice, (byte *)bufVoice.Base() );
 
 					nVoiceBytes = unDecompressedVoice;
 				}
@@ -1417,7 +1417,7 @@ bool NET_ReceiveDatagram ( const int sock, netpacket_t * packet )
 				CUtlMemoryFixedGrowable< byte, NET_COMPRESSION_STACKBUF_SIZE > memDecompressed( NET_COMPRESSION_STACKBUF_SIZE );
 				memDecompressed.EnsureCapacity( actualSize );
 
-				unsigned int uDecompressedSize = lzss.SafeUncompress( pCompressedData, memDecompressed.Base(), memDecompressed.Count() );
+				unsigned int uDecompressedSize = lzss.Uncompress( pCompressedData, memDecompressed.Base() );
 
 				// packet->wiresize is already set
 				Q_memcpy( packet->data, memDecompressed.Base(), uDecompressedSize );
@@ -2990,7 +2990,7 @@ void NET_Init( bool bIsDedicated )
 			Msg( "Xbox 360 network is Unsecure\n" );
 		}
 
-		//net_reduce_payloadsize.SetValue( true );
+		net_reduce_payloadsize.SetValue( true );
 
 		INT err = XNetStartup( &xnsp );
 		if ( err )
@@ -3263,7 +3263,7 @@ bool NET_BufferToBufferDecompress( char *dest, unsigned int *destLen, char *sour
 		}
 		else
 		{
-			*destLen = s.SafeUncompress( (byte *)source, (byte *)dest, *destLen );
+			*destLen = s.Uncompress( (byte *)source, (byte *)dest );
 		}
 	}
 	else

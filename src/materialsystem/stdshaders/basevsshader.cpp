@@ -2047,7 +2047,7 @@ void CBaseVSShader::DrawFlashlight_dx90( IMaterialVar** params, IShaderDynamicAP
 }
 
 // Take 0..1 seed and map to (u, v) coordinate to be used in shadow filter jittering...
-void CBaseVSShader::HashShadow2DJitter( const float fJitterSeed, float *fU, float* fV )
+void CBaseVSShader::HashShadow2DJitter( float fJitterSeed, float *fU, float* fV )
 {
 	const int nTexRes = 32;
 	int nSeed = fmod (fJitterSeed, 1.0f) * nTexRes * nTexRes;

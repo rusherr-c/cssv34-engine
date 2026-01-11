@@ -80,6 +80,9 @@ public:
 		return g_pFullFileSystem->ReadLine( pOutput, maxChars, m_FileHandle );
 	}
 
+	// read every line of the file into a vector of strings
+	void ReadLines(CUtlStringList& sList, int nMaxLineLength = 2048);
+
 	int Read( void* pOutput, int size )
 	{
 		return g_pFullFileSystem->Read( pOutput, size, m_FileHandle );

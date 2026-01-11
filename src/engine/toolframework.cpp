@@ -576,9 +576,10 @@ void CToolFrameworkInternal::LoadTools()
 {
 	m_bInToolMode = true;
 
+	// Load rootdir/bin/enginetools.txt
 	KeyValues *kv = new KeyValues( "enginetools" );
 	Assert( kv );
-	if ( kv && kv->LoadFromFile( g_pFileSystem, "enginetools.txt", "BASEBIN" ) )
+	if ( kv && kv->LoadFromFile( g_pFileSystem, "enginetools.txt", "EXECUTABLE_PATH" ) )
 	{
 		for ( KeyValues *tool = kv->GetFirstSubKey();
 				tool != NULL;
@@ -586,9 +587,8 @@ void CToolFrameworkInternal::LoadTools()
 		{
 			if ( !Q_stricmp( tool->GetName(),  "library" ) )
 			{
-				char str[MAX_PATH];
-				sprintf(str, "%s/%s", PLATFORM_SUBDIR, tool->GetString());
-				LoadToolsFromLibrary( str );
+				// CHECK both bin/tools and gamedir/bin/tools
+				LoadToolsFromLibrary( tool->GetString() );
 			}
 		}
 

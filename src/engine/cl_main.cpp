@@ -307,7 +307,7 @@ void CL_InitHL2DemoFlag()
 			char szSubscribedValue[10];
 
 			if ( VCRGetMode() != VCR_Playback )
-				nRet = SteamApps()->BIsSubscribedApp( 220 );
+				nRet = SteamApps()->GetAppData( 220, "subscribed", szSubscribedValue, sizeof(szSubscribedValue) );
 #if !defined( NO_VCR )
 			VCRGenericValue( "e", &nRet, sizeof( nRet ) );
 #endif
@@ -322,6 +322,8 @@ void CL_InitHL2DemoFlag()
 			s_bIsHL2Demo = true;
 		}
 	}
+#else
+	s_bIsHL2Demo = false;
 #endif
 #endif
 }
@@ -349,7 +351,7 @@ void CL_InitPortalDemoFlag()
 			char szSubscribedValue[10];
 
 			if ( VCRGetMode() != VCR_Playback )
-				nRet = SteamApps()->BIsSubscribedApp( 220 );
+				nRet = SteamApps()->GetAppData( 400, "subscribed", szSubscribedValue, sizeof(szSubscribedValue) );
 #if !defined( NO_VCR )
 			VCRGenericValue( "e", &nRet, sizeof( nRet ) );
 #endif
@@ -1001,11 +1003,11 @@ void CL_FullyConnected( void )
  	g_ClientDLL->LevelInitPostEntity();
 
 	// communicate to tracker that we're in a game
-	int ip = cl.m_NetChannel->GetRemoteAddress().GetIPNetworkByteOrder();
+	int ip = cl.m_NetChannel->GetRemoteAddress().GetIP();
 	short port = cl.m_NetChannel->GetRemoteAddress().GetPort();
 	if (!port)
 	{
-		ip = net_local_adr.GetIPNetworkByteOrder();
+		ip = net_local_adr.GetIP();
 		port = net_local_adr.GetPort();
 	}
 
@@ -1066,7 +1068,7 @@ void CL_FullyConnected( void )
 			}
 			void R_BuildCubemapSamples( int numIterations );
 			R_BuildCubemapSamples( numIterations );
-			//Cbuf_AddText( "quit\n" );
+			Cbuf_AddText( "quit\n" );
 		}
 		if ( CommandLine()->FindParm("-exit") )
 		{
@@ -1367,6 +1369,11 @@ void CL_TakeSnapshotAndSwap()
 
 	// take screenshot for bx movie maker
 	EngineTool_UpdateScreenshot();
+}
+
+bool IsIntegralValue( float flValue, float flTolerance = 0.001f )
+{
+	return fabs( RoundFloatToInt( flValue ) - flValue ) < flTolerance;
 }
 
 static float s_flPreviousHostFramerate = 0;
@@ -2221,12 +2228,84 @@ void CL_CheckToDisplayStartupMenus( const CCommand &args )
 	}
 }
 
+static float s_fDemoRevealGameUITime = -1;
+float s_fDemoPlayMusicTime = -1;
+static bool s_bIsRavenHolmn = false;
+//-----------------------------------------------------------------------------
+// Purpose: run the special demo logic when transitioning from the trainstation levels
+//----------------------------------------------------------------------------
+void CL_DemoTransitionFromTrainstation()
+{
+	// kick them out to GameUI instead and bring up the chapter page with raveholm unlocked
+	sv_unlockedchapters.SetValue(6); // unlock ravenholm
+	Cbuf_AddText( "sv_cheats 1; fadeout 1.5; sv_cheats 0;");
+	Cbuf_Execute();
+	s_fDemoRevealGameUITime = Sys_FloatTime() + 1.5;
+	s_bIsRavenHolmn = false;
+}
+
+void CL_DemoTransitionFromRavenholm()
+{
+	Cbuf_AddText( "sv_cheats 1; fadeout 2; sv_cheats 0;");
+	Cbuf_Execute();
+	s_fDemoRevealGameUITime = Sys_FloatTime() + 1.9;
+	s_bIsRavenHolmn = true;
+}
+
+void CL_DemoTransitionFromTestChmb()
+{
+	Cbuf_AddText( "sv_cheats 1; fadeout 2; sv_cheats 0;");
+	Cbuf_Execute();
+	s_fDemoRevealGameUITime = Sys_FloatTime() + 1.9;	
+}
+
 
 //-----------------------------------------------------------------------------
 // Purpose: make the gameui appear after a certain interval
 //----------------------------------------------------------------------------
 void V_RenderVGuiOnly();
 bool V_CheckGamma();
+void CL_DemoCheckGameUIRevealTime( ) 
+{
+	if ( s_fDemoRevealGameUITime > 0 )
+	{
+		if ( s_fDemoRevealGameUITime < Sys_FloatTime() )
+		{
+			s_fDemoRevealGameUITime = -1;
+
+			SCR_BeginLoadingPlaque();
+			Cbuf_AddText( "disconnect;");
+
+			CCommand args;
+			CL_CheckToDisplayStartupMenus( args );
+
+			s_fDemoPlayMusicTime = Sys_FloatTime() + 1.0;
+		}
+	}
+
+	if ( s_fDemoPlayMusicTime > 0 )
+	{
+		V_CheckGamma();
+		V_RenderVGuiOnly();
+		if ( s_fDemoPlayMusicTime < Sys_FloatTime() )
+		{
+			s_fDemoPlayMusicTime = -1;
+			EngineVGui()->ActivateGameUI();
+
+			if ( CL_IsHL2Demo() )
+			{
+				if ( s_bIsRavenHolmn )
+				{
+					Cbuf_AddText( "play music/ravenholm_1.mp3;" );
+				}
+				else
+				{
+					EngineVGui()->ShowNewGameDialog(6);// bring up the new game dialog in game UI
+				}
+			}
+		}
+	}
+}
 
 
 //-----------------------------------------------------------------------------

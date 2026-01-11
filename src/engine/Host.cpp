@@ -378,7 +378,7 @@ void ReserveThreads( int nToReserve )
 		g_pThreadPool->QueueCall( &ThreadPoolReserverFunction )->Release();
 	}
 
-	Msg( "%d threads being reserved\n", (int)g_NumReservedThreads );
+	Msg( "%d threads being reserved\n", g_NumReservedThreads );
 }
 
 void OnChangeThreadReserve( IConVar *var, const char *pOldValue, float flOldValue )
@@ -2165,6 +2165,12 @@ void _Host_RunFrame_Client( bool framefinished )
 	// Resend connection request if needed.
 	cl.RunFrame();
 
+	if ( CL_IsHL2Demo() || CL_IsPortalDemo() ) // don't need sv.IsDedicated() because ded servers don't run this
+	{
+		void CL_DemoCheckGameUIRevealTime();
+		CL_DemoCheckGameUIRevealTime();
+	}
+
 	Steam3Client().RunFrame();
 
 	g_HostTimes.EndFrameSegment( FRAME_SEGMENT_CLIENT );
@@ -2421,7 +2427,6 @@ S_API int SteamGameServer_GetIPCCallCount();
 #else
 S_API int SteamGameServer_GetIPCCallCount() { return 0; }
 #endif
-#pragma warning(disable:4700)
 void Host_ShowIPCCallCount()
 {
 	// If set to 0 then get out.
@@ -3014,7 +3019,24 @@ bool IsLowViolence_Secure()
 #ifndef NO_STEAM
 	if ( !IsX360() && SteamApps() )
 	{
-		return SteamApps()->BIsLowViolence();
+		//
+		// Check country of purchase.
+		//
+		char szCountry[80];
+		szCountry[0] = '\0';
+
+		// Determine violence settings based on the country of purchase.		
+		int nSuccess = SteamApps()->GetAppData( g_iSteamAppID, "country", szCountry, sizeof(szCountry) );
+		if ( nSuccess <= 0 )
+		{
+			return false;
+		}	
+
+		// Germany gets low violence.
+		if ( !Q_stricmp( szCountry, "de" ) )
+		{
+			return true;
+		}
 	}
 	else if ( IsX360() )
 	{
@@ -3135,7 +3157,7 @@ void Host_CheckGore( void )
 //-----------------------------------------------------------------------------
 void Host_InitProcessor( void )
 {
-	const CPUInformation& pi = *GetCPUInformation();
+	const CPUInformation& pi = GetCPUInformation();
 
 	// Compute Frequency in Mhz: 
 	char* szFrequencyDenomination = "Mhz";
@@ -3381,10 +3403,18 @@ void Host_Init( bool bDedicated )
 
 	TRACEINIT( sv.Init( bDedicated ), sv.Shutdown() );
 
+#if !defined( SWDS )
+	// turn on the Steam3 API early so we can query app data up front
+	TRACEINIT( Steam3Client().Activate(), Steam3Client().Shutdown() );
+#endif
+
 	if ( !CommandLine()->FindParm( "-nogamedll" ) )
 	{
 		SV_InitGameDLL();
 	}
+
+	// Allow master server interface to register its commands
+	TRACEINIT( master->Init(), master->Shutdown() );
 
 	TRACEINIT( g_Log.Init(), g_Log.Shutdown() );
 
@@ -3395,9 +3425,6 @@ void Host_Init( bool bDedicated )
 #if defined( _WIN32 ) && !defined( SWDS )
 	if ( !bDedicated )
 	{
-		// turn on the Steam3 API early so we can query app data up front
-		TRACEINIT( Steam3Client().Activate(), Steam3Client().Shutdown() );
-
 		TRACEINIT( CL_Init(), CL_Shutdown() );
 
 		// NOTE: This depends on the mod search path being set up
@@ -3422,8 +3449,6 @@ void Host_Init( bool bDedicated )
 
 		TRACEINIT( Decal_Init(), Decal_Shutdown() );
 
-		TRACEINIT( S_Init(), S_Shutdown() );
-
 		// hookup interfaces
 		EngineVGui()->Connect();
 	}
@@ -3445,6 +3470,7 @@ void Host_Init( bool bDedicated )
 
 #ifndef SWDS
 	Host_ReadConfiguration();
+	TRACEINIT( S_Init(), S_Shutdown() );
 #endif
 
 	// Execute valve.rc
@@ -3730,6 +3756,13 @@ void Host_Changelevel( bool loadfromsavedgame, const char *mapname, const char *
 #if !defined(SWDS)
 	saverestore->FinishAsyncSave();
 #endif
+
+	if ( IsUsingMasterLegacyMode() && master && master->RestartOnLevelChange() )
+	{
+		Cbuf_Clear();
+		Cbuf_AddText( "quit\n" );
+		return;
+	}
 
 	if ( sv.RestartOnLevelChange() )
 	{
@@ -4087,6 +4120,8 @@ void Host_Shutdown(void)
 	TRACESHUTDOWN( g_Log.Shutdown() );
 
 	TRACESHUTDOWN( g_GameEventManager.Shutdown() );
+
+	TRACESHUTDOWN( master->Shutdown() );
 
 	TRACESHUTDOWN( sv.Shutdown() );
 

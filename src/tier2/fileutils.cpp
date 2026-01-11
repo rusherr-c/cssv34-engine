@@ -355,3 +355,15 @@ void AddFilesToList( CUtlVector< CUtlString > &list, const char *pDirectory, con
 		AddFilesToList( list, subDirs[i], pPathID, pExtension );
 	}
 }
+
+void CBaseFile::ReadLines(CUtlStringList& lineList, int nMaxLineLength)
+{
+	char* pLine = (char*)stackalloc(nMaxLineLength);
+	while (ReadLine(pLine, nMaxLineLength))
+	{
+		char* pEOL = strchr(pLine, '\n');					// kill the \n
+		if (pEOL)
+			*pEOL = 0;
+		lineList.CopyAndAddToTail(pLine);
+	}
+}
