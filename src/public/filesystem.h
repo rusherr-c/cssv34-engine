@@ -14,7 +14,7 @@
 #include "appframework/IAppSystem.h"
 #include "tier1/checksum_crc.h"
 #include "tier1/checksum_md5.h"
-
+#define SUPPORT_PACKED_STORE
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
 

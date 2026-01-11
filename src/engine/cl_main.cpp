@@ -293,39 +293,7 @@ const CPrecacheUserData* CL_GetPrecacheUserData( INetworkStringTable *table, int
 static bool s_bIsHL2Demo = false;
 void CL_InitHL2DemoFlag()
 {
-#ifndef NO_STEAM
-#if defined(_X360)
-	s_bIsHL2Demo = false;
-#else
-	static bool initialized = false;
-	if ( !initialized )
-	{
-		if ( SteamApps() && !Q_stricmp( COM_GetModDirectory(), "hl2" ) && g_pFileSystem->IsSteam() )
-		{
-			initialized = true;
-			int nRet = 0;
-			char szSubscribedValue[10];
-
-			if ( VCRGetMode() != VCR_Playback )
-				nRet = SteamApps()->GetAppData( 220, "subscribed", szSubscribedValue, sizeof(szSubscribedValue) );
-#if !defined( NO_VCR )
-			VCRGenericValue( "e", &nRet, sizeof( nRet ) );
-#endif
-			if ( nRet && Q_atoi( szSubscribedValue ) == 0 ) // if they don't own HL2 this must be the demo!
-			{
-					s_bIsHL2Demo = true;
-			}
-		}
-		
-		if ( !Q_stricmp( COM_GetModDirectory(), "hl2" ) && CommandLine()->CheckParm( "-demo" ) ) 
-		{
-			s_bIsHL2Demo = true;
-		}
-	}
-#else
-	s_bIsHL2Demo = false;
-#endif
-#endif
+	// dont do anything...
 }
 
 //-----------------------------------------------------------------------------
@@ -340,35 +308,7 @@ bool CL_IsHL2Demo()
 static bool s_bIsPortalDemo = false;
 void CL_InitPortalDemoFlag()
 {
-#ifndef NO_STEAM
-	static bool initialized = false;
-	if ( !initialized )
-	{
-		if ( SteamApps() && !Q_stricmp( COM_GetModDirectory(), "portal" ) && g_pFileSystem->IsSteam() )
-		{
-			initialized = true;
-			int nRet = 0;
-			char szSubscribedValue[10];
-
-			if ( VCRGetMode() != VCR_Playback )
-				nRet = SteamApps()->GetAppData( 400, "subscribed", szSubscribedValue, sizeof(szSubscribedValue) );
-#if !defined( NO_VCR )
-			VCRGenericValue( "e", &nRet, sizeof( nRet ) );
-#endif
-			if ( nRet && Q_atoi( szSubscribedValue ) == 0 ) // if they don't own HL2 this must be the demo!
-			{
-				s_bIsPortalDemo = true;
-			}
-		}
-		
-		if ( !Q_stricmp( COM_GetModDirectory(), "portal" ) && CommandLine()->CheckParm( "-demo" ) ) 
-		{
-			s_bIsPortalDemo = true;
-		}
-	}
-#else
-	static bool initialized = true;
-#endif
+	// dont do anything...
 }
 
 //-----------------------------------------------------------------------------
@@ -1371,10 +1311,7 @@ void CL_TakeSnapshotAndSwap()
 	EngineTool_UpdateScreenshot();
 }
 
-bool IsIntegralValue( float flValue, float flTolerance = 0.001f )
-{
-	return fabs( RoundFloatToInt( flValue ) - flValue ) < flTolerance;
-}
+bool IsIntegralValue(float flValue, float flTolerance);
 
 static float s_flPreviousHostFramerate = 0;
 void CL_StartMovie( const char *filename, int flags, int nWidth, int nHeight, float flFrameRate, int jpeg_quality )
@@ -2446,9 +2383,6 @@ void CL_SetSteamCrashComment()
 
 		char full[ 4096 ];
 		Q_snprintf( full, sizeof( full ), "%sPP PAGES: used: %d, free %d\n", g_minidumpinfo, g_pagedpoolinfo.numPagesUsed, g_pagedpoolinfo.numPagesFree );
-#ifndef NO_STEAM
-	SteamAPI_SetMiniDumpComment( full );
-#endif
 }
 
 

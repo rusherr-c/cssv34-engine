@@ -475,8 +475,8 @@ public:
 	virtual bool		IsInCommentaryMode( void );
 	virtual float		GetScreenAspectRatio();
 
-	virtual unsigned int		GetEngineBuildNumber() { return PROTOCOL_VERSION; }
-	virtual const char *		GetProductVersionString() { return gpszVersionString; }
+	virtual unsigned int		GetEngineBuildNumber() { return build_number(); }
+	virtual const char *		GetProductVersionString() { return GetSteamInfIDVersionInfo().szVersionString; }
 	virtual void				GrabPreColorCorrectedFrame( int x, int y, int width, int height );
 	virtual bool				IsHammerRunning( ) const;
 

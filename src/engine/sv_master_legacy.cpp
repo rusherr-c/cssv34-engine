@@ -11,6 +11,7 @@
 #include "server.h"
 #include "sv_master_legacy.h"
 #include "proto_oob.h"
+#include "sys_dll.h"
 #include "sv_main.h" // SV_GetFakeClientCount()
 #include "tier0/icommandline.h"
 #include "FindSteamServers.h"
@@ -31,8 +32,7 @@ extern ConVar sv_visiblemaxplayers;
 extern ConVar sv_lan;
 extern ConVar sv_tags;
 
-extern char gpszVersionString[32];
-extern char gpszProductString[32];
+
 extern int g_iSteamAppID;
 
 #define MASTER_SERVER_PROTOCOL_VERSION		7
@@ -55,7 +55,7 @@ extern int g_iSteamAppID;
 bool IsUsingMasterLegacyMode()
 {
 #ifndef NO_STEAM
-	return sv_master_legacy_mode.GetBool() || !SteamMasterServerUpdater();
+	return sv_master_legacy_mode.GetBool();
 #else
 	return true;
 #endif
@@ -463,14 +463,14 @@ void CMaster::SendHeartbeat ( netadr_t &adr, int challangenr, CBaseServer *pServ
 	Info_SetValueForKey( info, "os", szOS , MAX_SINFO );
 	Info_SetValueForKey( info, "lan", Steam3Server().BLanOnly() ?"1":"0", MAX_SINFO ); 
 	Info_SetValueForKey( info, "region", sv_region.GetString(), MAX_SINFO );
-	Info_SetValueForKey( info, "gametype", sv_tags.GetString(), MAX_SINFO );
+	//Info_SetValueForKey( info, "gametype", sv_tags.GetString(), MAX_SINFO ); //// Source 2007 key that we would not support
 	
 	if ( pServer->IsHLTV() )
 	{
 		Info_SetValueForKey( info, "type", "p"  , MAX_SINFO ); // p = HLTV proxy
 		Info_SetValueForKey( info, "secure", "0", MAX_SINFO ); // never requires a secure client
 		Info_SetValueForKey( info, "version", "1.0.0.0", MAX_SINFO );
-		Info_SetValueForKey( info, "product", "srctv", MAX_SINFO );
+		Info_SetValueForKey( info, "product", "srctv", MAX_SINFO ); // SourceTV
 
 		// Info_SetValueForKey( info, "proxy", hltv->IsMasterProxy()?"1":"2", MAX_SINFO );
 	}
@@ -478,8 +478,8 @@ void CMaster::SendHeartbeat ( netadr_t &adr, int challangenr, CBaseServer *pServ
 	{
 		Info_SetValueForKey( info, "type", pServer->IsDedicated() ? "d" : "l"  , MAX_SINFO );
 		Info_SetValueForKey( info, "secure", Steam3Server().BSecure() ? "1" : "0", MAX_SINFO );
-		Info_SetValueForKey( info, "version", gpszVersionString, MAX_SINFO );
-		Info_SetValueForKey( info, "product", gpszProductString, MAX_SINFO );
+		Info_SetValueForKey( info, "version", GetSteamInfIDVersionInfo().szVersionString, MAX_SINFO );
+		Info_SetValueForKey( info, "product", GetSteamInfIDVersionInfo().szProductString, MAX_SINFO );
 	}
 		
 
@@ -1126,7 +1126,7 @@ void CMaster::ReplyInfo( netadr_t &adr, CBaseServer *pServer )
 	buf.WriteByte( bIsSecure?1:0 );
 
 	char verString[40];
-	Q_snprintf( verString, sizeof(verString), "%s", gpszVersionString );
+	Q_snprintf( verString, sizeof(verString), "%s", GetSteamInfIDVersionInfo().szVersionString );
 	buf.WriteString( verString );
 
 	// temp hack until we kill the legacy interface

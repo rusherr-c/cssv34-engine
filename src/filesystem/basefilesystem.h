@@ -61,6 +61,9 @@
 #include "byteswap.h"
 #include "threadsaferefcountedobject.h"
 #include "filetracker.h"
+#if defined( SUPPORT_PACKED_STORE )
+#include "vpklib/packedstore.h"
+#endif
 
 #include "tier0/memdbgon.h"
 
@@ -155,6 +158,9 @@ public:
 #endif
 
 	CPackFileHandle		*m_pPackFileHandle;
+#if defined( SUPPORT_PACKED_STORE )
+	CPackedStoreFileHandle m_VPKHandle;
+#endif
 	int64				m_nLength;
 	FileType_t			m_type;
 	FILE				*m_pFile;
@@ -353,6 +359,20 @@ public:
 #ifdef AsyncRead
 #undef AsyncRead
 #undef AsyncReadMutiple
+#endif
+
+#ifdef SUPPORT_PACKED_STORE
+class CPackedStoreRefCount : public CPackedStore, public CRefCounted<CRefCountServiceMT>
+{
+public:
+	CPackedStoreRefCount(char const* pFileBasename, char* pszFName, IBaseFileSystem* pFS);
+
+	bool m_bSignatureValid;
+};
+#else
+class CPackedStoreRefCount : public CRefCounted<CRefCountServiceMT>
+{
+};
 #endif
 
 //-----------------------------------------------------------------------------
@@ -609,6 +629,11 @@ public:
 		void SetPackFile(CPackFile *pPackFile) { m_pPackFile = pPackFile; }
 		CPackFile *GetPackFile() const { return m_pPackFile; }
 
+		#ifdef SUPPORT_PACKED_STORE
+		void SetPackedStore(CPackedStoreRefCount* pPackedStore) { m_pPackedStore = pPackedStore; }
+		#endif
+		CPackedStoreRefCount* GetPackedStore() const { return m_pPackedStore; }
+
 		int					m_storeId;
 
 		// Used to track if its search 
@@ -620,6 +645,7 @@ public:
 		CUtlSymbol			m_Path;
 		const char			*m_pDebugPath;
 		CPackFile			*m_pPackFile;
+		CPackedStoreRefCount* m_pPackedStore;
 	};
 
 	class CSearchPathsVisits
@@ -876,6 +902,8 @@ protected:
 	void						AddMapPackFile( const char *pPath, const char *pPathID, SearchPathAdd_t addType );
 	void						AddPackFiles( const char *pPath, const CUtlSymbol &pathID, SearchPathAdd_t addType );
 	bool						PreparePackFile( CPackFile &packfile, int offsetofpackinmetafile, int64 filelen );
+	void						AddVPKFile(const char* pPath, const char* pPathID, SearchPathAdd_t addType);
+	bool						RemoveVPKFile(const char* pPath, const char* pPathID);
 
 	// Goes through all the search paths (or just the one specified) and calls FindFile on them. Returns the first successful result, if any.
 	FileHandle_t				FindFileInSearchPaths( const char *pFileName, const char *pOptions, const char *pathID, unsigned flags, char **ppszResolvedFilename = NULL, bool bTrackCRCs=false );

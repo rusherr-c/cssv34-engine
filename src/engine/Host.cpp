@@ -130,7 +130,7 @@ void CL_SetPagedPoolInfo();
 extern char	*CM_EntityString( void );
 extern ConVar host_map;
 extern ConVar sv_cheats;
-extern int g_iSteamAppID;
+int g_iSteamAppID;
 
 #define OPTIONS_DIR "cfg"
 
@@ -2453,7 +2453,8 @@ void Host_ShowIPCCallCount()
 		ISteamClient *pSteamClient = SteamClient();
 		if ( pSteamClient )
 		{
-			callCount = pSteamClient->GetIPCCallCount();
+			//callCount = pSteamClient->GetIPCCallCount();
+			callCount = (uint32)SteamGameServer_GetIPCCallCount();
 		}
 		else
 		{
@@ -3016,40 +3017,6 @@ void Host_RunFrame( float time )
 //-----------------------------------------------------------------------------
 bool IsLowViolence_Secure()
 {
-#ifndef NO_STEAM
-	if ( !IsX360() && SteamApps() )
-	{
-		//
-		// Check country of purchase.
-		//
-		char szCountry[80];
-		szCountry[0] = '\0';
-
-		// Determine violence settings based on the country of purchase.		
-		int nSuccess = SteamApps()->GetAppData( g_iSteamAppID, "country", szCountry, sizeof(szCountry) );
-		if ( nSuccess <= 0 )
-		{
-			return false;
-		}	
-
-		// Germany gets low violence.
-		if ( !Q_stricmp( szCountry, "de" ) )
-		{
-			return true;
-		}
-	}
-	else if ( IsX360() )
-	{
-		// Low violence for the 360 is enabled by the presence of a file.
-		if ( g_pFileSystem->FileExists( "cfg/violence.cfg" ) )
-		{
-			return true;
-		}
-		
-		return false;
-	}
-#endif
-		
 	return false;
 }
 
@@ -3157,7 +3124,7 @@ void Host_CheckGore( void )
 //-----------------------------------------------------------------------------
 void Host_InitProcessor( void )
 {
-	const CPUInformation& pi = GetCPUInformation();
+	const CPUInformation& pi = *GetCPUInformation();
 
 	// Compute Frequency in Mhz: 
 	char* szFrequencyDenomination = "Mhz";
@@ -3486,10 +3453,8 @@ void Host_Init( bool bDedicated )
 
 	// Mark DLL as active
 	//	eng->SetNextState( InEditMode() ? IEngine::DLL_PAUSED : IEngine::DLL_ACTIVE );
-
-	// setup the version string
-	Host_Version();
-
+	g_iSteamAppID = GetSteamInfIDVersionInfo().AppID;
+	
 	// Deal with Gore Settings
 	Host_CheckGore();
 

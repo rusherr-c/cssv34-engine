@@ -590,7 +590,7 @@ void GetMaterialSystemConfigForBenchmarkUpload(KeyValues *dataToUpload)
 	dataToUpload->SetInt( "deviceID", driverInfo.m_DeviceID );
 	dataToUpload->SetInt( "ram", GetRam() );
 
-	const CPUInformation& pi = GetCPUInformation();
+	const CPUInformation& pi = *GetCPUInformation();
 	double fFrequency = pi.m_Speed / 1000000.0;
 	dataToUpload->SetInt( "cpu_speed", (int)fFrequency );
 	dataToUpload->SetString( "cpu", pi.m_szProcessorID );
@@ -668,8 +668,9 @@ CON_COMMAND( mat_setvideomode, "sets the width, height, windowed state of the ma
 	int nWidth = Q_atoi( args[1] );
 	int nHeight = Q_atoi( args[2] );
 	bool bWindowed = Q_atoi( args[3] ) > 0 ? true : false;
+	bool bNoBorderWindow = Q_atoi(args[4]) > 0 ? true : false;
 
-	videomode->SetMode( nWidth, nHeight, bWindowed );
+	videomode->SetMode( nWidth, nHeight, bWindowed, bNoBorderWindow);
 }
 #endif
 

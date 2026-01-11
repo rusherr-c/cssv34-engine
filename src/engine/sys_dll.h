@@ -94,6 +94,34 @@ bool Sys_MessageBox(const char *title, const char *info, bool bShowOkAndCancel);
 bool ServerDLL_Load();
 void ServerDLL_Unload();
 
+typedef uint32 AppId_t;
+
+// steam.inf information.
+struct SteamInfVersionInfo_t
+{
+	int32 ClientVersion; // PatchVersion
+	int32 ServerVersion; // ServerVersion
+
+	//-------------------------------------
+	// Short Version numbers
+	// e.g: 
+	// ServerVersion is 10034(1.0.0.34)
+	// ==> ShortVersions[0] = 34
+	//-------------------------------------
+	// ClientVersion is 10034(1.0.0.34)
+	// ==> ShortVersions[1] = 34
+	//-------------------------------------
+	int32 ShortVersions[2];
+
+	char szVersionString[32]; // PatchVersion string
+	char szProductString[32]; // ProductName string
+
+	AppId_t AppID; // Steam AppID. Read from steam.inf(AppID) or gameinfo.txt(SteamAppId)
+	AppId_t ServerAppID; // ServerAppID. Used for dedicated server crash reporting.
+
+};
+const SteamInfVersionInfo_t& GetSteamInfIDVersionInfo();
+
 extern CreateInterfaceFn g_ServerFactory;
 
 #endif

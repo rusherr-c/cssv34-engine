@@ -6,7 +6,6 @@
 
 #include "cbase.h"
 #include "hl2_gamestats.h"
-#include "achievementmgr.h"
 
 static CHL2GameStats s_HL2GameStats;
 

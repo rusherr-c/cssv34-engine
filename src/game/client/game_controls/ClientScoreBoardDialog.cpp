@@ -31,17 +31,11 @@
 #include <game/client/iviewport.h>
 #include <igameresources.h>
 
-#include "vgui_avatarimage.h"
-
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 using namespace vgui;
 
-bool AvatarIndexLessFunc( const int &lhs, const int &rhs )	
-{ 
-	return lhs < rhs; 
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -78,9 +72,6 @@ CClientScoreBoardDialog::CClientScoreBoardDialog(IViewPort *pViewPort) : Editabl
 
 	m_pImageList = NULL;
 
-	m_mapAvatarsToImageList.SetLessFunc( AvatarIndexLessFunc );
-	m_mapAvatarsToImageList.RemoveAll();
-	memset( &m_iImageAvatars, 0, sizeof(int) * (MAX_PLAYERS+1) );
 }
 
 //-----------------------------------------------------------------------------
@@ -168,9 +159,6 @@ void CClientScoreBoardDialog::ApplySchemeSettings( IScheme *pScheme )
 	if ( m_pImageList )
 		delete m_pImageList;
 	m_pImageList = new ImageList( false );
-
-	m_mapAvatarsToImageList.RemoveAll();
-	memset( &m_iImageAvatars, 0, sizeof(int) * (MAX_PLAYERS+1) );
 
 	PostApplySchemeSettings( pScheme );
 }
@@ -323,8 +311,7 @@ void CClientScoreBoardDialog::UpdatePlayerInfo()
 		{
 			// add the player to the list
 			KeyValues *playerData = new KeyValues("data");
-			GetPlayerScoreInfo( i, playerData );
-			UpdatePlayerAvatar( i, playerData );
+			GetPlayerScoreInfo(i, playerData);
 
 			const char *oldName = playerData->GetString("name","");
 			int bufsize = strlen(oldName) * 2 + 1;
@@ -415,13 +402,7 @@ void CClientScoreBoardDialog::AddSection(int teamType, int teamNumber)
 		
 		m_pPlayerList->AddSection(m_iSectionId, "", StaticPlayerSortFunc);
 
-		// Avatars are always displayed at 32x32 regardless of resolution
-		if ( ShowAvatars() )
-		{
-			m_pPlayerList->AddColumnToSection( m_iSectionId, "avatar", "", SectionedListPanel::COLUMN_IMAGE | SectionedListPanel::COLUMN_CENTER, m_iAvatarWidth );
-		}
-
-		m_pPlayerList->AddColumnToSection(m_iSectionId, "name", string1, 0, scheme()->GetProportionalScaledValueEx( GetScheme(),NAME_WIDTH) - m_iAvatarWidth );
+		m_pPlayerList->AddColumnToSection(m_iSectionId, "name", string1, 0, scheme()->GetProportionalScaledValueEx( GetScheme(),NAME_WIDTH) );
 		m_pPlayerList->AddColumnToSection(m_iSectionId, "frags", "", 0, scheme()->GetProportionalScaledValueEx( GetScheme(),SCORE_WIDTH) );
 		m_pPlayerList->AddColumnToSection(m_iSectionId, "deaths", "", 0, scheme()->GetProportionalScaledValueEx( GetScheme(),DEATH_WIDTH) );
 		m_pPlayerList->AddColumnToSection(m_iSectionId, "ping", "", 0, scheme()->GetProportionalScaledValueEx( GetScheme(),PING_WIDTH) );
@@ -430,12 +411,7 @@ void CClientScoreBoardDialog::AddSection(int teamType, int teamNumber)
 	{
 		m_pPlayerList->AddSection(m_iSectionId, "");
 
-		// Avatars are always displayed at 32x32 regardless of resolution
-		if ( ShowAvatars() )
-		{
-			m_pPlayerList->AddColumnToSection( m_iSectionId, "avatar", "", SectionedListPanel::COLUMN_IMAGE | SectionedListPanel::COLUMN_CENTER, m_iAvatarWidth );
-		}
-		m_pPlayerList->AddColumnToSection(m_iSectionId, "name", "#Spectators", 0, scheme()->GetProportionalScaledValueEx( GetScheme(),NAME_WIDTH) - m_iAvatarWidth );
+		m_pPlayerList->AddColumnToSection(m_iSectionId, "name", "#Spectators", 0, scheme()->GetProportionalScaledValueEx( GetScheme(),NAME_WIDTH) );
 		m_pPlayerList->AddColumnToSection(m_iSectionId, "frags", "", 0, scheme()->GetProportionalScaledValueEx( GetScheme(),SCORE_WIDTH) );
 	}
 }
@@ -486,53 +462,6 @@ bool CClientScoreBoardDialog::GetPlayerScoreInfo(int playerIndex, KeyValues *kv)
 	kv->SetInt("playerIndex", playerIndex);
 
 	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CClientScoreBoardDialog::UpdatePlayerAvatar( int playerIndex, KeyValues *kv )
-{
-#ifndef NO_STEAM
-	// Update their avatar
-	if ( kv && ShowAvatars() && SteamFriends() && SteamUtils() )
-	{
-		player_info_t pi;
-		if ( engine->GetPlayerInfo( playerIndex, &pi ) )
-		{
-			if ( pi.friendsID )
-			{
-				CSteamID steamIDForPlayer( pi.friendsID, 1, SteamUtils()->GetConnectedUniverse(), k_EAccountTypeIndividual );
-
-				// See if the avatar's changed
-				int iAvatar = SteamFriends()->GetSmallFriendAvatar( steamIDForPlayer );
-				if ( m_iImageAvatars[playerIndex] != iAvatar )
-				{
-					m_iImageAvatars[playerIndex] = iAvatar;
-
-					// Now see if we already have that avatar in our list
-					int iIndex = m_mapAvatarsToImageList.Find( iAvatar );
-					if ( iIndex == m_mapAvatarsToImageList.InvalidIndex() )
-					{
-						CAvatarImage *pImage = new CAvatarImage();
-						pImage->SetAvatarSteamID( steamIDForPlayer );
-						pImage->SetSize( 32, 32 );	// Deliberately non scaling
-						int iImageIndex = m_pImageList->AddImage( pImage );
-
-						m_mapAvatarsToImageList.Insert( iAvatar, iImageIndex );
-					}
-				}
-
-				int iIndex = m_mapAvatarsToImageList.Find( iAvatar );
-
-				if ( iIndex != m_mapAvatarsToImageList.InvalidIndex() )
-				{
-					kv->SetInt( "avatar", m_mapAvatarsToImageList[iIndex] );
-				}
-			}
-		}
-	}
-#endif
 }
 
 //-----------------------------------------------------------------------------

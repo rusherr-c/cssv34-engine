@@ -142,7 +142,7 @@ public:
 			if ( SteamFriends() )
 			{
 				// Tell Friends' Voice chat that the local user is speaking!!!
-				SteamFriends()->SetInGameVoiceSpeaking( SteamUser()->GetSteamID(), status );
+				//SteamFriends()->SetInGameVoiceSpeaking( SteamUser()->GetSteamID(), status );
 			}
 #endif
 		}

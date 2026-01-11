@@ -79,13 +79,6 @@ void CSteamID::SetFromString( const char *pchSteamID, EUniverse eDefaultUniverse
 		if (*pchSteamID == '-' || *pchSteamID == ':')
 			pchSteamID++; // skip the optional - or :
 	}
-	else if (*pchSteamID == 'C')
-	{
-		pchSteamID++; // skip the C
-		eAccountType = k_EAccountTypeContentServer;
-		if (*pchSteamID == '-' || *pchSteamID == ':')
-			pchSteamID++; // skip the optional - or :
-	}
 
 	if ( strchr( pchSteamID, ':' ) )
 	{
@@ -150,7 +143,7 @@ bool CSteamID::SetFromSteam2String( const char *pchSteam2ID, EUniverse eUniverse
 //			code, this code returns a pointer to a static buffer and is NOT thread-safe.
 // Output:  buffer with rendered Steam ID
 //-----------------------------------------------------------------------------
-const char * CSteamID::Render() const
+char * CSteamID::Render() const
 {
 	const int k_cBufLen = 255;
 	const int k_cBufs = 4;	// # of static bufs to use (so people can compose output with multiple calls to Render() )
@@ -176,10 +169,6 @@ const char * CSteamID::Render() const
 	{
 		Q_snprintf( pchBuf, k_cBufLen, "[%u:%u(pending)]", GetEUniverse(), GetAccountID() );
 	} 
-	else if ( k_EAccountTypeContentServer == GetEAccountType() )
-	{
-		Q_snprintf( pchBuf, k_cBufLen, "[C-%u:%u]", GetEUniverse(), GetAccountID() );
-	}
 	else
 	{
 		Q_snprintf( pchBuf, k_cBufLen, "[%u:%u]", GetEUniverse(), GetAccountID() );
@@ -194,7 +183,7 @@ const char * CSteamID::Render() const
 // Input:	64-bit representation of Steam ID to render
 // Output:  buffer with rendered Steam ID
 //-----------------------------------------------------------------------------
-const char * CSteamID::Render( uint64 ulSteamID )
+char * CSteamID::Render( uint64 ulSteamID )
 {
 	CSteamID steamID( ulSteamID );
 	return steamID.Render();
@@ -209,7 +198,7 @@ bool CSteamID::BValidExternalSteamID() const
 {
 	if ( GetEAccountType() == k_EAccountTypePending )
 		return false;
-	if ( GetEAccountType() != k_EAccountTypeAnonGameServer && GetEAccountType() != k_EAccountTypeContentServer )
+	if ( GetEAccountType() != k_EAccountTypeAnonGameServer )
 	{
 		if ( GetAccountID() == 0 && GetUnAccountInstance() == 0 )
 			return false;

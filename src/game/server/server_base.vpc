@@ -5,13 +5,12 @@
 //-----------------------------------------------------------------------------
 
 $Macro OUTBINNAME	"Server"
-$Macro OUTBINDIR	"$SRCDIR\..\game\$GAMENAME\bin"
+$Macro OUTBINDIR	"$SRCDIR\..\game\mod_$GAMENAME\bin"
 $Macro DEVKITBINDIR	"$GAMENAME\bin"							[$X360]
 
 $MacroRequired "GAMENAME"
 
-$include "$SRCDIR\vpc_scripts\source_dll_win32_base.vpc"	[$WIN32||$LINUX]
-$include "$SRCDIR\vpc_scripts\source_dll_x360_base.vpc"		[$X360]
+$include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
 
 $Linux
 {
@@ -40,11 +39,11 @@ $Project
 {
 	$Folder	"Source Files"
 	{
-		$File	"$SRCDIR\game\shared\Achievement_SaveRestore.cpp"
-		$File	"$SRCDIR\game\shared\Achievement_SaveRestore.h"
-		$File	"$SRCDIR\game\shared\AchievementMgr.cpp"
-		$File	"$SRCDIR\game\shared\AchievementMgr.h"
-		$File	"$SRCDIR\game\shared\achievements_hlx.cpp"
+		//$File	"$SRCDIR\game\shared\Achievement_SaveRestore.cpp"
+		//$File	"$SRCDIR\game\shared\Achievement_SaveRestore.h"
+		//$File	"$SRCDIR\game\shared\AchievementMgr.cpp"
+		//$File	"$SRCDIR\game\shared\AchievementMgr.h"
+		//$File	"$SRCDIR\game\shared\achievements_hlx.cpp"
 		$File	"$SRCDIR\game\shared\activitylist.cpp"
 		$File	"$SRCDIR\game\shared\activitylist.h"
 		$File	"AI_Activity.cpp"
@@ -179,8 +178,8 @@ $Project
 		$File	"$SRCDIR\game\shared\apparent_velocity_helper.h"
 		$File	"$SRCDIR\game\shared\base_playeranimstate.cpp"
 		$File	"base_transmit_proxy.cpp"
-		$File	"$SRCDIR\game\shared\baseachievement.cpp"
-		$File	"$SRCDIR\game\shared\baseachievement.h"
+		//$File	"$SRCDIR\game\shared\baseachievement.cpp"
+		//$File	"$SRCDIR\game\shared\baseachievement.h"
 		$File	"baseanimating.cpp"
 		$File	"BaseAnimating.h"
 		$File	"BaseAnimatingOverlay.cpp"
@@ -807,7 +806,7 @@ $Project
 		$File	"$SRCDIR\public\globalvars_base.h"
 		$File	"$SRCDIR\game\shared\groundlink.h"
 		$File	"$SRCDIR\game\shared\hl2\hl2_vehicle_radar.h"
-		$File	"$SRCDIR\public\iachievementmgr.h"
+		//$File	"$SRCDIR\public\iachievementmgr.h"
 		$File	"$SRCDIR\public\appframework\IAppSystem.h"
 		$File	"$SRCDIR\Public\icliententity.h"
 		$File	"$SRCDIR\public\iclientnetworkable.h"

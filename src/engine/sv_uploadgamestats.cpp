@@ -306,9 +306,6 @@ public:
 		if ( VCRGetMode() != VCR_Playback )
 #endif
 		{
-#ifndef NO_STEAM
-			SteamUtils()->GetCSERIPPort( &unIP, &usPort );
-#endif
 		}
 #if !defined( NO_VCR )
 		VCRGenericValue( "a", &unIP, sizeof( unIP ) );	

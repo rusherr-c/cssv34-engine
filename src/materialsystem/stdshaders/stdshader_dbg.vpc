@@ -37,12 +37,6 @@ $Project "stdshader_dbg"
 		$File	"debugtangentspace.cpp"
 		$File	"fillrate.cpp"
 		$File	"fillrate_dx6.cpp"
-
-		$Folder	"Remove me when VAC2 is out" [$WIN32]
-		{
-			$File	"..\shader_dll_verify.cpp"
-			$File	"..\shader_dll_verify.h"
-		}
 	}
 
 	$Folder	"Header Files"
@@ -64,5 +58,4 @@ $Project "stdshader_dbg"
 
 	$Shaders	"stdshader_dx9_20b.txt"
 	$Shaders	"stdshader_dx9_30.txt"
-	$Shaders	"stdshader_dx10.txt"
 }

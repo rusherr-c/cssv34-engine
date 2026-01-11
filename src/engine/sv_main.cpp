@@ -750,46 +750,7 @@ void SV_InitGameDLL( void )
 		Error( "The Portal demo is unable to run Mods.\n" );
 		return;			
 	} 
-#ifndef NO_STEAM
-	// check permissions
-	if ( SteamApps() && g_pFileSystem->IsSteam() && !CL_IsHL2Demo() && !CL_IsPortalDemo() )
-	{
-		bool bVerifiedMod = false;
 
-        // find the game dir we're running
-		for ( int i = 0; i < ARRAYSIZE( g_ModDirPermissions ); i++ )
-		{
-			if ( !Q_stricmp( COM_GetModDirectory(), g_ModDirPermissions[i].m_pchGameDir ) )
-			{
-				// we've found the mod, make sure we own the app
-				char szSub[10];
-				if ( SteamApps()->GetAppData( g_ModDirPermissions[i].m_iAppID, "subscribed", szSub, sizeof(szSub) ) > 0
-					 && Q_atoi( szSub ) > 0 )
-				{
-					bVerifiedMod = true;
-				}
-				else
-				{
-					Error( "No permissions to run '%s'\n", COM_GetModDirectory() );
-					return;			
-				}
-
-				break;
-			}
-		}
-
-		if ( !bVerifiedMod )
-		{
-			// make sure they can run the Source engine
-			char szSub[10];
-			if ( SteamApps()->GetAppData( 215, "subscribed", szSub, sizeof(szSub) ) == 0 || Q_atoi( szSub ) == 0 )
-			{
-				Error( "A Source engine game is required to run mods\n" );
-				return;
-			}
-		}
-	}
-#endif // NO_STEAM
 #endif // _X360
 #endif
 
@@ -1494,7 +1455,7 @@ void CGameServer::SendClientMessages ( bool bSendSnapshots )
 
 		if ( receivingClientCount > 1 && sv_parallel_sendsnapshot.GetBool() )
 		{
-			ParallelProcess( pReceivingClients, receivingClientCount, &SV_ParallelSendSnapshot );
+			ParallelProcess( "", pReceivingClients, receivingClientCount, &SV_ParallelSendSnapshot);
 		}
 		else
 		{
@@ -1832,10 +1793,6 @@ bool SV_ActivateServer()
 	Steam3Server().SendUpdatedServerDetails();
 	if ( IsUsingMasterLegacyMode() )
 		master->Heartbeat_Legacy_f();
-#ifndef NO_STEAM
-	else
-		SteamMasterServerUpdater()->ForceHeartbeat();
-#endif
 
 	COM_TimestampedLog( "SV_ActivateServer(finished)" );
 
@@ -2283,9 +2240,6 @@ void CGameServer::UpdateMasterServerPlayers()
 
 		if ( !client->m_SteamID || !client->m_SteamID->IsValid() )
 			continue;
-#ifndef NO_STEAM
-		SteamGameServer()->GSSetUserData( *client->m_SteamID, client->GetClientName(), pl->frags );
-#endif
 	}
 }
 

@@ -728,6 +728,111 @@ void CBaseFileSystem::PrintOpenedFiles( void )
 	m_fwLevel = saveLevel;
 }
 
+#if defined( SUPPORT_PACKED_STORE )
+
+CPackedStoreRefCount::CPackedStoreRefCount(char const* pFileBasename, char* pszFName, IBaseFileSystem* pFS)
+	: CPackedStore(pFileBasename, pszFName, pFS, false)
+{
+	// If the VPK is signed, check the signature
+	//
+	// !FIXME! This code is simple a linchpin that a hacker could detour to bypass sv_pure
+#ifdef VPK_ENABLE_SIGNING
+	CPackedStore::ESignatureCheckResult eSigResult = CPackedStore::CheckSignature(0, NULL);
+	m_bSignatureValid = (eSigResult == CPackedStore::eSignatureCheckResult_ValidSignature);
+#else
+	m_bSignatureValid = false;
+#endif
+}
+
+#endif
+
+void CBaseFileSystem::AddVPKFile(char const* pPath, const char* pPathID, SearchPathAdd_t addType)
+{
+#if defined( SUPPORT_PACKED_STORE )
+	char nameBuf[MAX_PATH];
+
+	Q_MakeAbsolutePath(nameBuf, sizeof(nameBuf), pPath);
+	Q_FixSlashes(nameBuf);
+
+	CUtlSymbol pathIDSym = g_PathIDTable.AddString(pPathID);
+
+	// See if we already have this vpk file as a search path
+	CPackedStoreRefCount* pVPK = NULL;
+	for (int i = 0; i < m_SearchPaths.Count(); i++)
+	{
+		CPackedStoreRefCount* p = m_SearchPaths[i].GetPackedStore();
+		if (p && V_stricmp(p->FullPathName(), nameBuf) == 0)
+		{
+			// Already present
+			if (m_SearchPaths[i].GetPath() == pathIDSym)
+				return;
+
+			// Present, but for a different path
+			pVPK = p;
+		}
+	}
+
+	// Create a new VPK if we didn't don't already have it opened
+	if (pVPK == NULL)
+	{
+		char pszFName[MAX_PATH];
+		pVPK = new CPackedStoreRefCount(nameBuf, pszFName, this);
+		if (pVPK->IsEmpty())
+		{
+			delete pVPK;
+			return;
+		}
+		pVPK->RegisterFileTracker((IThreadedFileMD5Processor*)&m_FileTracker2);
+
+		pVPK->m_PackFileID = m_FileTracker2.NotePackFileOpened(pVPK->FullPathName(), pPathID, 0);
+	}
+	else
+	{
+		pVPK->AddRef();
+	}
+
+	// Crete a search path for this
+	CSearchPath* sp = &m_SearchPaths[(addType == PATH_ADD_TO_TAIL) ? m_SearchPaths.AddToTail() : m_SearchPaths.AddToHead()];
+	sp->SetPackedStore(pVPK);
+	sp->m_storeId = g_iNextSearchPathID++;
+	sp->SetPath(pathIDSym);
+	sp->m_pPathIDInfo = FindOrAddPathIDInfo(g_PathIDTable.AddString(pPathID), -1);
+
+	// Check if we're trusted or not
+	//SetSearchPathIsTrustedSource(sp);
+#endif // SUPPORT_PACKED_STORE
+}
+
+
+bool CBaseFileSystem::RemoveVPKFile(const char* pPath, const char* pPathID)
+{
+#if defined( SUPPORT_PACKED_STORE )
+	char nameBuf[MAX_PATH];
+
+	Q_MakeAbsolutePath(nameBuf, sizeof(nameBuf), pPath);
+	Q_FixSlashes(nameBuf);
+
+	CUtlSymbol pathIDSym = g_PathIDTable.AddString(pPathID);
+
+	// See if we already have this vpk file as a search path
+	for (int i = 0; i < m_SearchPaths.Count(); i++)
+	{
+		CPackedStoreRefCount* p = m_SearchPaths[i].GetPackedStore();
+		if (p && V_stricmp(p->FullPathName(), nameBuf) == 0)
+		{
+			// remove if we find one
+			if (m_SearchPaths[i].GetPath() == pathIDSym)
+			{
+				m_SearchPaths.Remove(i);
+				return true;
+			}
+		}
+	}
+#endif // SUPPORT_PACKED_STORE
+
+	return false;
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: Adds the specified pack file to the list
 // Output : Returns true on success, false on failure.

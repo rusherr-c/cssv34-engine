@@ -18,7 +18,6 @@
 #include "netmessages.h"
 #include "net.h"
 #include "event_system.h"
-#include "steam/isteammasterserverupdater.h"
 
 class CNetworkStringTableContainer;
 class PackedEntity;

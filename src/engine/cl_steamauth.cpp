@@ -11,7 +11,6 @@
 #elif _LINUX
 #include <netinet/in.h>
 #endif
-
 #include "cl_steamauth.h"
 #include "interface.h"
 #include "filesystem_engine.h"
@@ -45,8 +44,6 @@ CSteam3Client::CSteam3Client()
 #if !defined(NO_STEAM)
 :
 			m_CallbackClientGameServerDeny( this, &CSteam3Client::OnClientGameServerDeny ),
-			m_CallbackGameServerChangeRequested( this, &CSteam3Client::OnGameServerChangeRequested ),
-			m_CallbackGameOverlayActivated( this, &CSteam3Client::OnGameOverlayActivated ),
 			m_CallbackPersonaStateChanged( this, &CSteam3Client::OnPersonaUpdated )
 #endif
 {
@@ -107,7 +104,7 @@ int CSteam3Client::InitiateConnection( void *pData, int cbMaxData, uint32 unIP, 
 	if ( !SteamUser() )
 		return 0;
 
-	return SteamUser()->InitiateGameConnection( pData, cbMaxData, unGSSteamID, CGameID( g_iSteamAppID ), ntohl( unIP ), usPort, bSecure, pvSteam2GetEncryptionKey, cbSteam2GetEncryptionKey ); // port is already in host order
+	return SteamUser()->InitiateGameConnection( pData, cbMaxData, unGSSteamID, g_iSteamAppID, ntohl( unIP ), usPort, bSecure /*, pvSteam2GetEncryptionKey, cbSteam2GetEncryptionKey */ ); // port is already in host order
 #else
 	return 0;
 #endif
@@ -176,42 +173,6 @@ void CSteam3Client::OnClientGameServerDeny( ClientGameServerDeny_t *pClientGameS
 	
 }
 
-
-extern ConVar	password;
-//-----------------------------------------------------------------------------
-// Purpose: Disconnect the user from their current server
-//-----------------------------------------------------------------------------
-void CSteam3Client::OnGameServerChangeRequested( GameServerChangeRequested_t *pGameServerChangeRequested )
-{
-	password.SetValue( pGameServerChangeRequested->m_rgchPassword );
-	Msg( "Connecting to %s\n", pGameServerChangeRequested->m_rgchServer );
-	Cbuf_AddText( va( "connect %s\n", pGameServerChangeRequested->m_rgchServer ) );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CSteam3Client::OnGameOverlayActivated( GameOverlayActivated_t *pGameOverlayActivated )
-{
-	if ( Host_IsSinglePlayerGame() )
-	{
-		if ( pGameOverlayActivated->m_bActive )
-		{
-			Cbuf_AddText( "setpause" );
-		}
-		else
-		{
-#ifndef SWDS
-			if ( !EngineVGui()->IsGameUIVisible() && 
-				 !EngineVGui()->IsConsoleVisible() )
-#endif
-			{
-				Cbuf_AddText( "unpause" );
-			}
-		}
-	}
-}
-
 extern void UpdateNameFromSteamID( IConVar *pConVar, CSteamID *pSteamID );
 
 //-----------------------------------------------------------------------------
@@ -219,14 +180,8 @@ extern void UpdateNameFromSteamID( IConVar *pConVar, CSteamID *pSteamID );
 //-----------------------------------------------------------------------------
 void CSteam3Client::OnPersonaUpdated( PersonaStateChange_t *pPersonaStateChanged )
 {
-	if ( pPersonaStateChanged->m_nChangeFlags & k_EPersonaChangeName )
-	{
-		if ( SteamUtils() && SteamFriends() && SteamUser() )
-		{
-			CSteamID steamID = SteamUser()->GetSteamID();
-			IConVar *pConVar = g_pCVar->FindVar( "name" );
-			UpdateNameFromSteamID( pConVar, &steamID );
-		}
-	}
+	//CSteamID steamID = SteamUser()->GetSteamID();
+	//IConVar *pConVar = g_pCVar->FindVar( "name" );
+	//UpdateNameFromSteamID( pConVar, &steamID );
 }
 #endif

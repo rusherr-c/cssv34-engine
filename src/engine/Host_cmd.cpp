@@ -84,10 +84,6 @@ ConVar host_map( "host_map", "", 0, "Current map name." );
 ConVar voice_recordtofile("voice_recordtofile", "0", 0, "Record mic data and decompressed voice data into 'voice_micdata.wav' and 'voice_decompressed.wav'");
 ConVar voice_inputfromfile("voice_inputfromfile", "0", 0, "Get voice input from 'voice_input.wav' rather than from the microphone.");
 
-char gpszVersionString[32];
-char gpszProductString[32];
-int g_iSteamAppID = 215;	// defaults to Source SDK Base (215) if no steam.inf can be found.
-
 // Globals
 int	gHostSpawnCount = 0;
 
@@ -358,7 +354,7 @@ CON_COMMAND( status, "Display map and connection status." )
 		}
 	}
 
-	print( "version : %s/%d %d %s %s\n", gpszVersionString, PROTOCOL_VERSION, build_number(), bGSSecure ? "secure" : "insecure", pchSecureReasonString );
+	print("version : %s/%d %d %s %s\n", GetSteamInfIDVersionInfo().szVersionString , PROTOCOL_VERSION, build_number(), bGSSecure ? "secure" : "insecure", pchSecureReasonString);
 	
 	if ( NET_IsMultiplayer() )
 	{
@@ -862,92 +858,13 @@ CON_COMMAND( disconnect, "Disconnect game from server." )
 }
 
 
-//-----------------------------------------------------------------------------
-// Output : void Host_Version_f
-//-----------------------------------------------------------------------------
-#define VERSION_KEY "PatchVersion="
-#define PRODUCT_KEY "ProductName="
-#define APPID_KEY "AppID="
-#define PRODUCT_STRING "valve"
-#define VERSION_STRING "1.0.1.0"
 
-void Host_Version( void )
-{
-	char szFileName[MAX_OSPATH];
-	char *buffer;
-	int bufsize = 0;
-	FileHandle_t fp = NULL;
-	const char *pbuf = NULL;
-	int gotKeys = 0;
-
-	Q_strcpy( gpszVersionString, VERSION_STRING );
-	Q_strcpy( gpszProductString, PRODUCT_STRING );
-
-	sprintf( szFileName, "steam.inf" );
-
-   // Mod's steam.inf is first option, the the steam.inf in the game GCF. 
-	fp = g_pFileSystem->Open( szFileName, "r" );
-	if ( fp )
-	{
-		bufsize = g_pFileSystem->Size( fp );
-		buffer = ( char * )_alloca( bufsize + 1 );
-		Assert( buffer );
-
-		int iBytesRead = g_pFileSystem->Read( buffer, bufsize, fp );
-		g_pFileSystem->Close( fp );
-
-		buffer[iBytesRead] = '\0';
-
-		// Read 
-		pbuf = buffer;
-
-		while ( 1 )
-		{
-			pbuf = COM_Parse( pbuf );
-			if ( !pbuf )
-				break;
-
-			if ( Q_strlen( com_token )  <= 0 )
-				break;
-
-			if ( gotKeys >= 3 )
-			{
-				break;
-			}
-
-			if ( !Q_strnicmp( com_token, VERSION_KEY, Q_strlen( VERSION_KEY ) ) )
-			{
-				Q_strncpy( gpszVersionString, com_token+Q_strlen( VERSION_KEY ), sizeof( gpszVersionString ) - 1 );
-				gpszVersionString[ sizeof( gpszVersionString ) - 1 ] = '\0';
-				gotKeys++;
-				continue;
-			}
-
-			if ( !Q_strnicmp( com_token, PRODUCT_KEY, Q_strlen( PRODUCT_KEY ) ) )
-			{
-				Q_strncpy( gpszProductString, com_token+Q_strlen( PRODUCT_KEY ), sizeof( gpszProductString ) - 1 );
-				gpszProductString[ sizeof( gpszProductString ) - 1 ] = '\0';
-				gotKeys++;
-				continue;
-			}
-
-			if ( !Q_strnicmp( com_token, APPID_KEY, Q_strlen( APPID_KEY ) ) )
-			{
-				char szAppID[32];
-				Q_strncpy( szAppID, com_token + Q_strlen( APPID_KEY ), sizeof( szAppID ) - 1 );
-				g_iSteamAppID = atoi(szAppID);
-				gotKeys++;
-				continue;
-			}
-		}
-
-	}
-}
 
 CON_COMMAND( version, "Print version info string." )
 {
-	ConMsg( "Protocol version %i\nExe version %s (%s)\n", PROTOCOL_VERSION, gpszVersionString, gpszProductString );
-	ConMsg( "Exe build: "__TIME__" "__DATE__" (%i)\n", build_number() );
+	SteamInfVersionInfo_t info = GetSteamInfIDVersionInfo();
+	ConMsg("Protocol version %i [v%i/v%i]\nExe version %s (%s)\n", PROTOCOL_VERSION, info.ShortVersions[0], info.ShortVersions[1], info.szVersionString, info.szProductString);
+	ConMsg("Exe build: " __TIME__ " " __DATE__ " (%i) (%i)\n", build_number(), info.AppID);
 }
 
 

@@ -1,13 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define STEAM_API_EXPORTS
-
-#if defined __GNUC__
- #define S_API extern "C" __attribute__ ((visibility("default"))) 
-#elif defined _MSC_VER
-#define S_API extern "C" __declspec(dllexport)
-#endif
 #define NULL 0
-
+#include "steam\steam_api.h"
+#define NOTE_UNUSED(x) (void)(x)
 S_API void *g_pSteamClientGameServer;
 void *g_pSteamClientGameServer = NULL;
 
@@ -43,12 +38,12 @@ S_API void SteamAPI_SetMiniDumpComment() {
 S_API void SteamAPI_RunCallbacks() {
 }
 
-S_API void SteamAPI_RegisterCallback() {
-
+S_API void SteamAPI_RegisterCallback( class CCallbackBase* pCallback, int iCallback ) {
+	NOTE_UNUSED(pCallback); NOTE_UNUSED(iCallback);
 }
 
-S_API void SteamAPI_UnregisterCallback() {
-
+S_API void SteamAPI_UnregisterCallback( class CCallbackBase* pCallback ) {
+	NOTE_UNUSED(pCallback);
 }
 
 S_API void SteamAPI_RegisterCallResult() {
@@ -63,11 +58,12 @@ S_API bool SteamAPI_IsSteamRunning() {
 	return false;
 }
 
-S_API void Steam_RunCallbacks() {
-
+S_API void Steam_RunCallbacks( HSteamPipe hSteamPipe, bool bGameServerCallbacks ) {
+	NOTE_UNUSED(hSteamPipe); NOTE_UNUSED(bGameServerCallbacks);
 }
 
-S_API void Steam_RegisterInterfaceFuncs() {
+S_API void Steam_RegisterInterfaceFuncs(void* hModule) {
+	NOTE_UNUSED(hModule);
 }
 
 S_API int Steam_GetHSteamUserCurrent() {
@@ -118,11 +114,11 @@ S_API void *SteamApps() {
 	return NULL;
 }
 
-S_API void *SteamClient() {
+S_API ISteamClient *SteamClient() {
 	return NULL;
 }
 
-S_API void *SteamFriends() {
+S_API ISteamFriends *SteamFriends() {
 	return NULL;
 }
 
@@ -150,7 +146,7 @@ S_API void *SteamScreenshots() {
 	return NULL;
 }
 
-S_API void *SteamUser() {
+S_API ISteamUser *SteamUser() {
 	return NULL;
 }
 
@@ -158,7 +154,15 @@ S_API void *SteamUserStats() {
 	return NULL;
 }
 
-S_API void *SteamUtils() {
+S_API ISteamUtils *SteamUtils() {
+	return NULL;
+}
+
+S_API ISteamGameServer* SteamGameServer() {
+	return NULL;
+}
+
+S_API ISteamUtils* SteamGameServerUtils() {
 	return NULL;
 }
 
@@ -172,6 +176,18 @@ S_API int SteamGameServer_GetHSteamUser() {
 
 S_API int SteamGameServer_GetIPCCallCount() {
 	return 0;
+}
+
+S_API bool SteamGameServer_Init(uint32 unIP, uint16 usPort, uint16 usGamePort, void* eServerMode, int nGameAppId, const char* pchGameDir, const char* pchVersionString) {
+	NOTE_UNUSED(unIP);
+	NOTE_UNUSED(usPort);
+	NOTE_UNUSED(usGamePort);
+	NOTE_UNUSED(eServerMode);
+	NOTE_UNUSED(nGameAppId);
+	NOTE_UNUSED(pchGameDir);
+	NOTE_UNUSED(pchVersionString);
+
+	return false;
 }
 
 S_API int SteamGameServer_InitSafe() {

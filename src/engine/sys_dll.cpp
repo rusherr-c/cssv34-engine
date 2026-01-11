@@ -403,7 +403,6 @@ void Sys_Error(const char *error, ...)
 	V_strncat( errorText, g_minidumpinfo, sizeof(errorText) );
 
 	g_bUpdateMinidumpComment = false;
-	SteamAPI_SetMiniDumpComment( errorText );
 #endif
 
 	if ( !Plat_IsInDebugSession() && !CommandLine()->FindParm( "-nominidumps") )
@@ -411,26 +410,16 @@ void Sys_Error(const char *error, ...)
 #ifndef NO_STEAM
 		// MiniDumpWrite() has problems capturing the calling thread's context 
 		// unless it is called with an exception context.  So fake an exception.
-		__try
-		{
-			RaiseException
-				(
-				0,							// dwExceptionCode
-				EXCEPTION_NONCONTINUABLE,	// dwExceptionFlags
-				0,							// nNumberOfArguments,
-				NULL						// const ULONG_PTR* lpArguments
-				);
 
-			// Never get here (non-continuable exception)
-		}
-		// Write the minidump from inside the filter (GetExceptionInformation() is only 
-		// valid in the filter)
+		RaiseException
+		(
+			0,							// dwExceptionCode
+			EXCEPTION_NONCONTINUABLE,	// dwExceptionFlags
+			0,							// nNumberOfArguments,
+			NULL						// const ULONG_PTR* lpArguments
+		);
 
-		__except ( SteamAPI_WriteMiniDump( 0, GetExceptionInformation(), build_number() ), EXCEPTION_EXECUTE_HANDLER )
-		{
-			
-			// We always get here because the above filter evaluates to EXCEPTION_EXECUTE_HANDLER
-		}
+
 #endif
 	}
 #endif
@@ -693,7 +682,7 @@ SpewRetval_t Sys_SpewFunc( SpewType_t spewType, const char *pMsg )
 #endif
 			default:
 				{
-					color = GetSpewOutputColor();
+					color = *GetSpewOutputColor();
 				}
 				break;
 			}

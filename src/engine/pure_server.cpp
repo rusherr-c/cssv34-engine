@@ -363,7 +363,7 @@ void CPureServerWhitelist::DecodeCommandList( CUtlDict<CPureServerWhitelist::CCo
 		pCommand->m_LoadOrder = buf.GetUnsignedShort();
 
 		char str[MAX_PATH];
-		buf.GetString( str, sizeof( str )-1 );
+		buf.GetString( str );
 		V_FixSlashes( str );
 		
 		theList.Insert( str, pCommand );

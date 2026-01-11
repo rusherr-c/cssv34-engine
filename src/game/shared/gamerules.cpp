@@ -9,7 +9,6 @@
 #include "ammodef.h"
 #include "tier0/vprof.h"
 #include "KeyValues.h"
-#include "achievementmgr.h"
 
 #ifdef CLIENT_DLL
 
@@ -592,12 +591,7 @@ void CGameRules::CreateStandardEntities()
 //-----------------------------------------------------------------------------
 void CGameRules::MarkAchievement( IRecipientFilter& filter, char const *pchAchievementName )
 {
-	gamestats->Event_IncrementCountedStatistic( vec3_origin, pchAchievementName, 1.0f );
 
-	IAchievementMgr *pAchievementMgr = engine->GetAchievementMgr();
-	if ( !pAchievementMgr )
-		return;
-	pAchievementMgr->OnMapEvent( pchAchievementName );
 }
 
 #endif //} !CLIENT_DLL

@@ -1,4 +1,4 @@
-//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
+﻿//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
@@ -977,10 +977,7 @@ private:
 	CTextureReference m_DummyColorTexture;
 	CUtlLinkedList< ClientShadow_t, ClientShadowHandle_t >	m_Shadows;
 	CTextureAllocator m_ShadowAllocator;
-	
-	// CSM
-	CTextureReference m_CascadedDepthTexture;
-	CTextureReference m_CascadedColorTexture;
+
 
 	bool m_RenderToTextureActive;
 	bool m_bRenderTargetNeedsClear;
@@ -1412,13 +1409,6 @@ void CClientShadowMgr::InitDepthTextureShadows()
 			m_DepthTextureCacheLocks.AddToTail( false );
 		}
 
-		const int iCadcadedShadowWidth = r_shadowmapresolution.GetInt();
-		const int iCadcadedShadowHeight = r_shadowmapresolution.GetInt();
-		m_CascadedColorTexture.InitRenderTarget( iCadcadedShadowWidth, iCadcadedShadowHeight, RT_SIZE_NO_CHANGE,
-												 nullFormat, MATERIAL_RT_DEPTH_NONE, false, "_rt_CascadedShadowColor" );
-		m_CascadedDepthTexture.InitRenderTarget( iCadcadedShadowWidth, iCadcadedShadowHeight, RT_SIZE_NO_CHANGE,
-												 dstFormat, MATERIAL_RT_DEPTH_NONE, false, "_rt_CascadedShadowDepth" );
-
 		materials->EndRenderTargetAllocation();
 	}
 }
@@ -1437,9 +1427,6 @@ void CClientShadowMgr::ShutdownDepthTextureShadows()
 			m_DepthTextureCacheLocks.Remove( m_DepthTextureCache.Count()-1 );
 			m_DepthTextureCache.Remove( m_DepthTextureCache.Count()-1 );
 		}
-
-		m_CascadedDepthTexture.Shutdown();
-		m_CascadedColorTexture.Shutdown();
 
 		m_bDepthTextureActive = false;
 	}
@@ -3579,8 +3566,7 @@ void CClientShadowMgr::PreRender()
 	// -- Render to Texture Shadows -----------------------
 	//
 
-	bool bRenderToTextureActive = r_shadowrendertotexture.GetBool() &&
-		( g_pCSMEnvLight == NULL || !g_pCSMEnvLight->IsCascadedShadowMappingEnabled() );
+	bool bRenderToTextureActive = r_shadowrendertotexture.GetBool();
 
 	if ( bRenderToTextureActive != m_RenderToTextureActive )
 	{

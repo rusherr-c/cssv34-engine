@@ -47,7 +47,7 @@ public:
 	virtual bool HasInputElements( void ) { return true; }
 	virtual void ShowPanel( bool bShow );
 
-	virtual bool ShowAvatars() { return IsPC(); }
+	//virtual bool ShowAvatars() { return IsPC(); }
 
 	// both vgui::Frame and IViewPortPanel define these, so explicitly define them here as passthroughs to vgui
 	vgui::VPANEL GetVPanel( void ) { return BaseClass::GetVPanel(); }
@@ -57,7 +57,7 @@ public:
 	// IGameEventListener interface:
 	virtual void FireGameEvent( IGameEvent *event);
 
-	virtual void UpdatePlayerAvatar( int playerIndex, KeyValues *kv );
+	//virtual void UpdatePlayerAvatar( int playerIndex, KeyValues *kv );
 			
 protected:
 	MESSAGE_FUNC_INT( OnPollHideCode, "PollHideCode", code );
@@ -96,10 +96,7 @@ protected:
 	void MoveToCenterOfScreen();
 
 	vgui::ImageList				*m_pImageList;
-	int							m_iImageAvatars[MAX_PLAYERS+1];
-	CUtlMap<int,int>			m_mapAvatarsToImageList;
 
-	CPanelAnimationVarAliasType( int, m_iAvatarWidth, "avatar_width", "34", "proportional_int" );
 	CPanelAnimationVarAliasType( int, m_iNameWidth, "name_width", "136", "proportional_int" );
 	CPanelAnimationVarAliasType( int, m_iClassWidth, "class_width", "35", "proportional_int" );
 	CPanelAnimationVarAliasType( int, m_iScoreWidth, "score_width", "35", "proportional_int" );

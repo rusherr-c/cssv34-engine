@@ -132,7 +132,7 @@ void CBenchmarkResults::Upload()
 	uint16 cserPort = 0;
 	while ( cserIP == 0 )
 	{
-		SteamUtils()->GetCSERIPPort( &cserIP, &cserPort );
+		//SteamUtils()->GetCSERIPPort( &cserIP, &cserPort );
 		if ( !cserIP )
 			Sys_Sleep( 10 );
 	}

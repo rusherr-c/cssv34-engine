@@ -130,7 +130,6 @@ modeswitchsave.tga
 *.wav
 *.mp3
 *.jpg
-*.ico
 #*.cur
 #*.scr
 
@@ -158,6 +157,10 @@ modeswitchsave.tga
 !/src/dx9sdk/*/*.dll
 !/src/dx9sdk/*/*.lib
 !/src/thirdparty/*
+!/src/tier0/deskey/*
 !/src/lib/public/ati_compress_mt_vc8.lib
 !/src/lib/public/nvtc.lib
 !/src/lib/common/vc8/cryptlib.lib
+!gameinfo.txt
+!steam.inf
+!.nomedia

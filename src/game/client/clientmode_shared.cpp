@@ -29,7 +29,6 @@
 #include "c_team.h"
 #include "c_rumble.h"
 #include "fmtstr.h"
-#include "achievementmgr.h"
 #include "c_playerresource.h"
 #include <vgui/ILocalize.h>
 #if defined( _X360 )
@@ -893,47 +892,6 @@ void ClientModeShared::FireGameEvent( IGameEvent *event )
 
 		if ( !hudChat || !pPlayer )
 			return;
-
-		if ( !IsInCommentaryMode() )
-		{
-			CAchievementMgr *pAchievementMgr = dynamic_cast<CAchievementMgr *>( engine->GetAchievementMgr() );
-			if ( !pAchievementMgr )
-				return;
-
-			IAchievement *pAchievement = pAchievementMgr->GetAchievementByID( iAchievement );
-			if ( pAchievement )
-			{
-				if ( !pPlayer->IsDormant() )
-				{
-					// no particle effect if the local player is the one with the achievement or the player is dead
-					if ( !pPlayer->IsLocalPlayer() && pPlayer->IsAlive() ) 
-					{
-						//tagES using the "head" attachment won't work for CS and DoD
-						pPlayer->ParticleProp()->Create( "achieved", PATTACH_POINT_FOLLOW, "head" );
-					}
-					
-					pPlayer->EmitSound( "Achievement.Earned" );
-				}
-
-				if ( g_PR )
-				{
-					wchar_t wszPlayerName[MAX_PLAYER_NAME_LENGTH];
-					g_pVGuiLocalize->ConvertANSIToUnicode( g_PR->GetPlayerName( iPlayerIndex ), wszPlayerName, sizeof( wszPlayerName ) );
-
-					const wchar_t *pchLocalizedAchievement = ACHIEVEMENT_LOCALIZED_NAME_FROM_STR( pAchievement->GetName() );
-					if ( pchLocalizedAchievement )
-					{
-						wchar_t wszLocalizedString[128];
-						g_pVGuiLocalize->ConstructString( wszLocalizedString, sizeof( wszLocalizedString ), g_pVGuiLocalize->Find( "#Achievement_Earned" ), 2, wszPlayerName, pchLocalizedAchievement );
-
-						char szLocalized[128];
-						g_pVGuiLocalize->ConvertUnicodeToANSI( wszLocalizedString, szLocalized, sizeof( szLocalized ) );
-
-						hudChat->ChatPrintf( iPlayerIndex, CHAT_FILTER_SERVERMSG, "%s", szLocalized );
-					}
-				}
-			}
-		}
 	}
 	else
 	{

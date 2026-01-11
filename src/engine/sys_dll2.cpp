@@ -36,7 +36,6 @@
 #include "materialsystem/materialsystem_config.h"
 #include "server.h"
 #include "avi/iavi.h"
-#include "avi/ibik.h"
 #include "datacache/idatacache.h"
 #include "vphysics_interface.h"
 #include "inputsystem/iinputsystem.h"
@@ -86,6 +85,13 @@ IBik *bik = NULL;
 extern CreateInterfaceFn g_ClientFactory;
 #endif
 
+static SteamInfVersionInfo_t g_SteamInfIDVersionInfo;
+const SteamInfVersionInfo_t& GetSteamInfIDVersionInfo()
+{
+	Assert(g_SteamInfIDVersionInfo.AppID != k_uAppIdInvalid);
+	return g_SteamInfIDVersionInfo;
+}
+
 //-----------------------------------------------------------------------------
 // Forward declarations
 //-----------------------------------------------------------------------------
@@ -100,6 +106,197 @@ void EditorToggle_f();
 HWND *pmainwindow = NULL;
 #endif
 
+enum {
+	k_uAppIdInvalid = 0
+};
+
+//-----------------------------------------------------------------------------
+// Purpose: Attempt to initialize appid/steam.inf/minidump information. May only return partial information if called
+//          before Filesystem is ready.
+//
+//          The desire is to be able to call this ASAP to init basic minidump and AppID info, then re-call later on when
+//          the filesystem is setup, so full version # information and such can be propagated to the minidump system.
+//          (Currently, SDK mods will generally only have partial information prior to filesystem init)
+//-----------------------------------------------------------------------------
+// steam.inf keys.
+#define VERSION_KEY				"PatchVersion="
+#define PRODUCT_KEY				"ProductName="
+#define SERVER_VERSION_KEY		"ServerVersion="
+#define APPID_KEY				"AppID="
+#define SERVER_APPID_KEY		"ServerAppID="
+enum eSteamInfoInit
+{
+	eSteamInfo_Uninitialized,
+	eSteamInfo_Partial,
+	eSteamInfo_Initialized
+};
+static eSteamInfoInit Sys_TryInitSteamInfo(void* pvAPI, SteamInfVersionInfo_t& VerInfo, const char* pchMod, const char* pchBaseDir, bool bDedicated)
+{
+	static eSteamInfoInit initState = eSteamInfo_Uninitialized;
+
+	eSteamInfoInit previousInitState = initState;
+
+	//
+	//
+	// Initialize with some defaults.
+	VerInfo.ClientVersion = 0;
+	VerInfo.ServerVersion = 0;
+	V_strcpy_safe(VerInfo.szVersionString, "1.0.1.0");
+	V_strcpy_safe(VerInfo.szProductString, "hl2");
+	VerInfo.AppID = k_uAppIdInvalid;
+	VerInfo.ServerAppID = k_uAppIdInvalid;
+
+	// Filesystem may or may not be up
+	CUtlBuffer infBuf;
+	bool bFoundInf = false;
+	if (g_pFileSystem)
+	{
+		FileHandle_t fh;
+		fh = g_pFileSystem->Open("steam.inf", "rb", "GAME");
+		bFoundInf = fh && g_pFileSystem->ReadToBuffer(fh, infBuf);
+	}
+
+	if (!bFoundInf)
+	{
+		// We may try to load the steam.inf BEFORE we turn on the filesystem, so use raw filesystem API's here.
+		char szFullPath[MAX_PATH] = { 0 };
+		char szModSteamInfPath[MAX_PATH] = { 0 };
+		V_ComposeFileName(pchMod, "steam.inf", szModSteamInfPath, sizeof(szModSteamInfPath));
+		V_MakeAbsolutePath(szFullPath, sizeof(szFullPath), szModSteamInfPath, pchBaseDir);
+
+		// Try opening steam.inf
+		FILE* fp;
+		fopen_s(&fp, szFullPath, "rb");
+		if (fp)
+		{
+			// Read steam.inf data.
+			fseek(fp, 0, SEEK_END);
+			size_t bufsize = ftell(fp);
+			fseek(fp, 0, SEEK_SET);
+
+			infBuf.EnsureCapacity(bufsize + 1);
+
+			size_t iBytesRead = fread(infBuf.Base(), 1, bufsize, fp);
+			((char*)infBuf.Base())[iBytesRead] = 0;
+			infBuf.SeekPut(CUtlBuffer::SEEK_CURRENT, iBytesRead + 1);
+			fclose(fp);
+
+			bFoundInf = (iBytesRead == bufsize);
+		}
+	}
+
+	if (bFoundInf)
+	{
+		const char* pbuf = (const char*)infBuf.Base();
+		while (1)
+		{
+			pbuf = COM_Parse(pbuf);
+			if (!pbuf || !com_token[0])
+				break;
+
+			if (!Q_strnicmp(com_token, VERSION_KEY, Q_strlen(VERSION_KEY)))
+			{
+				V_strcpy_safe(VerInfo.szVersionString, com_token + Q_strlen(VERSION_KEY));
+				VerInfo.ClientVersion = atoi(VerInfo.szVersionString);
+			}
+			else if (!Q_strnicmp(com_token, PRODUCT_KEY, Q_strlen(PRODUCT_KEY)))
+			{
+				V_strcpy_safe(VerInfo.szProductString, com_token + Q_strlen(PRODUCT_KEY));
+			}
+			else if (!Q_strnicmp(com_token, SERVER_VERSION_KEY, Q_strlen(SERVER_VERSION_KEY)))
+			{
+				VerInfo.ServerVersion = atoi(com_token + Q_strlen(SERVER_VERSION_KEY));
+			}
+			else if (!Q_strnicmp(com_token, APPID_KEY, Q_strlen(APPID_KEY)))
+			{
+				VerInfo.AppID = atoi(com_token + Q_strlen(APPID_KEY));
+			}
+			else if (!Q_strnicmp(com_token, SERVER_APPID_KEY, Q_strlen(SERVER_APPID_KEY)))
+			{
+				VerInfo.ServerAppID = atoi(com_token + Q_strlen(SERVER_APPID_KEY));
+			}
+		}
+
+		// If we found a steam.inf we're as good as we're going to get, but don't tell callers we're fully initialized
+		// if it doesn't at least have an AppID
+		initState = (VerInfo.AppID != k_uAppIdInvalid) ? eSteamInfo_Initialized : eSteamInfo_Partial;
+	}
+	else if (!bDedicated)
+	{
+		// Opening steam.inf failed - try to open gameinfo.txt and read in just SteamAppId from that.
+		// (gameinfo.txt lacks the dedicated server steamid, so we'll just have to live until filesystem init to setup
+		// breakpad there when we hit this case)
+		char szModGameinfoPath[MAX_PATH] = { 0 };
+		char szFullPath[MAX_PATH] = { 0 };
+		V_ComposeFileName(pchMod, "gameinfo.txt", szModGameinfoPath, sizeof(szModGameinfoPath));
+		V_MakeAbsolutePath(szFullPath, sizeof(szFullPath), szModGameinfoPath, pchBaseDir);
+
+		// Try opening gameinfo.txt
+		FILE* fp;
+		fopen_s(&fp, szFullPath, "rb");
+		if (fp)
+		{
+			fseek(fp, 0, SEEK_END);
+			size_t bufsize = ftell(fp);
+			fseek(fp, 0, SEEK_SET);
+
+			char* buffer = (char*)_alloca(bufsize + 1);
+
+			size_t iBytesRead = fread(buffer, 1, bufsize, fp);
+			buffer[iBytesRead] = 0;
+			fclose(fp);
+
+			KeyValuesAD pkvGameInfo("gameinfo");
+			if (pkvGameInfo->LoadFromBuffer("gameinfo.txt", buffer))
+			{
+				VerInfo.AppID = (AppId_t)pkvGameInfo->GetInt("FileSystem/SteamAppId", k_uAppIdInvalid);
+			}
+		}
+
+		initState = eSteamInfo_Partial;
+	}
+
+	// In partial state the ServerAppID might be unknown, but if we found the full steam.inf and it's not set, it shares AppID.
+	if (initState == eSteamInfo_Initialized && VerInfo.ServerAppID == k_uAppIdInvalid)
+		VerInfo.ServerAppID = VerInfo.AppID;
+
+#if !defined(_X360)
+	if (VerInfo.AppID)
+	{
+		// steamclient.dll doesn't know about steam.inf files in mod folder,
+		// it accepts a steam_appid.txt in the root directory if the game is
+		// not started through Steam. So we create one there containing the
+		// current AppID
+		FILE* fh;
+		fopen_s(&fh, "steam_appid.txt", "wb");
+		if (fh)
+		{
+			char strAppID[512];
+			sprintf(strAppID, "%u\n", VerInfo.AppID);
+			fwrite(strAppID, sizeof(strAppID) + 1, 1, fh);
+
+			fclose(fh);
+		}
+	}
+	// Short Version numbers
+	int ShortV[2];
+	
+	ShortV[0] = VerInfo.ServerVersion - 10000;
+	ShortV[1] = VerInfo.ClientVersion - 10000;
+	if (ShortV[0] >= 0)
+		VerInfo.ShortVersions[0] = ShortV[0];
+	else
+		VerInfo.ShortVersions[0] = ShortV[0] + 9000;
+	if (ShortV[1] >= 0)
+		VerInfo.ShortVersions[1] = ShortV[1];
+	else
+		VerInfo.ShortVersions[1] = ShortV[1] + 9000;
+
+
+#endif // !_X360
+	return initState;
+}
+
 //-----------------------------------------------------------------------------
 // ConVars and console commands
 //-----------------------------------------------------------------------------
@@ -110,6 +307,8 @@ static ConCommand editor_toggle( "editor_toggle", EditorToggle_f, "Disables the 
 
 
 #ifndef SWDS
+
+
 //-----------------------------------------------------------------------------
 // Purpose: exports an interface that can be used by the launcher to run the engine
 //			this is the exported function when compiled as a blob
@@ -473,10 +672,6 @@ bool CEngineAPI::Connect( CreateInterfaceFn factory )
 		if ( !avi )
 			return false;
 	}
-
-	bik = (IBik*)factory( BIK_INTERFACE_VERSION, NULL );
-	if ( !bik )
-		return false;
 	
 	if ( !g_pStudioRender || !g_pDataCache || !g_pPhysics || !g_pMDLCache || !g_pMatSystemSurface || !g_pInputSystem )
 	{
@@ -530,6 +725,10 @@ void *CEngineAPI::QueryInterface( const char *pInterfaceName )
 //-----------------------------------------------------------------------------
 void CEngineAPI::SetStartupInfo( StartupInfo_t &info ) 
 {
+	// Setup and write out steam_appid.txt before we launch
+	bool bDedicated = false; // Dedicated comes through CDedicatedServerAPI
+	eSteamInfoInit steamInfo = Sys_TryInitSteamInfo(this, g_SteamInfIDVersionInfo, info.m_pInitialMod, info.m_pBaseDirectory, bDedicated);
+
 	g_bTextMode = info.m_bTextMode;
 
 	// Set up the engineparms_t which contains global information about the mod
@@ -540,6 +739,18 @@ void CEngineAPI::SetStartupInfo( StartupInfo_t &info )
 
 	// Needs to be done prior to init material system config
 	TRACEINIT( COM_InitFilesystem( m_StartupInfo.m_pInitialMod ), COM_ShutdownFileSystem() );
+
+	if (steamInfo != eSteamInfo_Initialized)
+	{
+		// Try again with filesystem available. This is commonly needed for SDK mods which need the filesystem to find
+		// their steam.inf, due to mounting SDK search paths.
+		steamInfo = Sys_TryInitSteamInfo(this, g_SteamInfIDVersionInfo, info.m_pInitialMod, info.m_pBaseDirectory, bDedicated);
+		Assert(steamInfo == eSteamInfo_Initialized);
+		if (steamInfo != eSteamInfo_Initialized)
+		{
+			Warning("Failed to find steam.inf or equivalent steam info. May not have proper information to connect to Steam.\n");
+		}
+	}
 }
 
 
@@ -964,7 +1175,7 @@ bool CEngineAPI::ModInit( const char *pModName, const char *pGameDir )
 
 	// Create the game window now that we have a search path
 	// FIXME: Deal with initial window width + height better
-	if ( !videomode || !videomode->CreateGameWindow( g_pMaterialSystemConfig->m_VideoMode.m_Width, g_pMaterialSystemConfig->m_VideoMode.m_Height, g_pMaterialSystemConfig->Windowed() ) )
+	if ( !videomode || !videomode->CreateGameWindow( g_pMaterialSystemConfig->m_VideoMode.m_Width, g_pMaterialSystemConfig->m_VideoMode.m_Height, g_pMaterialSystemConfig->Windowed(), g_pMaterialSystemConfig->NoBorderWindow()) )
 	{
 		return false;
 	}
@@ -1096,17 +1307,13 @@ extern "C" void __cdecl WriteMiniDumpUsingExceptionInfo( unsigned int uStructure
 
 			V_snprintf( ppi, sizeof(ppi), "prev PP PAGES: used: %d, free %d\nfinal PP PAGES: used: %d, free %d\nmemalloc = %u\n", g_pagedpoolinfo.numPagesUsed, g_pagedpoolinfo.numPagesFree, final.numPagesUsed, final.numPagesFree, g_pMemAlloc->MemoryAllocFailed() );
 			V_strncat( errorText, ppi, sizeof(errorText) );
-
-			SteamAPI_SetMiniDumpComment( errorText );
+			//WriteMiniDump(pchName);
 		}
 		catch ( ... )
 		{
 			// Oh oh
 		}
 	}
-
-	SteamAPI_WriteMiniDump( uStructuredExceptionCode, pExceptionInfo, build_number() );
-	// Clear DSound Buffers so the sound doesn't loop while the game shuts down
 	try
 	{
 		S_ClearBuffer();

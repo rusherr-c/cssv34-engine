@@ -26,6 +26,7 @@
 #include "tier0/vcrmode.h"
 #include "sv_plugin.h"
 #include "sv_log.h"
+#include "sys_dll.h"
 #include "filesystem_engine.h"
 #include "filesystem_init.h"
 #include "tier0/icommandline.h"
@@ -171,6 +172,7 @@ void CSteam3::Activate()
 	if ( !hltv )
 		usSpectatorPort = 0;
 	
+	/*
 	uint16 usMasterServerUpdaterPort;
 	if ( IsUsingMasterLegacyMode() || sv_master_share_game_socket.GetBool() )
 	{
@@ -186,18 +188,17 @@ void CSteam3::Activate()
 		m_bMasterServerUpdaterSharingGameSocket = false;
 		usMasterServerUpdaterPort = m_usPort;
 		m_QueryPort = m_usPort;
-	}
+	}*/
+
 #ifndef NO_STEAM
 	if ( !SteamGameServer_Init( 
 			m_unIP, 
 			m_usPort+1,	// Steam lives on -steamport + 1, master server updater lives on -steamport.
 			usGamePort, 
-			usSpectatorPort,
-			usMasterServerUpdaterPort, 
 			m_eServerMode, 
 			g_iSteamAppID, 
 			gamedir, 
-			gpszVersionString ) )
+			GetSteamInfIDVersionInfo().szVersionString ) )
 	{
 		Warning( "*********************************************************\n" );
 		Warning( "*\tUnable to load Steam support library.*\n" );
@@ -312,9 +313,7 @@ CSteamID CSteam3::GetGSSteamID()
 //-----------------------------------------------------------------------------
 void CSteam3::UpdateSpectatorPort( unsigned short unSpectatorPort )
 {
-	ISteamGameServer *pGameServer = SteamGameServer();
-	if ( pGameServer )
-		pGameServer->GSUpdateSpectatorPort( unSpectatorPort );
+	return;
 }
 
 
@@ -679,7 +678,7 @@ bool CSteam3::NotifyClientConnect( CBaseClient *client, uint32 unUserID, netadr_
 		return false;
 #ifndef NO_STEAM
 	// Msg("S3: Sending client logon request for %x\n", steamIDClient.ConvertToUint64( ) );
-	bool bRet = SteamGameServer()->GSSendUserConnect( unUserID, htonl( adr.GetIP() ), htons( adr.GetPort() ), pvCookie, ucbCookie );
+	bool bRet = SteamGameServer()->GSSendSteam2UserConnect( unUserID, 0, 0, htonl( adr.GetIP() ), htons( adr.GetPort() ), pvCookie, ucbCookie );
 #else
 	bool bRet = false;
 #endif
@@ -692,9 +691,11 @@ bool CSteam3::NotifyLocalClientConnect( CBaseClient *client )
 #ifndef NO_STEAM
 	CSteamID steamID;
 
+	/*
 	if ( SteamGameServer() && !SteamGameServer()->GSCreateUnauthenticatedUser( &steamID ) )
 		return false;
-	
+	*/
+
 	client->SetSteamID( steamID );
 #endif
 	SendUpdatedServerDetails();
@@ -796,8 +797,7 @@ void CSteam3::SendUpdatedServerDetails()
 								sv.GetMaxClients(), 
 								sv.GetNumFakeClients(), 
 								sv.GetName(),
-								hltv ? hltv->GetName() : sv.GetName(),
-								(hltv && hltv->IsTVRelay()) ? hltv->GetMapName() : sv.GetMapName() 
+								sv.GetMapName() 
 								);
 #endif
 }

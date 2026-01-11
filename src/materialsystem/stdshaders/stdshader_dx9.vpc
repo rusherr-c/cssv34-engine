@@ -124,14 +124,6 @@ $Project "stdshader_dx9"
 		$File	"writez_dx9.cpp"
 		$File	"writestencil_dx9.cpp"
 
-		$Folder	"Remove me when VAC2 is out" [$WIN32]
-		{
-			$File	"$SRCDIR\tier1\checksum_crc.cpp"
-			$File	"$SRCDIR\tier1\checksum_md5.cpp"
-			$File	"..\shader_dll_verify.cpp"
-			$File	"..\shader_dll_verify.h"
-		}
-
 	}
 
 	$Folder	"Header Files"
