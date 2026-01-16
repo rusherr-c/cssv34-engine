@@ -11,6 +11,11 @@
 #pragma once
 #endif
 
+#include "ServerBrowser/IServerBrowser.h"
+#include "IVGuiModule.h"
+
+#include <vgui_controls/PHandle.h>
+
 class CServerBrowserDialog;
 
 //-----------------------------------------------------------------------------
@@ -35,14 +40,14 @@ public:
 
 	// IServerBrowser implementation
 	// joins a specified game - game info dialog will only be opened if the server is fully or passworded
-	virtual bool JoinGame( uint32 unGameIP, uint16 usGamePort );
-	virtual bool JoinGame( uint64 ulSteamIDFriend );
+	virtual bool JoinGame(uint32 unGameIP, uint16 usGamePort);
+	virtual bool JoinGame(uint64 ulSteamIDFriend);
 
 	// opens a game info dialog to watch the specified server; associated with the friend 'userName'
-	virtual bool OpenGameInfoDialog( uint64 ulSteamIDFriend );
+	virtual bool OpenGameInfoDialog(uint64 ulSteamIDFriend);
 
 	// forces the game info dialog closed
-	virtual void CloseGameInfoDialog( uint64 ulSteamIDFriend );
+	virtual void CloseGameInfoDialog(uint64 ulSteamIDFriend);
 
 	// closes all the game info dialogs
 	virtual void CloseAllGameInfoDialogs();
@@ -51,16 +56,9 @@ public:
 	virtual void CreateDialog();
 	virtual void Open();
 
-	// true if the user can't play a game
-	bool IsVACBannedFromGame( int nAppID );
-
-
 private:
 	vgui::DHANDLE<CServerBrowserDialog> m_hInternetDlg;
 };
-
-// singleton accessor
-CServerBrowser &ServerBrowser();
 
 
 #endif // SERVERBROWSER_H

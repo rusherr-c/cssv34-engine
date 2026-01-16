@@ -12,12 +12,29 @@ $MacroRequired "GAMENAME"
 
 $include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
 
-$Linux
+$Configuration	"Debug"
 {
-	-$File	"$SRCDIR\lib\public\steam_api.lib"
-	$File	"$SRCDIR\linux\steam_api_i486.so"
+	$General
+	{
+		$OutputDirectory			".\Debug_$GAMENAME"			[$WIN32]
+		$IntermediateDirectory		".\Debug_$GAMENAME"			[$WIN32]
+
+		$OutputDirectory			".\Debug_$GAMENAME_360"		[$X360]
+		$IntermediateDirectory		".\Debug_$GAMENAME_360"		[$X360]
+	}
 }
 
+$Configuration	"Release"
+{
+	$General
+	{
+		$OutputDirectory			".\Release_$GAMENAME"		[$WIN32]
+		$IntermediateDirectory		".\Release_$GAMENAME"		[$WIN32]
+
+		$OutputDirectory			".\Release_$GAMENAME_360"	[$X360]
+		$IntermediateDirectory		".\Release_$GAMENAME_360"	[$X360]
+	}
+}
 
 $Configuration
 {

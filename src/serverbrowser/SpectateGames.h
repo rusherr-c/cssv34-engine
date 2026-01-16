@@ -19,11 +19,12 @@
 class CSpectateGames : public CInternetGames
 {
 public:
-	CSpectateGames(vgui::Panel *parent);
+	CSpectateGames(vgui::Panel *parent) : CInternetGames(parent, "SpectateGames") {}
 
 protected:
 	// filters by spectator games
-	virtual void GetNewServerList();
+	virtual void RequestServers(int Start, const char *filterString);
+	virtual bool CheckPrimaryFilters(serveritem_t &server);
 
 private:
 	typedef CInternetGames BaseClass;

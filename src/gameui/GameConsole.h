@@ -34,6 +34,15 @@ public:
 	// clears the console
 	virtual void Clear();
 
+	// prints a message to the console
+	virtual void Printf(const char* format, ...);
+
+	// prints a debug message to the console
+	virtual void DPrintf(const char* format, ...);
+
+	// prints a debug message to the console
+	virtual void ColorPrintf(Color& clr, const char* format, ...);
+
 	// returns true if the console is currently in focus
 	virtual bool IsConsoleVisible();
 

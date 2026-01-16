@@ -5,9 +5,17 @@
 // $NoKeywords: $
 //=============================================================================
 
-#include "pch_serverbrowser.h"
+#define PROTECTED_THINGS_DISABLE
 
-extern class IAppInformation *g_pAppInformation; // may be NULL
+#include <winlite.h>
+#include <stdio.h>
+
+#include "ModList.h"
+
+#include <vgui/VGUI.h>
+#include <vgui/ISystem.h>
+#include <KeyValues.h>
+#include <vgui_controls/Controls.h>
 
 //-----------------------------------------------------------------------------
 // Purpose: Singleton accessor
@@ -23,7 +31,8 @@ CModList &ModList()
 //-----------------------------------------------------------------------------
 CModList::CModList()
 {
-	ParseSteamMods();
+
+	ParseInstalledMods();
 }
 
 //-----------------------------------------------------------------------------
@@ -31,102 +40,99 @@ CModList::CModList()
 //-----------------------------------------------------------------------------
 int CModList::ModCount()
 {
-	return m_ModList.Count();
+	return m_ModList.Size();
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: data accessor
-//-----------------------------------------------------------------------------
-const char *CModList::GetModName(int index)
-{
-	return m_ModList[index].description;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: data accessor
+// Purpose: 
+// Input  : index - 
+// Output : const char
 //-----------------------------------------------------------------------------
 const char *CModList::GetModDir(int index)
 {
-	return m_ModList[index].gamedir;
+	return m_ModList[index].modName;
 }
 
 
 //-----------------------------------------------------------------------------
-// Purpose: data accessor
+// Purpose: Searches half-life directory for mods
 //-----------------------------------------------------------------------------
-int CModList::GetAppID(int index) const
+void CModList::ParseInstalledMods()
 {
-	return m_ModList[index].appID;
-}
+	char szGameDirectory[MAX_PATH];
+	char szSearchPath[MAX_PATH + 5];
 
-
-//-----------------------------------------------------------------------------
-// Purpose: returns the mod name for the associated gamedir
-//-----------------------------------------------------------------------------
-const char *CModList::GetModNameForModDir(const char *gamedir, int iAppID = 0 )
-{
-	for (int i = 0; i < m_ModList.Count(); i++)
+	// if we're running under steam, use it's game list
+	ParseSteamMods();
+	
+	// get half-life directory
+	if (!vgui::system()->GetRegistryString("HKEY_LOCAL_MACHINE\\Software\\Valve\\Half-life\\InstallPath", szGameDirectory, sizeof(szGameDirectory)))
 	{
-		if (!Q_stricmp(m_ModList[i].gamedir, gamedir) && ( iAppID == 0 || iAppID == m_ModList[i].appID ) )
+		// fallback to getting the cstrike retail directory
+		if (!vgui::system()->GetRegistryString("HKEY_LOCAL_MACHINE\\Software\\Sierra OnLine\\Setup\\CSTRIKE\\Directory", szGameDirectory, sizeof(szGameDirectory)))
 		{
-			return m_ModList[i].description;
+			return;
 		}
 	}
 
-	if ( ServerBrowserDialog().GetActiveModName() )
+	strcpy(szSearchPath, szGameDirectory);
+	strcat(szSearchPath, "\\*.*");
+
+	WIN32_FIND_DATA wfd;
+	HANDLE hResult;
+	memset(&wfd, 0, sizeof(WIN32_FIND_DATA));
+	
+	hResult = FindFirstFile( szSearchPath, &wfd);
+	if (hResult != INVALID_HANDLE_VALUE)
 	{
-		return ServerBrowserDialog().GetActiveGameName();
-	}
-	return "";
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: looks for liblist.gam in the mod dir
-//-----------------------------------------------------------------------------
-bool ExtractGameNameFromLiblist(char *gameDescription, const char *appPath, const char *gameDir)
-{
-	char fullPath[512];
-	sprintf(fullPath, "%s\\%s\\liblist.gam", appPath, gameDir);
-
-	FILE *f = fopen(fullPath, "rt");
-	if (!f)
-		return false;
-
-	// read out the whole file into a buffer
-	while (!feof(f))
-	{
-		char line[512];
-		fgets(line, sizeof(line), f);
-		// look for the game key
-		if (!Q_strnicmp(line, "game ", 5))
+		BOOL bMoreFiles;
+		while (1)
 		{
-			// parse out from quote to quote
-			char *start = strchr(line, '\"');
-			if (!start)
-				break;
-			++start;
-			char *end = strchr(start, '\"');
-			if (!end)
-				break;
+			if ( (wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) &&
+				 (strnicmp(wfd.cFileName, ".",1) ) )
+			{
+				// Check for dlls\*.dll
+				char	szDllDirectory[MAX_PATH + 16];
+				sprintf(szDllDirectory, "%s\\%s\\liblist.gam", szGameDirectory, wfd.cFileName);
 
-			strncpy(gameDescription, start, end - start);
-			gameDescription[end - start] = 0;
-			break;
+				WIN32_FIND_DATA wfd2;
+				HANDLE hResult2;
+				memset(&wfd2, 0, sizeof(WIN32_FIND_DATA));
+
+				hResult2 = FindFirstFile(szDllDirectory, &wfd2);
+				if (hResult2 != INVALID_HANDLE_VALUE)
+				{
+					// Add the game directory.
+					strlwr(wfd.cFileName);
+
+					mod_t mod;
+
+					strncpy(mod.modName, wfd.cFileName, sizeof(mod.modName) - 1);
+					mod.modName[sizeof(mod.modName) - 1] = 0;
+
+					m_ModList.AddToTail(mod);
+					
+/*
+					CMod *pnew = ParseFromLibList( wfd.cFileName, szDllDirectory );
+					if ( pnew )
+					{
+						pnew->next = g_pModList;
+						g_pModList = pnew;
+
+						if ( !stricmp( wfd.cFileName, "VALVE" ) )
+							g_pHalfLife = pnew;
+					}
+					FindClose( hResult2 );
+*/
+				}
+			}
+			bMoreFiles = FindNextFile(hResult, &wfd);
+			if (!bMoreFiles)
+				break;
 		}
+		
+		FindClose(hResult);
 	}
-
-	fclose(f);
-	return true;
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: sort the mod list in alphabetical order
-//-----------------------------------------------------------------------------
-int CModList::ModNameCompare( const mod_t *pLeft, const mod_t *pRight )
-{
-	return ( Q_stricmp( pLeft->description, pRight->description ) ); 
 }
 
 //-----------------------------------------------------------------------------
@@ -134,52 +140,22 @@ int CModList::ModNameCompare( const mod_t *pLeft, const mod_t *pRight )
 //-----------------------------------------------------------------------------
 void CModList::ParseSteamMods()
 {
-	// bugbug jmccaskey - fix this to assert again once IAppInformation is moved
-	// out of SteamUI so it can work in the overlay, for now server browser will
-	// only half work in the overlay...
-	//Assert( g_pAppInformation );
-	if ( g_pAppInformation )
+	KeyValues *file = new KeyValues("GameInfo");
+	if (file->LoadFromFile((IBaseFileSystem*)g_pFullFileSystem, "resource/games/ClientGameInfo.vdf", "PLATFORM"))
 	{
-		int numSteamApps = g_pAppInformation->GetAppCount();
-		for ( int i = 0; i < numSteamApps; i++ )
+		for (KeyValues *kv = file->FindKey("Apps", true)->GetFirstSubKey(); kv != NULL; kv = kv->GetNextKey())
 		{
-			bool bIsSubscribed = g_pAppInformation->GetAppIsSubscribed( i );
-
-			// skip this app if not subscribed
-			if ( !bIsSubscribed )
-				continue;
-
-			bool bAppHasServers = g_pAppInformation->GetAppHasServers( i );
-
-			// skip if NoServers
-			if ( !bAppHasServers )
-				continue;
-
-			const char *pchGameDir = g_pAppInformation->GetAppGameDir( i );
-			const char *pchName = g_pAppInformation->GetAppServerBrowserName( i );
-
-			if ( pchGameDir && Q_strlen( pchGameDir ) > 0 
-				&& pchName &&  Q_strlen( pchName ) > 0 )
+			if (!kv->GetInt("NoServers"))
 			{
 				// add the game directory to the list
 				mod_t mod;
-				
-				if ( Q_IsAbsolutePath( pchGameDir ) ) // 3rd party mods are full paths, but the master server just wants the game dir 
-				{	
-					Q_strncpy( mod.gamedir, pchGameDir, sizeof(mod.gamedir) );
-					Q_StripLastDir( mod.gamedir, sizeof(mod.gamedir) );
-					Q_strncpy( mod.gamedir, pchGameDir + Q_strlen(mod.gamedir), Q_strlen(pchGameDir) - Q_strlen(mod.gamedir) + 1 );
-				}
-				else
-				{
-					Q_strncpy(mod.gamedir, pchGameDir, sizeof(mod.gamedir));
-				}
-				Q_strlower(mod.gamedir);
-				Q_strncpy(mod.description, pchName, sizeof(mod.description));
-				mod.appID = g_pAppInformation->GetAppID( i );
-
+				strncpy(mod.modName, kv->GetString("gamedir"), sizeof(mod.modName) - 1);
+				mod.modName[sizeof(mod.modName) - 1] = 0;
+				strlwr(mod.modName);
 				m_ModList.AddToTail(mod);
 			}
 		}
 	}
+
+	file->deleteThis();
 }

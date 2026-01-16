@@ -6,30 +6,35 @@
 
 $Macro SRCDIR		".."
 $Macro OUTBINDIR	"$SRCDIR\..\game\bin"
+$Macro TRACKERCOMN	"$SRCDIR\Tracker\common"
 
-$Include "$SRCDIR\vpc_scripts\source_dll_win32_base.vpc"	[$WIN32||$LINUX]
-$Include "$SRCDIR\vpc_scripts\source_dll_x360_base.vpc"		[$X360]
+// Replace ServerBrowser with a stub?
+$Macro STUB		"1"
+
+$Include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
+
 
 $Configuration
 {
 	$Compiler
 	{
+		$AdditionalIncludeDirectories			"$BASE;$TRACKERCOMN"
 		$PreprocessorDefinitions			"$BASE;SERVERBROWSER_EXPORTS;GAME_SRC;_USE_32BIT_TIME_T"
+		$PreprocessorDefinitions			"$BASE;STUB_SERVERBROWSER" [$STUB]
 	}
 
 	$Linker
 	{
-		$AdditionalDependencies				"$BASE Advapi32.lib wsock32.lib Ws2_32.lib User32.lib" [$WIN32]
-		$AdditionalDependencies				"$BASE Xonline.lib" [$X360]
+		$AdditionalDependencies				"$BASE ws2_32.lib wsock32.lib" [$WIN32]
+		//$AdditionalDependencies				"$BASE Xonline.lib" [$X360]
 	}
 }
 
-$Project "ServerBrowser"
+$Project "ServerBrowser" 
 {
-	$Folder	"Source Files"
+	$Folder	"Source Files" [!$STUB]
 	{
 		$File	"BaseGamesPage.cpp"
-		$File	"CustomGames.cpp"
 		$File	"DialogAddServer.cpp"
 		$File	"DialogGameInfo.cpp"
 		$File	"DialogServerPassword.cpp"
@@ -38,30 +43,37 @@ $Project "ServerBrowser"
 		$File	"HistoryGames.cpp"
 		$File	"InternetGames.cpp"
 		$File	"LanGames.cpp"
+		$File	"LanBroadcastMsgHandler.cpp"
 		$File	"ModList.cpp"
+		$File	"MasterMsgHandler.cpp"
 		$File	"ServerBrowser.cpp"
 		$File	"ServerBrowserDialog.cpp"
 		$File	"ServerContextMenu.cpp"
+		$File	"ServerMsgHandlerDetails.cpp"
 		$File	"ServerListCompare.cpp"
+		$File	"ServerList.cpp"
 		$File	"SpectateGames.cpp"
-		$File	"VACBannedConnRefusedDialog.cpp"
-		$File	"VACBannedConnRefusedDialog.h"
+		//$File	"VACBannedConnRefusedDialog.cpp"
+		//$File	"VACBannedConnRefusedDialog.h"
+		$File	"vinternetdlg.cpp"
 		$File	"$SRCDIR\public\vgui_controls\vgui_controls.cpp"
-		{
-			$Configuration
-			{
-				$Compiler
-				{
-					$Create/UsePrecompiledHeader	"Not Using Precompiled Headers"
-				}
-			}
-		}
+
+		// Tracker files
+		$File	"$TRACKERCOMN\netapi.cpp"
+		$File	"$TRACKERCOMN\msgbuffer.cpp"
+		$File	"$TRACKERCOMN\socket.cpp"
+		$File	"$TRACKERCOMN\util.cpp"
+
+	}
+	
+	$Folder "Source Files"	[$STUB]
+	{
+		$File	"StubServerBrowser.cpp"
 	}
 
-	$Folder	"Header Files"
+	$Folder	"Header Files" [!$STUB]
 	{
 		$File	"BaseGamesPage.h"
-		$File	"CustomGames.h"
 		$File	"DialogAddServer.h"
 		$File	"DialogGameInfo.h"
 		$File	"DialogServerPassword.h"
@@ -75,10 +87,20 @@ $Project "ServerBrowser"
 		$File	"ServerBrowserDialog.h"
 		$File	"ServerContextMenu.h"
 		$File	"ServerListCompare.h"
+		$File	"ServerList.h"
 		$File	"SpectateGames.h"
+
+		// Tracker files
+		$File	"$TRACKERCOMN\igamelist.h"
+		$File	"$TRACKERCOMN\inetapi.h"
+		$File	"$TRACKERCOMN\iserverrefreshresponse.h"
+		$File	"$TRACKERCOMN\MasterMsgHandler.h"
+		$File	"$TRACKERCOMN\msgbuffer.h"
+		$File	"$TRACKERCOMN\server.h"
+		$File	"$TRACKERCOMN\util.h"
 	}
 
-	$Folder	"Resource Files"
+	$Folder	"Resource Files" [!$STUB]
 	{
 	}
 	$Folder	"Exposed interfaces"

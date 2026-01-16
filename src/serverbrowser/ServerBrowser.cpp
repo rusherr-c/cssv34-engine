@@ -5,21 +5,24 @@
 // $NoKeywords: $
 //=============================================================================
 
-#include "pch_serverbrowser.h"
+#include "ServerBrowser.h"
+#include "ServerBrowserDialog.h"
+#include "IRunGameEngine.h"
+#include "Friends/IFriendsUser.h"
+#include "DialogGameInfo.h"
+
+#include <vgui/ILocalize.h>
+#include <vgui/IPanel.h>
+#include <vgui/IVGui.h>
+#include <KeyValues.h>
 
 // expose the server browser interfaces
 CServerBrowser g_ServerBrowserSingleton;
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CServerBrowser, IServerBrowser, SERVERBROWSER_INTERFACE_VERSION, g_ServerBrowserSingleton);
-EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CServerBrowser, IVGuiModule, "VGuiModuleServerBrowser001", g_ServerBrowserSingleton); // the interface loaded by PlatformMenu.vdf
-
-// singleton accessor
-CServerBrowser &ServerBrowser()
-{
-	return g_ServerBrowserSingleton;
-}
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR(CServerBrowser, IVGuiModule, "VGuiModuleServerBrowser001", g_ServerBrowserSingleton);
 
 IRunGameEngine *g_pRunGameEngine = NULL;
-IAppInformation *g_pAppInformation = NULL;
+IFriendsUser *g_pFriendsUser = NULL;
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -28,14 +31,12 @@ CServerBrowser::CServerBrowser()
 {
 }
 
-
 //-----------------------------------------------------------------------------
 // Purpose: Destructor
 //-----------------------------------------------------------------------------
 CServerBrowser::~CServerBrowser()
 {
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -49,21 +50,12 @@ void CServerBrowser::CreateDialog()
 	}
 }
 
-
 //-----------------------------------------------------------------------------
 // Purpose: links to vgui and engine interfaces
 //-----------------------------------------------------------------------------
 bool CServerBrowser::Initialize(CreateInterfaceFn *factorylist, int factoryCount)
 {
-	ConnectTier1Libraries( factorylist, factoryCount );
-	ConVar_Register();
-	ConnectTier2Libraries( factorylist, factoryCount );
-	ConnectTier3Libraries( factorylist, factoryCount );
 	g_pRunGameEngine = NULL;
-	g_pAppInformation = NULL;
-#ifndef NO_STEAM
-	SteamAPI_Init();
-#endif
 
 	for (int i = 0; i < factoryCount; i++)
 	{
@@ -71,31 +63,26 @@ bool CServerBrowser::Initialize(CreateInterfaceFn *factorylist, int factoryCount
 		{
 			g_pRunGameEngine = (IRunGameEngine *)(factorylist[i])(RUNGAMEENGINE_INTERFACE_VERSION, NULL);
 		}
-		if (!g_pAppInformation)
-		{
-			g_pAppInformation = (IAppInformation *)(factorylist[i])(APPINFORMATION_INTERFACE_VERSION, NULL);
-		}
 	}
 
 	// load the vgui interfaces
-#if defined( STEAM ) || defined( HL1 )
-	if ( !vgui::VGuiControls_Init("ServerBrowser", factorylist, factoryCount) )
-#else
-	if ( !vgui::VGui_InitInterfacesList("ServerBrowser", factorylist, factoryCount) )
-#endif
-		return false;
+	if ( vgui::VGui_InitInterfacesList("ServerBrowser", factorylist, factoryCount) )
+	{
+		// load localization file
+		g_pVGuiLocalize->AddFile("servers/serverbrowser_%language%.txt");
+		return true;
+	}
 
-	// load localization file
-	g_pVGuiLocalize->AddFile( "servers/serverbrowser_%language%.txt" );
-	return true;
+	return false;
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: links to other modules interfaces (tracker)
 //-----------------------------------------------------------------------------
 bool CServerBrowser::PostInitialize(CreateInterfaceFn *modules, int factoryCount)
 {
+	g_pFriendsUser = NULL;
+
 	// find the interfaces we need
 	for (int i = 0; i < factoryCount; i++)
 	{
@@ -104,84 +91,52 @@ bool CServerBrowser::PostInitialize(CreateInterfaceFn *modules, int factoryCount
 			g_pRunGameEngine = (IRunGameEngine *)(modules[i])(RUNGAMEENGINE_INTERFACE_VERSION, NULL);
 		}
 
-		if (!g_pAppInformation)
+		if (!g_pFriendsUser)
 		{
-			g_pAppInformation = (IAppInformation *)(modules[i])(APPINFORMATION_INTERFACE_VERSION, NULL);
+			g_pFriendsUser = (IFriendsUser *)(modules[i])(FRIENDSUSER_INTERFACE_VERSION, NULL);
 		}
-
 	}
 
 	CreateDialog();
 	m_hInternetDlg->SetVisible(false);
 
-	// g_pAppInformation ISN'T required
-	return g_pRunGameEngine;
+	return (g_pRunGameEngine /*&& g_pFriendsUser*/);
 }
-
-
-//-----------------------------------------------------------------------------
-// Purpose: true if the user can't play a game due to VAC banning
-//-----------------------------------------------------------------------------
-bool CServerBrowser::IsVACBannedFromGame( int nAppID )
-{
-	return false;
-}
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 bool CServerBrowser::IsValid()
 {
-	return ( g_pRunGameEngine );
+	return (g_pRunGameEngine /*&& g_pFriendsUser*/);
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 bool CServerBrowser::Activate()
 {
-	static bool firstTimeOpening = true;
-	if ( firstTimeOpening )
-	{
-		m_hInternetDlg->LoadUserData(); // reload the user data the first time the dialog is made visible, helps with the lag between module load and
-										// steamui getting Deactivate() call
-		firstTimeOpening = false;
-	}
-
 	Open();
 	return true;
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: called when the server browser gets used in the game
+// Purpose: 
 //-----------------------------------------------------------------------------
 void CServerBrowser::Deactivate()
 {
 	if (m_hInternetDlg.Get())
 	{
-		m_hInternetDlg->SaveUserData();
+		m_hInternetDlg->SaveFilters();
 	}
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: called when the server browser is no longer being used in the game
+// Purpose: 
 //-----------------------------------------------------------------------------
 void CServerBrowser::Reactivate()
 {
-	if (m_hInternetDlg.Get())
-	{
-		m_hInternetDlg->LoadUserData();
-		if (m_hInternetDlg->IsVisible())
-		{
-			m_hInternetDlg->RefreshCurrentPage();
-		}
-	}
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -190,7 +145,6 @@ void CServerBrowser::Open()
 {
 	m_hInternetDlg->Open();
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: returns direct handle to main server browser dialog
@@ -206,11 +160,13 @@ vgui::VPANEL CServerBrowser::GetPanel()
 //-----------------------------------------------------------------------------
 void CServerBrowser::SetParent(vgui::VPANEL parent)
 {
-	if (m_hInternetDlg.Get())
+	if(m_hInternetDlg.Get())
 	{
 		m_hInternetDlg->SetParent(parent);
 	}
 }
+
+
 
 
 //-----------------------------------------------------------------------------
@@ -223,100 +179,78 @@ void CServerBrowser::Shutdown()
 		m_hInternetDlg->Close();
 		m_hInternetDlg->MarkForDeletion();
 	}
-
-#if defined( STEAM )
-	vgui::VGuiControls_Shutdown();
-#endif
-
-	DisconnectTier3Libraries();
-	DisconnectTier2Libraries();
-	ConVar_Unregister();
-	DisconnectTier1Libraries();
-#ifndef NO_STEAM
-	SteamAPI_Shutdown();
-#endif
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: opens a game info dialog to watch the specified server; associated with the friend 'userName'
 //-----------------------------------------------------------------------------
-bool CServerBrowser::OpenGameInfoDialog( uint64 ulSteamIDFriend )
+GameHandle_t CServerBrowser::OpenGameInfoDialog(unsigned int gameIP, unsigned int gamePort, const char *userName)
 {
-#if !defined( _X360 ) // X360TBD: SteamFriends()
-	if ( m_hInternetDlg.Get() )
+	// opens the game info dialog, but does not connect
+	if (m_hInternetDlg.Get())
 	{
-		// activate an already-existing dialog
-		CDialogGameInfo *pDialogGameInfo = m_hInternetDlg->GetDialogGameInfoForFriend( ulSteamIDFriend );
-		if ( pDialogGameInfo )
-		{
-			pDialogGameInfo->Activate();
-			return true;
-		}
+		vgui::Panel *dlg = m_hInternetDlg->OpenGameInfoDialog(gameIP, gamePort, userName);
 
-#ifndef NO_STEAM
-		// none yet, create a new dialog
-		FriendGameInfo_t friendGameInfo;
-		if ( SteamFriends()->GetFriendGamePlayed( ulSteamIDFriend, &friendGameInfo ) )
-		{
-			uint16 usConnPort = friendGameInfo.m_usGamePort;
-			if ( friendGameInfo.m_usQueryPort < QUERY_PORT_ERROR )
-				usConnPort = friendGameInfo.m_usGamePort;
-			CDialogGameInfo *pDialogGameInfo = m_hInternetDlg->OpenGameInfoDialog( friendGameInfo.m_unGameIP, friendGameInfo.m_usGamePort, usConnPort );
-			pDialogGameInfo->SetFriend( ulSteamIDFriend );
-			return true;
-		}
-#endif
+		// return safe handle to the panel
+		return (GameHandle_t)vgui::ivgui()->PanelToHandle(dlg->GetVPanel());
 	}
-#endif
-	return false;
-}
 
+	return (GameHandle_t)0;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: joins a specified game - game info dialog will only be opened if the server is fully or passworded
 //-----------------------------------------------------------------------------
-bool CServerBrowser::JoinGame( uint64 ulSteamIDFriend )
+GameHandle_t CServerBrowser::JoinGame(unsigned int gameIP, unsigned int gamePort, const char *userName)
 {
-	if ( OpenGameInfoDialog( ulSteamIDFriend ) )
+	// open the game info dialog in connect-right-away-mode
+	if (m_hInternetDlg.Get())
 	{
-		CDialogGameInfo *pDialogGameInfo = m_hInternetDlg->GetDialogGameInfoForFriend( ulSteamIDFriend );
-		pDialogGameInfo->Connect();
+		vgui::Panel *dlg = m_hInternetDlg->JoinGame(gameIP, gamePort);
+
+		// return safe handle to the panel
+		return (GameHandle_t)vgui::ivgui()->PanelToHandle(dlg->GetVPanel());
 	}
 
-	return false;
+	return (GameHandle_t)0;
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: joins a game by IP/Port
+// Purpose: changes the game info dialog to watch a new server; normally used when a friend changes games
 //-----------------------------------------------------------------------------
-bool CServerBrowser::JoinGame( uint32 unGameIP, uint16 usGamePort )
+void CServerBrowser::UpdateGameInfoDialog(GameHandle_t gameDialog, unsigned int gameIP, unsigned int gamePort)
 {
-    m_hInternetDlg->JoinGame( unGameIP, usGamePort );
-	return true;
+	// updates an existing dialog with a new game (for if a friend changes games)
+	vgui::VPANEL VPanel = vgui::ivgui()->HandleToPanel(gameDialog);
+	if (VPanel)
+	{
+		CDialogGameInfo *gameDialog = dynamic_cast<CDialogGameInfo *>(vgui::ipanel()->GetPanel(VPanel, vgui::GetControlsModuleName()));
+		if (gameDialog)
+		{
+			gameDialog->ChangeGame(gameIP, gamePort);
+		}
+	}
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: forces the game info dialog closed
 //-----------------------------------------------------------------------------
-void CServerBrowser::CloseGameInfoDialog( uint64 ulSteamIDFriend )
+void CServerBrowser::CloseGameInfoDialog(GameHandle_t gameDialog)
 {
-	CDialogGameInfo *pDialogGameInfo = m_hInternetDlg->GetDialogGameInfoForFriend( ulSteamIDFriend );
-	if ( pDialogGameInfo )
+	// forces the dialog closed
+	vgui::VPANEL VPanel = vgui::ivgui()->HandleToPanel(gameDialog);
+	if (VPanel)
 	{
-		pDialogGameInfo->Close();
+		vgui::ivgui()->PostMessage(VPanel, new KeyValues("Close"), NULL);
 	}
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: closes all the game info dialogs
 //-----------------------------------------------------------------------------
 void CServerBrowser::CloseAllGameInfoDialogs()
 {
-	if ( m_hInternetDlg.Get() )
+	if (m_hInternetDlg.Get())
 	{
 		m_hInternetDlg->CloseAllGameInfoDialogs();
 	}

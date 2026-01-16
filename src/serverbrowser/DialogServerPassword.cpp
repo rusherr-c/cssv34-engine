@@ -5,7 +5,14 @@
 // $NoKeywords: $
 //=============================================================================
 
-#include "pch_serverbrowser.h"
+#include "DialogServerPassword.h"
+
+#include <KeyValues.h>
+#include <vgui/ISurface.h>
+
+#include <vgui_controls/Button.h>
+#include <vgui_controls/Label.h>
+#include <vgui_controls/TextEntry.h>
 
 using namespace vgui;
 
@@ -16,8 +23,6 @@ CDialogServerPassword::CDialogServerPassword(vgui::Panel *parent) : Frame(parent
 {
 	m_iServerID = -1;
 	SetSize(320, 240);
-	SetDeleteSelfOnClose(true);
-	SetSizeable(false);
 
 	m_pInfoLabel = new Label(this, "InfoLabel", "#ServerBrowser_ServerRequiresPassword");
 	m_pGameLabel = new Label(this, "GameLabel", "<game label>");
@@ -61,7 +66,7 @@ void CDialogServerPassword::OnCommand(const char *command)
 {
 	bool bClose = false;
 
-	if (!Q_stricmp(command, "Connect"))
+	if (!stricmp(command, "Connect"))
 	{
 		KeyValues *msg = new KeyValues("JoinServerWithPassword");
 		char buf[64];
@@ -72,7 +77,7 @@ void CDialogServerPassword::OnCommand(const char *command)
 
 		bClose = true;
 	}
-	else if (!Q_stricmp(command, "Close"))
+	else if (!stricmp(command, "Close"))
 	{
 		bClose = true;
 	}
@@ -84,6 +89,28 @@ void CDialogServerPassword::OnCommand(const char *command)
 	if (bClose)
 	{
 		PostMessage(this, new KeyValues("Close"));
+		MarkForDeletion();
 	}
 }
+
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CDialogServerPassword::PerformLayout()
+{
+	BaseClass::PerformLayout();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: deletes the dialog on close
+//-----------------------------------------------------------------------------
+void CDialogServerPassword::OnClose()
+{
+	BaseClass::OnClose();
+	MarkForDeletion();
+}
+
+
+
 

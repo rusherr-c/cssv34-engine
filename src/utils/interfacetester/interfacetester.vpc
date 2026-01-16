@@ -1,0 +1,50 @@
+$Macro SRCDIR		"..\.."
+$Macro OUTBINDIR	"..\..\..\game\bin"
+
+$Include "$SRCDIR\vpc_scripts\source_exe_con_base.vpc"
+
+$Configuration
+{
+	$Linker
+	{
+		$AdditionalLibraryDirectories		"$LIBCOMMON;$LIBPUBLIC"
+    	}
+
+}
+
+$Configuration
+{
+	$Compiler
+	{
+		$AdditionalIncludeDirectories		"$BASE,..\common"
+	}
+}
+
+$Project
+{
+	$Folder "Link Libraries"
+	{
+		-$ImpLib tier0
+		-$Lib tier1
+		-$ImpLib vstdlib
+	}
+	$Folder	"Source Files"
+	{
+		-$File 	"$SRCDIR\public\tier0\memoverride.cpp"
+	}
+}
+
+$Project "interfacetester"
+{
+	$Folder "Source Files"
+	{
+		$File	"inttester_main.cpp"
+		$File	"vtables.h"
+		$File	"debugging.cpp"
+		$File	"debugging.h"
+		//$File	"headerwriter.h"
+		//$File	"headerwriter.cpp"
+	}
+
+}
+

@@ -651,7 +651,7 @@ void S_Init( void )
 
 	if ( IsPC() )
 	{
-		g_pAudioModule = FileSystem_LoadModule( "audio_minimp3" );
+		g_pAudioModule = FileSystem_LoadModule( "vaudio_minimp3" );
 		CreateInterfaceFn vaudioFactory = Sys_GetFactory( g_pAudioModule );
 		vaudio = (IVAudio *)vaudioFactory( VAUDIO_INTERFACE_VERSION, NULL );
 	}

@@ -11,196 +11,107 @@
 #pragma once
 #endif
 
-
-class CBaseGamesPage;
-
-enum EMatchMakingType
-{
-	eInternetServer = 0,
-	eLANServer,
-	eFriendsServer,
-	eFavoritesServer,
-	eHistoryServer,
-	eSpectatorServer,
-	eInvalidServer
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: Acts like a regular ListPanel but forwards enter key presses
-// to its outer control.
-//-----------------------------------------------------------------------------
-class CGameListPanel : public vgui::ListPanel
-{
-public:
-	DECLARE_CLASS_SIMPLE( CGameListPanel, vgui::ListPanel );
-	
-	CGameListPanel( CBaseGamesPage *pOuter, const char *pName );
-	
-	virtual void OnKeyCodeTyped(vgui::KeyCode code);
-
-private:
-	CBaseGamesPage *m_pOuter;
-};
-
+#include <vgui_controls/PropertyPage.h>
+#include "ServerList.h"
+#include "IServerRefreshResponse.h"
+#include "server.h"
+#include "IGameList.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: Base property page for all the games lists (internet/favorites/lan/etc.)
 //-----------------------------------------------------------------------------
-class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public ISteamMatchmakingServerListResponse, public ISteamMatchmakingPingResponse
+class CBaseGamesPage : public vgui::PropertyPage, public IServerRefreshResponse, public IGameList
 {
-	DECLARE_CLASS_SIMPLE( CBaseGamesPage, vgui::PropertyPage );
+public:
+
+	DECLARE_PANELMAP();
+	typedef vgui::PropertyPage BaseClass;
 
 public:
-	CBaseGamesPage( vgui::Panel *parent, const char *name, EMatchMakingType eType, const char *pCustomResFilename=NULL);
+	CBaseGamesPage(vgui::Panel *parent, const char *name);
 	~CBaseGamesPage();
 
 	virtual void PerformLayout();
 	virtual void ApplySchemeSettings(vgui::IScheme *pScheme);
 
 	// gets information about specified server
-	virtual gameserveritem_t *GetServer(unsigned int serverID);
+	virtual serveritem_t &GetServer(unsigned int serverID);
 
-	uint32 GetServerFilters( MatchMakingKeyValuePair_t **pFilters );
+	// filtering methods
+	// returns true if filters passed; false if failed
+	virtual bool CheckPrimaryFilters(serveritem_t &server);
+	virtual bool CheckSecondaryFilters(serveritem_t &server);
+
+	// returns filter string
+	virtual const char *GetFilterString();
 
 	virtual void SetRefreshing(bool state);
 
 	// loads filter settings from disk
 	virtual void LoadFilterSettings();
 
-	// Called by CGameList when the enter key is pressed.
-	// This is overridden in the add server dialog - since there is no Connect button, the message
-	// never gets handled, but we want to add a server when they dbl-click or press enter.
-	virtual bool OnGameListEnterPressed();
-	
-	int GetSelectedItemsCount();
+	virtual int GetInvalidServerListID();
 
-	// adds a server to the favorites
-	MESSAGE_FUNC( OnAddToFavorites, "AddToFavorites" );
+	virtual void ListReceived(bool moreAvailable, const char* lastUniqueIP, ESteamServerType serverType);
 
-	virtual void StartRefresh();
-
-	virtual void UpdateDerivedLayouts( void );
-#ifndef NO_STEAM
-	STEAM_CALLBACK( CBaseGamesPage, OnFavoritesMsg, FavoritesListChanged_t, m_CallbackFavoritesMsg );
-#endif
 protected:
+	virtual void OnTick();
 	virtual void OnCommand(const char *command);
 	virtual void OnKeyCodePressed(vgui::KeyCode code);
-	virtual int GetRegionCodeToFilter() { return -1; }
-
-	MESSAGE_FUNC( OnItemSelected, "ItemSelected" );
 
 	// applies games filters to current list
 	void ApplyGameFilters();
 	// updates server count UI
 	void UpdateStatus();
 
-	// ISteamMatchmakingServerListResponse callbacks
-	virtual void ServerResponded( HServerListRequest request, int iServer );
-	virtual void ServerResponded( int iServer, gameserveritem_t *pServerItem );
-	virtual void ServerFailedToRespond( HServerListRequest request, int iServer );
-	virtual void RefreshComplete( HServerListRequest request, EMatchMakingServerResponse response ) = 0;
+	// server response
+	virtual void ServerResponded(serveritem_t &server);
 
-	// ISteamMatchmakingPingResponse callbacks
-	virtual void ServerResponded( gameserveritem_t &server );
-	virtual void ServerFailedToRespond() {}
+	vgui::ListPanel *m_pGameList;
+	CServerList	m_Servers;
+//	vgui::ImagePanel *m_pPasswordIcon; // password icon
 
-	// Removes server from list
-	void RemoveServer( serverdisplay_t &server );
-
-	virtual bool BShowServer( serverdisplay_t &server ) { return server.m_bDoNotRefresh; } 
-	void ClearServerList();
-
-	// filtering methods
-	// returns true if filters passed; false if failed
-	virtual bool CheckPrimaryFilters( gameserveritem_t &server);
-	virtual bool CheckSecondaryFilters( gameserveritem_t &server);
-	virtual bool CheckTagFilter( gameserveritem_t &server ) { return true; }
-	virtual int GetInvalidServerListID();
-
-	virtual void OnSaveFilter(KeyValues *filter);
-	virtual void OnLoadFilter(KeyValues *filter);
-	virtual void UpdateFilterSettings();
-
-	// whether filter settings limit which master server to query
-	uint32 GetFilterAppID() { return m_iLimitToAppID; }
-	
-	virtual void GetNewServerList();
-	virtual void StopRefresh();
-	virtual bool IsRefreshing();
-	virtual void OnPageShow();
-	virtual void OnPageHide();
-
-	// called when Connect button is pressed
-	MESSAGE_FUNC( OnBeginConnect, "ConnectToServer" );
-	// called to look at game info
-	MESSAGE_FUNC( OnViewGameInfo, "ViewGameInfo" );
-	// refreshes a single server
-	MESSAGE_FUNC_INT( OnRefreshServer, "RefreshServer", serverID );
-
-	// If true, then we automatically select the first item that comes into the games list.
-	bool m_bAutoSelectFirstItemInGameList;
-
-	CGameListPanel *m_pGameList;
-	vgui::ComboBox *m_pLocationFilter;
+private:
+	void CreateFilters();
+	void OnButtonToggled(vgui::Panel *panel, int state);
+	void OnTextChanged(vgui::Panel *panel, const char *text);
+	void UpdateFilterSettings();
+	void RecalculateFilterString();
+	void OnItemSelected();
 
 	// command buttons
 	vgui::Button *m_pConnect;
 	vgui::Button *m_pRefreshAll;
 	vgui::Button *m_pRefreshQuick;
 	vgui::Button *m_pAddServer;
-	vgui::Button *m_pAddCurrentServer;
-	vgui::Button *m_pAddToFavoritesButton;
-	vgui::ToggleButton *m_pFilter;
-
-	CUtlMap<int, serverdisplay_t> m_mapServers;
-	CUtlMap<netadr_t, int> m_mapServerIP;
-	CUtlVector<MatchMakingKeyValuePair_t> m_vecServerFilters;
-	int m_iServerRefreshCount;
-
-	EMatchMakingType m_eMatchMakingType;
-	HServerListRequest m_hRequest;
-
-protected:
-	virtual void CreateFilters();
-	virtual void UpdateGameFilter();
-
-	MESSAGE_FUNC_PTR_CHARPTR( OnTextChanged, "TextChanged", panel, text );
-	MESSAGE_FUNC_PTR_INT( OnButtonToggled, "ButtonToggled", panel, state );
-
-private:
-	void RequestServersResponse( int iServer, EMatchMakingServerResponse response, bool bLastServer ); // callback for matchmaking interface
-
-	void RecalculateFilterString();
-
-	// If set, it uses the specified resfile name instead of its default one.
-	const char *m_pCustomResFilename;
 
 	// filter controls
 	vgui::ComboBox *m_pGameFilter;
+	vgui::ComboBox *m_pLocationFilter;
 	vgui::TextEntry *m_pMapFilter;
 	vgui::ComboBox *m_pPingFilter;
-	vgui::ComboBox *m_pSecureFilter;
 	vgui::CheckButton *m_pNoFullServersFilterCheck;
 	vgui::CheckButton *m_pNoEmptyServersFilterCheck;
 	vgui::CheckButton *m_pNoPasswordFilterCheck;
+	vgui::ToggleButton *m_pFilter;
 	vgui::Label *m_pFilterString;
-	char m_szComboAllText[64];
+	
+	bool m_bFiltersVisible;	// true if filter section is currently visible
 
 	KeyValues *m_pFilters; // base filter data
-	bool m_bFiltersVisible;	// true if filter section is currently visible
-	vgui::HFont m_hFont;
 
 	// filter data
 	char m_szGameFilter[32];
 	char m_szMapFilter[32];
+	char m_szLocationFilter[32];
 	int	m_iPingFilter;
 	bool m_bFilterNoFullServers;
 	bool m_bFilterNoEmptyServers;
 	bool m_bFilterNoPasswordedServers;
-	int m_iSecureFilter;
 
-	int m_iLimitToAppID;
+	enum { MAX_FILTERSTRING = 512 };
+	char m_szMasterServerFilterString[MAX_FILTERSTRING];
 };
+
 
 #endif // BASEGAMESPAGE_H

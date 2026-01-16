@@ -11,103 +11,115 @@
 #pragma once
 #endif
 
+#include <vgui_controls/Frame.h>
+#include <vgui_controls/ListPanel.h>
+#include <vgui_controls/PHandle.h>
+
+#include "UtlVector.h"
+#include "netadr.h"
+#include "server.h"
+
+#include "IGameList.h"
+
+class CServerContextMenu;
 extern class IRunGameEngine *g_pRunGameEngine;
-extern class IAppInformation *g_pAppInformation; // can be NULL
+extern void v_strncpy(char *dest, const char *src, int bufsize);
+
+class CFavoriteGames;
+class CInternetGames;
+class CSpectateGames;
+class CLanGames;
+class CFriendsGames;
+class CDialogGameInfo;
+class CBaseGamesPage;
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 class CServerBrowserDialog : public vgui::Frame
 {
-	DECLARE_CLASS_SIMPLE( CServerBrowserDialog, vgui::Frame ); 
+	typedef vgui::Frame BaseClass;
 
 public:
 	// Construction/destruction
 	CServerBrowserDialog( vgui::Panel *parent );
-	~CServerBrowserDialog( void );
+	virtual				~CServerBrowserDialog( void );
 
-	void		Initialize( void );
+	virtual void		Initialize( void );
 
 	// displays the dialog, moves it into focus, updates if it has to
-	void		Open( void );
+	virtual void		Open( void );
 
 	// gets server info
-	gameserveritem_t *GetServer(unsigned int serverID);
-	// called every frame
-	virtual void OnTick();
+	serveritem_t &CServerBrowserDialog::GetServer(unsigned int serverID);
+
+	// setup
+	virtual void		PerformLayout();
 
 	// updates status text at bottom of window
-	void UpdateStatusText(const char *format, ...);
+	virtual void		UpdateStatusText(const char *format, ...);
 	
 	// updates status text at bottom of window
-	void UpdateStatusText(wchar_t *unicode);
+	virtual void		UpdateStatusText(wchar_t *unicode);
 
 	// context menu access
-	CServerContextMenu *GetContextMenu(vgui::Panel *pParent);		
+	virtual CServerContextMenu *GetContextMenu(vgui::Panel *pParent);		
 
 	// returns a pointer to a static instance of this dialog
 	// valid for use only in sort functions
 	static CServerBrowserDialog *GetInstance();
 
 	// Adds a server to the list of favorites
-	void AddServerToFavorites(gameserveritem_t &server);
+	virtual void		AddServerToFavorites(serveritem_t &server);
 
 	// begins the process of joining a server from a game list
 	// the game info dialog it opens will also update the game list
-	CDialogGameInfo *JoinGame(IGameList *gameList, unsigned int serverIndex);
+	virtual CDialogGameInfo *JoinGame(IGameList *gameList, unsigned int serverIndex);
 
 	// joins a game by a specified IP, not attached to any game list
-	CDialogGameInfo *JoinGame(int serverIP, int serverPort);
+	virtual CDialogGameInfo *JoinGame(int serverIP, int serverPort, const char *titleName);
 
 	// opens a game info dialog from a game list
-	CDialogGameInfo *OpenGameInfoDialog(IGameList *gameList, unsigned int serverIndex);
+	virtual CDialogGameInfo *OpenGameInfoDialog(IGameList *gameList, unsigned int serverIndex);
 
 	// opens a game info dialog by a specified IP, not attached to any game list
-	CDialogGameInfo *OpenGameInfoDialog( int serverIP, uint16 connPort, uint16 queryPort );
+	virtual CDialogGameInfo *OpenGameInfoDialog(int serverIP, int serverPort, const char *titleName);
 
 	// closes all the game info dialogs
-	void CloseAllGameInfoDialogs();
-	CDialogGameInfo *GetDialogGameInfoForFriend( uint64 ulSteamIDFriend );
+	virtual void CloseAllGameInfoDialogs();
 
 	// accessor to the filter save data
-	KeyValues *GetFilterSaveData(const char *filterSet);
+	virtual KeyValues *GetFilterSaveData(const char *filterSet);
 
 	// gets the name of the mod directory we're restricted to accessing, NULL if none
-	const char *GetActiveModName();
-	int GetActiveAppID();
-	const char *GetActiveGameName();
+	virtual const char *GetActiveModName();
 
-	// load/saves filter & favorites settings from disk
-	void		LoadUserData();
-	void		SaveUserData();
+	// called when dialog is shut down
+	virtual void		OnClose();
 
-	// forces the currently active page to refresh
-	void		RefreshCurrentPage();
-
-	virtual gameserveritem_t *GetCurrentConnectedServer()
-	{
-		return &m_CurrentConnection;
-	}
+	// saves filter settings
+	virtual void		SaveFilters();
 
 private:
 
 	// current game list change
-	MESSAGE_FUNC( OnGameListChanged, "PageChanged" );
-	void ReloadFilterSettings();
+	virtual void		OnGameListChanged();
 
 	// receives a specified game is active, so no other game types can be displayed in server list
-	MESSAGE_FUNC_PARAMS( OnActiveGameName, "ActiveGameName", name );
+	virtual void		OnActiveGameName(const char *gameName);
 
-	// notification that we connected / disconnected
-	MESSAGE_FUNC_PARAMS( OnConnectToGame, "ConnectedToGame", kv );
-	MESSAGE_FUNC( OnDisconnectFromGame, "DisconnectedFromGame" );
+	// load/saves filter settings from disk
+	virtual void		LoadFilters();
 
 	virtual bool GetDefaultScreenPosition(int &x, int &y, int &wide, int &tall);
 	virtual void ActivateBuildMode();
+	virtual void PaintBackground();
+
+	DECLARE_PANELMAP();
 
 private:
 	// list of all open game info dialogs
-	CUtlVector<vgui::DHANDLE<CDialogGameInfo> > m_GameInfoDialogs;
+	CUtlVector<vgui::PHandle> m_GameInfoDialogs;
 
 	// pointer to current game list
 	IGameList *m_pGameList;
@@ -118,34 +130,21 @@ private:
 	// property sheet
 	vgui::PropertySheet *m_pTabPanel;
 	CFavoriteGames *m_pFavorites;
-	CHistoryGames *m_pHistory;
 	CInternetGames *m_pInternetGames;
 	CSpectateGames *m_pSpectateGames;
 	CLanGames *m_pLanGames;
 	CFriendsGames *m_pFriendsGames;
-	CCustomGames	*m_pCustomGames;
 
 	KeyValues *m_pSavedData;
-	KeyValues *m_pFilterData;
 
 	// context menu
 	CServerContextMenu *m_pContextMenu;
 
 	// active game
 	char m_szGameName[128];
-	char m_szModDir[128];
-	int m_iLimitAppID;
-
-	// currently connected game
-	bool m_bCurrentlyConnected;
-	gameserveritem_t m_CurrentConnection;
 };
 
 // singleton accessor
 extern CServerBrowserDialog &ServerBrowserDialog();
-
-// Used by the LAN tab and the add server dialog when trying to find servers without having
-// been given any ports to look for servers on.
-void GetMostCommonQueryPorts( CUtlVector<uint16> &ports );
 
 #endif // SERVERBROWSERDIALOG_H

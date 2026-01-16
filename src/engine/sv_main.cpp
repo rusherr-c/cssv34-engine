@@ -1814,79 +1814,9 @@ static void SV_AllocateEdicts()
 	sv.edictchangeinfo = (IChangeInfoAccessor *)Hunk_AllocName( sv.max_edicts * sizeof( IChangeInfoAccessor ), "edictchangeinfo" );
 }
 
-#include "tier0/memdbgon.h"
-
-
-void CGameServer::ReloadWhitelist( const char *pMapName )
+void CGameServer::ReloadWhitelist(const char* pMapName)
 {
-	// Always return - until we get the whilelist stuff resolved for TF2.
-	if ( m_pPureServerWhitelist )
-	{
-		m_pPureServerWhitelist->Release();
-		m_pPureServerWhitelist = NULL;
-	}
 
-	// Don't do sv_pure stuff in SP games.
-	if ( GetMaxClients() <= 1 )
-		return;
-
-	// Get rid of the old whitelist.
-	if ( m_pPureServerWhitelist )
-	{
-		m_pPureServerWhitelist->Release();
-		m_pPureServerWhitelist = NULL;
-	}
-
-	// Don't use the whitelist if sv_pure is not set.
-	if ( g_sv_pure_mode == 0 )
-		return;
-
-	m_pPureServerWhitelist = CPureServerWhitelist::Create( g_pFileSystem );
-	if ( g_sv_pure_mode == 2 )
-	{
-		// sv_pure 2 means to ignore the pure_server_whitelist.txt file and force everything to come from Steam.
-		m_pPureServerWhitelist->EnableFullyPureMode();
-		Msg( "Server using sv_pure 2.\n" );
-	}
-	else
-	{
-		const char *pGlobalWhitelistFilename = "pure_server_whitelist.txt";
-		const char *pMapWhitelistSuffix = "_whitelist.txt";
-		
-		// Load the new whitelist.
-		KeyValues *kv = new KeyValues( "" );
-		bool bLoaded = kv->LoadFromFile( g_pFileSystem, pGlobalWhitelistFilename, "game" );
-		if ( bLoaded )
-			bLoaded = m_pPureServerWhitelist->LoadFromKeyValues( kv );
-		
-		if ( !bLoaded )
-			Warning( "Can't load pure server whitelist in %s.\n", pGlobalWhitelistFilename );
-		
-		// Load the per-map whitelist.
-		char testFilename[MAX_PATH] = "maps";
-		V_AppendSlash( testFilename, sizeof( testFilename ) );
-		V_strncat( testFilename, pMapName, sizeof( testFilename ) );
-		V_strncat( testFilename, pMapWhitelistSuffix, sizeof( testFilename ) );
-		
-		kv->Clear();
-		if ( kv->LoadFromFile( g_pFileSystem, testFilename ) )
-			m_pPureServerWhitelist->LoadFromKeyValues( kv );
-
-		kv->deleteThis();
-	}
-
-	// Now cache in all files that we'll need CRCs for later..
-	float startTime = Plat_FloatTime();
-	Msg( "Caching file CRCs for pure server...\n" );	
-
-	int oldFlags = g_pFileSystem->GetWhitelistSpewFlags();
-	if ( sv_pure_trace.GetInt() > 0 )
-		g_pFileSystem->SetWhitelistSpewFlags( oldFlags | WHITELIST_SPEW_WHILE_LOADING );	
-	
-	m_pPureServerWhitelist->CacheFileCRCs();
-
-	g_pFileSystem->SetWhitelistSpewFlags( oldFlags );	
-	Msg( "Finished caching file CRCs for pure server in %d seconds.\n", (int)(Plat_FloatTime() - startTime) );
 }
 
 

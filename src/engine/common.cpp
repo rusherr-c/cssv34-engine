@@ -861,12 +861,12 @@ void COM_InitFilesystem( const char *pFullModPath )
 		if ( V_stricmp( modinfo->GetString("type", "singleplayer_only"), "singleplayer_only") == 0 )
 		{
 			DevMsg( "Disabling whitelist file tracking in filesystem...\n" );
-			g_pFileSystem->EnableWhitelistFileTracking( false );
+			g_pFileSystem->EnableWhitelistFileTracking( false , false, false);
 		}
 		else
 		{
 			DevMsg( "Enabling whitelist file tracking in filesystem...\n" );
-			g_pFileSystem->EnableWhitelistFileTracking( true );
+			g_pFileSystem->EnableWhitelistFileTracking( true, false, false );
 		}
 	}
 	modinfo->deleteThis();
@@ -897,7 +897,7 @@ void COM_InitFilesystem( const char *pFullModPath )
 		modinfo = new KeyValues("ModInfo");
 		if ( modinfo->LoadFromFile( g_pFileSystem, "gameinfo.txt" ) )
 		{
-			const int nSteamAppId =	modinfo->FindKey( "FileSystem" )->GetInt("SteamAppId", 215 );
+			const int nSteamAppId =	modinfo->FindKey( "FileSystem" )->GetInt("SteamAppId", 218 );
 			ELanguage eAudioLanguage = k_Lang_English;
 			char szAudioLanguageRegKey[MAX_PATH];
 			long lRegValue;
@@ -990,6 +990,8 @@ const char *COM_DXLevelToString( int dxlevel )
 			{
 				return "9.0 (full-precision)";
 			}
+		case 95:
+			return "9.5";
 		default:
 			return "UNKNOWN";
 		}
@@ -1024,6 +1026,8 @@ const char *COM_DXLevelToString( int dxlevel )
 			{
 				return "gamemode - 9.0 (full-precision)";
 			}
+		case 95:
+			return " gamemode - 9.5";
 		default:
 			return "gamemode";
 		}

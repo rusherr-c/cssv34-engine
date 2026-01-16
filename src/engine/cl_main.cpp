@@ -136,85 +136,27 @@ static char cl_snapshot_subdirname[MAX_OSPATH];
 void CL_HandlePureServerWhitelist( CPureServerWhitelist *pWhitelist )
 {
 	// Free the old whitelist and get the new one.
-	if ( cl.m_pPureServerWhitelist )
+	if (cl.m_pPureServerWhitelist)
 		cl.m_pPureServerWhitelist->Release();
-		
+
 	cl.m_pPureServerWhitelist = pWhitelist;
-	
-	IFileList *pForceMatchList = NULL;
-	IFileList *pAllowFromDiskList = NULL;
+	if (cl.m_pPureServerWhitelist)
+		cl.m_pPureServerWhitelist->AddRef();
 
-	if ( pWhitelist )
-	{
-		pForceMatchList = pWhitelist->GetForceMatchList();
-		pAllowFromDiskList = pWhitelist->GetAllowFromDiskList();
-	}
-	
-	if ( !IsPC() )
-	{
-		if ( pForceMatchList )
-			pForceMatchList->Release();
-		
-		if ( pAllowFromDiskList )
-			pAllowFromDiskList->Release();
-		
-		return;
-	}
-	
-	// First, hand the whitelist to the filesystem. Now it will know which files we want it to
-	// load from the Steam caches BEFORE files on disk.
-	// 
-	// Note: The filesystem now owns the pointer. It will delete it when it shuts down or next time we call this.
-	IFileList *pFilesToReload;
-	g_pFileSystem->RegisterFileWhitelist( pForceMatchList, pAllowFromDiskList, &pFilesToReload );
-
-	if ( pFilesToReload )
-	{
-		// Handle sounds..
-#if 0 // There are problems with the soundemittersystem + sv_pure currently.
-		if ( g_pSoundEmitterSystem )
-			g_pSoundEmitterSystem->ReloadFilesInList( pFilesToReload );
-		else
-			Warning( "CL_HandlePureServerWhitelist: No sound emitter system.\n" );
-#endif
-
-#if 0 // Still under testing for release in OB engine.
-		S_ReloadFilesInList( pFilesToReload );
-#endif
-
-		// Handle materials..
-		materials->ReloadFilesInList( pFilesToReload );
-		
-#if 0 // Still under testing for release in OB engine.
-		// Handle models.. NOTE: this MUST come after materials->ReloadFilesInList because the
-		// models need to know which materials got flushed.
-		modelloader->ReloadFilesInList( pFilesToReload );
-#endif
-		
-		pFilesToReload->Release();
-	}
+	IFileList* pFilesToReload;
+	g_pFileSystem->RegisterFileWhitelist(pWhitelist, &pFilesToReload);
 
 	// Now that we've flushed any files that shouldn't have been on disk, we should have a CRC
 	// set that we can check with the server.
-	if ( pForceMatchList && pAllowFromDiskList )
-		cl.m_bCheckCRCsWithServer = true;
-	else
-		cl.m_bCheckCRCsWithServer = false;
+	cl.m_bCheckCRCsWithServer = true;
 }
 
 void CL_PrintWhitelistInfo()
 {
 	if ( cl.m_pPureServerWhitelist )
 	{
-		if ( cl.m_pPureServerWhitelist->IsInFullyPureMode() )
-		{
-			Msg( "The server is using sv_pure = 2.\n" );
-		}
-		else
-		{
-			Msg( "The server is using sv_pure = 1.\n" );
-			cl.m_pPureServerWhitelist->PrintWhitelistContents();
-		}
+		Msg("The server is using sv_pure = 1.\n");
+		cl.m_pPureServerWhitelist->PrintWhitelistContents();
 	}
 	else
 	{		
@@ -856,10 +798,7 @@ void CL_CheckForPureServerWhitelist()
 		
 	if ( pWhitelist )
 	{
-		if ( pWhitelist->IsInFullyPureMode() )
-			Msg( "Got pure server whitelist: sv_pure = 2.\n" );
-		else
-			Msg( "Got pure server whitelist: sv_pure = 1.\n" );
+		Msg( "Got pure server whitelist: sv_pure = 1.\n" );
 		
 		CL_HandlePureServerWhitelist( pWhitelist );
 	}

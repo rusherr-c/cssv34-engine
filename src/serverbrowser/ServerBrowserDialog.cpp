@@ -15,16 +15,49 @@
 //
 // $NoKeywords: $
 //=============================================================================
-#include "pch_serverbrowser.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+#include <assert.h>
 
-#if defined( _X360 )
-#include "xbox/xbox_win32stubs.h"
-#endif
+// base vgui interfaces
+#include <vgui/IInput.h>
+#include <vgui/ISurface.h>
+#include <vgui/IScheme.h>
+#include <vgui/IVGui.h>
+#include <KeyValues.h>
+#include <vgui/MouseCode.h>
+#include "FileSystem.h"
 
-#if defined( _WIN32 ) && !defined( _X360 )
-#define WIN32_LEAN_AND_MEAN
-#include <winsock.h>
-#endif
+// vgui controls
+#include <vgui_controls/Button.h>
+#include <vgui_controls/CheckButton.h>
+#include <vgui_controls/ComboBox.h>
+#include <vgui_controls/FocusNavGroup.h>
+#include <vgui_controls/Frame.h>
+#include <vgui_controls/ListPanel.h>
+#include <vgui_controls/MessageBox.h>
+#include <vgui_controls/Panel.h>
+#include <vgui_controls/PropertySheet.h>
+#include <vgui_controls/QueryBox.h>
+
+// serverbrowser headers
+#include "inetapi.h"
+#include "msgbuffer.h"
+#include "proto_oob.h"
+#include "ServerContextMenu.h"
+#include "socket.h"
+#include "util.h"
+#include "ServerBrowserDialog.h"
+#include "ModList.h"
+#include "DialogGameInfo.h"
+
+// game list
+#include "InternetGames.h"
+#include "FavoriteGames.h"
+#include "SpectateGames.h"
+#include "LanGames.h"
+#include "FriendsGames.h"
 
 using namespace vgui;
 
@@ -35,19 +68,6 @@ CServerBrowserDialog &ServerBrowserDialog()
 	return *CServerBrowserDialog::GetInstance();
 }
 
-
-// Returns a list of the ports that we hit when looking for 
-void GetMostCommonQueryPorts( CUtlVector<uint16> &ports )
-{
-	for ( int i=0; i <= 5; i++ )
-	{
-		ports.AddToTail( 27015 + i );
-		ports.AddToTail( 26900 + i );
-	}
-
-	ports.AddToTail(4242); //RDKF
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
 //-----------------------------------------------------------------------------
@@ -56,26 +76,17 @@ CServerBrowserDialog::CServerBrowserDialog(vgui::Panel *parent) : Frame(parent, 
 	s_InternetDlg = this;
 
 	m_szGameName[0] = 0;
-	m_szModDir[0] = 0;
-	m_iLimitAppID = 0;
 	m_pSavedData = NULL;
-	m_pFilterData = NULL;
-	m_pFavorites = NULL;
-	m_pHistory = NULL;
-	m_pCustomGames = NULL;
 
-	LoadUserData();
+	LoadFilters();
 
 	m_pInternetGames = new CInternetGames(this);
-	m_pFavorites = new CFavoriteGames(this);
-	m_pHistory = new CHistoryGames(this);
 	m_pSpectateGames = new CSpectateGames(this);
+	m_pFavorites = new CFavoriteGames(this);
 	m_pLanGames = new CLanGames(this);
 	m_pFriendsGames = new CFriendsGames(this);
-	m_pCustomGames = new CCustomGames(this);
 
-	SetMinimumSize( 640, 384 );
-	SetSize( 640, 384 );
+	SetMinimumSize(564, 384);
 
 	m_pGameList = m_pInternetGames;
 
@@ -85,9 +96,7 @@ CServerBrowserDialog::CServerBrowserDialog(vgui::Panel *parent) : Frame(parent, 
 	m_pTabPanel = new PropertySheet(this, "GameTabs");
 	m_pTabPanel->SetTabWidth(72);
 	m_pTabPanel->AddPage(m_pInternetGames, "#ServerBrowser_InternetTab");
-	m_pTabPanel->AddPage(m_pCustomGames, "#ServerBrowser_CustomTab");
 	m_pTabPanel->AddPage(m_pFavorites, "#ServerBrowser_FavoritesTab");
-	m_pTabPanel->AddPage(m_pHistory, "#ServerBrowser_HistoryTab");
 	m_pTabPanel->AddPage(m_pSpectateGames, "#ServerBrowser_SpectateTab");
 	m_pTabPanel->AddPage(m_pLanGames, "#ServerBrowser_LanTab");
 	m_pTabPanel->AddPage(m_pFriendsGames, "#ServerBrowser_FriendsTab");
@@ -99,39 +108,33 @@ CServerBrowserDialog::CServerBrowserDialog(vgui::Panel *parent) : Frame(parent, 
 
 	m_pStatusLabel->SetText("");
 
+	// load favorite servers
+	KeyValues *favorites = m_pSavedData->FindKey("Favorites", true);
+	m_pFavorites->LoadFavoritesList(favorites);
+
 	// load current tab
 	const char *gameList = m_pSavedData->GetString("GameList");
 
-	if (!Q_stricmp(gameList, "spectate"))
+	if (!stricmp(gameList, "spectate"))
 	{
 		m_pTabPanel->SetActivePage(m_pSpectateGames);
 	}
-	else if (!Q_stricmp(gameList, "favorites"))
+	else if (!stricmp(gameList, "favorites"))
 	{
 		m_pTabPanel->SetActivePage(m_pFavorites);
 	}
-	else if (!Q_stricmp(gameList, "history"))
-	{
-		m_pTabPanel->SetActivePage(m_pHistory);
-	}
-	else if (!Q_stricmp(gameList, "lan"))
+	else if (!stricmp(gameList, "lan"))
 	{
 		m_pTabPanel->SetActivePage(m_pLanGames);
 	}
-	else if (!Q_stricmp(gameList, "friends"))
+	else if (!stricmp(gameList, "friends"))
 	{
 		m_pTabPanel->SetActivePage(m_pFriendsGames);
-	}
-	else if (!Q_stricmp(gameList, "custom"))
-	{
-		m_pTabPanel->SetActivePage(m_pCustomGames);
 	}
 	else
 	{
 		m_pTabPanel->SetActivePage(m_pInternetGames);
 	}
-
-	ivgui()->AddTickSignal( GetVPanel() );
 }
 
 //-----------------------------------------------------------------------------
@@ -139,60 +142,97 @@ CServerBrowserDialog::CServerBrowserDialog(vgui::Panel *parent) : Frame(parent, 
 //-----------------------------------------------------------------------------
 CServerBrowserDialog::~CServerBrowserDialog()
 {
-	delete m_pContextMenu;
-
-	SaveUserData();
-
-  	if (m_pSavedData)
-  	{
-  		m_pSavedData->deleteThis();
-  	}
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Called once to set up
 //-----------------------------------------------------------------------------
 void CServerBrowserDialog::Initialize()
 {
-	SetTitle("#ServerBrowser_Servers", true);
+	SetTitle("Servers", true);
 	SetVisible(false);
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: returns a server in the list
+// Purpose: 
 //-----------------------------------------------------------------------------
-gameserveritem_t *CServerBrowserDialog::GetServer( unsigned int serverID )
+serveritem_t &CServerBrowserDialog::GetServer(unsigned int serverID)
 {
-	return m_pGameList->GetServer( serverID );
+	return m_pGameList->GetServer(serverID);
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: Activates and gives the tab focus
+// Purpose: 
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::Open()
+void CServerBrowserDialog::Open( void )
 {	
-	BaseClass::Activate();
 	m_pTabPanel->RequestFocus();
+	// if serverbrowser file is not there we will try to transfer the favorites list.
+	FileHandle_t f = g_pFullFileSystem->Open("ServerBrowser.vdf", "rb", "CONFIG");
+	if (f)
+	{
+		g_pFullFileSystem->Close( f );
+	}
+	else
+	{		
+		m_pFavorites->ImportFavorites(); // import old favorites from old server browser
+	}	
+	
+	surface()->SetMinimized(GetVPanel(), false);
+	SetVisible(true);
+	RequestFocus();
+	m_pTabPanel->RequestFocus();
+	MoveToFront();
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: Called every frame, updates animations for this module
+// Purpose: relayouts the dialogs controls
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::OnTick()
+void CServerBrowserDialog::PerformLayout()
 {
-	BaseClass::OnTick();
-	vgui::GetAnimationController()->UpdateAnimations( system()->GetFrameTime() );
+	BaseClass::PerformLayout();
+
+	int x, y, wide, tall;
+	GetClientArea(x, y, wide, tall);
+	
+	// game list in middle
+	m_pTabPanel->SetBounds(8, y + 8, GetWide() - 16, tall - (28));
+	x += 4;
+
+	// status text along bottom
+	m_pStatusLabel->SetBounds(x + 2, (tall - y) + 40, wide - 24, 20);
+	m_pStatusLabel->SetContentAlignment(Label::a_northwest);
+
+	Repaint();
+
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: This makes it so the menu will always be in front in GameUI
+//-----------------------------------------------------------------------------
+void CServerBrowserDialog::PaintBackground()
+{
+	BaseClass::PaintBackground();
+	if (m_pContextMenu->IsVisible())
+	{
+		m_pContextMenu->MoveToFront();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CServerBrowserDialog::OnClose()
+{
+	// bug here if you exit before logging in.
+	SaveFilters();
+	BaseClass::OnClose();	
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Loads filter settings from disk
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::LoadUserData()
+void CServerBrowserDialog::LoadFilters()
 {
   	// free any old filters
   	if (m_pSavedData)
@@ -200,57 +240,18 @@ void CServerBrowserDialog::LoadUserData()
   		m_pSavedData->deleteThis();
   	}
 
-	m_pSavedData = new KeyValues("Filters");
-	if (!m_pSavedData->LoadFromFile( g_pFullFileSystem, "ServerBrowser.vdf", "CONFIG"))
+	m_pSavedData = new KeyValues ("Filters");
+	if (!m_pSavedData->LoadFromFile(g_pFullFileSystem, "ServerBrowser.vdf", "CONFIG"))
 	{
 		// doesn't matter if the file is not found, defaults will work successfully and file will be created on exit
 	}
-
-	KeyValues *filters = m_pSavedData->FindKey( "Filters", false );
-	if ( filters )
-	{
-		m_pFilterData = filters->MakeCopy();
-		m_pSavedData->RemoveSubKey( filters );
-	}
-	else
-	{
-		m_pFilterData = new KeyValues( "Filters" );
-	}
-
-
-	// reload all the page settings if necessary
-	if (m_pHistory)
-	{
-		// history
-		m_pHistory->LoadHistoryList();
-		if ( m_pHistory->IsVisible() )
-			m_pHistory->StartRefresh();
-	}
-
-	if (m_pFavorites)
-	{
-		// favorites
-		m_pFavorites->LoadFavoritesList();
-
-		// filters
-		ReloadFilterSettings();
-
-		if ( m_pFavorites->IsVisible() )
-			m_pFavorites->StartRefresh();
-	}
-
-	InvalidateLayout();
-	Repaint();
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::SaveUserData()
+void CServerBrowserDialog::SaveFilters()
 {
-	m_pSavedData->Clear();
-	m_pSavedData->LoadFromFile( g_pFullFileSystem, "ServerBrowser.vdf", "CONFIG");
-
 	// set the current tab
 	if (m_pGameList == m_pSpectateGames)
 	{
@@ -268,36 +269,15 @@ void CServerBrowserDialog::SaveUserData()
 	{
 		m_pSavedData->SetString("GameList", "friends");
 	}
-	else if (m_pGameList == m_pHistory)
-	{
-		m_pSavedData->SetString("GameList", "history");
-	}
-	else if (m_pGameList == m_pCustomGames)
-	{
-		m_pSavedData->SetString("GameList", "custom");
-	}
 	else
 	{
 		m_pSavedData->SetString("GameList", "internet");
 	}
 
-	m_pSavedData->RemoveSubKey( m_pSavedData->FindKey( "Filters" ) ); // remove the saved subkey and add our subkey
-	m_pSavedData->AddSubKey( m_pFilterData->MakeCopy() );
-	m_pSavedData->SaveToFile( g_pFullFileSystem, "ServerBrowser.vdf", "CONFIG");
-
-	// save per-page config
-	SaveUserConfig();
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: refreshes the page currently visible
-//-----------------------------------------------------------------------------
-void CServerBrowserDialog::RefreshCurrentPage()
-{
-	if (m_pGameList)
-	{
-		m_pGameList->StartRefresh();
-	}
+	// get the favorites list
+	KeyValues *favorites = m_pSavedData->FindKey("Favorites", true);
+	m_pFavorites->SaveFavoritesList(favorites);
+	m_pSavedData->SaveToFile(g_pFullFileSystem, "ServerBrowser.vdf", "CONFIG");
 }
 
 //-----------------------------------------------------------------------------
@@ -308,21 +288,13 @@ void CServerBrowserDialog::UpdateStatusText(const char *fmt, ...)
 	if ( !m_pStatusLabel )
 		return;
 
-	if ( fmt && strlen(fmt) > 0 )
-	{
-		char str[ 1024 ];
-		va_list argptr;
-		va_start( argptr, fmt );
-		_vsnprintf( str, sizeof(str), fmt, argptr );
-		va_end( argptr );
+	char str[ 1024 ];
+	va_list argptr;
+	va_start( argptr, fmt );
+	vsprintf( str, fmt, argptr );
+	va_end( argptr );
 
-		m_pStatusLabel->SetText( str );
-	}
-	else
-	{
-		// clear
-		m_pStatusLabel->SetText( "" );
-	}
+	m_pStatusLabel->SetText( str );
 }
 
 //-----------------------------------------------------------------------------
@@ -334,15 +306,7 @@ void CServerBrowserDialog::UpdateStatusText(wchar_t *unicode)
 	if ( !m_pStatusLabel )
 		return;
 
-	if ( unicode && wcslen(unicode) > 0 )
-	{
-		m_pStatusLabel->SetText( unicode );
-	}
-	else
-	{
-		// clear
-		m_pStatusLabel->SetText( "" );
-	}
+	m_pStatusLabel->SetText( unicode );
 }
 
 //-----------------------------------------------------------------------------
@@ -368,21 +332,11 @@ CServerBrowserDialog *CServerBrowserDialog::GetInstance()
 
 //-----------------------------------------------------------------------------
 // Purpose: Adds a server to the list of favorites
+// Input  : &server - 
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::AddServerToFavorites(gameserveritem_t &server)
+void CServerBrowserDialog::AddServerToFavorites(serveritem_t &server)
 {
-#ifndef NO_STEAM
-	if ( SteamMatchmaking() )
-	{
-		SteamMatchmaking()->AddFavoriteGame( 
-			server.m_nAppID, 
-			server.m_NetAdr.GetIP(), 
-			server.m_NetAdr.GetConnectionPort(),		
-			server.m_NetAdr.GetQueryPort(), 
-			k_unFavoriteFlagFavorite, 
-			time( NULL ) );
-	}
-#endif
+	m_pFavorites->AddNewServer(server);
 }
 
 //-----------------------------------------------------------------------------
@@ -394,7 +348,6 @@ CServerContextMenu *CServerBrowserDialog::GetContextMenu(vgui::Panel *pPanel)
 	if (m_pContextMenu)
 		delete m_pContextMenu;
 	m_pContextMenu = new CServerContextMenu(this);
-	m_pContextMenu->SetAutoDelete( false );
 
     if (!pPanel)
     {
@@ -427,10 +380,10 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, unsigned in
 //-----------------------------------------------------------------------------
 // Purpose: joins a game by a specified IP, not attached to any game list
 //-----------------------------------------------------------------------------
-CDialogGameInfo *CServerBrowserDialog::JoinGame(int serverIP, int serverPort)
+CDialogGameInfo *CServerBrowserDialog::JoinGame(int serverIP, int serverPort, const char *titleName)
 {
 	// open the game info dialog, then mark it to attempt to connect right away
-	CDialogGameInfo *gameDialog = OpenGameInfoDialog( serverIP, serverPort, serverPort );
+	CDialogGameInfo *gameDialog = OpenGameInfoDialog(serverIP, serverPort, serverPort);
 
 	// set the dialog name to be the server name
 	gameDialog->Connect();
@@ -441,16 +394,11 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(int serverIP, int serverPort)
 //-----------------------------------------------------------------------------
 // Purpose: opens a game info dialog from a game list
 //-----------------------------------------------------------------------------
-CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog( IGameList *gameList, unsigned int serverIndex )
+CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog(IGameList *gameList, unsigned int serverIndex)
 {
-	gameserveritem_t *pServer = gameList->GetServer( serverIndex );
-	if ( !pServer )
-		return NULL;
-
-	CDialogGameInfo *gameDialog = new CDialogGameInfo( NULL, pServer->m_NetAdr.GetIP(), pServer->m_NetAdr.GetQueryPort(), pServer->m_NetAdr.GetConnectionPort() );
-	gameDialog->SetParent(GetVParent());
-	gameDialog->AddActionSignalTarget(this);
-	gameDialog->Run( pServer->GetName() );
+	CDialogGameInfo *gameDialog = new CDialogGameInfo(gameList, serverIndex);
+	serveritem_t &server = gameList->GetServer(serverIndex);
+	gameDialog->Run(server.name);
 	int i = m_GameInfoDialogs.AddToTail();
 	m_GameInfoDialogs[i] = gameDialog;
 	return gameDialog;
@@ -459,12 +407,10 @@ CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog( IGameList *gameList, 
 //-----------------------------------------------------------------------------
 // Purpose: opens a game info dialog by a specified IP, not attached to any game list
 //-----------------------------------------------------------------------------
-CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog( int serverIP, uint16 connPort, uint16 queryPort )
+CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog(int serverIP, int serverPort, const char *titleName)
 {
-	CDialogGameInfo *gameDialog = new CDialogGameInfo(NULL, serverIP, queryPort, connPort);
-	gameDialog->AddActionSignalTarget(this);
-	gameDialog->SetParent(GetVParent());
-	gameDialog->Run("");
+	CDialogGameInfo *gameDialog = new CDialogGameInfo(NULL, 0, serverIP, serverPort);
+	gameDialog->Run(titleName);
 	int i = m_GameInfoDialogs.AddToTail();
 	m_GameInfoDialogs[i] = gameDialog;
 	return gameDialog;
@@ -485,29 +431,13 @@ void CServerBrowserDialog::CloseAllGameInfoDialogs()
 	}
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose: finds a dialog
-//-----------------------------------------------------------------------------
-CDialogGameInfo *CServerBrowserDialog::GetDialogGameInfoForFriend( uint64 ulSteamIDFriend )
-{
-	FOR_EACH_VEC( m_GameInfoDialogs, i )
-	{
-		CDialogGameInfo *pDlg = m_GameInfoDialogs[i];
-		if ( pDlg && pDlg->GetAssociatedFriend() == ulSteamIDFriend )
-		{
-			return pDlg;
-		}
-	}
-	return NULL;
-}
-
 //-----------------------------------------------------------------------------
 // Purpose: accessor to the filter save data
 //-----------------------------------------------------------------------------
 KeyValues *CServerBrowserDialog::GetFilterSaveData(const char *filterSet)
 {
-	return m_pFilterData->FindKey(filterSet, true);
+	KeyValues *filterList = m_pSavedData->FindKey("FilterList", true);
+	return filterList->FindKey(filterSet, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -515,105 +445,22 @@ KeyValues *CServerBrowserDialog::GetFilterSaveData(const char *filterSet)
 //-----------------------------------------------------------------------------
 const char *CServerBrowserDialog::GetActiveModName()
 {
-	return m_szModDir[0] ? m_szModDir : NULL;
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: gets the name of the mod directory we're restricted to accessing, NULL if none
-//-----------------------------------------------------------------------------
-const char *CServerBrowserDialog::GetActiveGameName()
-{
 	return m_szGameName[0] ? m_szGameName : NULL;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: return the app id to limit game queries to, set by Source/HL1 engines (NOT by filter settings, that is per page)
-//-----------------------------------------------------------------------------
-int CServerBrowserDialog::GetActiveAppID()
-{
-	return m_iLimitAppID;
-}
-
-
-//-----------------------------------------------------------------------------
 // Purpose: receives a specified game is active, so no other game types can be displayed in server list
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::OnActiveGameName( KeyValues *pKV )
+void CServerBrowserDialog::OnActiveGameName(const char *gameName)
 {
-	Q_strncpy(m_szModDir, pKV->GetString( "name" ), sizeof(m_szModDir));
-	Q_strncpy(m_szGameName, pKV->GetString( "game" ), sizeof(m_szGameName));
-	m_iLimitAppID = pKV->GetInt( "appid", 0 );	
-	// reload filter settings (since they are no forced to be game specific)
-	ReloadFilterSettings();
-}
+	v_strncpy(m_szGameName, gameName, sizeof(m_szGameName));
 
-//-----------------------------------------------------------------------------
-// Purpose: resets all pages filter settings
-//-----------------------------------------------------------------------------
-void CServerBrowserDialog::ReloadFilterSettings()
-{
+	// reload filter settings (since they are no forced to be game specific)
 	m_pInternetGames->LoadFilterSettings();
-	m_pCustomGames->LoadFilterSettings();
 	m_pSpectateGames->LoadFilterSettings();
 	m_pFavorites->LoadFilterSettings();
 	m_pLanGames->LoadFilterSettings();
 	m_pFriendsGames->LoadFilterSettings();
-	m_pHistory->LoadFilterSettings();
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Adds server to the history, saves as currently connected server
-//-----------------------------------------------------------------------------
-void CServerBrowserDialog::OnConnectToGame( KeyValues *pMessageValues )
-{
-	int ip = pMessageValues->GetInt( "ip" );
-	int connectionPort = pMessageValues->GetInt( "connectionport" );
-	int queryPort = pMessageValues->GetInt( "queryport" );
-
-	if ( !ip || !queryPort )
-		return;
-
-	memset( &m_CurrentConnection, 0, sizeof(gameserveritem_t) );
-	m_CurrentConnection.m_NetAdr.SetIP( ip );
-	m_CurrentConnection.m_NetAdr.SetQueryPort( queryPort );
-	m_CurrentConnection.m_NetAdr.SetConnectionPort( (unsigned short)connectionPort );
-#ifndef NO_STEAM
-	if (m_pHistory && SteamMatchmaking() )
-	{
-		SteamMatchmaking()->AddFavoriteGame( 0, ::htonl( ip ), connectionPort, queryPort, k_unFavoriteFlagHistory, time( NULL ) );
-		m_pHistory->SetRefreshOnReload();
-	}
-#endif
-	// tell the game info dialogs, so they can cancel if we have connected
-	// to a server they were auto-retrying
-	for (int i = 0; i < m_GameInfoDialogs.Count(); i++)
-	{
-		vgui::Panel *dlg = m_GameInfoDialogs[i];
-		if (dlg)
-		{
-			KeyValues *kv = new KeyValues("ConnectedToGame", "ip", ip, "connectionport", connectionPort);
-			kv->SetInt( "queryport", queryPort );
-			vgui::ivgui()->PostMessage(dlg->GetVPanel(), kv, NULL);
-		}
-	}
-
-	// forward to favorites
-	m_pFavorites->OnConnectToGame();
-
-	m_bCurrentlyConnected = true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Clears currently connected server
-//-----------------------------------------------------------------------------
-void CServerBrowserDialog::OnDisconnectFromGame( void )
-{
-	m_bCurrentlyConnected = false;
-	memset( &m_CurrentConnection, 0, sizeof(gameserveritem_t) );
-
-	// forward to favorites
-	m_pFavorites->OnDisconnectFromGame();
 }
 
 //-----------------------------------------------------------------------------
@@ -642,3 +489,26 @@ bool CServerBrowserDialog::GetDefaultScreenPosition(int &x, int &y, int &wide, i
 	tall = (int)(wt * 0.55);
 	return true;
 }
+
+//-----------------------------------------------------------------------------
+// Purpose: safe string copy
+//-----------------------------------------------------------------------------
+void v_strncpy(char *dest, const char *src, int bufsize)
+{
+	if (src == dest)
+		return;
+
+	strncpy(dest, src, bufsize - 1);
+	dest[bufsize - 1] = 0;
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: Message map
+//-----------------------------------------------------------------------------
+MessageMapItem_t CServerBrowserDialog::m_MessageMap[] =
+{
+	MAP_MESSAGE( CServerBrowserDialog, "PageChanged", OnGameListChanged ),
+	MAP_MESSAGE_CONSTCHARPTR( CServerBrowserDialog, "ActiveGameName", OnActiveGameName, "name" ),
+};
+IMPLEMENT_PANELMAP(CServerBrowserDialog, vgui::Frame);

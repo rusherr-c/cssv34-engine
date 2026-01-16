@@ -7,7 +7,32 @@
 $Macro SRCDIR		"..\.."
 $Macro OUTBINDIR	"$SRCDIR\..\game\bin"
 
-$Include "$SRCDIR\vpc_scripts\source_dll_win32_base.vpc"	[$WIN32||$LINUX]
+$Include "$SRCDIR\vpc_scripts\source_dll_base.vpc"
+
+$Configuration	"Debug"
+{
+	$General
+	{
+		$OutputDirectory		"Debug_dx9"			[$WIN32]
+		$IntermediateDirectory	"Debug_dx9"			[$WIN32]
+		
+		$OutputDirectory		"Debug_dx9_360"		[$X360]
+		$IntermediateDirectory	"Debug_dx9_360"		[$X360]
+	}
+}
+
+$Configuration	"Release"
+{
+	$General
+	{
+		$OutputDirectory		"Release_dx9"		[$WIN32]
+		$IntermediateDirectory	"Release_dx9"		[$WIN32]
+
+		$OutputDirectory		"Release_dx9_360"	[$X360]
+		$IntermediateDirectory	"Release_dx9_360"	[$X360]
+	}
+}
+
 
 // Common Configuration
 $Configuration

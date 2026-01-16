@@ -24,11 +24,11 @@
 #include "tier3/tier3.h"
 
 // steam3 API
-// #include "steam/isteammasterserverupdater.h"
+//#include "steam/isteammasterserverupdater.h"
 //#include "steam/steam_querypackets.h"
 #include "steam/steam_api.h"
 #include "steam/isteamuser.h"
-#include "steam/isteammatchmaking.h"
+//#include "steam/isteammatchmaking.h"
 #include "steam/isteamfriends.h"
 
 #include "ServerBrowser/IServerBrowser.h"
@@ -64,7 +64,6 @@
 #include "FriendsGames.h"
 #include "HistoryGames.h"
 #include "SpectateGames.h"
-#include "CustomGames.h"
 #include "ServerBrowserDialog.h"
 
 #pragma warning( disable: 4355 )  //  warning C4355: 'this' : used in base member initializer list

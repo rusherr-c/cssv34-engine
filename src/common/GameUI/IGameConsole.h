@@ -1,8 +1,9 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright © 1996-2002, Valve LLC, All rights reserved. ============
 //
 // Purpose: 
 //
-//===========================================================================//
+// $NoKeywords: $
+//=============================================================================
 
 #ifndef IGAMECONSOLE_H
 #define IGAMECONSOLE_H
@@ -12,6 +13,7 @@
 
 #include "tier1/interface.h"
 
+class Color;
 
 //-----------------------------------------------------------------------------
 // Purpose: interface to game/dev console
@@ -30,12 +32,21 @@ public:
 	// clears the console
 	virtual void Clear() = 0;
 
+	// prints a message to the console
+	virtual void Printf(const char* format, ...) = 0;
+
+	// prints a debug message to the console
+	virtual void DPrintf(const char* format, ...) = 0;
+
+	// prints a debug message to the console
+	virtual void ColorPrintf(Color& clr, const char* format, ...) = 0;
+
 	// return true if the console has focus
 	virtual bool IsConsoleVisible() = 0;
 
 	virtual void SetParent( int parent ) = 0;
 };
 
-#define GAMECONSOLE_INTERFACE_VERSION "GameConsole004"
+#define GAMECONSOLE_INTERFACE_VERSION /*"GameConsole004"*/ "GameConsole003"
 
 #endif // IGAMECONSOLE_H

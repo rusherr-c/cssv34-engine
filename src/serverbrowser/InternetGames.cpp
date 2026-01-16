@@ -5,62 +5,96 @@
 // $NoKeywords: $
 //=============================================================================
 
-#include "pch_serverbrowser.h"
+#include "INetApi.h"
+#include "InternetGames.h"
+#include "MasterMsgHandler.h"
+#include "proto_oob.h"
+#include "ServerContextMenu.h"
+#include "ServerListCompare.h"
+#include "Socket.h"
+#include "util.h"
+#include "ServerBrowserDialog.h"
+#include <GameUI/Random.h>
+
+#include <stdio.h>
+
+#include <vgui/ILocalize.h>
+#include <vgui/IInput.h>
+#include <vgui/IScheme.h>
+#include <vgui/IVGui.h>
+#include <vgui/MouseCode.h>
+#include <KeyValues.h>
+
+#include <vgui_controls/Menu.h>
 
 using namespace vgui;
 
+// Number of retry attempts to get batch of server list
+const int NUMBER_OF_RETRIES = 3;
+// Time between retries
+const float MASTER_LIST_TIMEOUT = 3.0f;
 // How often to re-sort the server list
 const float MINIMUM_SORT_TIME = 1.5f;
+// maximum number of servers to get from master
+const int MAXIMUM_SERVERS = 10000;
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
 //			NOTE:	m_Servers can not use more than 96 sockets, else it will
 //					cause internet explorer to Stop working under win98 SE!
 //-----------------------------------------------------------------------------
-CInternetGames::CInternetGames(vgui::Panel *parent, const char *panelName, EMatchMakingType eType ) : 
-	CBaseGamesPage(parent, panelName, eType )
+CInternetGames::CInternetGames(vgui::Panel *parent, const char *panelName) : CBaseGamesPage(parent, panelName)
 {
+	// Init server query data
+	m_nStartPoint = 0;
 	m_fLastSort = 0.0f;
 	m_bDirty = false;
+	m_nRetriesRemaining = NUMBER_OF_RETRIES;
+	m_fRequestTime = 0.0f;
+	m_bRequesting = false;
+	m_nLastRequest = 0;
 	m_bRequireUpdate = true;
-	m_bOfflineMode = !IsSteamGameServerBrowsingEnabled();
+	m_bMoreUpdatesAvailable = false;
+	m_iServerRefreshCount = 0;
 
-	m_bAnyServersRetrievedFromMaster = false;
-	m_bNoServersListedOnMaster = false;
-	m_bAnyServersRespondedToQuery = false;
+	m_pMaster = new CSocket( "internet dialog master", -1 );
+	// The socket will delete the handler
+	int bytecode = M2A_SERVER_BATCH;
+	m_pMaster->AddMessageHandler(new CMasterMsgHandler(this, CMsgHandler::MSGHANDLER_BYTECODE, &bytecode));
 
-	m_pLocationFilter->DeleteAllItems();
-	KeyValues *kv = new KeyValues("Regions");
-	if (kv->LoadFromFile( g_pFullFileSystem, "servers/Regions.vdf", NULL))
+	// load masters from config file
+	KeyValues *kv = new KeyValues("MasterServers");
+	if (kv->LoadFromFile((IBaseFileSystem*)g_pFullFileSystem, "servers/MasterServers.vdf" ))
 	{
 		// iterate the list loading all the servers
 		for (KeyValues *srv = kv->GetFirstSubKey(); srv != NULL; srv = srv->GetNextKey())
 		{
-			struct regions_s region;
-
-			region.name = srv->GetString("text");
-			region.code = srv->GetInt("code");
-			KeyValues *regionKV = new KeyValues("region", "code", region.code);
-			m_pLocationFilter->AddItem( region.name.String(), regionKV );
-			regionKV->deleteThis();
-			m_Regions.AddToTail(region);
+			m_MasterServerNames.AddToTail(srv->GetString("addr"));
 		}
 	}
 	else
 	{
-		Assert(!("Could not load file servers/Regions.vdf; server browser will not function."));
+		Assert(!("Could not load file servers/MasterServers.vdf; server browser will not function."));
 	}
-	kv->deleteThis();
 
-	LoadFilterSettings();
+	// make sure we have at least one master listed
+	if (m_MasterServerNames.Count() < 1)
+	{
+		// add the default master
+		m_MasterServerNames.AddToTail("half-life.west.won.net:27010");
+	}
+
+	// choose a server at random
+	int serverIndex = RandomLong(0, m_MasterServerNames.Count() - 1);
+	net->StringToAdr(m_MasterServerNames[serverIndex].String(), &m_MasterAddress);
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Destructor
 //-----------------------------------------------------------------------------
 CInternetGames::~CInternetGames()
 {
+	delete m_pMaster;
 }
 
 //-----------------------------------------------------------------------------
@@ -68,24 +102,12 @@ CInternetGames::~CInternetGames()
 //-----------------------------------------------------------------------------
 void CInternetGames::PerformLayout()
 {
-	if ( !m_bOfflineMode && m_bRequireUpdate && ServerBrowserDialog().IsVisible() )
+	if (m_bRequireUpdate)
 	{
-		PostMessage( this, new KeyValues( "GetNewServerList" ), 0.1f );
-		m_bRequireUpdate = false;
-	}
-
-	if ( m_bOfflineMode )
-	{
-		m_pGameList->SetEmptyListText("#ServerBrowser_OfflineMode");
-		m_pConnect->SetEnabled( false );
-		m_pRefreshAll->SetEnabled( false );
-		m_pRefreshQuick->SetEnabled( false );
-		m_pAddServer->SetEnabled( false );
-		m_pFilter->SetEnabled( false );
+		GetNewServerList();
 	}
 
 	BaseClass::PerformLayout();
-	m_pLocationFilter->SetEnabled(true);
 }
 
 //-----------------------------------------------------------------------------
@@ -95,119 +117,169 @@ void CInternetGames::OnPageShow()
 {
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Called on page hide, stops any refresh
+//-----------------------------------------------------------------------------
+void CInternetGames::OnPageHide()
+{
+	StopRefresh();
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Called every frame, maintains sockets and runs refreshes
 //-----------------------------------------------------------------------------
 void CInternetGames::OnTick()
 {
-	if ( m_bOfflineMode )
+	if (m_pMaster)
 	{
-		BaseClass::OnTick();
-		return;
+		m_pMaster->Frame();
 	}
 
 	BaseClass::OnTick();
 
-	CheckRedoSort();
-}
+	// check to see if it's time to get the next master server list
+	if (m_Servers.IsRefreshing() && m_Servers.RefreshListRemaining() < 1)
+	{
+		// server list has sent out all the pings and is now just waiting for replies;
+		// the perfect time to ask for the next server list
+		if (m_bMoreUpdatesAvailable && !m_bRequesting)
+		{
+			RequestServers(m_nLastUnique, GetFilterString());
+		}
+	}
 
+	CheckRedoSort();
+	CheckRetryRequest();
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Handles incoming server refresh data
 //			updates the server browser with the refreshed information from the server itself
 //-----------------------------------------------------------------------------
-void CInternetGames::ServerResponded( HServerListRequest request, int iServer )
+void CInternetGames::ServerResponded(serveritem_t &server)
 {
 	m_bDirty = true;
-	BaseClass::ServerResponded( request, iServer );
-	m_bAnyServersRespondedToQuery = true;
-	m_bAnyServersRetrievedFromMaster = true;
-}
+	BaseClass::ServerResponded(server);
 
+	m_iServerRefreshCount++;
+	if (!m_bMoreUpdatesAvailable && m_pGameList->GetItemCount() > 0)
+	{
+		wchar_t unicode[128], unicodePercent[6];
+		char tempPercent[6];
+
+		int percentDone = (m_iServerRefreshCount * 100) / m_pGameList->GetItemCount();
+		if (percentDone < 0)
+		{
+			percentDone = 0;
+		}
+		else if (percentDone > 99)
+		{
+			percentDone = 99;
+		}
+
+		itoa( percentDone, tempPercent, 10 );
+		g_pVGuiLocalize->ConvertANSIToUnicode(tempPercent, unicodePercent, sizeof( unicodePercent ));
+		g_pVGuiLocalize->ConstructString(unicode, sizeof( unicode ), g_pVGuiLocalize->Find("#ServerBrowser_RefreshingPercentDone"), 1, unicodePercent);
+		ServerBrowserDialog().UpdateStatusText(unicode);
+	}
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CInternetGames::ServerFailedToRespond( HServerListRequest request, int iServer )
+void CInternetGames::ServerFailedToRespond(serveritem_t &server)
 {
-#ifndef NO_STEAM
 	m_bDirty = true;
-	gameserveritem_t *pServer = SteamMatchmakingServers()->GetServerDetails( request, iServer );
-	Assert( pServer );
 
-	if ( pServer->m_bHadSuccessfulResponse )
+	if (server.hadSuccessfulResponse)
 	{
 		// if it's had a successful response in the past, leave it on
-		ServerResponded( request, iServer );
+		ServerResponded(server);
 	}
 	else
 	{
-		int iServerMap = m_mapServers.Find( iServer );
-		if ( iServerMap != m_mapServers.InvalidIndex() )
-			RemoveServer( m_mapServers[ iServerMap ] );
 		// we've never had a good response from this server, remove it from the list
+		RemoveServer(server);
 		m_iServerRefreshCount++;
 	}
-#endif
-}
 
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Called when server refresh has been completed
 //-----------------------------------------------------------------------------
-void CInternetGames::RefreshComplete( HServerListRequest request, EMatchMakingServerResponse response )
+void CInternetGames::RefreshComplete()
 {
-	SetRefreshing(false);
-	UpdateFilterSettings();
-
-	if ( response != eServerFailedToRespond )
+	if (!m_bMoreUpdatesAvailable)
 	{
-		if ( m_bAnyServersRespondedToQuery )
+		SetRefreshing(false);
+	}
+
+	// get the next batch of servers if we're not already getting them
+	if (!m_bRequesting)
+	{
+		if (m_bMoreUpdatesAvailable)
 		{
-			m_pGameList->SetEmptyListText( GetStringNoUnfilteredServers() );
-		}
-		else if ( response == eNoServersListedOnMasterServer )
-		{
-			m_pGameList->SetEmptyListText( GetStringNoUnfilteredServersOnMaster() );
+			RequestServers(m_nLastUnique, GetFilterString());
 		}
 		else
 		{
-			m_pGameList->SetEmptyListText( GetStringNoServersResponded() );
-		}
-	}
-	else
-	{
-		m_pGameList->SetEmptyListText("#ServerBrowser_MasterServerNotResponsive");
-	}
+			// finished getting servers, reset Start point
+			m_nStartPoint = 0;
+			m_bRequesting = false;
+			m_iServerRefreshCount = 0;
+			m_pGameList->SetEmptyListText("#ServerBrowser_NoInternetGames");
 
-	// perform last sort
-	m_bDirty = false;
-	m_fLastSort = Plat_FloatTime();
-	if (IsVisible())
-	{
-		m_pGameList->SortList();
+			// perform last sort
+			m_bDirty = false;
+			m_fLastSort = m_pMaster->GetClock();
+			if (IsVisible())
+			{
+				m_pGameList->SortList();
+			}
+		}
 	}
 
 	UpdateStatus();
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 void CInternetGames::GetNewServerList()
 {
-	BaseClass::GetNewServerList();
+	// No master socket?
+	Assert( m_pMaster );
+	if ( !m_pMaster )
+	{
+		return;
+	}
+
+	// Clear the current list
+	m_Servers.Clear();
 	UpdateStatus();
 
-	m_bRequireUpdate = false;
-	m_bAnyServersRetrievedFromMaster = false;
-	m_bAnyServersRespondedToQuery = false;
-
 	m_pGameList->DeleteAllItems();
+
+	m_bRequireUpdate = false;
+	m_iServerRefreshCount = 0;
+
+	// Start requesting servers at batch 0
+	RequestServers(0, GetFilterString());
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Handles details on new server received from master
+//			Adds to list and marks it to be pinged/refreshed
+//-----------------------------------------------------------------------------
+void CInternetGames::AddNewServer(serveritem_t &server)
+{
+	// add to main server list
+	unsigned int index = m_Servers.AddNewServer(server);
+
+	// add to refresh list
+	m_Servers.AddServerToRefreshList(index);
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: returns true if the game list supports the specified ui elements
@@ -230,33 +302,244 @@ bool CInternetGames::SupportsItem(IGameList::InterfaceItem_e item)
 //-----------------------------------------------------------------------------
 void CInternetGames::CheckRedoSort( void )
 {
-	float fCurTime;
+	float curtime;
 
 	// No changes detected
 	if ( !m_bDirty )
 		return;
 
-	fCurTime = Plat_FloatTime();
+	curtime = m_pMaster->GetClock();
 	// Not time yet
-	if ( fCurTime - m_fLastSort < MINIMUM_SORT_TIME)
+	if (curtime - m_fLastSort < MINIMUM_SORT_TIME)
 		return;
 
-	// postpone sort if mouse button is down
-	if ( input()->IsMouseDown(MOUSE_LEFT) || input()->IsMouseDown(MOUSE_RIGHT) )
+	// postpown sort if mouse button is down
+	if (input()->IsMouseDown(MOUSE_LEFT) || input()->IsMouseDown(MOUSE_RIGHT))
 	{
 		// don't sort for at least another second
-		m_fLastSort = fCurTime - MINIMUM_SORT_TIME + 1.0f;
+		m_fLastSort = curtime - MINIMUM_SORT_TIME + 1.0f;
 		return;
 	}
 
 	// Reset timer
 	m_bDirty	= false;
-	m_fLastSort = fCurTime;
+	m_fLastSort = curtime;
 
 	// Force sort to occur now!
 	m_pGameList->SortList();
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Check to see if master server didn't respond to request for servers
+//-----------------------------------------------------------------------------
+void CInternetGames::CheckRetryRequest( void )
+{
+	if (!m_bRequesting)
+		return;
+
+	float curtime = m_pMaster->GetClock();
+	if (curtime - m_fRequestTime <= MASTER_LIST_TIMEOUT)
+	{
+		return;
+	}
+
+	if (--m_nRetriesRemaining <= 0)
+	{
+		// couldn't connect
+		StopRefresh();
+		return;
+	}
+
+	// Re-send last request
+	RequestServers(m_nLastRequest, GetFilterString());
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: removes the server from the UI list
+//-----------------------------------------------------------------------------
+void CInternetGames::RemoveServer(serveritem_t &server)
+{
+	if ( m_pGameList->IsValidItemID(server.listEntryID) )
+	{
+		// don't remove the server from list, just hide since this is a lot faster
+		m_pGameList->SetItemVisible(server.listEntryID, false);
+
+		// find the row in the list and kill
+	//	m_pGameList->RemoveItem(server.listEntryID);
+	//	server.listEntryID = GetInvalidServerListID();
+	}
+
+	UpdateStatus();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+void CInternetGames::StartRefresh()
+{
+	// if the game list is empty, we need to update
+	if (m_pGameList->GetItemCount() < 1 || m_bRequireUpdate)
+	{
+		GetNewServerList();
+	}
+	else
+	{
+		// Stop current refresh
+		m_Servers.StopRefresh();
+
+		// build the refresh list from the game list
+		for (int i = 0; i < m_pGameList->GetItemCount(); i++)
+		{
+			int serverID = m_pGameList->GetItemUserData(m_pGameList->GetItemIDFromRow(i));
+
+			m_Servers.AddServerToRefreshList(serverID);
+		}
+
+		ContinueRefresh();
+	}
+
+	m_iServerRefreshCount = 0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Continues current refresh
+//-----------------------------------------------------------------------------
+void CInternetGames::ContinueRefresh()
+{
+	m_Servers.StartRefresh();
+	SetRefreshing(true);
+	if (m_bMoreUpdatesAvailable)
+	{
+		ServerBrowserDialog().UpdateStatusText("#ServerBrowser_GettingNewServerList");
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Called after a list of servers has been received from the master
+//-----------------------------------------------------------------------------
+void CInternetGames::ListReceived(bool moreAvailable, int lastUnique)
+{
+	if (!m_bRequesting)
+		return;
+
+	m_bRequesting = false;
+	m_nRetriesRemaining = NUMBER_OF_RETRIES;
+
+	if (m_Servers.ServerCount() < MAXIMUM_SERVERS)
+	{
+		m_bMoreUpdatesAvailable = moreAvailable;
+		m_nLastUnique = lastUnique;
+	}
+	else
+	{
+		// we're over the max, so don't get any more servers
+		m_bMoreUpdatesAvailable = false;
+		m_nLastUnique = 0;
+	}
+
+	ContinueRefresh();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: returns true if getting server list or refreshing servers
+//-----------------------------------------------------------------------------
+bool CInternetGames::IsRefreshing()
+{
+	return (m_Servers.IsRefreshing() || m_bRequesting);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: stops current refresh, does last sort on list
+//-----------------------------------------------------------------------------
+void CInternetGames::StopRefresh()
+{
+	// Stop the server list refreshing
+	m_Servers.StopRefresh();
+
+	// clear update states
+	m_nStartPoint = 0;
+	m_bRequesting = false;
+	m_bRequireUpdate = false;
+	m_bMoreUpdatesAvailable = false;
+	m_nLastUnique = 0;
+	m_iServerRefreshCount = 0;
+
+	// update UI
+	RefreshComplete();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: initiates server connection
+//-----------------------------------------------------------------------------
+void CInternetGames::OnBeginConnect()
+{
+	if (!m_pGameList->GetSelectedItemsCount())
+		return;
+	
+	// get the server
+	int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(0));
+
+	// Stop the current refresh
+	StopRefresh();
+	
+	// join the game
+	ServerBrowserDialog().JoinGame(this, serverID);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Displays the current game info without connecting
+//-----------------------------------------------------------------------------
+void CInternetGames::OnViewGameInfo()
+{
+	if (!m_pGameList->GetSelectedItemsCount())
+		return;
+
+	// get the server
+	int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(0));
+
+	// Stop the current refresh
+	StopRefresh();
+
+	// join the game
+	ServerBrowserDialog().OpenGameInfoDialog(this, serverID);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: applies filters to the current list
+//-----------------------------------------------------------------------------
+void CInternetGames::ApplyFilters()
+{
+	ApplyGameFilters();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Gets a set of servers from the master
+//-----------------------------------------------------------------------------
+void CInternetGames::RequestServers(int Start, const char *filterString)
+{
+	CMsgBuffer *buffer = m_pMaster->GetSendBuffer();
+	Assert( buffer );
+	if ( !buffer )
+		return;
+
+	m_bRequesting = true;
+
+	SetRefreshing(true);
+	ServerBrowserDialog().UpdateStatusText("#ServerBrowser_GettingNewServerList");
+
+	m_fRequestTime = m_pMaster->GetClock();
+	m_nLastRequest = Start;
+
+	buffer->Clear();
+	// Write query string
+	buffer->WriteByte( A2M_GET_SERVERS_BATCH2 );
+	// Write first requested id
+	buffer->WriteLong( Start );
+	// write filter string
+	buffer->WriteString(filterString);
+
+	m_pMaster->SendMessage(&m_MasterAddress);
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: opens context menu (user right clicked on a server)
@@ -268,10 +551,11 @@ void CInternetGames::OnOpenContextMenu(int itemID)
 
 	// get the server
 	int serverID = m_pGameList->GetItemData(m_pGameList->GetSelectedItem(0))->userData;
+	serveritem_t &server = m_Servers.GetServer(serverID);
 
 	// Activate context menu
 	CServerContextMenu *menu = ServerBrowserDialog().GetContextMenu(m_pGameList);
-	menu->ShowMenu(this, serverID, true, true, true, true);
+	menu->ShowMenu(this, serverID, true, true, true);
 }
 
 //-----------------------------------------------------------------------------
@@ -279,34 +563,47 @@ void CInternetGames::OnOpenContextMenu(int itemID)
 //-----------------------------------------------------------------------------
 void CInternetGames::OnRefreshServer(int serverID)
 {
-	BaseClass::OnRefreshServer( serverID );
+	// walk the list of selected servers refreshing them
+	for (int i = 0; i < m_pGameList->GetSelectedItemsCount(); i++)
+	{
+		serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(i));
 
-	ServerBrowserDialog().UpdateStatusText("#ServerBrowser_GettingNewServerList");
+		// refresh this server
+		m_Servers.AddServerToRefreshList(serverID);
+	}
+
+	ContinueRefresh();
 }
 
-
 //-----------------------------------------------------------------------------
-// Purpose: get the region code selected in the ui
-// Output: returns the region code the user wants to filter by
+// Purpose: adds a server to the favorites
 //-----------------------------------------------------------------------------
-int CInternetGames::GetRegionCodeToFilter()
+void CInternetGames::OnAddToFavorites()
 {
-	KeyValues *kv = m_pLocationFilter->GetActiveItemUserData();
-	if ( kv )
-		return kv->GetInt( "code" );
-	else
-		return 255;
+	// loop through all the selected favorites
+	for (int i = 0; i < m_pGameList->GetSelectedItemsCount(); i++)
+	{
+		int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(i));
+
+		if (serverID >= m_Servers.ServerCount())
+			continue;
+		
+		serveritem_t &server = m_Servers.GetServer(serverID);
+
+		// add to favorites list
+		ServerBrowserDialog().AddServerToFavorites(server);
+	}
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose: Message map
 //-----------------------------------------------------------------------------
-bool CInternetGames::CheckTagFilter( gameserveritem_t &server )
+MessageMapItem_t CInternetGames::m_MessageMap[] =
 {
-	// Servers without tags go in the official games, servers with tags go in custom games
-	bool bOfficialServer = !( server.m_szGameTags && server.m_szGameTags[0] );
-	if ( !bOfficialServer )
-		return false;
-
-	return true;
-}
+	MAP_MESSAGE( CInternetGames, "ConnectToServer", OnBeginConnect ),
+	MAP_MESSAGE( CInternetGames, "ViewGameInfo", OnViewGameInfo ),
+	MAP_MESSAGE( CInternetGames, "AddToFavorites", OnAddToFavorites ),
+	MAP_MESSAGE_INT( CInternetGames, "RefreshServer", OnRefreshServer, "serverID" ),
+	MAP_MESSAGE_INT( CInternetGames, "OpenContextMenu", OnOpenContextMenu, "itemID" ),
+};
+IMPLEMENT_PANELMAP(CInternetGames, BaseClass);

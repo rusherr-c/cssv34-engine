@@ -201,6 +201,25 @@ typedef signed char int8;
 #endif // else _WIN32
 
 //-----------------------------------------------------------------------------
+// Old-school defines we don't want to use moving forward
+//-----------------------------------------------------------------------------
+
+// feature enables
+#define NEW_SOFTWARE_LIGHTING
+#if !defined( _X360 )
+#define SUPPORT_PACKED_STORE
+#endif
+
+#if defined( BINK_VIDEO ) && ( defined( _X360 ) || defined( _PS3 ) )
+#define BINK_ENABLED_FOR_CONSOLE
+#endif
+
+#if !defined( PORTAL2 )
+//#define PORTAL2
+#endif
+
+
+//-----------------------------------------------------------------------------
 // Set up platform type defines.
 //-----------------------------------------------------------------------------
 // Remove:
@@ -215,6 +234,7 @@ typedef signed char int8;
 #else
 	#define IsPlatform64Bits()	false
 #endif
+
 
 // From steam/steamtypes.h
 // RTime32

@@ -148,6 +148,7 @@ void CBaseGameStats::StatsLog( char const *fmt, ... )
 	// Prepend the time.
 	time_t aclock;
 	time( &aclock );
+
 	struct tm *newtime = localtime( &aclock );
 
 	

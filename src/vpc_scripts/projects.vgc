@@ -745,6 +745,10 @@ $Project "ServerBrowser"
 {
 	"ServerBrowser\ServerBrowser.vpc" [$WIN32||$X360]
 }
+$Project "InterfaceTester"
+{
+	"utils\interfacetester\interfacetester.vpc" [$WIN32]
+}
 
 $Project "ServerMonitor"
 {

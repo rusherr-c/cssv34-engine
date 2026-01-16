@@ -11,86 +11,61 @@
 #pragma once
 #endif
 
-struct challenge_s
-{
-	netadr_t addr;
-	int challenge;
-};
+#include <vgui_controls/Frame.h>
+#include "ServerList.h"
+#include "IServerRefreshResponse.h"
 
 //-----------------------------------------------------------------------------
 // Purpose: Dialog for displaying information about a game server
 //-----------------------------------------------------------------------------
-class CDialogGameInfo : public vgui::Frame, public ISteamMatchmakingPlayersResponse, public ISteamMatchmakingPingResponse
+class CDialogGameInfo : public vgui::Frame, public IServerRefreshResponse
 {
-	DECLARE_CLASS_SIMPLE( CDialogGameInfo, vgui::Frame ); 
-
 public:
-	CDialogGameInfo(vgui::Panel *parent, int serverIP, int queryPort, unsigned short connectionPort );
+	CDialogGameInfo(class IGameList *gameList, unsigned int serverID, int serverIP = 0, int serverPort = 0);
 	~CDialogGameInfo();
 
 	void Run(const char *titleName);
-	void ChangeGame(int serverIP, int queryPort, unsigned short connectionPort);
-	void SetFriend( uint64 ulSteamIDFriend );
-	uint64 GetAssociatedFriend();
+	void ChangeGame(int serverIP, int serverPort);
 
 	// forces the dialog to attempt to connect to the server
 	void Connect();
 
 	// implementation of IServerRefreshResponse interface
 	// called when the server has successfully responded
-	virtual void ServerResponded( gameserveritem_t &server );
+	virtual void ServerResponded(serveritem_t &server);
 
 	// called when a server response has timed out
-	virtual void ServerFailedToRespond();
-
-	// on individual player added
-	virtual void AddPlayerToList(const char *playerName, int score, float timePlayedSeconds);
-	virtual void PlayersFailedToRespond() {}
-	virtual void PlayersRefreshComplete() { m_hPlayersQuery = HSERVERQUERY_INVALID; }
+	virtual void ServerFailedToRespond(serveritem_t &server);
 
 	// called when the current refresh list is complete
-	virtual void RefreshComplete( EMatchMakingServerResponse response );
-
-	// player list received
-	virtual void ClearPlayerList();
-
-	//virtual void SendChallengeQuery( const netadr_t & to );
-	virtual void SendPlayerQuery( uint32 unIP, uint16 usQueryPort );
-	//virtual void InsertChallengeResponse( const netadr_t & to, int nChallenge );
+	virtual void RefreshComplete();
 
 protected:
 	// message handlers
-	MESSAGE_FUNC( OnConnect, "Connect" );
-	MESSAGE_FUNC( OnRefresh, "Refresh" );
-	MESSAGE_FUNC_PTR( OnButtonToggled, "ButtonToggled", panel );
-	MESSAGE_FUNC_PTR( OnRadioButtonChecked, "RadioButtonChecked", panel )
-	{
-		OnButtonToggled( panel );
-	}
+	void OnConnect();
+	void OnRefresh();
+	void OnButtonToggled(vgui::Panel *toggleButton);
 
 	// response from the get password dialog
-	MESSAGE_FUNC_CHARPTR( OnJoinServerWithPassword, "JoinServerWithPassword", password );
+	void OnJoinServerWithPassword(const char *password);
 
-	MESSAGE_FUNC_INT_INT( OnConnectToGame, "ConnectedToGame", ip, port );
+	DECLARE_PANELMAP();
 
 	// vgui overrides
-	virtual void OnTick();
+	void OnTick();
+	virtual void OnClose();
 	virtual void PerformLayout();
+	virtual void ApplySchemeSettings(vgui::IScheme *pScheme);
 
 private:
-#ifndef NO_STEAM
-	STEAM_CALLBACK( CDialogGameInfo, OnPersonaStateChange, PersonaStateChange_t, m_CallbackPersonaStateChange );
-#endif
-
 	long m_iRequestRetry;	// time at which to retry the request
-	static int PlayerTimeColumnSortFunc(vgui::ListPanel *pPanel, const vgui::ListPanelItem &p1, const vgui::ListPanelItem &p2);
 
 	// methods
 	void RequestInfo();
 	void ConnectToServer();
 	void ShowAutoRetryOptions(bool state);
-	void ConstructConnectArgs( char *pchOptions, int cchOptions, const gameserveritem_t &server );
-	void ApplyConnectCommand( const gameserveritem_t &server );
+
+	void SetControlText(const char *textEntryName, const char *text);
 
 	vgui::Button *m_pConnectButton;
 	vgui::Button *m_pCloseButton;
@@ -99,9 +74,14 @@ private:
 	vgui::ToggleButton *m_pAutoRetry;
 	vgui::RadioButton *m_pAutoRetryAlert;
 	vgui::RadioButton *m_pAutoRetryJoin;
-	vgui::ListPanel *m_pPlayerList;
 
 	enum { PING_TIMES_MAX = 4 };
+
+	// the ID of the server we're watching
+	unsigned int m_iServerID;
+
+	// server refreshing object
+	CServerList	m_Servers;
 
 	// true if we should try connect to the server when it refreshes
 	bool m_bConnecting;
@@ -114,12 +94,8 @@ private:
 	bool m_bServerFull;
 	bool m_bShowAutoRetryToggle;
 	bool m_bShowingExtendedOptions;
-	uint64 m_SteamIDFriend;
 
-	gameserveritem_t m_Server;
-	HServerQuery m_hPingQuery;
-	HServerQuery m_hPlayersQuery;
-	bool m_bPlayerListUpdatePending;
+	typedef vgui::Frame BaseClass;
 };
 
 #endif // DIALOGGAMEINFO_H

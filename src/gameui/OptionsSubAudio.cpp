@@ -145,16 +145,6 @@ void COptionsSubAudio::OnResetData()
    // Fallback to current engine language
    engine->GetUILanguage( szCurrentLanguage, sizeof( szCurrentLanguage ));
 
-   // In a Steam environment we get the current language 
-#if !defined( NO_STEAM )
-   // When Steam isn't running we can't get the language info... 
-   if ( SteamApps() )
-   {
-	  V_strcpy( szCurrentLanguage, SteamApps()->GetCurrentGameLanguage() );
-	  V_strcpy( szAvailableLanguages, SteamApps()->GetAvailableGameLanguages() );
-   }
-#endif
-
    // Get the spoken language and store it for comparison purposes
    m_nCurrentAudioLanguage = PchLanguageToELanguage( szCurrentLanguage );
 

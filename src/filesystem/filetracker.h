@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -10,156 +10,227 @@
 #pragma once
 #endif
 
+class CBaseFileSystem;
+class CPackedStoreFileHandle;
+
+#if !defined( DEDICATED )
+
+// Comments from Fletcher:
+// 
+// TF isn’t sending any hashes to the server. (That’s probably what CSGO is doing,
+// but not TF.) Comparing hashes doesn’t work when there are optional updates. (We
+// release a new client without updating the server.) Also on TF, we don’t ship
+// any textures or audio to the dedicated server.
+//  
+// On TF, the client just confirms that the files were loaded from a trusted source.
+// 
+// When a client connects to a “pure” server, the client is supposed to limit
+// which modified files are allowed.)
 
 #include "ifilelist.h"
 #include "tier1/utldict.h"
+#include "tier0/tslist.h"
+#include "tier1/stringpool.h"
 
-
-class CBaseFileSystem;
-class CFileHandle;
-
-
-enum EFileFlags
+struct TrackedFile_t
 {
-	k_eFileFlagsLoadedFromSteam			= 0x0001,
-	
-	k_eFileFlagsHasCRC					= 0x0002,	// m_CRC represents the most recently-loaded version of the file. This might be 
-													// unset but m_CRC (and k_eFileFlagsGotCRCOnce) could be set, signifying that
-													// the file has been opened since last time we calculated the CRC but we didn't
-													// calculate a CRC for that file version.
-	
-	k_eFileFlagsForcedLoadFromSteam		= 0x0004,	// Set if k_eFileFlagsLoadedFromSteam is set AND we forced Steam to not check the disk for this file.
-	
-	k_eFileFlagsGotCRCOnce				= 0x0008,	// This is set if we EVER had k_eFileFlagsHasCRC set.. m_CRC will still be set in that case,
-													// but it'll be the last CRC we calculated and not necessarily 
-	
-	k_eFileFlagsFailedToLoadLastTime	= 0x0010	// This is used if we had a record of the file and the game tried to open it, but
-													// it couldn't be opened. This will happen if the file was loaded from disk, then
-													// sv_pure is turned on and the file is forced to come from Steam, but there is no
-													// Steam version. In that case, the game should be told to retry the file
-													// next time sv_pure is changed because if sv_pure goes back to 0 it -would- load
-													// the file legitimately.
+	TrackedFile_t()
+	{
+		m_nFileFraction = 0;
+		m_PackFileID = 0;
+		m_nPackFileNumber = 0;
+		m_bPackOrVPKFile = false;
+		m_bFileInVPK = false;
+		m_iLoadedSearchPathStoreId = 0;
+		m_bIgnoredForPureServer = false;
+	}
+
+	FileHash_t m_filehashFinal;
+
+	const char* m_filename;
+	const char* m_path;
+	int m_nFileFraction;
+	int m_iLoadedSearchPathStoreId; // ID of the search path that we loaded from.  Zero if we are not currently loaded.
+
+	int m_PackFileID;
+	int m_nPackFileNumber;
+	bool m_bPackOrVPKFile;
+	bool m_bFileInVPK;
+	bool m_bIgnoredForPureServer; // Did we ignore a file by this name as a result of pure server rules, the last time it was opened?
+
+	// The crcIdentifier is a CRC32 of the filename and path. It could be used for quick comparisons of
+	//  path+filename, but since we don't do that at the moment we don't need this.
+	// CRC32_t m_crcIdentifier;
+
+	void RebuildFileName(CStringPool& stringPool, const char* pFilename, const char* pPathID, int nFileFraction);
+
+	static bool Less(const TrackedFile_t& lhs, const TrackedFile_t& rhs)
+	{
+		int nCmp = Q_strcmp(lhs.m_path, rhs.m_path);
+		if (nCmp < 0)
+			return true;
+		else if (nCmp > 0)
+			return false;
+
+		nCmp = Q_strcmp(lhs.m_filename, rhs.m_filename);
+		if (nCmp < 0)
+			return true;
+
+		return false;
+	}
 };
 
-
-class CPathIDFileList;
-
-
-class CFileInfo
+struct TrackedVPKFile_t
 {
-public:
-	CFileInfo();
-	~CFileInfo();
-	
-	const char* GetFilename();
-	const char* GetPathIDString();
-	
-public:	
+	TrackedVPKFile_t()
+	{
+		m_PackFileID = 0;
+		m_nPackFileNumber = 0;
+		m_nFileFraction = 0;
+	}
+	int m_PackFileID;
+	int m_nPackFileNumber;
+	int m_nFileFraction;
+	int m_idxAllOpenedFiles; // Index into m_treeAllOpenedFiles
 
-	unsigned short	m_Flags;	// This is a combination of EFileFlags.
-	CRC32_t			m_CRC;		// The CRC for this file.
-	
-	CPathIDFileList	*m_pPathIDFileList;
-	int				m_PathIDFileListDictIndex;		// Our index into m_pPathIDFileList->m_Files
-	
-	int				m_iNeedsVerificationListIndex;	// Index into m_NeedsVerificationList or -1 if not in the list.
+	static bool Less(const TrackedVPKFile_t& lhs, const TrackedVPKFile_t& rhs)
+	{
+		if (lhs.m_nPackFileNumber < rhs.m_nPackFileNumber)
+			return true;
+		else if (lhs.m_nPackFileNumber > rhs.m_nPackFileNumber)
+			return false;
+
+		if (lhs.m_nFileFraction < rhs.m_nFileFraction)
+			return true;
+		else if (lhs.m_nFileFraction > rhs.m_nFileFraction)
+			return false;
+
+		if (lhs.m_PackFileID < rhs.m_PackFileID)
+			return true;
+
+		return false;
+	}
 };
 
-
-// This tracks a list of files for the specified path ID.
-class CPathIDFileList
+class StuffToMD5_t
 {
 public:
-	CPathIDFileList();
-	~CPathIDFileList();
-	CFileInfo*		FindFileInfo( const char *pFilename );
-	CFileInfo*		AddFileInfo( const char *pFilename );
-
-public:
-	CUtlSymbol						m_PathID;				// "" for a null path ID.
-	CUtlDict<CFileInfo*,int>		m_Files;
-	CUtlLinkedList<CFileInfo*,int>	m_UnverifiedCRCFiles;	// These are the files whose CRCs have not been verified yet.
-															// These just point at entries in m_Files.
+	uint8* m_pubBuffer;
+	int m_cubBuffer;
+	MD5Value_t m_md5Value;
+	int m_idxTrackedVPKFile;
+	int m_idxListSubmittedJobs;
 };
 
-
-//-----------------------------------------------------------------------------
-// This tracks the files that have been opened by the filesystem.
-// It remembers if they were loaded from Steam or off-disk.
-// If the filesystem is tracking CRCs, then it will calculate a CRC
-// for each file that came off disk.
-//
-// TODO: This is similar to CBaseFileSystem::m_OpenedFiles - it could probably
-// manage both sets of files in the same list. Having 2 separate lists might
-// be confusing.
-//-----------------------------------------------------------------------------
-class CFileTracker
+class SubmittedMd5Job_t
 {
 public:
-	CFileTracker( CBaseFileSystem *pFileSystem );
-	~CFileTracker();
+	bool m_bFinished;
+	MD5Value_t m_md5Value;
+};
 
-	// If this is true, then we'll calculate CRCs for each file that came off disk.
-	void	SetWantFileCRCs( bool bWantCRCs );
+class CFileTracker2
+#ifdef SUPPORT_PACKED_STORE
+	: IThreadedFileMD5Processor
+#endif
+{
+public:
+	CFileTracker2(CBaseFileSystem * pFileSystem);
+	~CFileTracker2();
 
-	// As files are opened, if it is calculating CRCs, it will add those files and their
-	// CRCs to the "unverified CRC" list. The client can then ask the server to verify
-	// those CRCs to make sure the client is "pure".
-	void	MarkAllCRCsUnverified();
-	void	MarkAllCRCsVerified( bool bLockMutex=true );
+	void ShutdownAsync();
 
-	// Cache a file's CRC. Loads the file and calculates the CRC if we don't have it yet.
-	void			CacheFileCRC( const char *pPathID, const char *pRelativeFilename );
-	EFileCRCStatus	CheckCachedFileCRC( const char *pPathID, const char *pRelativeFilename, CRC32_t *pCRC );
+	void MarkAllCRCsUnverified();
+	int	GetUnverifiedFileHashes(CUnverifiedFileHash* pFiles, int nMaxFiles);
+	EFileCRCStatus CheckCachedFileHash(const char* pPathID, const char* pRelativeFilename, int nFileFraction, FileHash_t* pFileHash);
 
-	// This is like CacheFileCRC, but it assumes that the same file would be found by pPathIDToCopyFrom, so it just
-	// copies the CRC record from that path ID into the one in pPathID and avoids a redundant CRC calculation.
-	void			CacheFileCRC_Copy( const char *pPathID, const char *pRelativeFilename, const char *pPathIDToCopyFrom );
+#ifdef SUPPORT_PACKED_STORE
+	unsigned ThreadedProcessMD5Requests();
+	virtual int SubmitThreadedMD5Request(uint8* pubBuffer, int cubBuffer, int PackFileID, int nPackFileNumber, int nPackFileFraction);
+	virtual bool BlockUntilMD5RequestComplete(int iRequest, MD5Value_t* pMd5ValueOut);
+	virtual bool IsMD5RequestComplete(int iRequest, MD5Value_t* pMd5ValueOut);
 
-	// When we don't have a whitelist, it loads files without bothering to calculate their CRCs (we'd only
-	// need them on a pure server), but when we get a whitelist, we'll want the CRCs, so it goes back, opens those
-	// files, and calculates the CRCs for them.
-	void	CalculateMissingCRCs( IFileList *pForceMatchList );
+	int NotePackFileOpened(const char* pVPKAbsPath, const char* pPathID, int64 nLength);
+	void NotePackFileAccess(const char* pFilename, const char* pPathID, int iSearchPathStoreId, CPackedStoreFileHandle& VPKHandle);
+	void AddFileHashForVPKFile(int nPackFileNumber, int nFileFraction, int cbFileLen, MD5Value_t& md5, CPackedStoreFileHandle& fhandle);
+#endif
 
-	int		GetUnverifiedCRCFiles( CUnverifiedCRCFile *pFiles, int nMaxFiles );
+	void NoteFileIgnoredForPureServer(const char* pFilename, const char* pPathID, int iSearchPathStoreId);
+	void NoteFileLoadedFromDisk(const char* pFilename, const char* pPathID, int iSearchPathStoreId, FILE* fp, int64 nLength);
+	void NoteFileUnloaded(const char* pFilename, const char* pPathID);
+	int ListOpenedFiles(bool bAllOpened, const char* pchFilenameFind);
 
-	// Note that we just opened this file and calculate a CRC for it.
-	void	NoteFileLoadedFromDisk( const char *pFilename, const char *pPathID, FileHandle_t fp );
-	void	NoteFileLoadedFromSteam( const char *pFilename, const char *pPathID, bool bForcedLoadFromSteam );
-	void	NoteFileFailedToLoad( const char *pFilename, const char *pPathID );
-	
-	// Get a file info from a specific path ID.
-	CFileInfo*	GetFileInfo( const char *pFilename, const char *pPathID );
-	
-	// Get all file infos with the specified filename (i.e. in all path IDs).
-	int			GetFileInfos( CFileInfo **ppFileInfos, int nMaxFileInfos, const char *pFilename );
-
-	// Clear everything.
-	void	Clear();
+	IFileList* GetFilesToUnloadForWhitelistChange(IPureServerWhitelist* pNewWhiteList);
 
 private:
-	void					CalculateMissingCRC( const char *pFilename, const char *pPathID );
-	CPathIDFileList*		GetPathIDFileList( const char *pPathID, bool bAutoAdd=true );
+	int IdxFileFromName(const char* pFilename, const char* pPathID, int nFileFraction, bool bPackOrVPKFile);
 
-	CRC32_t					CalculateCRCForFile( FileHandle_t fp );
+	CStringPool m_stringPool;
+	CUtlRBTree< TrackedFile_t, int > m_treeAllOpenedFiles;
+	CUtlRBTree< TrackedVPKFile_t, int > m_treeTrackedVPKFiles;
 
-private:
-	CUtlLinkedList<CFileInfo*>		m_NeedsVerificationList;	// The list of files that need CRCs verified.
-	CUtlDict<CPathIDFileList*,int>	m_PathIDs;
-	CBaseFileSystem					*m_pFileSystem;
+	CBaseFileSystem* m_pFileSystem;
 	CThreadMutex					m_Mutex;	// Threads call into here, so we need to be safe.
+
+#ifdef SUPPORT_PACKED_STORE
+	CThreadEvent m_threadEventWorkToDo;
+	CThreadEvent m_threadEventWorkCompleted;
+	volatile bool m_bThreadShouldRun;
+	ThreadHandle_t m_hWorkThread;
+
+	CTSQueue< StuffToMD5_t >				m_PendingJobs;
+	CTSQueue< StuffToMD5_t >				m_CompletedJobs;
+	CUtlLinkedList< SubmittedMd5Job_t >		m_SubmittedJobs;
+#endif // SUPPORT_PACKED_STORE
+
+	// Stats
+	int m_cThreadBlocks;
+	int m_cDupMD5s;
 };
 
+#else
 
-inline const char* CFileInfo::GetFilename()
+//
+// Dedicated server NULL filetracker. Pretty much does nothing.
+//
+class CFileTracker2
+#ifdef SUPPORT_PACKED_STORE
+	: IThreadedFileMD5Processor
+#endif
 {
-	return m_pPathIDFileList->m_Files.GetElementName( m_PathIDFileListDictIndex );
+public:
+	CFileTracker2(CBaseFileSystem * pFileSystem) {}
+	~CFileTracker2() {}
+
+	void ShutdownAsync() {}
+
+	void MarkAllCRCsUnverified() {}
+	int	GetUnverifiedFileHashes(CUnverifiedFileHash * pFiles, int nMaxFiles) { return 0; }
+	EFileCRCStatus CheckCachedFileHash(const char* pPathID, const char* pRelativeFilename, int nFileFraction, FileHash_t * pFileHash)
+		{
+ return k_eFileCRCStatus_CantOpenFile;
 }
 
-inline const char* CFileInfo::GetPathIDString()
-{
-	return m_pPathIDFileList->m_PathID.String();
+#ifdef SUPPORT_PACKED_STORE
+	virtual int SubmitThreadedMD5Request(uint8 * pubBuffer, int cubBuffer, int PackFileID, int nPackFileNumber, int nPackFileFraction)
+		{
+ return 0;
 }
+virtual bool BlockUntilMD5RequestComplete(int iRequest, MD5Value_t * pMd5ValueOut) { Assert(0); return true; }
+virtual bool IsMD5RequestComplete(int iRequest, MD5Value_t * pMd5ValueOut) { Assert(0); return true; }
 
+int NotePackFileOpened(const char* pVPKAbsPath, const char* pPathID, int64 nLength) { return 0; }
+void NotePackFileAccess(const char* pFilename, const char* pPathID, int iSearchPathStoreId, CPackedStoreFileHandle & VPKHandle) {}
+void AddFileHashForVPKFile(int nPackFileNumber, int nFileFraction, int cbFileLen, MD5Value_t & md5, CPackedStoreFileHandle & fhandle) {}
+#endif
+
+	void NoteFileIgnoredForPureServer(const char* pFilename, const char* pPathID, int iSearchPathStoreId) {}
+	void NoteFileLoadedFromDisk(const char* pFilename, const char* pPathID, int iSearchPathStoreId, FILE * fp, int64 nLength) {}
+	void NoteFileUnloaded(const char* pFilename, const char* pPathID) {}
+
+	IFileList * GetFilesToUnloadForWhitelistChange(IPureServerWhitelist * pNewWhiteList) { return NULL; }
+};
+
+#endif // DEDICATED
 
 #endif // FILETRACKER_H

@@ -31,6 +31,11 @@ class Button;
 class IDraggerEvent;
 class FastSortListPanelItem;
 
+// column header attributes
+#define	NOT_RESIZABLE false  
+#define	RESIZABLE true
+
+
 //-----------------------------------------------------------------------------
 // Purpose: Generic class for ListPanel items
 //-----------------------------------------------------------------------------

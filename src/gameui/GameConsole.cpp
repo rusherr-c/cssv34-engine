@@ -111,6 +111,42 @@ void CGameConsole::Clear()
 #endif
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: prints a message to the console
+//-----------------------------------------------------------------------------
+void CGameConsole::Printf(const char* format, ...)
+{
+	if (!m_bInitialized)
+		return;
+
+	m_pConsole->Print(format);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: printes a debug message to the console
+//-----------------------------------------------------------------------------
+void CGameConsole::DPrintf(const char* format, ...)
+{
+	if (!m_bInitialized)
+		return;
+
+	m_pConsole->DPrint(format);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+// Input  : clr - 
+//			*format - 
+//			... - 
+//-----------------------------------------------------------------------------
+void CGameConsole::ColorPrintf(Color& clr, const char* format, ...)
+{
+	if (!m_bInitialized)
+		return;
+
+	//m_pConsole->ColorPrintf(clr, format);
+	m_pConsole->ColorPrint(clr, format);
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: returns true if the console is currently in focus

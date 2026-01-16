@@ -1419,7 +1419,20 @@ void CClientState::CheckUpdatingSteamResources()
 //-----------------------------------------------------------------------------
 void CClientState::CheckFileCRCsWithServer()
 {
-	VPROF_( "CheckFileCRCsWithServer", 1, VPROF_BUDGETGROUP_OTHER_NETWORKING, false, BUDGETFLAG_CLIENT );
+//! !FIXME! Stubbed this.  Several reasons:
+//!
+//! 1.) Removed the CRC functionality (because it was broken when we switched to use MD5's for hashes of
+//!     loose files, but the server only has CRC's of some files in the VPK headers.).  Currently the only
+//!     supported pure server mode is "trusted source."
+//! 2.) Sending MD5's of VPK's is a bit too restrictive for most use cases.  For example, if a client
+//!     has an extra VPK for custom content, the server doesn't know what to do with it.  Or if we
+//!     release an optional update, the VPK's might legitimately differ.
+//!
+//! Rich has pointed out that we really need pure server client work to be something that the client
+//! cannot easily bypass.  Currently that is the case.  But I need to ship the SteamPipe conversion now.
+//! We can revisit pure server security after that has shipped.
+// 
+/*	VPROF_("CheckFileCRCsWithServer", 1, VPROF_BUDGETGROUP_OTHER_NETWORKING, false, BUDGETFLAG_CLIENT);
 	const float flBatchInterval = 1.0f / 3.0f;
 	const int nBatchSize = 3;
 	
@@ -1437,7 +1450,9 @@ void CClientState::CheckFileCRCsWithServer()
 	
 	m_flLastCRCBatchTime = flCurTime;
 	
-	CUnverifiedCRCFile crcFiles[nBatchSize];
+	//CUnverifiedCRCFile crcFiles[nBatchSize];
+	CUnverifiedFileHash hashFiles[nBatchSize];
+
 	int count = g_pFileSystem->GetUnverifiedCRCFiles( crcFiles, ARRAYSIZE( crcFiles ) );
 	if ( count == 0 )
 		return;
@@ -1451,7 +1466,7 @@ void CClientState::CheckFileCRCsWithServer()
 		crcCheck.m_CRC = crcFiles[i].m_CRC;
 
 		m_NetChannel->SendNetMsg( crcCheck );
-	}
+	}*/
 }
 
 

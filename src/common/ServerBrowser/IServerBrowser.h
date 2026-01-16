@@ -13,6 +13,9 @@
 
 #include "interface.h"
 
+// handle to a game window
+typedef unsigned int GameHandle_t;
+
 //-----------------------------------------------------------------------------
 // Purpose: Interface to server browser module
 //-----------------------------------------------------------------------------

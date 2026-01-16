@@ -1,4 +1,4 @@
-//========== Copyright © 2005, Valve Corporation, All rights reserved. ========
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: CBaseFileSystem Async Operation
 //
@@ -37,9 +37,6 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-#ifdef _LINUX
-#define DISABLE_ASYNC
-#endif
 
 //-----------------------------------------------------------------------------
 // 
@@ -125,11 +122,11 @@ public:
 		Q_strncpy( szFixedName, pszFilename, sizeof( szFixedName ) );
 		Q_FixSlashes( szFixedName );
 
-		Assert( (int)FS_INVALID_ASYNC_FILE == m_map.InvalidIndex() );
+		Assert( (intp)FS_INVALID_ASYNC_FILE == m_map.InvalidIndex() );
 
-		AUTO_LOCK_FM( m_mutex );
+		AUTO_LOCK( m_mutex );
 
-		int iEntry = m_map.Find( szFixedName );
+		intp iEntry = m_map.Find( szFixedName );
 		if ( iEntry == m_map.InvalidIndex() )
 		{
 			iEntry = m_map.Insert( strdup( szFixedName ), new AsyncOpenedFile_t );
@@ -147,9 +144,9 @@ public:
 		Q_strncpy( szFixedName, pszFilename, sizeof( szFixedName ) );
 		Q_FixSlashes( szFixedName );
 
-		AUTO_LOCK_FM( m_mutex );
+		AUTO_LOCK( m_mutex );
 
-		int iEntry = m_map.Find( szFixedName );
+		intp iEntry = m_map.Find( szFixedName );
 		if ( iEntry != m_map.InvalidIndex() )
 		{
 			m_map[iEntry]->AddRef();
@@ -165,9 +162,9 @@ public:
 			return NULL;
 		}
 
-		AUTO_LOCK_FM( m_mutex );
+		AUTO_LOCK( m_mutex );
 
-		int iEntry = (CUtlMap<CUtlString, AsyncOpenedFile_t>::IndexType_t)(int)item;
+		int iEntry = (CUtlMap<CUtlString, AsyncOpenedFile_t>::IndexType_t)(intp)item;
 		Assert( m_map.IsValidIndex( iEntry ) );
 		m_map[iEntry]->AddRef();
 		return m_map[iEntry];
@@ -180,9 +177,9 @@ public:
 			return;
 		}
 
-		AUTO_LOCK_FM( m_mutex );
+		AUTO_LOCK( m_mutex );
 
-		int iEntry = (CUtlMap<CUtlString, AsyncOpenedFile_t>::IndexType_t)(int)item;
+		int iEntry = (CUtlMap<CUtlString, AsyncOpenedFile_t>::IndexType_t)(intp)item;
 		Assert( m_map.IsValidIndex( iEntry ) );
 		m_map[iEntry]->AddRef();
 	}
@@ -194,9 +191,9 @@ public:
 			return;
 		}
 
-		AUTO_LOCK_FM( m_mutex );
+		AUTO_LOCK( m_mutex );
 
-		int iEntry = (CUtlMap<CUtlString, AsyncOpenedFile_t>::IndexType_t)(int)item;
+		int iEntry = (CUtlMap<CUtlString, AsyncOpenedFile_t>::IndexType_t)(intp)item;
 		Assert( m_map.IsValidIndex( iEntry ) );
 		if ( m_map[iEntry]->Release() == 0 )
 		{
@@ -232,11 +229,13 @@ enum FSAsyncMode_t
 
 //---------------------------------------------------------
 
-ASSERT_INVARIANT( FSASYNC_OK == JOB_OK );
-ASSERT_INVARIANT( FSASYNC_STATUS_PENDING == JOB_STATUS_PENDING );
-ASSERT_INVARIANT( FSASYNC_STATUS_INPROGRESS == JOB_STATUS_INPROGRESS );
-ASSERT_INVARIANT( FSASYNC_STATUS_ABORTED == JOB_STATUS_ABORTED );
-ASSERT_INVARIANT( FSASYNC_STATUS_UNSERVICED == JOB_STATUS_UNSERVICED );
+// Cast to int in order to indicate that we are intentionally comparing different
+// enum types, to suppress gcc warnings.
+ASSERT_INVARIANT( FSASYNC_OK == (int)JOB_OK );
+ASSERT_INVARIANT( FSASYNC_STATUS_PENDING == (int)JOB_STATUS_PENDING );
+ASSERT_INVARIANT( FSASYNC_STATUS_INPROGRESS == (int)JOB_STATUS_INPROGRESS );
+ASSERT_INVARIANT( FSASYNC_STATUS_ABORTED == (int)JOB_STATUS_ABORTED );
+ASSERT_INVARIANT( FSASYNC_STATUS_UNSERVICED == (int)JOB_STATUS_UNSERVICED );
 
 //---------------------------------------------------------
 // A standard filesystem job
@@ -252,6 +251,7 @@ public:
 
 	virtual JobStatus_t GetResult( void **ppData, int *pSize ) { *ppData = NULL; *pSize = 0; return GetStatus(); }
 	virtual bool IsWrite() const { return false; }
+	CFileAsyncReadJob *AsReadJob() { return NULL; }
 };
 
 //---------------------------------------------------------
@@ -261,13 +261,16 @@ class CFileAsyncReadJob : public CFileAsyncJob,
 						  protected FileAsyncRequest_t
 {
 public:
-	CFileAsyncReadJob( const FileAsyncRequest_t &fromRequest )
+	CFileAsyncReadJob( const FileAsyncRequest_t &fromRequest, CBaseFileSystem *pOwnerFileSystem )
 	  : CFileAsyncJob( ConvertPriority( fromRequest.priority ) ),
 		FileAsyncRequest_t( fromRequest ),
 		m_pResultData( NULL ),
 		m_nResultSize( 0 ),
 		m_pRealContext( fromRequest.pContext ),
-		m_pfnRealCallback( fromRequest.pfnCallback )
+		m_pfnRealCallback( fromRequest.pfnCallback ),
+		m_pCustomFetcher(NULL),
+		m_hCustomFetcherHandle(NULL),
+		m_pOwnerFileSystem(pOwnerFileSystem)
 	{
 #if defined( TRACK_BLOCKING_IO )
 		m_Timer.Start();
@@ -299,6 +302,8 @@ public:
 			free( (void *)pszFilename );
 	}
 
+	CFileAsyncReadJob *AsReadJob() { return this; }
+
 	virtual char const	*Describe()
 	{
 		return pszFilename; 
@@ -321,10 +326,26 @@ public:
 			MemAlloc_PushAllocDbgInfo( m_pszAllocCreditFile, m_nAllocCreditLine );
 #endif
 
-		int iPrevPriority = ThreadGetPriority();
-		ThreadSetPriority( 2 );
-		JobStatus_t retval = BaseFileSystem()->SyncRead( *this );
-		ThreadSetPriority( iPrevPriority );
+		JobStatus_t retval;
+		if ( m_pCustomFetcher )
+		{
+			Assert( GetRefCount() > 1 ); // This will produce self-destruction.  No-can-do
+			if ( m_pCustomFetcher->FinishSynchronous( m_hCustomFetcherHandle ) == FSASYNC_OK )
+			{
+				retval = JOB_OK;
+			}
+			else
+			{
+				retval = -1; // generic failure code...?
+			}
+		}
+		else
+		{
+			int iPrevPriority = ThreadGetPriority();
+			ThreadSetPriority( 2 );
+			retval = BaseFileSystem()->SyncRead( *this );
+			ThreadSetPriority( iPrevPriority );
+		}
 
 #if (defined(_DEBUG) || defined(USE_MEM_DEBUG))
 		if ( m_pszAllocCreditFile )
@@ -368,6 +389,23 @@ public:
 
 			(*pJob->m_pfnRealCallback)( temp, nBytesRead, result );
 		}
+
+		// Check if we a called by a custom fetcher, then we aren't owned by
+		// a thread pool, so we should clean up.
+		if ( pJob->m_pCustomFetcher )
+		{
+
+			// The job is finished
+			pJob->SlamStatus( (JobStatus_t)result );
+
+			// The fetcher is going to destroy this, so make sure we clear our handle,
+			// remembering thatwe've been deleted
+			pJob->m_hCustomFetcherHandle = 0;
+
+			// Remove us from the list of active jobs.  This will
+			// also decrement our ref count, which might delete us!
+			pJob->m_pOwnerFileSystem->RemoveAsyncCustomFetchJob( pJob );
+		}
 	}
 
 	void SetAllocCredit( const char *pszFile, int line )
@@ -378,6 +416,9 @@ public:
 #endif
 	}
 
+	IAsyncFileFetch *		m_pCustomFetcher;
+	IAsyncFileFetch::Handle	m_hCustomFetcherHandle;
+	CBaseFileSystem *		m_pOwnerFileSystem;
 private:
 	void *					m_pResultData;
 	int						m_nResultSize;
@@ -447,7 +488,7 @@ public:
 	{
 		if ( m_pData && m_bFreeMemory )
 		{
-			delete m_pData;
+			delete[] (char*)m_pData;
 		}
 	}
 
@@ -547,8 +588,8 @@ private:
 class CFileAsyncFileSizeJob : public CFileAsyncReadJob 
 {
 public:
-	CFileAsyncFileSizeJob( const FileAsyncRequest_t &fromRequest )
-		: CFileAsyncReadJob( fromRequest )
+	CFileAsyncFileSizeJob( const FileAsyncRequest_t &fromRequest, CBaseFileSystem *pOwnerFileSystem )
+		: CFileAsyncReadJob( fromRequest, pOwnerFileSystem )
 	{
 #if defined( TRACK_BLOCKING_IO )
 		m_Timer.Start();
@@ -603,6 +644,8 @@ void CBaseFileSystem::InitAsync()
 						BaseFileSystem()->AsyncResume();
 					}
 				}
+				// Unreachable.
+				return 0;
 			}
 		};
 
@@ -617,7 +660,7 @@ void CBaseFileSystem::InitAsync()
 		return;
 	}
 
-	if ( VCRGetMode() == VCR_Disabled && !IsLinux() )
+	if ( VCRGetMode() == VCR_Disabled )
 	{
 		// create the i/o thread pool
 		m_pThreadPool = CreateThreadPool();
@@ -625,6 +668,7 @@ void CBaseFileSystem::InitAsync()
 		ThreadPoolStartParams_t params;
 		params.iThreadPriority = 0;
 		params.bIOThreads = true;
+		params.nThreadsMax = 4; // Limit count of IO threads to a maximum of 4.
 		if ( IsX360() )
 		{
 			// override defaults
@@ -634,8 +678,14 @@ void CBaseFileSystem::InitAsync()
 			params.bUseAffinityTable = true;
 			params.iAffinityTable[0] = XBOX_PROCESSOR_3;
 		}
+		else if( IsPC() )
+		{
+			// override defaults
+			// maximum # of async I/O thread on PC is 2
+			params.nThreads = 1;
+		}
 
-		if ( !m_pThreadPool->Start( params ) )
+		if ( !m_pThreadPool->Start( params, "IOJob" ) )
 		{
 			SafeRelease( m_pThreadPool );
 		}
@@ -649,11 +699,88 @@ void CBaseFileSystem::ShutdownAsync()
 {
 	if ( m_pThreadPool )
 	{
-#ifdef _WIN32
 		AsyncFlush();
 		m_pThreadPool->Stop();
 		SafeRelease( m_pThreadPool );
-#endif
+	}
+}
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
+void CBaseFileSystem::AsyncAddFetcher( IAsyncFileFetch *pFetcher )
+{
+	m_vecAsyncFetchers.AddToTail( pFetcher );
+}
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
+void CBaseFileSystem::AsyncRemoveFetcher( IAsyncFileFetch *pFetcher )
+{
+
+	// Abort any active jobs
+	int i = 0;
+	while ( i < m_vecAsyncCustomFetchJobs.Count() )
+	{
+		if ( m_vecAsyncCustomFetchJobs[i]->m_pCustomFetcher == pFetcher )
+		{
+			AsyncAbort( (FSAsyncControl_t)m_vecAsyncCustomFetchJobs[i] );
+		}
+		else
+		{
+			++i;
+		}
+	}
+
+	// Remove it from the hook list
+	i = 0;
+	while ( i < m_vecAsyncFetchers.Count() )
+	{
+		if ( m_vecAsyncFetchers[i] == pFetcher )
+		{
+			m_vecAsyncFetchers.Remove( i );
+		}
+		else
+		{
+			++i;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// 
+//-----------------------------------------------------------------------------
+void CBaseFileSystem::RemoveAsyncCustomFetchJob( CFileAsyncReadJob *pJob )
+{
+	Assert( pJob );
+	Assert( pJob->m_pOwnerFileSystem == this );
+	Assert( pJob->m_pCustomFetcher );
+	Assert( !pJob->m_hCustomFetcherHandle );
+
+	// Linear search,  This list is usually very small, and completion doesn't
+	// happen often, anyway
+	int i = 0;
+	bool bFound = false;
+	while ( i < m_vecAsyncCustomFetchJobs.Count() )
+	{
+		if ( m_vecAsyncCustomFetchJobs[i] == pJob )
+		{
+			m_vecAsyncCustomFetchJobs.Remove( i );
+			Assert( !bFound );
+			bFound = true;
+		}
+		else
+		{
+			++i;
+		}
+	}
+
+	// Release our reference.
+	Assert( bFound );
+	if ( bFound )
+	{
+		pJob->Release();
 	}
 }
 
@@ -684,16 +811,67 @@ FSAsyncStatus_t CBaseFileSystem::AsyncReadMultipleCreditAlloc( const FileAsyncRe
 	{
 		if ( pRequests[i].nBytes >= 0 )
 		{
-			pJob = new CFileAsyncReadJob( pRequests[i] );
+			pJob = new CFileAsyncReadJob( pRequests[i], this );
 		}
 		else
 		{
-			pJob =  new CFileAsyncFileSizeJob( pRequests[i] );
+			pJob =  new CFileAsyncFileSizeJob( pRequests[i], this );
 		}
 
 #if (defined(_DEBUG) || defined(USE_MEM_DEBUG))
 		pJob->SetAllocCredit( pszFile, line );
 #endif
+
+		// Search list of application custom fetchers and see if any of them want it
+		for ( int j = 0; j < m_vecAsyncFetchers.Count(); j++ )
+		{
+			IAsyncFileFetch::Handle	handle;
+			FSAsyncStatus_t status = m_vecAsyncFetchers[j]->Start( *pJob->GetRequest(), &handle, m_pThreadPool );
+			if ( status == FSASYNC_OK )
+			{
+				pJob->m_pCustomFetcher = m_vecAsyncFetchers[j];
+				pJob->m_hCustomFetcherHandle = handle;
+				break;
+			}
+			
+			// !KLUDGE! For now, this is the only other acceptable failure
+			Assert ( status == FSASYNC_ERR_NOT_MINE );
+		}
+
+		// Found custom fetcher?
+		if ( pJob->m_pCustomFetcher != NULL )
+		{
+			m_vecAsyncCustomFetchJobs.AddToTail( pJob ); // this counts as a reference
+
+			// Give them back the control handle, if they wanted it
+			if ( phControls )
+			{
+				phControls[i] = (FSAsyncControl_t)pJob;
+				pJob->AddRef();
+			}
+
+			// Execute job synchronously, if requested
+			if ( bSynchronous )
+			{
+				pJob->Execute();
+			}
+			else
+			{
+				// We need to manually slam the job status to
+				// in progress, in case they poll it
+				pJob->SlamStatus( JOB_STATUS_INPROGRESS );
+			}
+
+			// We'll deal with it in our callback.  DO NOT
+			// put it in the thread pool.  If other, regular async jobs
+			// come in, we want those to be processed immediately.
+			// We don't have any reason to think that we need to wait
+			// on the custom fetcher job in order to do local disk access.
+			// (Even if there is, we don't have anough knowledge at this level
+			// to properly deal with it.)
+			continue;
+		}
+
 		if ( !bSynchronous )
 		{
 			// async mode, queue request
@@ -893,7 +1071,7 @@ bool CBaseFileSystem::AsyncResume()
 //-----------------------------------------------------------------------------
 FSAsyncStatus_t CBaseFileSystem::AsyncBeginRead( const char *pszFile, FSAsyncFile_t *phFile )
 {
-#if defined(_WIN32) && !(defined(FILESYSTEM_STEAM) || defined(DEDICATED))
+#if !(defined(FILESYSTEM_STEAM) || defined(DEDICATED))
 	if ( AsyncAllowHeldFiles() )
 	{
 		*phFile = g_AsyncOpenedFiles.FindOrAdd( pszFile );
@@ -910,7 +1088,7 @@ FSAsyncStatus_t CBaseFileSystem::AsyncBeginRead( const char *pszFile, FSAsyncFil
 //-----------------------------------------------------------------------------
 FSAsyncStatus_t CBaseFileSystem::AsyncEndRead( FSAsyncFile_t hFile )
 {
-#if defined(_WIN32) && !(defined(FILESYSTEM_STEAM) || defined(DEDICATED))
+#if !(defined(FILESYSTEM_STEAM) || defined(DEDICATED))
 	if ( hFile != FS_INVALID_ASYNC_FILE )
 		g_AsyncOpenedFiles.Release( hFile );
 #endif
@@ -984,11 +1162,39 @@ FSAsyncStatus_t CBaseFileSystem::AsyncGetResult( FSAsyncControl_t hControl, void
 //-----------------------------------------------------------------------------
 FSAsyncStatus_t CBaseFileSystem::AsyncAbort( FSAsyncControl_t hControl )
 {
-	CJob *pJob = (CJob *)hControl;
+	CFileAsyncJob *pJob = (CFileAsyncJob *)hControl;
 	if ( !pJob )
 	{
 		return FSASYNC_ERR_FAILURE;
 	}
+
+	// Custom job doesn't have a job manager, needs to be handled specially
+	CFileAsyncReadJob *pReadJob = pJob->AsReadJob();
+	if ( pReadJob && pReadJob->m_pCustomFetcher )
+	{
+		Assert( pReadJob->m_pOwnerFileSystem == this );
+
+		FSAsyncStatus_t status = (FSAsyncStatus_t)pReadJob->GetStatus();
+		if ( status == (FSAsyncStatus_t)JOB_STATUS_INPROGRESS) {
+
+			// Slam the status.  The default behaviour doesn't change the status
+			// if the task is in progess for some reason
+			status = (FSAsyncStatus_t)JOB_STATUS_ABORTED;
+			pReadJob->SlamStatus( status );
+
+			// Tell fetcher to abort job
+			Assert( pReadJob->m_hCustomFetcherHandle );
+			pReadJob->m_pCustomFetcher->Abort( pReadJob->m_hCustomFetcherHandle );
+			pReadJob->m_hCustomFetcherHandle = NULL;
+
+			// Remove us from the list of active jobs.  This will
+			// also decrement our ref count, which might delete us!
+			RemoveAsyncCustomFetchJob( pReadJob );
+		}
+
+		return status;
+	}
+
 	return (FSAsyncStatus_t)pJob->Abort();
 }
 
@@ -1015,6 +1221,14 @@ FSAsyncStatus_t CBaseFileSystem::AsyncFlush()
 	if ( m_pThreadPool )
 	{
 		m_pThreadPool->AbortAll();
+	}
+
+	// Abort all custom jobs
+	while ( m_vecAsyncCustomFetchJobs.Count() > 0 )
+	{
+		CFileAsyncReadJob *pJob = m_vecAsyncCustomFetchJobs[0];
+		Assert( pJob->m_pCustomFetcher );
+		AsyncAbort( (FSAsyncControl_t)pJob );
 	}
 
 	return FSASYNC_OK;
@@ -1071,13 +1285,6 @@ void CBaseFileSystem::AsyncRelease( FSAsyncControl_t hControl )
 	}
 }
 
-
-//-----------------------------------------------------------------------------
-// 
-//-----------------------------------------------------------------------------
-static void *GetDest( const FileAsyncRequest_t &request, bool bTryUnbuffered, unsigned *pBytesBuffer, unsigned *pBytesRead )
-{
-}
 
 //-----------------------------------------------------------------------------
 // 
@@ -1219,7 +1426,7 @@ FSAsyncStatus_t CBaseFileSystem::SyncWrite(const char *pszFilename, const void *
 		Close( hFile );
 		if ( bFreeMemory )
 		{
-			delete pSrc;
+			free( (void*)pSrc );
 		}
 
 		if ( m_fwLevel >= FILESYSTEM_WARNING_REPORTALLACCESSES_ASYNC )
@@ -1289,7 +1496,7 @@ void CBaseFileSystem::DoAsyncCallback( const FileAsyncRequest_t &request, void *
 
 	if ( request.pfnCallback )
 	{
-		AUTO_LOCK_FM( m_AsyncCallbackMutex );
+		AUTO_LOCK( m_AsyncCallbackMutex );
 		if ( pData && request.pData != pData )
 		{
 			// Allocated the data here
@@ -1320,7 +1527,12 @@ void CBaseFileSystem::DoAsyncCallback( const FileAsyncRequest_t &request, void *
 	if ( pDataToFree  )
 	{
 		Assert( !request.pfnAlloc );
+#if defined( OSX ) || defined( LINUX ) || defined(PLATFORM_BSD)
+		// The ugly delete[] (void*) method generates a compile warning on osx, as it should.
+		free( pDataToFree );
+#else
 		delete [] pDataToFree;
+#endif
 	}
 }
 

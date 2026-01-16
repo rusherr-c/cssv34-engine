@@ -230,7 +230,13 @@ bool CGameClient::ProcessRespondCvarValue( CLC_RespondCvarValue *msg )
 
 bool CGameClient::ProcessFileCRCCheck( CLC_FileCRCCheck *msg )
 {
-	// Ignore this message if we're not in pure server mode...
+//! !FIXME! Stubbed this.  Reason:
+//!
+//! *) Removed the CRC functionality (because it was broken when we switched to use MD5's for hashes of
+//!     loose files, but the server only has CRC's of some files in the VPK headers.).  Currently the only
+//!     supported pure server mode is "trusted source."
+//! 
+/*
 	if ( !sv.IsInPureServerMode() )
 		return true;
 	
@@ -269,7 +275,7 @@ bool CGameClient::ProcessFileCRCCheck( CLC_FileCRCCheck *msg )
 			Msg( "Pure server CRC check: client %s passed check for [%s]\\%s\n", GetClientName(), msg->m_szPathID, msg->m_szFilename );
 		}
 	}
-	
+	*/
 	return true;
 }
 

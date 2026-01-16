@@ -5,17 +5,24 @@
 // $NoKeywords: $
 //=============================================================================
 
-#include "pch_serverbrowser.h"
+#include "SpectateGames.h"
 
-
-CSpectateGames::CSpectateGames( vgui::Panel *parent )
-	: CInternetGames( parent, "SpectateGames", eSpectatorServer )
+void CSpectateGames::RequestServers(int Start, const char *filterString)
 {
+	char filter[2048];
+
+	strcpy(filter, filterString);
+	strcat(filter, "\\proxy\\1");
+
+	BaseClass::RequestServers(Start, filter);
 }
 
-void CSpectateGames::GetNewServerList()
+bool CSpectateGames::CheckPrimaryFilters(serveritem_t &server)
 {
-	m_vecServerFilters.AddToTail( MatchMakingKeyValuePair_t( "proxy", "1" ) );
-	BaseClass::GetNewServerList();
+	if (!server.proxy)
+		return false;
+
+	return BaseClass::CheckPrimaryFilters(server);
 }
+
 

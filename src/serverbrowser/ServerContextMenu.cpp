@@ -5,7 +5,12 @@
 // $NoKeywords: $
 //=============================================================================
 
-#include "pch_serverbrowser.h"
+#include "ServerContextMenu.h"
+
+#include <vgui/IInput.h>
+#include <vgui/IPanel.h>
+#include <vgui/ISurface.h>
+#include <KeyValues.h>
 
 using namespace vgui;
 
@@ -26,32 +31,22 @@ CServerContextMenu::~CServerContextMenu()
 //-----------------------------------------------------------------------------
 // Purpose: Activates the menu
 //-----------------------------------------------------------------------------
-void CServerContextMenu::ShowMenu(
-	Panel *target, 
-	unsigned int serverID, 
-	bool showConnect, 
-	bool showViewGameInfo,
-	bool showRefresh, 
-	bool showAddToFavorites)
+void CServerContextMenu::ShowMenu(Panel *target, unsigned int serverID, bool showConnect, bool showRefresh, bool showAddToFavorites)
 {
 	if (showConnect)
 	{
-		AddMenuItem("ConnectToServer", "#ServerBrowser_ConnectToServer", new KeyValues("ConnectToServer", "serverID", serverID), target);
-	}
-
-	if (showViewGameInfo)
-	{
-		AddMenuItem("ViewGameInfo", "#ServerBrowser_ViewServerInfo", new KeyValues("ViewGameInfo", "serverID", serverID), target);
+		AddMenuItem("ConnectToServer", "&Connect to server", new KeyValues("ConnectToServer", "serverID", serverID), target);
+		AddMenuItem("ViewGameInfo", "&View server info", new KeyValues("ViewGameInfo", "serverID", serverID), target);
 	}
 
 	if (showRefresh)
 	{
-		AddMenuItem("RefreshServer", "#ServerBrowser_RefreshServer", new KeyValues("RefreshServer", "serverID", serverID), target);
+		AddMenuItem("RefreshServer", "&Refresh server", new KeyValues("RefreshServer", "serverID", serverID), target);
 	}
 
 	if (showAddToFavorites)
 	{
-		AddMenuItem("AddToFavorites", "#ServerBrowser_AddServerToFavorites", new KeyValues("AddToFavorites", "serverID", serverID), target);
+		AddMenuItem("AddToFavorites", "&Add server to favorites", new KeyValues("AddToFavorites", "serverID", serverID), target);
 	}
 
 	int x, y, gx, gy;

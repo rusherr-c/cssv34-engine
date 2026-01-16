@@ -1,29 +1,32 @@
-//====== Copyright © 1996-2005, Valve Corporation, All rights reserved. =======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
 //=============================================================================//
-
-#ifdef _LINUX
-#include "linux_support.cpp"
-#endif
 #ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
 #endif
 
 #include "basefilesystem.h"
+#include "packfile.h"
 #include "tier0/dbg.h"
 #include "tier0/threadtools.h"
 #ifdef _WIN32
 #include "tier0/tslist.h"
+#elif defined(POSIX)
+#include <fcntl.h>
+#ifdef LINUX
+#include <sys/file.h>
+#endif
 #endif
 #include "tier1/convar.h"
 #include "tier0/vcrmode.h"
 #include "tier0/vprof.h"
 #include "tier1/fmtstr.h"
 #include "tier1/utlrbtree.h"
+#include "vstdlib/osversion.h"
 
 #ifdef _X360
 #undef WaitForSingleObject
@@ -63,7 +66,7 @@ public:
 
 protected:
 	// implementation of CBaseFileSystem virtual functions
-	virtual FILE *FS_fopen( const char *filename, const char *options, unsigned flags, int64 *size, CFileLoadInfo *pInfo );
+	virtual FILE *FS_fopen( const char *filename, const char *options, unsigned flags, int64 *size );
 	virtual void FS_setbufsize( FILE *fp, unsigned nBytes );
 	virtual void FS_fclose( FILE *fp );
 	virtual void FS_fseek( FILE *fp, int64 pos, int seekType );
@@ -76,7 +79,7 @@ protected:
 	virtual int FS_ferror( FILE *fp );
 	virtual int FS_fflush( FILE *fp );
 	virtual char *FS_fgets( char *dest, int destSize, FILE *fp );
-	virtual int FS_stat( const char *path, struct _stat *buf );
+	virtual int FS_stat( const char *path, struct _stat *buf, bool *pbLoadedFromSteamCache=NULL  );
 	virtual int FS_chmod( const char *path, int pmode );
 	virtual HANDLE FS_FindFirstFile(const char *findname, WIN32_FIND_DATA *dat);
 	virtual bool FS_FindNextFile(HANDLE handle, WIN32_FIND_DATA *dat);
@@ -86,7 +89,7 @@ protected:
 private:
 	bool CanAsync() const
 	{
-		m_bCanAsync;
+		return m_bCanAsync;
 	}
 
 	bool m_bMounted;
@@ -136,14 +139,24 @@ public:
 	virtual int FS_fflush();
 	virtual char *FS_fgets( char *dest, int destSize );
 
+#ifdef POSIX
+	static CUtlMap< ino_t, CThreadMutex * > m_LockedFDMap;
+	static CThreadMutex	m_MutexLockedFD;
+#endif
 private:
-	CStdioFile( FILE *pFile )
-		: m_pFile( pFile )
+	CStdioFile( FILE *pFile, bool bWriteable )
+		: m_pFile( pFile ), m_bWriteable( bWriteable )
 	{
 	}
 
 	FILE *m_pFile;
+	bool m_bWriteable;
 };
+
+#ifdef POSIX
+CUtlMap< ino_t, CThreadMutex * > CStdioFile::m_LockedFDMap;
+CThreadMutex	CStdioFile::m_MutexLockedFD;
+#endif
 
 //-----------------------------------------------------------------------------
 
@@ -238,6 +251,9 @@ CFileSystem_Stdio::CFileSystem_Stdio()
 {
 	m_bMounted = false;
 	m_bCanAsync = true;
+#ifdef POSIX
+	SetDefLessFunc( CStdioFile::m_LockedFDMap );
+#endif
 }
 
 
@@ -246,6 +262,15 @@ CFileSystem_Stdio::CFileSystem_Stdio()
 //-----------------------------------------------------------------------------
 CFileSystem_Stdio::~CFileSystem_Stdio()
 {
+#ifdef POSIX
+	FOR_EACH_MAP_FAST( CStdioFile::m_LockedFDMap, i )
+	{
+		Assert( CStdioFile::m_LockedFDMap[ i ] );
+		delete CStdioFile::m_LockedFDMap[ i ];
+	}
+	CStdioFile::m_LockedFDMap.RemoveAll();
+#endif
+
 	Assert(!m_bMounted);
 }
 
@@ -384,13 +409,13 @@ void CFileSystem_Stdio::FreeOptimalReadBuffer( void *p )
 //-----------------------------------------------------------------------------
 // Purpose: low-level filesystem wrapper
 //-----------------------------------------------------------------------------
-FILE *CFileSystem_Stdio::FS_fopen( const char *filename, const char *options, unsigned flags, int64 *size, CFileLoadInfo *pInfo )
+FILE *CFileSystem_Stdio::FS_fopen( const char *filenameT, const char *options, unsigned flags, int64 *size )
 {
 	CStdFilesystemFile *pFile = NULL;
 
-	if ( pInfo )
-		pInfo->m_bLoadedFromSteamCache = false;
+	char filename[ MAX_PATH ];
 
+	CBaseFileSystem::FixUpPath ( filenameT, filename, sizeof( filename ) );
 
 #ifdef _WIN32
 	if ( CWin32ReadOnlyFile::CanOpen( filename, options ) )
@@ -423,6 +448,7 @@ void CFileSystem_Stdio::FS_setbufsize( FILE *fp, unsigned nBytes )
 void CFileSystem_Stdio::FS_fclose( FILE *fp )
 {
 	CStdFilesystemFile *pFile = ((CStdFilesystemFile *)fp);
+
 	pFile->FS_fclose();
 	delete pFile;
 }
@@ -433,6 +459,7 @@ void CFileSystem_Stdio::FS_fclose( FILE *fp )
 void CFileSystem_Stdio::FS_fseek( FILE *fp, int64 pos, int seekType )
 {
 	CStdFilesystemFile *pFile = ((CStdFilesystemFile *)fp);
+
 	pFile->FS_fseek( pos, seekType );
 }
 
@@ -459,6 +486,12 @@ int CFileSystem_Stdio::FS_feof( FILE *fp )
 //-----------------------------------------------------------------------------
 size_t CFileSystem_Stdio::FS_fread( void *dest, size_t destSize, size_t size, FILE *fp )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s", __FUNCTION__ );
+	if( ThreadInMainThread() )
+	{
+		tmPlotI32( TELEMETRY_LEVEL0, TMPT_MEMORY, 0, size, "FileBytesRead" );
+	}
+
 	CStdFilesystemFile *pFile = ((CStdFilesystemFile *)fp);
 	size_t nBytesRead = pFile->FS_fread( dest, destSize, size);
 
@@ -472,6 +505,12 @@ size_t CFileSystem_Stdio::FS_fread( void *dest, size_t destSize, size_t size, FI
 //-----------------------------------------------------------------------------
 size_t CFileSystem_Stdio::FS_fwrite( const void *src, size_t size, FILE *fp )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s %t", __FUNCTION__, tmSendCallStack( TELEMETRY_LEVEL0, 0 ) );
+	if( ThreadInMainThread() )
+	{
+		tmPlotI32( TELEMETRY_LEVEL0, TMPT_MEMORY, 0, size, "FileBytesWrite" );
+	}
+
 	CStdFilesystemFile *pFile = ((CStdFilesystemFile *)fp);
 
 	size_t nBytesWritten = pFile->FS_fwrite(src, size);
@@ -530,43 +569,152 @@ char *CFileSystem_Stdio::FS_fgets( char *dest, int destSize, FILE *fp )
 //			pmode - 
 // Output : int
 //-----------------------------------------------------------------------------
-int CFileSystem_Stdio::FS_chmod( const char *path, int pmode )
+int CFileSystem_Stdio::FS_chmod( const char *pathT, int pmode )
 {
-	if ( !path )
+	if ( !pathT )
 		return -1;
 
+	char path[ MAX_PATH ];
+
+	CBaseFileSystem::FixUpPath ( pathT, path, sizeof( path ) );
+
 	int rt = _chmod( path, pmode );
-#if !defined(_WIN32)
+#if defined(LINUX) || defined(PLATFORM_BSD)
 	if (rt==-1)
 	{
-		const char *file =findFileInDirCaseInsensitive(path);
-		if (file)
+		char caseFixedName[ MAX_PATH ];
+		const bool found = findFileInDirCaseInsensitive_safe( path, caseFixedName );
+		if ( found )
 		{
-			rt=_chmod(file,pmode);
+			rt=_chmod( caseFixedName, pmode );
 		}
 	}	
 #endif
 	return rt;
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: A replacement for _stat() backed by GetFileAttributesEx for XP users
+//
+// Workaround for:
+// https://connect.microsoft.com/VisualStudio/feedback/details/1600505/stat-not-working-on-windows-xp-using-v14-xp-platform-toolset-vs2015
+//
+// This is not well tested or meant to be a proper implementation of stat(), but rather a band-aid for XP users only
+// until microsoft pushes a runtime update to fix above issue :-/
+//-----------------------------------------------------------------------------
+#if defined(_WIN32) && defined(FILESYSTEM_MSVC2015_STAT_BUG_WORKAROUND)
+static int WindowsXPStatShim( const char *pathT, struct _stat *buf )
+{
+	WIN32_FILE_ATTRIBUTE_DATA fileAttributes;
+	if ( !GetFileAttributesEx(pathT, GetFileExInfoStandard, &fileAttributes) )
+	{
+		*_errno() = ENOENT;
+		return -1;
+	}
+
+	memset( buf, 0, sizeof(struct _stat) );
+
+	// Mode
+	unsigned short permBits = _S_IREAD; // If GetFileAttributes let us see it, we can read it. I think.
+	if ( fileAttributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
+	{
+		buf->st_mode |= _S_IFDIR;
+		permBits |= _S_IEXEC;
+	}
+	else
+	{
+		buf->st_mode |= _S_IFREG;
+
+		const char *pExt = V_GetFileExtension( pathT );
+		if ( V_strcasecmp( pExt, "exe" ) == 0 ||
+		     V_strcasecmp( pExt, "bat" ) == 0 ||
+		     V_strcasecmp( pExt, "com" ) == 0 ||
+		     V_strcasecmp( pExt, "cmd" ) == 0 )
+		{
+			// Windows stat seems to set this flag for these extensions
+			permBits |= _S_IEXEC;
+		}
+	}
+
+	if ( fileAttributes.dwFileAttributes & FILE_ATTRIBUTE_READONLY )
+	{
+		permBits |= S_IWRITE;
+	}
+
+	// Duplicate permission bits to user/group/world (windows stat doesn't care)
+	buf->st_mode |= permBits | permBits >> 3 | permBits >> 6;
+
+	// Device is just drive-letter-index according to msdn
+	char driveLetter = tolower( pathT[ 0 ] );
+	if ( driveLetter >= 'a' && driveLetter <= 'z' && pathT[1] == ':' )
+	{
+		unsigned char driveIdx = driveLetter - 'a';
+		buf->st_dev = driveIdx;
+		buf->st_rdev = driveIdx;
+	}
+	else
+	{
+		buf->st_dev = _getdrive();
+		buf->st_rdev = _getdrive();
+	}
+
+	buf->st_nlink = 1;
+	buf->st_size = (uint64_t)fileAttributes.nFileSizeHigh << 32 | fileAttributes.nFileSizeLow;
+	// The 90s was a hell of a time I guess.
+	uint64_t actualAccessTime = (uint64_t)fileAttributes.ftLastAccessTime.dwHighDateTime << 32 | (uint64_t)fileAttributes.ftLastAccessTime.dwLowDateTime;
+	uint64_t actualModTime = (uint64_t)fileAttributes.ftLastWriteTime.dwHighDateTime << 32 | (uint64_t)fileAttributes.ftLastWriteTime.dwLowDateTime;
+	uint64_t actualCreationTime = (uint64_t)fileAttributes.ftCreationTime.dwHighDateTime << 32 | (uint64_t)fileAttributes.ftCreationTime.dwLowDateTime;
+	uint64_t ullMSUniverseToEveryoneElseUniverse = (369 * 365 + 89) * 86400ull; // okay
+	buf->st_atime = actualAccessTime / 10000000ull - ullMSUniverseToEveryoneElseUniverse;
+	buf->st_mtime = actualModTime / 10000000ull - ullMSUniverseToEveryoneElseUniverse;
+	buf->st_ctime = actualCreationTime / 10000000ull - ullMSUniverseToEveryoneElseUniverse;
+
+	// st_uid/st_gid always 0 on windows
+
+	return 0;
+}
+#endif // defined(_WIN32) && defined(FILESYSTEM_MSVC2015_STAT_BUG_WORKAROUND)
+
 //-----------------------------------------------------------------------------
 // Purpose: low-level filesystem wrapper
 //-----------------------------------------------------------------------------
-int CFileSystem_Stdio::FS_stat( const char *path, struct _stat *buf )
+int CFileSystem_Stdio::FS_stat( const char *pathT, struct _stat *buf, bool *pbLoadedFromSteamCache )
 {
-	if ( !path )
+	if ( pbLoadedFromSteamCache )
+		*pbLoadedFromSteamCache = false;
+		
+	if ( !pathT )
 	{
 		return -1;
 	}
 
+	char path[ MAX_PATH ];
+
+	CBaseFileSystem::FixUpPath ( pathT, path, sizeof( path ) );
+
 	int rt = _stat( path, buf );
-#if !defined( _WIN32 )
+
+	// Workaround bug wherein stat() randomly fails on Windows XP.  See comment on function.
+#if defined(_WIN32) && defined(FILESYSTEM_MSVC2015_STAT_BUG_WORKAROUND)
 	if ( rt == -1 )
 	{
-		const char *file = findFileInDirCaseInsensitive( path );
-		if ( file )
+		EOSType eOSType = GetOSType();
+		if ( eOSType == k_eWin2000 || eOSType == k_eWinXP || eOSType == k_eWin2003 )
 		{
-			rt = _stat( file, buf );
+			rt = WindowsXPStatShim( path, buf );
+		}
+	}
+#endif // defined(_WIN32) && defined(FILESYSTEM_MSVC2015_STAT_BUG_WORKAROUND)
+
+#if defined(LINUX) || defined(PLATFORM_BSD)
+	if ( rt == -1 )
+	{
+		char caseFixedName[ MAX_PATH ];
+		bool found = findFileInDirCaseInsensitive_safe( path, caseFixedName );
+		if ( found )
+		{
+			rt = _stat( caseFixedName, buf );
 		}
 	}	
 #endif
@@ -576,8 +724,12 @@ int CFileSystem_Stdio::FS_stat( const char *path, struct _stat *buf )
 //-----------------------------------------------------------------------------
 // Purpose: low-level filesystem wrapper
 //-----------------------------------------------------------------------------
-HANDLE CFileSystem_Stdio::FS_FindFirstFile(const char *findname, WIN32_FIND_DATA *dat)
+HANDLE CFileSystem_Stdio::FS_FindFirstFile(const char *findnameT, WIN32_FIND_DATA *dat)
 {
+	char findname[ MAX_PATH ];
+
+	CBaseFileSystem::FixUpPath ( findnameT, findname, sizeof( findname ) );
+
 	return ::FindFirstFile(findname, dat);
 }
 
@@ -586,6 +738,10 @@ HANDLE CFileSystem_Stdio::FS_FindFirstFile(const char *findname, WIN32_FIND_DATA
 //-----------------------------------------------------------------------------
 bool CFileSystem_Stdio::FS_FindNextFile(HANDLE handle, WIN32_FIND_DATA *dat)
 {
+
+	if (INVALID_HANDLE_VALUE == handle)  // invalid handle should return false
+		return false;
+
 	return (::FindNextFile(handle, dat) != 0);
 }
 
@@ -681,18 +837,28 @@ int CFileSystem_Stdio::HintResourceNeed( const char *hintlist, int forgetEveryth
 //-----------------------------------------------------------------------------
 // Purpose: low-level filesystem wrapper
 //-----------------------------------------------------------------------------
-CStdioFile *CStdioFile::FS_fopen( const char *filename, const char *options, int64 *size )
+CStdioFile *CStdioFile::FS_fopen( const char *filenameT, const char *options, int64 *size )
 {
 	FILE *pFile = NULL;
+	char *p = NULL;
+	char filename[MAX_PATH];
+	struct _stat buf;
 
-	// stop newline characters at end of filename
-	Assert(!strchr(filename, '\n') && !strchr(filename, '\r'));
+	V_strncpy( filename, filenameT, sizeof(filename) );
 	
+	// stop newline characters at end of filename
+	p = strchr( filename, '\n' );
+	if ( p )
+		*p = '\0';
+	p = strchr( filename, '\r' );
+	if ( p )
+		*p = '\0';
+
+
 	pFile = fopen(filename, options);
 	if (pFile && size)
 	{
 		// todo: replace with filelength()? 
-		struct _stat buf;
 		int rt = _stat( filename, &buf );
 		if (rt == 0)
 		{
@@ -700,19 +866,20 @@ CStdioFile *CStdioFile::FS_fopen( const char *filename, const char *options, int
 		}
 	}
 
-#if !defined _WIN32
+#if defined(LINUX) || defined(PLATFORM_BSD)
 	if(!pFile && !strchr(options,'w') && !strchr(options,'+') ) // try opening the lower cased version
 	{
-		const char *file =findFileInDirCaseInsensitive(filename);
-		if ( file )
+		char caseFixedName[ MAX_PATH ];
+		bool found = findFileInDirCaseInsensitive_safe( filename, caseFixedName );
+		if ( found )
 		{	
-			pFile = fopen( file, options );
+			pFile = fopen( caseFixedName, options );
 
 			if (pFile && size)
 			{
 				// todo: replace with filelength()? 
 				struct _stat buf;
-				int rt = _stat( file, &buf );
+				int rt = _stat( caseFixedName, &buf );
 				if (rt == 0)
 				{
 					*size = buf.st_size;
@@ -724,11 +891,54 @@ CStdioFile *CStdioFile::FS_fopen( const char *filename, const char *options, int
 
 	if ( pFile )
 	{
-		return new CStdioFile( pFile );
+		bool bWriteable = false;
+		if ( strchr(options,'w') || strchr(options,'a') )
+			bWriteable = true;
+		
+#if defined POSIX
+		if ( bWriteable )
+		{
+			CThreadMutex *pMutex = NULL;
+
+			{
+				AUTO_LOCK( m_MutexLockedFD );
+				// Win32 has an undocumented feature that is serialized ALL writes to a file across threads (i.e only 1 thread can open a file at a time)
+				// so add a lock here to mimic that behavior
+
+				int iLockID = m_LockedFDMap.Find( buf.st_ino );
+				if ( iLockID != m_LockedFDMap.InvalidIndex() )
+				{
+					pMutex = m_LockedFDMap[iLockID];
+				}
+				else
+				{
+					CThreadMutex *newMutex = new CThreadMutex;
+					pMutex = m_LockedFDMap[m_LockedFDMap.Insert( buf.st_ino, newMutex )];
+				}
+			}
+			// grab the lock once we have UNLOCKED m_MutexLockedFD so we don't deadlock on a close
+			pMutex->Lock();
+
+			rewind( pFile );
+
+			// we need to get the file size again after the lock returns
+			if (pFile && size)
+			{
+				int rt = _stat( filename, &buf );
+				if (rt == 0)
+				{
+					*size = buf.st_size;
+				}
+			}
+
+		}
+#endif
+		return new CStdioFile( pFile, bWriteable );
 	}
 
 	return NULL;
 }
+
 
 //-----------------------------------------------------------------------------
 // Purpose: low-level filesystem wrapper
@@ -743,8 +953,10 @@ void CStdioFile::FS_setbufsize( unsigned nBytes )
 	else
 	{
 		setvbuf( m_pFile, NULL, _IONBF,  0 );
+#if defined(_MSC_VER) && ( _MSC_VER < 1900 )
 		// hack to make microsoft stdio not always read one stray byte on odd sized files
-		//m_pFile->_bufsiz = 1;
+		m_pFile->_bufsiz = 1;
+#endif
 	}
 #endif
 }
@@ -754,6 +966,27 @@ void CStdioFile::FS_setbufsize( unsigned nBytes )
 //-----------------------------------------------------------------------------
 void CStdioFile::FS_fclose()
 {
+#ifdef POSIX
+	if ( m_bWriteable )
+	{
+		AUTO_LOCK( m_MutexLockedFD );
+
+		struct _stat buf;
+#ifdef ANDROID
+		int fd = fileno( m_pFile ); // need to test this
+#else
+		int fd = fileno_unlocked( m_pFile );
+#endif
+		fstat( fd, &buf );
+
+		fflush( m_pFile );
+		int iLockID = m_LockedFDMap.Find( buf.st_ino );
+		if ( iLockID != m_LockedFDMap.InvalidIndex() )
+		{
+			m_LockedFDMap[iLockID]->Unlock();
+		}
+	}
+#endif
 	fclose(m_pFile);
 }
 
@@ -786,6 +1019,12 @@ int CStdioFile::FS_feof()
 //-----------------------------------------------------------------------------
 size_t CStdioFile::FS_fread( void *dest, size_t destSize, size_t size )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s %t", __FUNCTION__, tmSendCallStack( TELEMETRY_LEVEL0, 0 ) );
+	if( ThreadInMainThread() )
+	{
+		tmPlotI32( TELEMETRY_LEVEL0, TMPT_MEMORY, 0, size, "FileBytesRead" );
+	}
+
 	// read (size) of bytes to ensure truncated reads returns bytes read and not 0
 	return fread( dest, 1, size, m_pFile );
 }
@@ -801,6 +1040,12 @@ size_t CStdioFile::FS_fread( void *dest, size_t destSize, size_t size )
 //-----------------------------------------------------------------------------
 size_t CStdioFile::FS_fwrite( const void *src, size_t size )
 {
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s %t", __FUNCTION__, tmSendCallStack( TELEMETRY_LEVEL0, 0 ) );
+	if( ThreadInMainThread() )
+	{
+		tmPlotI32( TELEMETRY_LEVEL0, TMPT_MEMORY, 0, size, "FileBytesWrite" );
+	}
+
 	if ( size > WRITE_CHUNK )
 	{
 		size_t remaining = size;
@@ -809,7 +1054,7 @@ size_t CStdioFile::FS_fwrite( const void *src, size_t size )
 
 		while ( remaining > 0 )
 		{
-			size_t bytesToCopy = min(remaining, WRITE_CHUNK);
+			size_t bytesToCopy = min(remaining, (size_t)WRITE_CHUNK);
 
 			total += fwrite(current, 1, bytesToCopy, m_pFile);
 
@@ -1141,6 +1386,11 @@ int CWin32ReadOnlyFile::FS_feof()
 size_t CWin32ReadOnlyFile::FS_fread( void *dest, size_t destSize, size_t size )
 {
 	VPROF_BUDGET( "CWin32ReadOnlyFile::FS_fread", VPROF_BUDGETGROUP_OTHER_FILESYSTEM );
+	tmZone( TELEMETRY_LEVEL0, TMZF_NONE, "%s %t", __FUNCTION__, tmSendCallStack( TELEMETRY_LEVEL0, 0 ) );
+	if( ThreadInMainThread() )
+	{
+		tmPlotI32( TELEMETRY_LEVEL0, TMPT_MEMORY, 0, size, "FileBytesRead" );
+	}
 
 	if ( !size || ( m_hFileUnbuffered == INVALID_HANDLE_VALUE && m_hFileBuffered == INVALID_HANDLE_VALUE ) )
 	{
@@ -1230,19 +1480,44 @@ size_t CWin32ReadOnlyFile::FS_fread( void *dest, size_t destSize, size_t size )
 
 		if ( bReadOk )
 		{
-			if ( GetOverlappedResult( hReadFile, &overlapped, &nCurBytesRead, true ) )
+			if ( !m_bOverlapped || GetOverlappedResult( hReadFile, &overlapped, &nCurBytesRead, true ) )
 			{
 				nBytesRead += nCurBytesRead;
-				nBytesToRead -= nCurBytesToRead;
+				nBytesToRead -= nCurBytesRead;
 				currentOffset += nCurBytesRead;
 			}
 			else
 			{
-				bReadOk = false;
+				if ( m_bOverlapped )
+				{
+					if ( GetLastError() == ERROR_HANDLE_EOF )
+					{
+						nBytesToRead = 0; // we have hit the end of the file					
+					}
+					else
+					{
+						bReadOk = false;
+					}
+				}
+				else
+				{
+					bReadOk = false;
+				}
 			}
+
+			if ( !m_bOverlapped && nCurBytesRead == 0 )
+			{
+				nBytesToRead = 0; // we have hit the end of the file
+			}
+
 		}
-		 
-		if ( !bReadOk )
+
+		if ( nBytesToRead > 0 && nCurBytesRead == 0 ) // if you failed to ready anything this time then bail the loop
+		{
+			DevMsg( "Got zero length read" );
+			bReadOk = false;
+		}
+		else if ( !bReadOk  )
 		{
 			DWORD dwError = GetLastError();
 
@@ -1284,7 +1559,7 @@ size_t CWin32ReadOnlyFile::FS_fread( void *dest, size_t destSize, size_t size )
 			}
 		}
 
-		result = min( nBytesRead, size );
+		result = min( (size_t)nBytesRead, size );
 	}
 
 	if ( m_bOverlapped )
@@ -1332,4 +1607,4 @@ char *CWin32ReadOnlyFile::FS_fgets( char *dest, int destSize )
 }
 
 
-#endif
+#endif // _WIN32
