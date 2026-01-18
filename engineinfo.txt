@@ -1,6 +1,0 @@
-"EngineInfo"
-{
-  // necessarry
-	"developer"	"RuSHeRR"
-	"developer_url"	"https://github.com/rusherr-c"
-}
