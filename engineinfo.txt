@@ -2,5 +2,5 @@
 {
   // necessarry
 	"developer"	"RuSHeRR"
-	"developer-url"	"https://github.com/rusherr-c"
+	"developer_url"	"https://github.com/rusherr-c"
 }
