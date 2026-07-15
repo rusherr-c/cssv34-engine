@@ -394,7 +394,7 @@ bool NET_StringToAdr ( const char *s, netadr_t *a)
 	if ( !NET_StringToSockaddr (address, &saddr) )
 		return false;
 		
-	a->SetFromSockadr( &saddr );
+	a->SetFromSockadr( &saddr );	
 
 	return true;
 }
@@ -926,7 +926,7 @@ void NET_AdjustLag( void )
 }
 
 
-bool NET_LagPacket (bool newdata, netpacket_t * packet)
+bool NET_LagPacket (bool newdata, netpacket_t * packet) // without newdata I guess
 {
 	static int losscount[MAX_SOCKETS];
 
@@ -975,7 +975,7 @@ bool NET_LagPacket (bool newdata, netpacket_t * packet)
 	}
 
 	// if new packet arrived in fakelag list
-	if ( newdata )
+	if ( newdata )	// this block didnt exist in src2006
 	{
 		NET_AddToLagged( &s_pLagData[packet->source], packet );
 	}
@@ -1313,7 +1313,7 @@ bool NET_GetLoopPacket ( netpacket_t * packet )
 	// copy data from loopback buffer to packet 
 	packet->from.SetType( NA_LOOPBACK );
 	packet->size = loop->datalen;
-	packet->wiresize = loop->datalen;
+	packet->wiresize = loop->datalen;	// didnt exist in src2006 I believe
 	Q_memcpy ( packet->data, loop->data, packet->size );
 	
 	loop->datalen = 0; // buffer is avalibale again
@@ -1447,7 +1447,7 @@ netpacket_t *NET_GetPacket (int sock, byte *scratch )
 	inpacket.source = sock;	
 	inpacket.data = scratch;
 	inpacket.size = 0;
-	inpacket.wiresize = 0;
+	inpacket.wiresize = 0;	// Didnt exist in src2006!
 	inpacket.pNext = NULL;
 	inpacket.message.SetDebugName("inpacket.message");
 
@@ -1683,7 +1683,7 @@ void NET_ProcessSocket( int sock, IConnectionlessPacketHandler *handler )
 		{
 			netchan->ProcessPacket( packet, true );
 		}
-		/* else	// Not an error that may happen during connect or disconnect
+		/* else	// Not an error that may happen during connect or disconnect. Didnt exist in src2006.
 		{
 			Msg ("Sequenced packet without connection from %s\n" , packet->from.ToString() );
 		}*/
@@ -2104,7 +2104,8 @@ int NET_SendLong( INetChannel *chan, int sock, SOCKET s, const char * buf, int l
 // Output : void NET_SendPacket
 //-----------------------------------------------------------------------------
 
-int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const unsigned char *data, int length, bf_write *pVoicePayload /* = NULL */, bool bUseCompression /*=false*/ )
+int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const unsigned char *data, int length, 
+	bf_write *pVoicePayload /* = NULL */, bool bUseCompression /*=false*/ )	// didnt exist in 2006
 {
 	int		ret;
 	struct sockaddr	addr;
@@ -2116,7 +2117,7 @@ int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const uns
 		Msg("UDP -> %s: sz=%i OOB '%c'\n", to.ToString(), length, data[4] );
 	}
 
-	if ( !NET_IsMultiplayer() || to.type == NA_LOOPBACK || ( to.IsLocalhost() && !net_usesocketsforloopback.GetBool() ) )
+	if ( !NET_IsMultiplayer() || to.type == NA_LOOPBACK || ( to.IsLocalhost() && !net_usesocketsforloopback.GetBool() ) )	// Just !NET_IsMultiplayer
 	{
 		Assert( !pVoicePayload );
 
@@ -2347,7 +2348,7 @@ void NET_FlushAllSockets( void )
 	}
 }
 
-static void OpenSocketInternal( int nModule, int nSetPort, int nDefaultPort, const char *pName, int nProtocol, bool bTryAny )
+static void OpenSocketInternal( int nModule, int nSetPort, int nDefaultPort, const char *pName, int nProtocol, bool bTryAny )	// It seems that this func doesnt exist in src2006
 {
 	int port = nSetPort ? nSetPort : nDefaultPort;
 	int *handle = NULL;
@@ -2775,7 +2776,7 @@ A single player game will only use the loopback code
 ====================
 */
 
-void NET_SetDedicated ()
+void NET_SetDedicated ()	// Was inlined
 {
 	if ( net_noip )
 	{
@@ -3150,6 +3151,7 @@ CON_COMMAND( net_status, "Shows current network status" )
 //			sourceLen - 
 // 
 // Output : int
+// Note : didnt exist in src2006!!!
 //-----------------------------------------------------------------------------
 bool NET_BufferToBufferCompress(char* dest, unsigned int* destLen, char* source, unsigned int sourceLen)
 {
@@ -3195,6 +3197,7 @@ bool NET_BufferToBufferCompress(char* dest, unsigned int* destLen, char* source,
 //			sourceLen - 
 // 
 // Output : int
+// Note : didnt exist in src2006!!!
 //-----------------------------------------------------------------------------
 bool NET_BufferToBufferDecompress(char* dest, unsigned int* destLen, char* source, unsigned int sourceLen)
 {
