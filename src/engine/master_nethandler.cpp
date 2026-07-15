@@ -182,8 +182,8 @@ void CMasterNETHandler::NET_SendPacket(int ns, const netadr_t& to, const byte* d
 	int ret = sendto(*SendSocket, (const char*)data, length, 0, &addr, sizeof(addr));
 	if (ret == SOCKET_ERROR)
 		Warning("CMasterNETHandler: failed sending packet (socket %i, to %s, data %s, length %i), WSA Last Error %i\n", ns, to.ToString(), data, length, WSAGetLastError());
-	//else
-		//Msg("CMasterNETHandler: send packet socket %i, to %s, data %s, length %i\n", ns, to.ToString(), data, length);
+	else
+		Msg("CMasterNETHandler: send packet socket %i, to %s, data %s, length %i\n", ns, to.ToString(), data, length);
 }
 
 void CMasterNETHandler::PacketReceived(sockaddr_in& from, byte* data, int length) {

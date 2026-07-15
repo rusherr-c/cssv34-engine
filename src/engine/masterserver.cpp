@@ -42,12 +42,13 @@ extern ConVar sv_region;
 #define MASTER_RESPONSE_TIMEOUT 1.5 // seconds
 #define INFO_REQUEST_TIMEOUT 5.0 // seconds
 
-const int g_iMasterServersVDF_Maximum = 4;
+const int g_iMasterServersVDF_Maximum = 6;
 
-static char g_MasterServers[][64] =
+// IPv4 only
+static char g_MasterServers[][32] =
 {
-	"194.87.101.97:27011",
-	"80.78.244.170:27011"
+	"80.78.244.170:27011",
+	//"78.154.103.37:10232",
 };
 
 #ifdef DEDICATED
@@ -80,6 +81,9 @@ typedef struct adrlist_s
 //-----------------------------------------------------------------------------
 class CMaster : public IMaster, public IServersInfo
 {
+	friend class IServerList;
+	// This is very dirty
+	// TODO: Move serversinfo stuff to ServerBrowser
 public:
 	CMaster( void );
 	virtual ~CMaster( void );
@@ -88,6 +92,8 @@ public:
 	void Init( void );
 	void Shutdown( void );
 	// Sets up master address
+
+	void InitConnection(void);
 	void ShutdownConnection(void);
 	void SendHeartbeat( adrlist_t *p );
 	void AddServer( netadr_t *adr );
@@ -173,6 +179,9 @@ IServersInfo *g_pServersInfo = (IServersInfo*)&s_MasterServer;
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CMaster, IServersInfo, SERVERLIST_INTERFACE_VERSION, s_MasterServer );
 
 #define	HEARTBEAT_SECONDS	140.0
+#define MASTER_PARSE_FILE "masterservers.vdf"
+
+#define MAX_SINFO 2048
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -196,10 +205,18 @@ CMaster::CMaster( void )
 	Init();
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Destructor
+//-----------------------------------------------------------------------------
 CMaster::~CMaster( void )
 {
+	m_bRefreshing = 0;
+
+	Shutdown();
+	ShutdownConnection();
 }
 
+// Purpose: Runs every frame
 void CMaster::RunFrame()
 {
 	CheckHeartbeat();
@@ -239,6 +256,7 @@ void CMaster::RunFrame()
 	}
 }
 
+// Purpose: stop refreshing server list
 void CMaster::StopRefresh()
 {
 	if( !m_bRefreshing )
@@ -256,6 +274,9 @@ void CMaster::StopRefresh()
 	monitoringservers->StopRefresh();
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Server replies with S2A_INFO_REPLY
+//-----------------------------------------------------------------------------
 void CMaster::ReplyInfo( const netadr_t &adr )
 {
 	static char gamedir[MAX_OSPATH];
@@ -315,6 +336,9 @@ void CMaster::ReplyInfo( const netadr_t &adr )
 	MasterNetHandler()->NET_SendPacket( NS_SERVER, adr, (unsigned char *)buf.Base(), buf.TellPut() );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Process info about server
+//-----------------------------------------------------------------------------
 newgameserver_t &CMaster::ProcessInfo(bf_read &buf)
 {
 	static newgameserver_t s;
@@ -377,6 +401,9 @@ newgameserver_t &CMaster::ProcessInfo(bf_read &buf)
 	return s;
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Server replies with S2C_CHALLENGE
+//-----------------------------------------------------------------------------
 void CMaster::ReplyChallenge(const netadr_t& adr) {
 	char buf[256];
 	bf_write msg(buf, sizeof(buf));
@@ -388,6 +415,9 @@ void CMaster::ReplyChallenge(const netadr_t& adr) {
 	MasterNetHandler()->NET_SendPacket(NS_SERVER, adr, msg.GetData(), msg.GetNumBytesWritten());
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Server replies with S2A_PLAYER_REPLY
+//-----------------------------------------------------------------------------
 void CMaster::ReplyPlayers(const netadr_t& adr) {
 	char buf[256];
 	bf_write msg(buf, sizeof(buf));
@@ -410,6 +440,9 @@ void CMaster::ReplyPlayers(const netadr_t& adr) {
 	MasterNetHandler()->NET_SendPacket(NS_SERVER, adr, msg.GetData(), msg.GetNumBytesWritten());
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Process connectionless packet
+//-----------------------------------------------------------------------------
 void CMaster::ProcessConnectionlessPacket(netpacket_t*packet )
 {
 	static ALIGN4 char string[2048] ALIGN4_POST;    // Buffer for sending heartbeat
@@ -473,6 +506,9 @@ void CMaster::ProcessConnectionlessPacket(netpacket_t*packet )
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Process connectionless packet (server)
+//-----------------------------------------------------------------------------
 void CMaster::ProcessConnectionless_GameServer(netpacket_t* packet) {
 	bf_read msg = packet->message;
 	byte c = msg.ReadByte();
@@ -510,6 +546,9 @@ void CMaster::ProcessConnectionless_GameServer(netpacket_t* packet) {
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Process connectionless packet (client)
+//-----------------------------------------------------------------------------
 void CMaster::ProcessConnectionless_GameClient(netpacket_t* packet) {
 	bf_read msg = packet->message;
 	byte c = msg.ReadByte();
@@ -550,6 +589,9 @@ void CMaster::ProcessConnectionless_GameClient(netpacket_t* packet) {
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Request info from single server
+//-----------------------------------------------------------------------------
 void CMaster::RequestServerInfo( const netadr_t &adr )
 {
 	char string[256];
@@ -571,6 +613,9 @@ void CMaster::RequestServerInfo( const netadr_t &adr )
 	//MasterNetHandler()->NET_SendPacket(NS_CLIENT, adr, msg.GetData(), msg.GetNumBytesWritten() );
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: Retry ServersInfo request
+//-----------------------------------------------------------------------------
 void CMaster::RetryServersInfoRequest()
 {
 	FOR_EACH_MAP_FAST( m_serverAddresses, i )
@@ -583,8 +628,6 @@ void CMaster::RetryServersInfoRequest()
 		RequestServerInfo( adr );
 	}
 }
-
-#define MAX_SINFO 2048
 
 //-----------------------------------------------------------------------------
 // Purpose: Sends a heartbeat to the master server
@@ -975,11 +1018,11 @@ CUtlVector<netadr_t>* MasterServersConfig_GetAddresses(KeyValues* kv)
 	return addresses;
 }
 
+// FIXME: Dirty!
 DWORD WINAPI CMaster::MasterServersVDFLoading_Thread(LPVOID param)
 {
 	CMaster* pThis = (CMaster*)param;
 
-	// Æä¸ì filesystem
 	while (!g_pFullFileSystem)
 	{
 		Sleep(100);
@@ -991,7 +1034,7 @@ DWORD WINAPI CMaster::MasterServersVDFLoading_Thread(LPVOID param)
 	if (!kv)
 	{
 		CreateDefaultMasterServersConfig();
-		Warning("MasterServers.vdf not found, creating default\n");
+		Warning("Couldn't find masterservers.vdf, using default master addresses\n");
 
 		pThis->UseDefault();
 		return 0;
@@ -1033,6 +1076,7 @@ void CMaster::Init(void)
 
 	Msg("%f: CMaster Init\n", Plat_FloatTime());
 
+	// FIXME: Dirty!
 	HANDLE hThread = CreateThread(
 		nullptr,
 		0,
@@ -1069,7 +1113,7 @@ void CMaster::Shutdown(void)
 // ServersInfo
 void CMaster::RequestInternetServerList(const char *gamedir, IServerListResponse *response)
 {
-#if 0
+#if 1
 	if (!m_lastServerAdr.IsValid())
 		m_lastServerAdr.SetIPAndPort(0, 0);
 
@@ -1110,6 +1154,9 @@ void CMaster::RequestInternetServerList(const char *gamedir, IServerListResponse
 #endif
 }
 
+//
+// Other functions controlled by IServerList interfaces
+//
 
 void CMaster::RequestLANServerList(const char *gamedir, IServerListResponse *response)
 {
@@ -1148,8 +1195,12 @@ void CMaster::RemoveHistoryServer(uint32 unIP, uint16 usPort)
 
 void CMaster::AddServerAddresses( netadr_t **adr, int count )
 {
-
+	// what this function supposed to be?
 }
+
+//
+// These three are defined in serverqueries
+//
 
 void CMaster::PingServer(uint32 unIP, uint16 usPort, IServerPingResponse* response) {
 	if (unIP == 0 || usPort == 0 || response == 0)
