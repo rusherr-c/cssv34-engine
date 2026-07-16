@@ -49,7 +49,6 @@ bool CServerListMsgHandler::Process(const netadr_t& from, bf_read& msg) {
 	double recvTime = Plat_FloatTime();
 
 	serveritem_t server{};
-	memset(&server, 0, sizeof(server));
 
 	// check connectionless header
 	if (msg.ReadLong() != CONNECTIONLESS_HEADER)
@@ -316,6 +315,9 @@ void CServerList::StartRefresh()
 //-----------------------------------------------------------------------------
 void CServerList::UpdateServer(netadr_t* adr, serveritem_t& sv, double recvTime)
 {
+	if (!m_pResponseTarget)
+		return;
+
 	// find the reply in the query list
 	query_t finder;
 	finder.addr = *adr;
@@ -372,6 +374,9 @@ int CServerList::CalculateAveragePing(serveritem_t &server)
 void CServerList::QueryFrame()
 {
 	if (!m_bRefreshing)
+		return;
+
+	if (!m_pResponseTarget)
 		return;
 
 	double curtime = Plat_FloatTime();

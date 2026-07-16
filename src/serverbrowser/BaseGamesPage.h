@@ -12,7 +12,9 @@
 #endif
 
 #include "tier1/utldict.h"
-#include "serversinfo.h"
+#include "ServersInfo.h"
+#include "ServerList.h"
+#include "Socket.h"
 
 class CBaseGamesPage;
 

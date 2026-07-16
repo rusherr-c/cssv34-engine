@@ -33,6 +33,7 @@ struct query_t
 //-----------------------------------------------------------------------------
 class CServerList
 {
+	friend class CServersInfo;
 public:
 	CServerList(IServerListResponse *gameList);
 	~CServerList();

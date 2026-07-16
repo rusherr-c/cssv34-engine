@@ -844,7 +844,7 @@ void CMaster::UseDefault ( void )
 	for( int i = 0; i < ARRAYSIZE(g_MasterServers);i++ )
 	{
 		// Convert to netadr_t
-		adr = g_MasterServers[i];
+		adr.SetFromString(g_MasterServers[i]);
 		// Add to master list
 		AddServer( &adr );
 	}

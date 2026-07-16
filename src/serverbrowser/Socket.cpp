@@ -264,7 +264,6 @@ void CSocket::Frame()
 		for (int i = 0; i < m_Handlers.Count(); i++)
 		{
 			if (m_Handlers[i]->Process(
-				this,
 				adr,
 				msg))
 			{

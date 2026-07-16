@@ -11,6 +11,7 @@
 #endif
 
 #include "tier0/platform.h"
+#include "tier0/threadtools.h"
 #include "tier1/bitbuf.h"
 #include "tier1/netadr.h"
 #include "proto_oob.h"
@@ -24,9 +25,7 @@
 #define S2A_EDF_GAMETAGS 0x20
 #define S2A_EDF_GAMEID 0x01
 
-#define RETRY_INFO_REQUEST_TIME 0.4 // seconds
-#define MASTER_RESPONSE_TIMEOUT 1.5 // seconds
-#define INFO_REQUEST_TIMEOUT 5.0 // seconds
+#define LIST_REFRESH_TIMEOUT 3.5f // seconds
 
 // Server response status
 enum NServerResponse
@@ -153,6 +152,8 @@ public:
 	void Initialize(); // Do some things like parsing masterservers.vdf
 	void Shutdown(); // Shutdown...
 
+	void RunFrame(); // Runs every frame
+
 public:
 	// Request Server List from master server...
 	void RequestInternetServerList(const char* gamedir, IServerListResponse* response);
@@ -179,6 +180,15 @@ public:
 protected:
 	// Internal functions //
 
+	// Thread
+	static void Thread(CServersInfo* pthis);
+
+	// Add master server to m_vecMasterAddresses
+	void AddMasterServer(const netadr_t& adr);
+
+	// Use default master addresses
+	void UseDefaultMasters();
+
 	// Request server list from masterserver
 	void RequestServerList(const netadr_t& adr);
 
@@ -189,15 +199,25 @@ protected:
 	bool Process(netadr_t* from, bf_read* msg);
 
 private:
+	bool			m_bInitialized;
+	bool			m_bWorking;
+	ThreadHandle_t	m_hThread;
+
 	// MasterServers.vdf
 	CUtlVector<netadr_t> m_vecMasterAddresses;
 
-	CSocket* m_pSocket;				//< used for server queries (TODO!)
+	char			m_szGameDir[32];
 
-	CServerList* m_pMainList;		//< main internet list
-	CServerList* m_pFavoritesList;	//< favorites list
-	CServerList* m_pHistoryList;	//< history list
-	CServerList* m_pLanServerList;	//< lan server list
+	double			m_flStartRequestTime;
+	bool			m_bRefreshing;
+
+	CSocket* m_pSocket;						//< used for server queries (TODO!)
+
+	CServerList*	m_pCurrentList;			//< current server list (one of those)
+	CServerList*	m_pMainList;			//< main internet list
+	CServerList*	m_pFavoritesList;		//< favorites list
+	CServerList*	m_pHistoryList;			//< history list
+	CServerList*	m_pLanServerList;		//< lan server list
 };	
 
 extern CServersInfo* g_pServersInfo;
