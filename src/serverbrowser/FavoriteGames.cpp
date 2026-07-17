@@ -132,7 +132,7 @@ void CFavoriteGames::OnRemoveFromFavorites()
 		int itemID = m_pGameList->GetSelectedItem(iGame);
 		int serverID = m_pGameList->GetItemData(itemID)->userData;
 
-		newgameserver_t* pServer = GetServer(serverID);
+		serveritem_t* pServer = GetServer(serverID);
 
 		if (pServer)
 		{
@@ -162,7 +162,7 @@ void CFavoriteGames::OnAddServerByName()
 //-----------------------------------------------------------------------------
 void CFavoriteGames::OnAddCurrentServer()
 {
-	newgameserver_t *pConnected = ServerBrowserDialog().GetCurrentConnectedServer();
+	serveritem_t *pConnected = ServerBrowserDialog().GetCurrentConnectedServer();
 
 	if ( pConnected )
 	{

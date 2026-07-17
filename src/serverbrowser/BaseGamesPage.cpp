@@ -45,27 +45,9 @@ bool GameSupportsReplay()
 #endif
 
 //--------------------------------------------------------------------------------------------------------
-bool IsReplayServer( newgameserver_t &server )
+bool IsReplayServer( serveritem_t &server )
 {
-	bool bReplay = false;
-
-	if ( GameSupportsReplay() )
-	{
-		if ( server.m_szGameTags[0] )
-		{
-			CUtlVector<char*> TagList;
-			V_SplitString( server.m_szGameTags, ",", TagList );
-			for ( int i = 0; i < TagList.Count(); i++ )
-			{
-				if ( Q_stricmp( TagList[i], "replays" ) == 0 )
-				{
-					bReplay = true;
-				}
-			}
-		}
-	}
-
-	return bReplay;
+	return false;
 }
 
 //--------------------------------------------------------------------------------------------------------
@@ -196,7 +178,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 		300,	// maxwidth
 		0		// flags
 	);
-	m_pGameList->AddColumnHeader(k_nColumn_Tags, "Tags", "#ServerBrowser_Tags", 64, ListPanel::COLUMN_RESIZEWITHWINDOW);
+	m_pGameList->AddColumnHeader(k_nColumn_Rules, "Rules", "Server Rules", 64, ListPanel::COLUMN_RESIZEWITHWINDOW);
 
 	m_pGameList->AddColumnHeader(k_nColumn_Ping, "Ping", "#ServerBrowser_Latency", 32, ListPanel::COLUMN_RESIZEWITHWINDOW);
 
@@ -214,7 +196,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	m_pGameList->SetSortFunc(k_nColumn_GameDesc, GameCompare);
 	m_pGameList->SetSortFunc(k_nColumn_Players, PlayersCompare);
 	m_pGameList->SetSortFunc(k_nColumn_Map, MapCompare);
-	m_pGameList->SetSortFunc(k_nColumn_Tags, TagsCompare);
+	m_pGameList->SetSortFunc(k_nColumn_Rules, TagsCompare);
 	m_pGameList->SetSortFunc(k_nColumn_Ping, PingCompare);
 
 	// Sort by ping time by default
@@ -361,7 +343,7 @@ int ServerPingSortFunc( const serverping_t *p1,  const serverping_t *p2 )
 //-----------------------------------------------------------------------------
 // Purpose: prepares all the QuickListPanel map panels...
 //-----------------------------------------------------------------------------
-void CBaseGamesPage::PrepareQuickListMap( newgameserver_t *server, int iListID )
+void CBaseGamesPage::PrepareQuickListMap( serveritem_t *server, int iListID )
 {
 	char szMapName[ 512 ];
 	Q_snprintf( szMapName, sizeof( szMapName ), "%s", server->m_szMap );
@@ -424,7 +406,7 @@ void CBaseGamesPage::PrepareQuickListMap( newgameserver_t *server, int iListID )
 //-----------------------------------------------------------------------------
 // Purpose: gets information about specified server
 //-----------------------------------------------------------------------------
-newgameserver_t *CBaseGamesPage::GetServer( unsigned int serverID )
+serveritem_t *CBaseGamesPage::GetServer( unsigned int serverID )
 {
 	if( serverID >= m_serversInfo.Count() ) return NULL;
 	return &m_serversInfo[serverID];
@@ -1374,7 +1356,7 @@ void CBaseGamesPage::RecalculateFilterString()
 // Purpose: Checks to see if the server passes the primary filters
 //			if the server fails the filters, it will not be refreshed again
 //-----------------------------------------------------------------------------
-bool CBaseGamesPage::CheckPrimaryFilters( newgameserver_t &server )
+bool CBaseGamesPage::CheckPrimaryFilters( serveritem_t &server )
 {
 	if (m_szGameFilter[0] && server.m_szGameDir[0] && Q_stricmp(m_szGameFilter, server.m_szGameDir ) )
 	{
@@ -1389,7 +1371,7 @@ bool CBaseGamesPage::CheckPrimaryFilters( newgameserver_t &server )
 //			server will be continued to be pinged if it fails the filter, since
 //			the relvent server data is dynamic
 //-----------------------------------------------------------------------------
-bool CBaseGamesPage::CheckSecondaryFilters( newgameserver_t &server )
+bool CBaseGamesPage::CheckSecondaryFilters( serveritem_t &server )
 {
 	bool bFilterNoEmpty = m_bFilterNoEmptyServers;
 	bool bFilterNoFull = m_bFilterNoFullServers;
@@ -1604,7 +1586,7 @@ void CBaseGamesPage::OnAddToFavorites()
 	{
 		int serverID = m_pGameList->GetItemUserData(m_pGameList->GetSelectedItem(i));
 
-		newgameserver_t* pServer = GetServer(serverID);
+		serveritem_t* pServer = GetServer(serverID);
 
 		if ( pServer )
 		{
@@ -1984,7 +1966,7 @@ void CBaseGamesPage::OnViewGameInfo()
 	// Stop the current refresh
 	StopRefresh();
 
-	newgameserver_t* pServer = GetServer(serverID);
+	serveritem_t* pServer = GetServer(serverID);
 	// join the game
 	ServerBrowserDialog().OpenGameInfoDialog(this, pServer);
 }
@@ -2025,9 +2007,9 @@ const char *CBaseGamesPage::GetConnectCode()
 	return pszConnectCode;
 }
 
-void CBaseGamesPage::ServerResponded( newgameserver_t &server )
+void CBaseGamesPage::ServerResponded( serveritem_t &server )
 {
-	newgameserver_t *pServerItem = &server;
+	serveritem_t *pServerItem = &server;
 	
 	// check filters
 	bool removeItem = false;
@@ -2089,10 +2071,10 @@ void CBaseGamesPage::ServerResponded( newgameserver_t &server )
 
 	kv->SetInt("Ping", pServerItem->m_nPing);
 
-	if (!pServerItem->m_szGameTags)
-		kv->SetString("Tags", "none");
+	if (!pServerItem->m_szServerRules)
+		kv->SetString("Rules", "none");
 	else
-		kv->SetString("Tags", pServerItem->m_szGameTags);
+		kv->SetString("Rules", pServerItem->m_szServerRules);
 
 	kv->SetInt("Replay", 0);
 

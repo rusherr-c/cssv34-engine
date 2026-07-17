@@ -42,8 +42,8 @@ CServerBrowserDialog &ServerBrowserDialog()
 
 struct ServerInfoTest : public IServerPingResponse
 {
-	void ServerResponded(newgameserver_t& server) {
-		Msg("Server responded:\n%s\n", server.toString());
+	void ServerResponded(serveritem_t& server) {
+		Msg("Server responded:\n%s\n", server.ToString());
 	}
 };
 
@@ -175,7 +175,7 @@ void CServerBrowserDialog::Initialize()
 //-----------------------------------------------------------------------------
 // Purpose: returns a server in the list
 //-----------------------------------------------------------------------------
-newgameserver_t *CServerBrowserDialog::GetServer( unsigned int serverID )
+serveritem_t *CServerBrowserDialog::GetServer( unsigned int serverID )
 {
 	if (m_pGameList)
 		return m_pGameList->GetServer( serverID );
@@ -378,7 +378,7 @@ CServerBrowserDialog *CServerBrowserDialog::GetInstance()
 //-----------------------------------------------------------------------------
 // Purpose: Adds a server to the list of favorites
 //-----------------------------------------------------------------------------
-void CServerBrowserDialog::AddServerToFavorites(newgameserver_t &server)
+void CServerBrowserDialog::AddServerToFavorites(serveritem_t &server)
 {
 	g_pServersInfo->AddFavoriteServer(server.m_NetAdr.GetIPHostByteOrder(), server.m_NetAdr.GetPort());
 }
@@ -411,7 +411,7 @@ CServerContextMenu *CServerBrowserDialog::GetContextMenu(vgui::Panel *pPanel)
 // Purpose: begins the process of joining a server from a game list
 //			the game info dialog it opens will also update the game list
 //-----------------------------------------------------------------------------
-CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, newgameserver_t *pServer)
+CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, serveritem_t *pServer)
 {
 	// open the game info dialog, then mark it to attempt to connect right away
 	//CDialogGameInfo *gameDialog = OpenGameInfoDialog(gameList, pServer);
@@ -449,7 +449,7 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(int serverIP, int serverPort, co
 //-----------------------------------------------------------------------------
 // Purpose: opens a game info dialog from a game list
 //-----------------------------------------------------------------------------
-CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog( IGameList *gameList, newgameserver_t *pServer )
+CDialogGameInfo *CServerBrowserDialog::OpenGameInfoDialog( IGameList *gameList, serveritem_t *pServer )
 {
 	CDialogGameInfo *gameDialog = new CDialogGameInfo( NULL, pServer->m_NetAdr.GetIPHostByteOrder(), 0, pServer->m_NetAdr.GetPort(), gameList->GetConnectCode() );
 	gameDialog->SetParent(GetVParent());
@@ -563,7 +563,7 @@ void CServerBrowserDialog::OnConnectToGame( KeyValues *pMessageValues )
 
 	uint32 unIP = ip;
 
-	memset( &m_CurrentConnection, 0, sizeof(newgameserver_t) );
+	memset( &m_CurrentConnection, 0, sizeof(serveritem_t) );
 	m_CurrentConnection.m_NetAdr.SetIP( unIP );
 	m_CurrentConnection.m_NetAdr.SetPort( (unsigned short)connectionPort );
 

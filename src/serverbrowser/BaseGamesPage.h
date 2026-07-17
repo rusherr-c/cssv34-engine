@@ -12,9 +12,6 @@
 #endif
 
 #include "tier1/utldict.h"
-#include "ServersInfo.h"
-#include "ServerList.h"
-#include "Socket.h"
 
 class CBaseGamesPage;
 
@@ -109,7 +106,7 @@ public:
 		k_nColumn_Players = 5,
 		k_nColumn_Bots = 6,
 		k_nColumn_Map = 7,
-		k_nColumn_Tags = 8,
+		k_nColumn_Rules = 8,
 		k_nColumn_Ping = 9,
 	};
 
@@ -120,7 +117,7 @@ public:
 	virtual void ApplySchemeSettings(vgui::IScheme *pScheme);
 
 	// gets information about specified server
-	virtual newgameserver_t *GetServer(unsigned int serverID);
+	virtual serveritem_t *GetServer(unsigned int serverID);
 	virtual const char *GetConnectCode();
 
 	uint32 GetServerFilters( MatchMakingKeyValuePair_t **pFilters );
@@ -144,7 +141,7 @@ public:
 
 	virtual void UpdateDerivedLayouts( void );
 	
-	void		PrepareQuickListMap( newgameserver_t *server, int iListID );
+	void		PrepareQuickListMap( serveritem_t *server, int iListID );
 	void		SelectQuickListServers( void );
 	vgui::Panel *GetActiveList( void );
 	virtual bool IsQuickListButtonChecked()
@@ -173,7 +170,7 @@ protected:
 	void UpdateStatus();
 
 	// ISteamMatchmakingServerListResponse callbacks
-	virtual void ServerResponded( newgameserver_t &server );
+	virtual void ServerResponded( serveritem_t &server );
 	virtual void RefreshComplete( NServerResponse response );
 
 	// ISteamMatchmakingPingResponse callbacks
@@ -190,10 +187,10 @@ protected:
 
 	// filtering methods
 	// returns true if filters passed; false if failed
-	virtual bool CheckPrimaryFilters( newgameserver_t &server);
-	virtual bool CheckSecondaryFilters( newgameserver_t &server );
-	virtual bool CheckTagFilter( newgameserver_t &server ) { return true; }
-	virtual bool CheckWorkshopFilter( newgameserver_t &server ) { return true; }
+	virtual bool CheckPrimaryFilters( serveritem_t &server);
+	virtual bool CheckSecondaryFilters( serveritem_t &server );
+	virtual bool CheckTagFilter( serveritem_t &server ) { return true; }
+	virtual bool CheckWorkshopFilter( serveritem_t &server ) { return true; }
 	virtual int GetInvalidServerListID();
 
 	virtual void OnSaveFilter(KeyValues *filter);
@@ -237,7 +234,7 @@ protected:
 	CUtlMap<int, serverdisplay_t> m_mapServers;
 	CUtlMap<netadr_t, int> m_mapServerIP;
 
-	CUtlVector<newgameserver_t> m_serversInfo;
+	CUtlVector<serveritem_t> m_serversInfo;
 
 	CUtlVector<MatchMakingKeyValuePair_t> m_vecServerFilters;
 	CUtlDict< CQuickListMapServerList, int > m_quicklistserverlist;

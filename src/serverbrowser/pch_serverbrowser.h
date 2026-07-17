@@ -67,6 +67,11 @@
 #include "QuickListPanel.h"
 #include "vgui_controls/PanelListPanel.h"
 
+#include "Socket.h"
+#include "ServerList.h"
+#include "ServersInfo.h"
+#include "ServerDetailsMsgHandler.h"
+
 
 #pragma warning( disable: 4355 )  //  warning C4355: 'this' : used in base member initializer list
 

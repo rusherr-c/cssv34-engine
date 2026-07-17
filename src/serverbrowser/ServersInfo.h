@@ -25,7 +25,7 @@
 #define S2A_EDF_GAMETAGS 0x20
 #define S2A_EDF_GAMEID 0x01
 
-#define LIST_REFRESH_TIMEOUT 3.5f // seconds
+#define LIST_REFRESH_TIMEOUT 3.5f // default timeout for all lists (excluding main list)
 
 // Server response status
 enum NServerResponse
@@ -193,10 +193,10 @@ protected:
 	void RequestServerList(const netadr_t& adr);
 
 	// Process server list
-	void ProcessServerList(bf_read* msg);
+	void ProcessServerList(const netadr_t& from, bf_read& msg);
 
 	// CMsgHandler
-	bool Process(netadr_t* from, bf_read* msg);
+	bool Process(const netadr_t& from, bf_read& msg);
 
 private:
 	bool			m_bInitialized;
@@ -211,7 +211,8 @@ private:
 	double			m_flStartRequestTime;
 	bool			m_bRefreshing;
 
-	CSocket* m_pSocket;						//< used for server queries (TODO!)
+	CSocket*		m_pMasterSocket;		//<
+	CSocket*		m_pQuerySocket;			//< used for server queries (TODO!)
 
 	CServerList*	m_pCurrentList;			//< current server list (one of those)
 	CServerList*	m_pMainList;			//< main internet list

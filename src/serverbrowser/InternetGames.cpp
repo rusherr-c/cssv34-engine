@@ -124,7 +124,7 @@ void CInternetGames::OnTick()
 // Purpose: Handles incoming server refresh data
 //			updates the server browser with the refreshed information from the server itself
 //-----------------------------------------------------------------------------
-void CInternetGames::ServerResponded( newgameserver_t &server )
+void CInternetGames::ServerResponded( serveritem_t &server )
 {
 	m_bDirty = true;
 

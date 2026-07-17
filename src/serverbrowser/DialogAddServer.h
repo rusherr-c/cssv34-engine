@@ -26,7 +26,7 @@ public:
 	CDialogAddServer(vgui::Panel *parent, IGameList *gameList);
 	~CDialogAddServer();
 
-	void ServerResponded( newgameserver_t &server );
+	void ServerResponded( serveritem_t &server );
 	void ServerFailedToRespond();
 
 	void ApplySchemeSettings( vgui::IScheme *pScheme );
@@ -40,7 +40,7 @@ private:
 	void TestServers();
 	MESSAGE_FUNC( OnTextChanged, "TextChanged" );
 
-	virtual void FinishAddServer( newgameserver_t &pServer );
+	virtual void FinishAddServer( serveritem_t &pServer );
 	virtual bool AllowInvalidIPs( void ) { return false; }
 
 protected:
@@ -54,7 +54,7 @@ protected:
 	vgui::TextEntry *m_pTextEntry;
 	vgui::ListPanel *m_pDiscoveredGames;
 	int m_OriginalHeight;
-	CUtlVector<newgameserver_t> m_Servers;
+	CUtlVector<serveritem_t> m_Servers;
 	CUtlVector<HServerQuery> m_Queries;
 };
 

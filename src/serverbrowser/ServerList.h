@@ -18,7 +18,8 @@
 #include <UtlVector.h>
 
 class CSocket;
-class IServerRefreshResponse;
+class IServerListResponse;
+struct serveritem_t;
 
 // holds a single query - needs to public unfortunately
 struct query_t
@@ -63,8 +64,9 @@ public:
 	void AddServerToRefreshList(unsigned int serverID);
 
 	// responses
-	void UpdateServer(netadr_t *adr, serveritem_t &server, double recvTime);
+	void UpdateServer(netadr_t& adr, serveritem_t& server, double recvTime);
 
+	int  FindServer(netadr_t& adr);
 	// returns true if servers are currently being refreshed
 	bool IsRefreshing();
 

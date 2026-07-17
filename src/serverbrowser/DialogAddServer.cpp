@@ -177,7 +177,7 @@ void CDialogAddServer::OnOK()
 
 	if ( AllowInvalidIPs() || netaddr.IsValid() )
 	{
-		newgameserver_t server;
+		serveritem_t server;
 		memset(&server, 0, sizeof(server));
 		strncpy( server.m_szServerName, address, sizeof(server.m_szServerName) );
 
@@ -265,7 +265,7 @@ void CDialogAddServer::TestServers()
 //-----------------------------------------------------------------------------
 // Purpose: A server answered our ping
 //-----------------------------------------------------------------------------
-void CDialogAddServer::ServerResponded( newgameserver_t &server )
+void CDialogAddServer::ServerResponded( serveritem_t &server )
 {
 	KeyValues *kv = new KeyValues( "Server" );
 
@@ -273,7 +273,7 @@ void CDialogAddServer::ServerResponded( newgameserver_t &server )
 	kv->SetString( "map", server.m_szMap );
 	kv->SetString( "GameDir", server.m_szGameDir );
 	kv->SetString( "GameDesc", server.m_szGameDescription );
-	kv->SetString( "GameTags", server.m_szGameTags );
+	//kv->SetString( "GameTags", server.m_szGameTags );
 	kv->SetInt( "password", server.m_bPassword ? 1 : 0);
 	kv->SetInt( "bots", server.m_nBotPlayers ? 2 : 0);
 	kv->SetInt( "Replay", 0 );
@@ -352,7 +352,7 @@ void CDialogAddServer::OnItemSelected()
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CDialogAddServer::FinishAddServer( newgameserver_t &pServer )
+void CDialogAddServer::FinishAddServer( serveritem_t &pServer )
 {
 	ServerBrowserDialog().AddServerToFavorites( pServer );
 }

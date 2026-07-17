@@ -108,7 +108,7 @@ void CHistoryGames::OnRemoveFromHistory()
 		int itemID = m_pGameList->GetSelectedItem(iGame);
 		int serverID = m_pGameList->GetItemData(itemID)->userData;
 
-		newgameserver_t* pServer = GetServer(serverID);
+		serveritem_t* pServer = GetServer(serverID);
 
 		if (pServer)
 		{

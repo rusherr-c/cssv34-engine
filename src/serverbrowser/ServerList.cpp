@@ -7,16 +7,7 @@
 
 #define PROTECTED_THINGS_DISABLE
 
-#include <stdlib.h>  // atoi
-#include "ServersInfo.h"
-#include "ServerList.h"
-#include "Socket.h"
-#include "proto_oob.h"
-
-// for debugging
-#include <vgui/ISystem.h>
-#include <vgui/IVGui.h>
-#include <vgui_controls/Controls.h>
+#include "pch_serverbrowser.h"
 
 #define min(a,b)    (((a) < (b)) ? (a) : (b))
 
@@ -26,107 +17,6 @@ typedef enum
 	INFO_REQUESTED,
 	INFO_RECEIVED
 } QUERYSTATUS;
-
-//-----------------------------------------------------------------------------
-// Purpose: Socket handler for pinging internet servers
-//-----------------------------------------------------------------------------
-class CServerListMsgHandler : public CMsgHandler
-{
-public:
-	CServerListMsgHandler(CServerList* list) { m_pList = list; }
-	~CServerListMsgHandler() {}
-
-	virtual bool Process(const netadr_t& from, bf_read& msg);
-
-private:
-	CServerList* m_pList;
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: Process cracked message
-//-----------------------------------------------------------------------------
-bool CServerListMsgHandler::Process(const netadr_t& from, bf_read& msg) {
-	double recvTime = Plat_FloatTime();
-
-	serveritem_t server{};
-
-	// check connectionless header
-	if (msg.ReadLong() != CONNECTIONLESS_HEADER)
-		return false;
-
-	char c = msg.ReadByte();
-
-	// check if it's the info
-	if (c != S2A_INFOREPLY)
-		return false;
-
-	if (from.GetIPHostByteOrder() == 0 || from.GetPort() == 0)
-		return false;
-
-	// set server address
-	server.m_NetAdr = from;
-
-	server.m_nProtocolVersion = msg.ReadByte();
-
-	msg.ReadString(server.m_szServerName, sizeof(server.m_szServerName));
-	msg.ReadString(server.m_szMap, sizeof(server.m_szMap));
-	msg.ReadString(server.m_szGameDir, sizeof(server.m_szGameDir));
-
-	msg.ReadString(server.m_szGameDescription, sizeof(server.m_szGameDescription));
-	server.m_nAppID = msg.ReadShort();
-
-	// player info
-	server.m_nPlayers = msg.ReadByte();
-	server.m_nMaxPlayers = msg.ReadByte();
-	server.m_nBotPlayers = msg.ReadByte();
-
-	// Password?
-	msg.ReadByte(); // server type
-	msg.ReadByte(); // env
-
-	server.m_bPassword = msg.ReadByte();
-	server.m_bSecure = msg.ReadByte();
-	msg.ReadString(server.m_szGameVersion, sizeof(server.m_szGameVersion));
-
-	server.m_iFlags = msg.ReadByte();
-
-	if (server.m_iFlags & S2A_EDF_GAMEPORT)
-	{
-		server.m_NetAdr.SetPort(msg.ReadShort());
-	}
-
-	if (server.m_iFlags & S2A_EDF_STEAMID)
-	{
-		uint64 ulSteamID;
-		msg.ReadBytes(&ulSteamID, 8);
-	}
-
-	if (server.m_iFlags & S2A_EDF_SOURCETV)
-	{
-		char str[64];
-		msg.ReadShort(); // spectator port (unused)
-		msg.ReadString(str, sizeof(str)); // spectator sv name
-	}
-
-	if (server.m_iFlags & S2A_EDF_GAMETAGS)
-	{
-		char str[64];
-		msg.ReadString(str, sizeof(str));
-	}
-
-	if (server.m_iFlags & S2A_EDF_GAMEID)
-	{
-		uint64 ulGameID;
-		msg.ReadBytes(&ulGameID, 8);
-	}
-
-	Msg("CServerListMsgHandler: server processed\n%s\n", server.ToString());
-	
-	// Update this server in the list
-	m_pList->UpdateServer(&server.m_NetAdr, server, recvTime);
-
-	return true;
-}
 
 //-----------------------------------------------------------------------------
 // Purpose: Comparison function used in query redblack tree
@@ -159,7 +49,7 @@ CServerList::CServerList(IServerListResponse *target) : m_Queries(0, MAX_QUERY_S
 
 	// setup sockets
 	m_pQuery = new CSocket(0);
-	m_pQuery->AddHandler(new CServerListMsgHandler(this));
+	m_pQuery->AddHandler(new CServerDetailsMsgHandler(this));
 }
 
 //-----------------------------------------------------------------------------
@@ -245,6 +135,13 @@ unsigned int CServerList::AddNewServer(serveritem_t &server)
 	}
 	*/
 
+	FOR_EACH_VEC(m_Servers, i)
+	{
+		if (server.m_NetAdr.CompareAdr(m_Servers[i].m_NetAdr))
+			return 0;
+	}
+	DevMsg("Adding %s to the list\n", server.m_NetAdr.ToString());
+
 	unsigned int serverID = m_Servers.AddToTail(server);
 	//m_Servers[serverID].serverID = serverID;
 	return serverID;
@@ -313,17 +210,24 @@ void CServerList::StartRefresh()
 //-----------------------------------------------------------------------------
 // Purpose: Handles a refresh response from a server
 //-----------------------------------------------------------------------------
-void CServerList::UpdateServer(netadr_t* adr, serveritem_t& sv, double recvTime)
+void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 {
 	if (!m_pResponseTarget)
 		return;
 
 	// find the reply in the query list
 	query_t finder;
-	finder.addr = *adr;
+	finder.addr = adr;
 	int queryIndex = m_Queries.Find(finder);
+
+	// Check if query exists
 	if (queryIndex == m_Queries.InvalidIndex())
+	{
+		int id = AddNewServer(sv);
+		m_Servers[id].m_bHadSuccessfulResponse = true;
+		m_pResponseTarget->ServerResponded(m_Servers[id]);
 		return;
+	}
 
 	DevMsg("CServerList::UpdateServer: Updating \"%s\" server\n", sv.m_szServerName);
 
@@ -352,10 +256,25 @@ void CServerList::UpdateServer(netadr_t* adr, serveritem_t& sv, double recvTime)
 
 	int ping = (int)((recvTime - sendTime) * 1000);
 
+	server.m_nPing = ping;
 	server.m_nReceivedStatus = INFO_RECEIVED;
 
 	// notify the UI of the new server info
 	m_pResponseTarget->ServerResponded(server);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: finds the server by address, if found returns handle
+//-----------------------------------------------------------------------------
+int CServerList::FindServer(netadr_t& adr)
+{
+	FOR_EACH_VEC(m_Servers, i)
+	{
+		if (adr.CompareAdr(m_Servers[i].m_NetAdr))
+			return i;
+	}
+
+	return 0;
 }
 
 //-----------------------------------------------------------------------------

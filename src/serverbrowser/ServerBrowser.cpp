@@ -19,7 +19,6 @@ CServerBrowser &ServerBrowser()
 }
 
 IRunGameEngine *g_pRunGameEngine = NULL;
-IServersInfo *g_pServersInfo = NULL;
 
 ConVar sb_firstopentime( "sb_firstopentime", "0", FCVAR_DEVELOPMENTONLY, "Indicates the time the server browser was first opened." );
 ConVar sb_numtimesopened( "sb_numtimesopened", "0", FCVAR_DEVELOPMENTONLY, "Indicates the number of times the server browser was opened this session." );
@@ -71,13 +70,6 @@ bool CServerBrowser::Initialize(CreateInterfaceFn *factorylist, int factoryCount
 	ConnectTier2Libraries( factorylist, factoryCount );
 	ConnectTier3Libraries( factorylist, factoryCount );
 	g_pRunGameEngine = NULL;
-
-	for ( int i = 0; i < factoryCount; ++i )
-	{
-		if( !g_pServersInfo )
-			g_pServersInfo = ( IServersInfo * )factorylist[ i ]( SERVERLIST_INTERFACE_VERSION, NULL );
-	}
-	
 
 	SteamAPI_Init();
 

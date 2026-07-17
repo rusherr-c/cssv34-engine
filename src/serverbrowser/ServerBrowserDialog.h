@@ -31,7 +31,7 @@ public:
 	void		Open( void );
 
 	// gets server info
-	newgameserver_t *GetServer(unsigned int serverID);
+	serveritem_t *GetServer(unsigned int serverID);
 	// called every frame
 	virtual void OnTick();
 
@@ -49,17 +49,17 @@ public:
 	static CServerBrowserDialog *GetInstance();
 
 	// Adds a server to the list of favorites
-	void AddServerToFavorites(newgameserver_t &server);
+	void AddServerToFavorites(serveritem_t &server);
 
 	// begins the process of joining a server from a game list
 	// the game info dialog it opens will also update the game list
-	CDialogGameInfo *JoinGame(IGameList *gameList, newgameserver_t *pServer);
+	CDialogGameInfo *JoinGame(IGameList *gameList, serveritem_t *pServer);
 
 	// joins a game by a specified IP, not attached to any game list
 	CDialogGameInfo *JoinGame(int serverIP, int serverPort, const char *pszConnectCode);
 
 	// opens a game info dialog from a game list
-	CDialogGameInfo *OpenGameInfoDialog(IGameList *gameList, newgameserver_t *pServer);
+	CDialogGameInfo *OpenGameInfoDialog(IGameList *gameList, serveritem_t *pServer);
 
 	// opens a game info dialog by a specified IP, not attached to any game list
 	CDialogGameInfo *OpenGameInfoDialog( int serverIP, uint16 connPort, uint16 queryPort, const char *pszConnectCode );
@@ -82,7 +82,7 @@ public:
 	// forces the currently active page to refresh
 	void		RefreshCurrentPage();
 
-	virtual newgameserver_t *GetCurrentConnectedServer()
+	virtual serveritem_t *GetCurrentConnectedServer()
 	{
 		return &m_CurrentConnection;
 	}
@@ -138,7 +138,7 @@ private:
 
 	// currently connected game
 	bool m_bCurrentlyConnected;
-	newgameserver_t m_CurrentConnection;
+	serveritem_t m_CurrentConnection;
 };
 
 // singleton accessor

@@ -11,18 +11,23 @@
 #include <assert.h>
 #include "winlite.h"
 #if !defined( _X360 )
-#include "winsock.h"
+#include "winsock2.h"
+#include "ws2tcpip.h"
 #else
 #include "winsockx.h"
 #endif
 #include "socket.h"
 #include "tier0/vcrmode.h"
+#include "color.h"
 
 #include <VGUI/IVGui.h>
 
 #if defined( _X360 )
 #include "xbox/xbox_win32stubs.h"
 #endif
+
+#define SOCKET_DEBUGGING 0
+const Color SocketDebugColor(255, 100, 255, 255);
 
 //-----------------------------------------------------------------------------
 // Purpose: Default message handler for received messages
@@ -115,6 +120,9 @@ bool CSocket::Open(uint16 port)
 	m_Address.SetFromSockadr(
 		(sockaddr*)&local);
 
+#if (SOCKET_DEBUGGING)
+	ConColorMsg(SocketDebugColor, "Opened socket %u at port %d\n", m_hSocket, local.sin_port);
+#endif
 	return true;
 }
 
@@ -123,6 +131,10 @@ bool CSocket::Open(uint16 port)
 //-----------------------------------------------------------------------------
 void CSocket::Close()
 {
+#if (SOCKET_DEBUGGING)
+	ConColorMsg(SocketDebugColor, "Closed socket %u\n", m_hSocket);
+#endif
+
 	if (m_hSocket != INVALID_SOCKET)
 	{
 		closesocket(m_hSocket);
@@ -145,6 +157,10 @@ int CSocket::Send(
 	const void* data,
 	int length)
 {
+#if (SOCKET_DEBUGGING)
+	ConColorMsg(SocketDebugColor, "--> Send to %s data %s len %i sock %u\n", to.ToString(), (const char*)data, length, m_hSocket);
+#endif
+
 	sockaddr addr{};
 
 	to.ToSockadr(&addr);
@@ -187,6 +203,10 @@ int CSocket::Broadcast(
 	const void* data,
 	int length)
 {
+#if (SOCKET_DEBUGGING)
+	ConColorMsg(SocketDebugColor, "--> Broadcast port %d data %s len %i sock %u\n", port, (const char*)data, length, m_hSocket);
+#endif
+
 	sockaddr_in addr{};
 
 	addr.sin_family = AF_INET;
@@ -250,6 +270,9 @@ void CSocket::Frame()
 
 			return;
 		}
+#if (SOCKET_DEBUGGING)
+		ConColorMsg(SocketDebugColor, "--> Received from %s bytes %i sock %u\n", inet_ntoa(from.sin_addr), bytes, m_hSocket);
+#endif
 
 		if (bytes <= 0)
 			break;

@@ -267,7 +267,7 @@ void CDialogGameInfo::PerformLayout()
 	SetControlString( "ServerText", m_Server.m_szServerName );
 	SetControlString( "GameText", m_Server.m_szGameDescription );
 	SetControlString( "MapText", m_Server.m_szMap );
-	SetControlString( "GameTags", m_Server.m_szGameTags );
+	//SetControlString( "GameTags", m_Server.m_szGameTags );
 
 
 	if ( !m_Server.m_bHadSuccessfulResponse )
@@ -523,7 +523,7 @@ void CDialogGameInfo::OnTick()
 //-----------------------------------------------------------------------------
 // Purpose: called when the server has successfully responded
 //-----------------------------------------------------------------------------
-void CDialogGameInfo::ServerResponded( newgameserver_t &server )
+void CDialogGameInfo::ServerResponded( serveritem_t &server )
 {
 	if (!server.m_NetAdr.GetPort() || !server.m_NetAdr.GetIPHostByteOrder())
 		return;
@@ -591,7 +591,7 @@ void CDialogGameInfo::ServerFailedToRespond()
 // way we could ask the engine itself to construct arguments in ways that fit.
 // Might be worth the effort as we start to add more engines.
 //-----------------------------------------------------------------------------
-void CDialogGameInfo::ApplyConnectCommand( const newgameserver_t &server )
+void CDialogGameInfo::ApplyConnectCommand( const serveritem_t &server )
 {
 	char command[ 256 ];
 	// set the server password, if any
@@ -609,7 +609,7 @@ void CDialogGameInfo::ApplyConnectCommand( const newgameserver_t &server )
 //-----------------------------------------------------------------------------
 // Purpose: Constructs game options to use when running a game to connect to a server
 //-----------------------------------------------------------------------------
-void CDialogGameInfo::ConstructConnectArgs( char *pchOptions, int cchOptions, const newgameserver_t &server )
+void CDialogGameInfo::ConstructConnectArgs( char *pchOptions, int cchOptions, const serveritem_t &server )
 {
 	Q_snprintf( pchOptions, cchOptions, " +connect %s", server.m_NetAdr.ToString() );
 	if ( m_szPassword[0] )

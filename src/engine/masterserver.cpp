@@ -474,8 +474,8 @@ void CMaster::ProcessConnectionlessPacket(netpacket_t*packet )
 			if (!m_bRefreshing)
 				break;
 
-			ip = htonl(msg.ReadLong());
-			port = htons(msg.ReadShort());
+			ip = msg.ReadLong();
+			port = msg.ReadShort();
 
 			while (ip != 0 && port != 0)
 			{

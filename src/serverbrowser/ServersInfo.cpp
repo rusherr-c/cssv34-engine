@@ -5,7 +5,6 @@
 
 static char masterServers[][32] =
 {
-	"80.78.244.170:27011", // css v34 default
 	"78.154.103.37:10232", // nttnmDev (https://github.com/nttnmDev/cssv34masterserver)
 };
 
@@ -14,6 +13,9 @@ static char masterServers[][32] =
 
 #define LANBROADCAST_MIN_PORT 27000
 #define LANBROADCAST_MAX_PORT 27100
+
+static CServersInfo s_serversinfo;
+CServersInfo* g_pServersInfo = &s_serversinfo;
 
 void CServersInfo::Thread(CServersInfo* pthis)
 {
@@ -36,7 +38,8 @@ void CServersInfo::Thread(CServersInfo* pthis)
 CServersInfo::CServersInfo()
 {
 	m_bInitialized = false;
-	m_pSocket = new CSocket();
+	m_pMasterSocket = new CSocket();
+	m_pQuerySocket = new CSocket();
 
 	m_szGameDir[0] = 0;
 	m_bRefreshing = false;
@@ -57,7 +60,8 @@ CServersInfo::~CServersInfo()
 
 	m_szGameDir[0] = 0;
 
-	delete m_pSocket;
+	delete m_pMasterSocket;
+	delete m_pQuerySocket;
 	delete m_pMainList;
 	delete m_pHistoryList;
 	delete m_pLanServerList;
@@ -73,6 +77,9 @@ void CServersInfo::Initialize() {
 
 	// create our thread
 	m_hThread = CreateSimpleThread((ThreadFunc_t)Thread, this);
+
+	m_pMasterSocket->AddHandler(this);
+	UseDefaultMasters();
 }
 
 // Shutdown...
@@ -92,12 +99,22 @@ void CServersInfo::RunFrame()
 	if (!m_bRefreshing)
 		return;
 
-	m_pSocket->Frame();
-	
+	m_pMasterSocket->Frame();
+	m_pQuerySocket->Frame();
+
 	if (m_pCurrentList)
 		m_pCurrentList->RunFrame();
 
 	if (m_flStartRequestTime < Plat_FloatTime() - LIST_REFRESH_TIMEOUT) {
+		if (m_pCurrentList)
+		{
+			if (m_pCurrentList->ServerCount() < 1)
+				if (m_pCurrentList->m_pResponseTarget)
+					m_pCurrentList->m_pResponseTarget->RefreshComplete(nNoServersListedOnMasterServer);
+				else;
+			else
+				m_pCurrentList->m_pResponseTarget->RefreshComplete(nServerResponded);
+		}
 		StopRefresh();
 	}
 }
@@ -106,6 +123,9 @@ void CServersInfo::RunFrame()
 void CServersInfo::RequestInternetServerList(const char* gamedir, IServerListResponse* response) {
 	if (!response || !gamedir)
 		return;
+
+	StopRefresh();
+	m_bRefreshing = true;
 
 	V_strcpy_safe(m_szGameDir, gamedir);
 	m_pMainList->m_pResponseTarget = response;
@@ -123,12 +143,15 @@ void CServersInfo::RequestLANServerList(const char* gamedir, IServerListResponse
 	if (!response || !gamedir)
 		return;
 
+	StopRefresh();
+	m_bRefreshing = true;
+
 	V_strcpy_safe(m_szGameDir, gamedir);
 	m_pLanServerList->m_pResponseTarget = response;
 	m_pCurrentList = m_pLanServerList;
 	m_flStartRequestTime = Plat_FloatTime();
 
-	char buffer[64];
+	char buffer[32];
 	bf_write msg(buffer, sizeof(buffer));
 
 	msg.WriteLong(CONNECTIONLESS_HEADER);
@@ -146,6 +169,7 @@ void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerListRe
 	if (!response || !gamedir)
 		return;
 
+	StopRefresh();
 	m_bRefreshing = true;
 
 	V_strcpy_safe(m_szGameDir, gamedir);
@@ -161,6 +185,7 @@ void CServersInfo::RequestHistoryServerList(const char* gamedir, IServerListResp
 	if (!response || !gamedir)
 		return;
 
+	StopRefresh();
 	m_bRefreshing = true;
 
 	V_strcpy_safe(m_szGameDir, gamedir);
@@ -179,8 +204,10 @@ void CServersInfo::StopRefresh() {
 	m_bRefreshing = false;
 	m_flStartRequestTime = 0.0f;
 
-	if (m_pCurrentList)
-		m_pCurrentList->StopRefresh();
+	m_pMainList->Clear(); // Clearing instead of StopRefresh
+	m_pFavoritesList->StopRefresh();
+	m_pHistoryList->StopRefresh();
+	m_pLanServerList->StopRefresh();
 }
 
 // Add server to favorites/history list
@@ -212,6 +239,7 @@ void CServersInfo::PlayerDetails(uint32 unIP, uint16 usPort, IServerPlayersRespo
 
 bool CServersInfo::CancelServerQuery(EServerQuery type, uint32 unIP, uint16 usPort) {
 	// todo
+	return true;
 }
 
 // Internal functions //
@@ -249,15 +277,101 @@ static netadr_t lastServerAddress;
 
 // Request server list from masterserver
 void CServersInfo::RequestServerList(const netadr_t& adr) {
-	
+	if (!m_bRefreshing)
+		return;
+
+	char gamedir[256];
+	strcpy(gamedir, "\\gamedir\\");
+	strcat(gamedir, m_szGameDir);
+
+	char buf[256];
+	bf_write msg(buf, sizeof(buf));
+
+	msg.WriteByte(C2M_CLIENTQUERY);
+	msg.WriteByte(0xFF);
+	msg.WriteString(lastServerAddress.ToString());
+	msg.WriteString(gamedir);
+
+	m_pMasterSocket->Send(adr, msg);
 }
 
 // Process server list
-void CServersInfo::ProcessServerList(bf_read* msg) {
+void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg) {
+	if (!m_bRefreshing)
+		return;
 
+	uint32 unIP = ntohl(msg.ReadLong());
+	uint16 usPort = ntohs(msg.ReadShort());
+	uint32 id = 0;
+
+	while (unIP != 0 && usPort != 0)
+	{
+		serveritem_t server{};
+		server.m_NetAdr = netadr_t(unIP, usPort);
+
+		// Add this server to server list
+		id = m_pMainList->AddNewServer(server);
+		// Add to refresh list
+		m_pMainList->AddServerToRefreshList(id);
+
+		// Next ip & port
+		unIP = ntohl(msg.ReadLong());
+		usPort = ntohs(msg.ReadShort());
+
+		lastServerAddress.SetIPAndPort(unIP, usPort);
+		//RequestServerList(from);
+	}
+
+	if (lastServerAddress.IsValid())
+	{
+		RequestServerList(from);
+	}
+
+	// Start Refreshing
+	m_pMainList->StartRefresh();
 }
 
 // CMsgHandler
-bool CServersInfo::Process(netadr_t* from, bf_read* msg) {
+bool CServersInfo::Process(const netadr_t& from, bf_read& msg) {
 
+	// check connectionless header
+	if (msg.ReadLong() != CONNECTIONLESS_HEADER)
+		return false;
+
+	char c = msg.ReadByte();
+
+	switch (c)
+	{
+
+	case M2C_QUERY:
+	{
+		// Next after 'f' is 0A
+		if (msg.ReadByte() != 0x0A)
+			return false;
+
+		FOR_EACH_VEC(m_vecMasterAddresses, i)
+		{
+			if (!from.CompareAdr(m_vecMasterAddresses[i]))
+				continue;
+			else
+				break;
+
+			return false;
+		}
+
+		ProcessServerList(from, msg);
+
+		break;
+	}
+	case S2A_INFOREPLY:
+	{
+		// todo
+		break;
+	}
+	default:
+		break;
+
+	}
+
+	return true;
 }

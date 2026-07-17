@@ -41,7 +41,7 @@ public:
 
 	// implementation of IServerRefreshResponse interface
 	// called when the server has successfully responded
-	virtual void ServerResponded( newgameserver_t &server );
+	virtual void ServerResponded( serveritem_t &server );
 
 	// called when a server response has timed out
 	virtual void ServerFailedToRespond();
@@ -92,8 +92,8 @@ private:
 	void RequestInfo();
 	void ConnectToServer();
 	void ShowAutoRetryOptions(bool state);
-	void ConstructConnectArgs( char *pchOptions, int cchOptions, const newgameserver_t &server );
-	void ApplyConnectCommand( const newgameserver_t &server );
+	void ConstructConnectArgs( char *pchOptions, int cchOptions, const serveritem_t &server );
+	void ApplyConnectCommand( const serveritem_t &server );
 
 	vgui::Button *m_pConnectButton;
 	vgui::Button *m_pCloseButton;
@@ -120,7 +120,7 @@ private:
 	uint64 m_SteamIDFriend;
 
 	CUtlString m_sConnectCode;
-	newgameserver_t m_Server;
+	serveritem_t m_Server;
 	bool m_bPlayerListUpdatePending;
 };
 
