@@ -460,8 +460,6 @@ void CMissile::IgniteThink( void )
 		{
 			color32 white = { 255,225,205,64 };
 			UTIL_ScreenFade( pPlayer, white, 0.1f, 0.0f, FFADE_IN );
-
-			pPlayer->RumbleEffect( RUMBLE_RPG_MISSILE, 0, RUMBLE_FLAG_RESTART );
 		}
 	}
 
@@ -1630,8 +1628,6 @@ void CWeaponRPG::PrimaryAttack( void )
 
 	SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 	WeaponSound( SINGLE );
-
-	pOwner->RumbleEffect( RUMBLE_SHOTGUN_SINGLE, 0, RUMBLE_FLAG_RESTART );
 
 	m_iPrimaryAttacks++;
 	gamestats->Event_WeaponFired( pOwner, true, GetClassname() );

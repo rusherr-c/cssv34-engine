@@ -1615,8 +1615,6 @@ void CBasePlayer::Event_Killed( const CTakeDamageInfo &info )
 
 	gamestats->Event_PlayerKilled( this, info );
 
-	RumbleEffect( RUMBLE_STOP_ALL, 0, RUMBLE_FLAGS_NONE );
-
 	ClearUseEntity();
 	
 	// this client isn't going to be thinking for a while, so reset the sound until they respawn
@@ -2243,7 +2241,7 @@ bool CBasePlayer::StartObserverMode(int mode)
 
 bool CBasePlayer::SetObserverMode(int mode )
 {
-	if ( mode < OBS_MODE_NONE || mode >= NUM_OBSERVER_MODES )
+	if ( mode < OBS_MODE_NONE || mode > OBS_MODE_ROAMING )
 		return false;
 
 
@@ -2626,10 +2624,7 @@ bool CBasePlayer::IsValidObserverTarget(CBaseEntity * target)
 		switch ( mp_forcecamera.GetInt() )	
 		{
 			case OBS_ALLOW_ALL	    :	break;
-			case OBS_ALLOW_TEAM     :
-			case OBS_ALLOW_TEAM_ALL :	if ( GetTeamNumber() != target->GetTeamNumber() )
-											return false;
-										break;
+			case OBS_ALLOW_TEAM     :	break;
 			case OBS_ALLOW_NONE     :	return false;
 		}
 	}
@@ -4893,8 +4888,6 @@ void CBasePlayer::Spawn( void )
 		gameeventmanager->FireEvent( event );
 	}
 
-	RumbleEffect( RUMBLE_STOP_ALL, 0, RUMBLE_FLAGS_NONE );
-
 	// Calculate this immediately
 	m_nVehicleViewSavedFrame = 0;
 }
@@ -4904,8 +4897,6 @@ void CBasePlayer::Activate( void )
 	BaseClass::Activate();
 
 	AimTarget_ForceRepopulateList();
-
-	RumbleEffect( RUMBLE_STOP_ALL, 0, RUMBLE_FLAGS_NONE );
 
 	// Reset the analog bias. If the player is in a vehicle when the game
 	// reloads, it will autosense and apply the correct bias.
@@ -5405,9 +5396,6 @@ void CBasePlayer::LeaveVehicle( const Vector &vecExitPoint, const QAngle &vecExi
 			ShowCrosshair( true );
 		}
 	}
-
-	// Just cut all of the rumble effects. 
-	RumbleEffect( RUMBLE_STOP_ALL, 0, RUMBLE_FLAGS_NONE );
 }
 
 
@@ -6209,12 +6197,6 @@ bool CBasePlayer::ClientCommand( const CCommand &args )
 	{
 		int mode;
 
-		if ( GetObserverMode() == OBS_MODE_FREEZECAM )
-		{
-			AttemptToExitFreezeCam();
-			return true;
-		}
-
 		// not allowed to change spectator modes when mp_fadetoblack is being used
 		if ( mp_fadetoblack.GetBool() )
 		{
@@ -6275,10 +6257,6 @@ bool CBasePlayer::ClientCommand( const CCommand &args )
 				SetObserverTarget( target );
 			}
 		}
-		else if ( GetObserverMode() == OBS_MODE_FREEZECAM )
-		{
-			AttemptToExitFreezeCam();
-		}
 		
 		return true;
 	}
@@ -6292,10 +6270,6 @@ bool CBasePlayer::ClientCommand( const CCommand &args )
 			{
 				SetObserverTarget( target );
 			}
-		}
-		else if ( GetObserverMode() == OBS_MODE_FREEZECAM )
-		{
-			AttemptToExitFreezeCam();
 		}
 		
 		return true;
@@ -6664,21 +6638,6 @@ void CBasePlayer::UpdateClientData( void )
 
 	// Let any global rules update the HUD, too
 	g_pGameRules->UpdateClientData( this );
-}
-
-void CBasePlayer::RumbleEffect( unsigned char index, unsigned char rumbleData, unsigned char rumbleFlags )
-{
-	if( !IsAlive() )
-		return;
-
-	CSingleUserRecipientFilter filter( this );
-	filter.MakeReliable();
-
-	UserMessageBegin( filter, "Rumble" );
-	WRITE_BYTE( index );
-	WRITE_BYTE( rumbleData );
-	WRITE_BYTE( rumbleFlags	);
-	MessageEnd();
 }
 
 void CBasePlayer::EnableControl(bool fControl)

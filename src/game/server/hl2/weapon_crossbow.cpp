@@ -640,8 +640,6 @@ void CWeaponCrossbow::FireBolt( void )
 	if ( pOwner == NULL )
 		return;
 
-	pOwner->RumbleEffect( RUMBLE_357, 0, RUMBLE_FLAG_RESTART );
-
 	Vector vecAiming	= pOwner->GetAutoaimVector( 0 );
 	Vector vecSrc		= pOwner->Weapon_ShootPosition();
 

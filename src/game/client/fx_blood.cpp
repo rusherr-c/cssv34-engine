@@ -26,7 +26,7 @@
 #include "tier0/memdbgon.h"
 
 CLIENTEFFECT_REGISTER_BEGIN( PrecacheEffectBloodSpray )
-CLIENTEFFECT_MATERIAL( "effects/blood_platform" )
+CLIENTEFFECT_MATERIAL( "effects/blood_core" )
 CLIENTEFFECT_MATERIAL( "effects/blood_gore" )
 CLIENTEFFECT_MATERIAL( "effects/blood_drop" )
 CLIENTEFFECT_MATERIAL( "effects/blood_puff" )

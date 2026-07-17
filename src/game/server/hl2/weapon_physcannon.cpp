@@ -1676,12 +1676,6 @@ bool CWeaponPhysCannon::Holster( CBaseCombatWeapon *pSwitchingTo )
 		}
 	}
 
-	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
-	if ( pOwner )
-	{
-		pOwner->RumbleEffect( RUMBLE_PHYSCANNON_OPEN, 0, RUMBLE_FLAG_STOP );
-	}
-
 	ForceDrop();
 
 	return BaseClass::Holster( pSwitchingTo );
@@ -1694,12 +1688,6 @@ void CWeaponPhysCannon::DryFire( void )
 {
 	SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 	WeaponSound( EMPTY );
-
-	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
-	if ( pOwner )
-	{
-		pOwner->RumbleEffect( RUMBLE_PISTOL, 0, RUMBLE_FLAG_RESTART );
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1782,7 +1770,6 @@ void CWeaponPhysCannon::Physgun_OnPhysGunPickup( CBaseEntity *pEntity, CBasePlay
 
 	if( reason == PUNTED_BY_CANNON )
 	{
-		pOwner->RumbleEffect( RUMBLE_357, 0, RUMBLE_FLAGS_NONE );
 		RecordThrownObject( pEntity );
 	}
 
@@ -2854,11 +2841,6 @@ void CWeaponPhysCannon::DetachObject( bool playSound, bool wasLaunched )
 	{
 		pOwner->EnableSprint( true );
 		pOwner->SetMaxSpeed( hl2_normspeed.GetFloat() );
-		
-		if( wasLaunched )
-		{
-			pOwner->RumbleEffect( RUMBLE_357, 0, RUMBLE_FLAG_RESTART );
-		}
 	}
 
 	CBaseEntity *pObject = m_grabController.GetAttached();
@@ -3464,11 +3446,6 @@ void CWeaponPhysCannon::OpenElements( void )
 	if ( pOwner == NULL )
 		return;
 
-	if( !IsMegaPhysCannon() )
-	{
-		pOwner->RumbleEffect( RUMBLE_PHYSCANNON_OPEN, 0, RUMBLE_FLAG_RESTART );
-	}
-
 	if ( m_flElementPosition < 0.0f )
 		m_flElementPosition = 0.0f;
 
@@ -3502,8 +3479,6 @@ void CWeaponPhysCannon::CloseElements( void )
 
 	if ( pOwner == NULL )
 		return;
-
-	pOwner->RumbleEffect(RUMBLE_PHYSCANNON_OPEN, 0, RUMBLE_FLAG_STOP);
 
 	if ( m_flElementPosition > 1.0f )
 		m_flElementPosition = 1.0f;

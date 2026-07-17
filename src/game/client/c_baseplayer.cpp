@@ -438,8 +438,6 @@ void C_BasePlayer::Spawn( void )
 	SetThink(NULL);
 
 	SharedSpawn();
-
-	m_bWasFreezeFraming = false;
 }
 
 //-----------------------------------------------------------------------------
@@ -616,7 +614,6 @@ void C_BasePlayer::OnPreDataChanged( DataUpdateType_t updateType )
 		m_iOldAmmo[i] = GetAmmoCount(i);
 	}
 
-	m_bWasFreezeFraming = (GetObserverMode() == OBS_MODE_FREEZECAM);
 	m_OldFog = m_Local.m_fog;
 
 	BaseClass::OnPreDataChanged( updateType );
@@ -692,39 +689,6 @@ void C_BasePlayer::PostDataUpdate( DataUpdateType_t updateType )
 			m_flOldPlayerZ = GetLocalOrigin().z;
 		}
 		SetLocalAngles( angles );
-
-		if ( !m_bWasFreezeFraming && GetObserverMode() == OBS_MODE_FREEZECAM )
-		{
-			m_vecFreezeFrameStart = MainViewOrigin();
-			m_flFreezeFrameStartTime = gpGlobals->curtime;
-			m_flFreezeFrameDistance = RandomFloat( spec_freeze_distance_min.GetFloat(), spec_freeze_distance_max.GetFloat() );
-			m_flFreezeZOffset = RandomFloat( -30, 20 );
-			m_bSentFreezeFrame = false;
-
-			IGameEvent *pEvent = gameeventmanager->CreateEvent( "show_freezepanel" );
-			if ( pEvent )
-			{
-				pEvent->SetInt( "killer", GetObserverTarget() ? GetObserverTarget()->entindex() : 0 );
-				gameeventmanager->FireEventClientSide( pEvent );
-			}
-
-			// Force the sound mixer to the freezecam mixer
-			ConVar *pVar = (ConVar *)cvar->FindVar( "snd_soundmixer" );
-			pVar->SetValue( "FreezeCam_Only" );
-		}
-		else if ( m_bWasFreezeFraming && GetObserverMode() != OBS_MODE_FREEZECAM )
-		{
-			IGameEvent *pEvent = gameeventmanager->CreateEvent( "hide_freezepanel" );
-			if ( pEvent )
-			{
-				gameeventmanager->FireEventClientSide( pEvent );
-			}
-
-			view->FreezeFrame(0);
-
-			ConVar *pVar = (ConVar *)cvar->FindVar( "snd_soundmixer" );
-			pVar->Revert();
-		}
 	}
 
 	// If we are updated while paused, allow the player origin to be snapped by the
@@ -740,8 +704,7 @@ void C_BasePlayer::PostDataUpdate( DataUpdateType_t updateType )
 //-----------------------------------------------------------------------------
 bool C_BasePlayer::CanSetSoundMixer( void )
 {
-	// Can't set sound mixers when we're in freezecam mode, since it has a code-enforced mixer
-	return (GetObserverMode() != OBS_MODE_FREEZECAM);
+	return true;
 }
 
 void C_BasePlayer::ReceiveMessage( int classID, bf_read &msg )
@@ -1354,89 +1317,6 @@ void C_BasePlayer::CalcRoamingView(Vector& eyeOrigin, QAngle& eyeAngles, float& 
 	eyeOrigin += vSmoothOffset;
 
 	fov = GetFOV();
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Calculate the view for the player while he's in freeze frame observer mode
-//-----------------------------------------------------------------------------
-void C_BasePlayer::CalcFreezeCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov )
-{
-	C_BaseEntity *pTarget = GetObserverTarget();
-	if ( !pTarget )
-	{
-		CalcDeathCamView( eyeOrigin, eyeAngles, fov );
-		return;
-	}
-
-	// Zoom towards our target
-	float flCurTime = (gpGlobals->curtime - m_flFreezeFrameStartTime);
-	float flBlendPerc = clamp( flCurTime / spec_freeze_traveltime.GetFloat(), 0, 1 );
-	flBlendPerc = SimpleSpline( flBlendPerc );
-
-	Vector vecCamDesired = pTarget->GetObserverCamOrigin();	// Returns ragdoll origin if they're ragdolled
-	VectorAdd( vecCamDesired, GetChaseCamViewOffset( pTarget ), vecCamDesired );
-	Vector vecCamTarget = vecCamDesired;
-	if ( pTarget->IsAlive() )
-	{
-		// Look at their chest, not their head
-		Vector maxs = GameRules()->GetViewVectors()->m_vHullMax;
-		vecCamTarget.z -= (maxs.z * 0.5);
-	}
-	else
-	{
-		vecCamTarget.z += VEC_DEAD_VIEWHEIGHT.z;	// look over ragdoll, not through
-	}
-
-	// Figure out a view position in front of the target
-	Vector vecEyeOnPlane = eyeOrigin;
-	vecEyeOnPlane.z = vecCamTarget.z;
-	Vector vecTargetPos = vecCamTarget;
-	Vector vecToTarget = vecTargetPos - vecEyeOnPlane;
-	VectorNormalize( vecToTarget );
-
-	// Stop a few units away from the target, and shift up to be at the same height
-	vecTargetPos = vecCamTarget - (vecToTarget * m_flFreezeFrameDistance);
-	float flEyePosZ = pTarget->EyePosition().z;
-	vecTargetPos.z = flEyePosZ + m_flFreezeZOffset;
-
-	// Now trace out from the target, so that we're put in front of any walls
-	trace_t trace;
-	C_BaseEntity::PushEnableAbsRecomputations( false ); // HACK don't recompute positions while doing RayTrace
-	UTIL_TraceHull( vecCamTarget, vecTargetPos, WALL_MIN, WALL_MAX, MASK_SOLID, pTarget, COLLISION_GROUP_NONE, &trace );
-	C_BaseEntity::PopEnableAbsRecomputations();
-	if (trace.fraction < 1.0)
-	{
-		// The camera's going to be really close to the target. So we don't end up
-		// looking at someone's chest, aim close freezecams at the target's eyes.
-		vecTargetPos = trace.endpos;
-		vecCamTarget = vecCamDesired;
-
-		// To stop all close in views looking up at character's chins, move the view up.
-		vecTargetPos.z += fabs(vecCamTarget.z - vecTargetPos.z) * 0.85;
-		C_BaseEntity::PushEnableAbsRecomputations( false ); // HACK don't recompute positions while doing RayTrace
-		UTIL_TraceHull( vecCamTarget, vecTargetPos, WALL_MIN, WALL_MAX, MASK_SOLID, pTarget, COLLISION_GROUP_NONE, &trace );
-		C_BaseEntity::PopEnableAbsRecomputations();
-		vecTargetPos = trace.endpos;
-	}
-
-	// Look directly at the target
-	vecToTarget = vecCamTarget - vecTargetPos;
-	VectorNormalize( vecToTarget );
-	VectorAngles( vecToTarget, eyeAngles );
-	
-	VectorLerp( m_vecFreezeFrameStart, vecTargetPos, flBlendPerc, eyeOrigin );
-
-	if ( flCurTime >= spec_freeze_traveltime.GetFloat() && !m_bSentFreezeFrame )
-	{
-		IGameEvent *pEvent = gameeventmanager->CreateEvent( "freezecam_started" );
-		if ( pEvent )
-		{
-			gameeventmanager->FireEventClientSide( pEvent );
-		}
-
-		m_bSentFreezeFrame = true;
-		view->FreezeFrame( spec_freeze_time.GetFloat() );
-	}
 }
 
 void C_BasePlayer::CalcInEyeCamView(Vector& eyeOrigin, QAngle& eyeAngles, float& fov)
@@ -2290,15 +2170,6 @@ IMaterial *C_BasePlayer::GetHeadLabelMaterial( void )
 		return NULL;
 
 	return GetClientVoiceMgr()->GetHeadLabelMaterial();
-}
-
-bool IsInFreezeCam( void )
-{
-	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
-	if ( pPlayer && pPlayer->GetObserverMode() == OBS_MODE_FREEZECAM )
-		return true;
-
-	return false;
 }
 
 //-----------------------------------------------------------------------------

@@ -65,7 +65,7 @@
 #error Bit buffers must be a multiple of 4 bytes
 #endif
 
-#define MIN_ROUTABLE_PAYLOAD		128		// minimum playload size. 128 in src2006
+#define MIN_ROUTABLE_PAYLOAD		16		// minimum payload size
 
 #define NETMSG_TYPE_BITS	5	// must be 2^NETMSG_TYPE_BITS > SVC_LASTMSG. Correct!
 

@@ -51,9 +51,6 @@ public:
 #define CHASE_CAM_DISTANCE		96.0f
 #define WALL_OFFSET				6.0f
 
-
-bool IsInFreezeCam( void );
-
 //-----------------------------------------------------------------------------
 // Purpose: Base Player class
 //-----------------------------------------------------------------------------
@@ -408,7 +405,6 @@ protected:
 	void				CalcInEyeCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov );
 	virtual void		CalcDeathCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov );
 	void				CalcRoamingView(Vector& eyeOrigin, QAngle& eyeAngles, float& fov);
-	void				CalcFreezeCamView( Vector& eyeOrigin, QAngle& eyeAngles, float& fov );
 
 	// Check to see if we're in vgui input mode...
 	void DetermineVguiInputMode( CUserCmd *pCmd );
@@ -431,7 +427,6 @@ protected:
 	Vector			m_vecFreezeFrameStart;
 	float			m_flFreezeFrameStartTime;	// Time at which we entered freeze frame observer mode
 	float			m_flFreezeFrameDistance;
-	bool			m_bWasFreezeFraming; 
 	float			m_flDeathTime;		// last time player died
 
 	float			m_flStepSoundTime;

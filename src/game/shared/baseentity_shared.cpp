@@ -1551,29 +1551,6 @@ void CBaseEntity::FireBullets( const FireBulletsInfo_t &info )
 	bDoServerEffects = false;
 #endif
 
-#if defined( GAME_DLL )
-	if( IsPlayer() )
-	{
-		CBasePlayer *pPlayer = dynamic_cast<CBasePlayer*>(this);
-
-		int rumbleEffect = pPlayer->GetActiveWeapon()->GetRumbleEffect();
-
-		if( rumbleEffect != RUMBLE_INVALID )
-		{
-			if( rumbleEffect == RUMBLE_SHOTGUN_SINGLE )
-			{
-				if( info.m_iShots == 12 )
-				{
-					// Upgrade to double barrel rumble effect
-					rumbleEffect = RUMBLE_SHOTGUN_DOUBLE;
-				}
-			}
-
-			pPlayer->RumbleEffect( rumbleEffect, 0, RUMBLE_FLAG_RESTART );
-		}
-	}
-#endif// GAME_DLL
-
 	int iPlayerDamage = info.m_iPlayerDamage;
 	if ( iPlayerDamage == 0 )
 	{

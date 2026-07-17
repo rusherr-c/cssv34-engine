@@ -197,9 +197,6 @@ void CHudVoiceStatus::OnThink( void )
 
 bool CHudVoiceStatus::ShouldDraw()
 {
-	if ( IsInFreezeCam() == true )
-		return false;
-
 	return true;
 }
 
@@ -235,8 +232,7 @@ void CHudVoiceStatus::Paint()
 	for( i = m_SpeakingList.Head(); i != m_SpeakingList.InvalidIndex(); i = m_SpeakingList.Next(i) )
 	{
 		int playerIndex = m_SpeakingList.Element(i);
-		bool bIsAlive = g_PR->IsAlive( playerIndex );
-
+		
 		Color c = g_PR->GetTeamColor( g_PR ? g_PR->GetTeam(playerIndex) : TEAM_UNASSIGNED );
 
 		c[3] = 128;
@@ -281,35 +277,12 @@ void CHudVoiceStatus::Paint()
 		// Draw the item background
 		surface()->DrawSetColor( c );
 		surface()->DrawFilledRect( xpos, ypos, xpos + item_wide, ypos + item_tall );
-	
-		int iDeathIconWidth = 0;
-
-		if ( bIsAlive == false && m_iDeadImageID != -1 )
-		{
-			Vertex_t vert[4];	
-			float uv1 = 0.0f;
-			float uv2 = 1.0f;
-
-			// Draw the dead material
-			surface()->DrawSetTexture( m_iDeadImageID );
-
-			vert[0].Init( Vector2D( xpos, ypos ), Vector2D( uv1, uv1 ) );
-			vert[1].Init( Vector2D( xpos + icon_wide, ypos ), Vector2D( uv2, uv1 ) );
-			vert[2].Init( Vector2D( xpos + icon_wide, ypos + icon_tall ), Vector2D( uv2, uv2 ) );				
-			vert[3].Init( Vector2D( xpos, ypos + icon_tall ), Vector2D( uv1, uv2 ) );
-
-			surface()->DrawSetColor( Color(255,255,255,255) );
-
-			surface()->DrawTexturedPolygon( 4, vert );
-
-			iDeathIconWidth = icon_wide;
-		}
 
 		// Draw the voice icon
-		m_pVoiceIcon->DrawSelf( xpos + icon_xpos + iDeathIconWidth, ypos + icon_ypos, icon_wide, icon_tall, m_clrIcon );
+		m_pVoiceIcon->DrawSelf( xpos + icon_xpos, ypos + icon_ypos, icon_wide, icon_tall, m_clrIcon );
 
 		// Draw the player's name
-		surface()->DrawSetTextPos( xpos + text_xpos + iDeathIconWidth, ypos + ( item_tall / 2 ) - ( iFontHeight / 2 ) );
+		surface()->DrawSetTextPos( xpos + text_xpos, ypos + ( item_tall / 2 ) - ( iFontHeight / 2 ) );
 
 		int iTextSpace = item_wide - text_xpos;
 

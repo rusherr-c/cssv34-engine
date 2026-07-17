@@ -439,9 +439,6 @@ void CPropCrane::EnterVehicle( CBaseCombatCharacter *pPassenger )
 		m_hPlayer = pPlayer;
 		m_playerOn.FireOutput( pPlayer, this, 0 );
 
-		m_hPlayer->RumbleEffect( RUMBLE_FLAT_BOTH, 0, RUMBLE_FLAG_LOOP );
-		m_hPlayer->RumbleEffect( RUMBLE_FLAT_BOTH, 10, RUMBLE_FLAG_UPDATE_SCALE );
-
 		m_ServerVehicle.SoundStart();
 	}
 	else
@@ -557,21 +554,6 @@ void CPropCrane::DriveCrane( int iDriverButtons, int iButtonsPressed, float flNP
 	{
 		m_flTurn = UTIL_Approach( 0, m_flTurn, m_flTurnDecel * gpGlobals->frametime );
 		m_iTurning = TURNING_NOT;
-	}
-
-	if ( m_hPlayer )
-	{
-		float maxTurn = GetMaxTurnRate();
-		static float maxRumble = 0.35f;
-		static float minRumble = 0.1f;
-		float rumbleRange = maxRumble - minRumble;
-		float rumble;
-
-		float factor = fabs(m_flTurn) / maxTurn;
-		factor = min( factor, 1.0f );
-		rumble = minRumble + (rumbleRange * factor);
-
-		m_hPlayer->RumbleEffect( RUMBLE_FLAT_BOTH, (int)(rumble * 100), RUMBLE_FLAG_UPDATE_SCALE );
 	}
 
 	SetLocalAngularVelocity( QAngle(0,m_flTurn * 10,0) );
@@ -895,14 +877,6 @@ void CPropCrane::SetNPCDriver( CNPC_VehicleDriver *pDriver )
 //-----------------------------------------------------------------------------
 void CPropCrane::PreExitVehicle( CBaseCombatCharacter *pPlayer, int nRole )
 {
-	if ( pPlayer != m_hPlayer )
-		return;
-
-	if ( m_hPlayer != NULL )
-	{
-		// Stop rumbles
-		m_hPlayer->RumbleEffect( RUMBLE_FLAT_BOTH, 0, RUMBLE_FLAG_STOP );
-	}
 }
 
 //========================================================================================================================================

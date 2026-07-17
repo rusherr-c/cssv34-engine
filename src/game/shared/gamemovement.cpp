@@ -3866,10 +3866,6 @@ void CGameMovement::PlayerRoughLandingEffects( float fvol )
 		{
 			player->m_Local.m_vecPunchAngle.Set( PITCH, 8 );
 		}
-
-#if !defined( CLIENT_DLL )
-		player->RumbleEffect( ( fvol > 0.85f ) ? ( RUMBLE_FALL_LONG ) : ( RUMBLE_FALL_SHORT ), 0, RUMBLE_FLAGS_NONE );
-#endif
 	}
 }
 

@@ -218,8 +218,6 @@ void CWeaponAR2::DelayedAttack( void )
 	
 	WeaponSound( WPN_DOUBLE );
 
-	pOwner->RumbleEffect(RUMBLE_SHOTGUN_DOUBLE, 0, RUMBLE_FLAG_RESTART );
-
 	// Fire the bullets
 	Vector vecSrc	 = pOwner->Weapon_ShootPosition( );
 	Vector vecAiming = pOwner->GetAutoaimVector( AUTOAIM_SCALE_DEFAULT );
@@ -282,10 +280,6 @@ void CWeaponAR2::SecondaryAttack( void )
 	m_flNextPrimaryAttack = m_flNextSecondaryAttack = m_flDelayedFire = gpGlobals->curtime + 0.5f;
 
 	CBasePlayer *pPlayer = ToBasePlayer( GetOwner() );
-	if( pPlayer )
-	{
-		pPlayer->RumbleEffect(RUMBLE_AR2_ALT_FIRE, 0, RUMBLE_FLAG_RESTART );
-	}
 
 	SendWeaponAnim( ACT_VM_FIDGET );
 	WeaponSound( SPECIAL1 );

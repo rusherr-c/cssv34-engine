@@ -142,9 +142,6 @@ void CBaseHLBludgeonWeapon::Hit( trace_t &traceHit, Activity nHitActivity, bool 
 	//Make sound for the AI
 	CSoundEnt::InsertSound( SOUND_BULLET_IMPACT, traceHit.endpos, 400, 0.2f, pPlayer );
 
-	// This isn't great, but it's something for when the crowbar hits.
-	pPlayer->RumbleEffect( RUMBLE_AR2, 0, RUMBLE_FLAG_RESTART );
-
 	CBaseEntity	*pHitEntity = traceHit.m_pEnt;
 
 	//Apply damage to a hit target
@@ -297,8 +294,6 @@ void CBaseHLBludgeonWeapon::Swing( int bIsSecondary )
 	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 	if ( !pOwner )
 		return;
-
-	pOwner->RumbleEffect( RUMBLE_CROWBAR_SWING, 0, RUMBLE_FLAG_RESTART );
 
 	Vector swingStart = pOwner->Weapon_ShootPosition( );
 	Vector forward;

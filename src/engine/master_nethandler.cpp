@@ -205,10 +205,10 @@ void CMasterNETHandler::NET_SendPacket(int ns, const netadr_t& to, const byte* d
 	int ret = sendto(*SendSocket, (const char*)data, length, 0, &addr, sizeof(addr));
 	if (ret == SOCKET_ERROR)
 		Warning("CMasterNETHandler: failed sending packet (socket %i, to %s, length %i), WSA Last Error %i\n", ns, to.ToString(), length, WSAGetLastError());
-	else
-		Msg("CMasterNETHandler: send packet socket %i, to %s, length %i, data: \n", ns, to.ToString(), length);
+	//else
+		//Msg("CMasterNETHandler: send packet socket %i, to %s, length %i, data: \n", ns, to.ToString(), length);
 	
-	DumpPacket(data, length);
+	//DumpPacket(data, length);
 }
 
 void CMasterNETHandler::PacketReceived(sockaddr_in& from, byte* data, int length) {
@@ -229,7 +229,7 @@ void CMasterNETHandler::PacketReceived(sockaddr_in& from, byte* data, int length
 
 	packet.size = length;
 
-	Msg("CMasterNETHandler: packet received from %s, data %s, length %i\n", packet.from.ToString(), data, length);
+	//Msg("CMasterNETHandler: packet received from %s, data %s, length %i\n", packet.from.ToString(), data, length);
 
 	if (serverqueries->IsValidQuery(k_eQuery_Any, packet.from)) {
 		serverqueries->ProcessConnectionlessPacket(&packet);

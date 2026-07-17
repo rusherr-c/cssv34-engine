@@ -344,8 +344,6 @@ void CWeaponSMG1::SecondaryAttack( void )
 	// MUST call sound before removing a round from the clip of a CMachineGun
 	BaseClass::WeaponSound( WPN_DOUBLE );
 
-	pPlayer->RumbleEffect( RUMBLE_357, 0, RUMBLE_FLAGS_NONE );
-
 	Vector vecSrc = pPlayer->Weapon_ShootPosition();
 	Vector	vecThrow;
 	// Don't autoaim on grenade tosses

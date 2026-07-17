@@ -684,17 +684,6 @@ void CPropAirboat::PreExitVehicle( CBaseCombatCharacter *pPlayer, int nRole )
 	// Stop shooting.
 	m_nGunState = GUN_STATE_IDLE;
 
-	CBaseEntity *pDriver = GetDriver();
-	CBasePlayer *pPlayerDriver;
-	if( pDriver && pDriver->IsPlayer() )
-	{
-		pPlayerDriver = dynamic_cast<CBasePlayer*>(pDriver);
-		if( pPlayerDriver )
-		{
-			pPlayerDriver->RumbleEffect( RUMBLE_AIRBOAT_GUN, 0, RUMBLE_FLAG_STOP );
-		}
-	}
-
 	BaseClass::PreExitVehicle( pPlayer, nRole );
 }
 
@@ -1617,17 +1606,6 @@ void CPropAirboat::FireGun( )
 
 	FireBullets( info );
 
-	CBaseEntity *pDriver = GetDriver();
-	CBasePlayer *pPlayerDriver;
-	if( pDriver && pDriver->IsPlayer() )
-	{
-		pPlayerDriver = dynamic_cast<CBasePlayer*>(pDriver);
-		if( pPlayerDriver )
-		{
-			pPlayerDriver->RumbleEffect( RUMBLE_AIRBOAT_GUN, 0, RUMBLE_FLAG_LOOP|RUMBLE_FLAG_ONLYONE );
-		}
-	}
-
 	DoMuzzleFlash();
 
 	// NOTE: This must occur after FireBullets
@@ -1705,8 +1683,6 @@ void CPropAirboat::FireGun( )
 
 void CPropAirboat::UpdateGunState( CUserCmd *ucmd )
 {
-	bool bStopRumble = false;
-
 	if ( ucmd->buttons & IN_ATTACK )
 	{
 		if ( m_nGunState == GUN_STATE_IDLE )
@@ -1723,7 +1699,6 @@ void CPropAirboat::UpdateGunState( CUserCmd *ucmd )
 			if ( m_nAmmoCount == 0 )
 			{
 				EmitSound( "Airboat.FireGunRevDown" );
-				bStopRumble = true;
 //				RemoveAllGestures();
 			}
 		}
@@ -1735,24 +1710,9 @@ void CPropAirboat::UpdateGunState( CUserCmd *ucmd )
 			if ( m_nAmmoCount != 0 )
 			{
 				EmitSound( "Airboat.FireGunRevDown" );
-				bStopRumble = true;
 //				RemoveAllGestures();
 			}
 			m_nGunState = GUN_STATE_IDLE;
-		}
-	}
-
-	if( bStopRumble )
-	{
-		CBaseEntity *pDriver = GetDriver();
-		CBasePlayer *pPlayerDriver;
-		if( pDriver && pDriver->IsPlayer() )
-		{
-			pPlayerDriver = dynamic_cast<CBasePlayer*>(pDriver);
-			if( pPlayerDriver )
-			{
-				pPlayerDriver->RumbleEffect( RUMBLE_AIRBOAT_GUN, 0, RUMBLE_FLAG_STOP );
-			}
 		}
 	}
 }

@@ -908,13 +908,6 @@ void CPropJeep::FireCannon( void )
 
 	FireBullets( info );
 
-	// Register a muzzleflash for the AI
-	if ( m_hPlayer )
-	{
-		m_hPlayer->SetMuzzleFlashTime( gpGlobals->curtime + 0.5 );
-		m_hPlayer->RumbleEffect( RUMBLE_PISTOL, 0, RUMBLE_FLAG_RESTART	);
-	}
-
 	CPASAttenuationFilter sndFilter( this, "PropJeep.FireCannon" );
 	EmitSound( sndFilter, entindex(), "PropJeep.FireCannon" );
 	
@@ -937,11 +930,6 @@ void CPropJeep::FireChargedCannon( void )
 
 	CPASAttenuationFilter sndFilter( this, "PropJeep.FireChargedCannon" );
 	EmitSound( sndFilter, entindex(), "PropJeep.FireChargedCannon" );
-
-	if( m_hPlayer )
-	{
-		m_hPlayer->RumbleEffect( RUMBLE_357, 0, RUMBLE_FLAG_RESTART );
-	}
 
 	//Find the direction the gun is pointing in
 	Vector aimDir;
@@ -1057,11 +1045,6 @@ void CPropJeep::ChargeCannon( void )
 		CPASAttenuationFilter filter( this );
 		m_sndCannonCharge = (CSoundEnvelopeController::GetController()).SoundCreate( filter, entindex(), CHAN_STATIC, "Jeep.GaussCharge", ATTN_NORM );
 
-		if ( m_hPlayer )
-		{
-			m_hPlayer->RumbleEffect( RUMBLE_FLAT_LEFT, (int)(0.1 * 100), RUMBLE_FLAG_RESTART | RUMBLE_FLAG_LOOP | RUMBLE_FLAG_INITIAL_SCALE );
-		}
-
 		assert(m_sndCannonCharge!=NULL);
 		if ( m_sndCannonCharge != NULL )
 		{
@@ -1070,21 +1053,6 @@ void CPropJeep::ChargeCannon( void )
 		}
 
 		return;
-	}
-	else
-	{
-		float flChargeAmount = ( gpGlobals->curtime - m_flCannonChargeStartTime ) / MAX_GAUSS_CHARGE_TIME;
-		if ( flChargeAmount > 1.0f )
-		{
-			flChargeAmount = 1.0f;
-		}
-
-		float rumble = flChargeAmount * 0.5f;
-
-		if( m_hPlayer )
-		{
-			m_hPlayer->RumbleEffect( RUMBLE_FLAT_LEFT, (int)(rumble * 100), RUMBLE_FLAG_UPDATE_SCALE );
-		}
 	}
 
 	//TODO: Add muzzle effect?
@@ -1100,11 +1068,6 @@ void CPropJeep::StopChargeSound( void )
 	if ( m_sndCannonCharge != NULL )
 	{
 		(CSoundEnvelopeController::GetController()).SoundFadeOut( m_sndCannonCharge, 0.1f );
-	}
-
-	if( m_hPlayer )
-	{
-		m_hPlayer->RumbleEffect( RUMBLE_FLAT_LEFT, 0, RUMBLE_FLAG_STOP );
 	}
 }
 
