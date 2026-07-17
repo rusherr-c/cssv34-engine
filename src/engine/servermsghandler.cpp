@@ -534,7 +534,7 @@ bool CClientState::ProcessSounds( SVC_Sounds *msg )
 	}
 
 	// check given length against read bits
-	return ( msg->m_nLength == (msg->m_DataIn.GetNumBitsRead()-startbit) );
+	return ( msg->m_nLength == (msg->m_DataIn.GetNumBitsRead() - startbit));
 }
 
 

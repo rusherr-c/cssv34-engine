@@ -497,7 +497,7 @@ bool RecvTable_Decode(
 }
 
 
-void RecvTable_DecodeZeros( RecvTable *pTable, void *pStruct, int objectID )
+void RecvTable_DecodeZeros( RecvTable *pTable, void *pStruct, int objectID )	// Not changed since 2006
 {
 	CRecvDecoder *pDecoder = pTable->m_pDecoder;
 	ErrorIfNot( pDecoder,

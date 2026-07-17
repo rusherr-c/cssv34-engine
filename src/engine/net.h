@@ -103,7 +103,6 @@ typedef struct netpacket_s
 	unsigned char	*data;		// pointer to raw packet data
 	bf_read			message;	// easy bitbuf data access
 	int				size;		// size in bytes
-	int				wiresize;   // size in bytes before decompression //// Didn't exist in source 2006. Not deleting to prevent code errors.
 	bool			stream;		// was send as stream
 	struct netpacket_s *pNext;	// for internal use, should be NULL in public
 } netpacket_t;
@@ -125,7 +124,7 @@ void		NET_ListenSocket( int sock, bool listen );
 // Send connectionsless string over the wire
 void		NET_OutOfBandPrintf(int sock, const netadr_t &adr, const char *format, ...);
 // Send a raw packet, connectionless must be provided (chan can be NULL)
-int			NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const  unsigned char *data, int length, bf_write *pVoicePayload = NULL, bool bUseCompression = false );
+int			NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const  unsigned char *data, int length );
 // Called periodically to maybe send any queued packets (up to 4 per frame)
 void		NET_SendQueuedPackets();
 // Start set current network configuration

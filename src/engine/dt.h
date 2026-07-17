@@ -35,7 +35,7 @@ class CDTISendTable;
 
 
 // Bit counts used to encode the information about a property.
-#define PROPINFOBITS_NUMPROPS			10
+#define PROPINFOBITS_NUMPROPS			9		// 9 in src2006
 #define PROPINFOBITS_TYPE				5
 #define PROPINFOBITS_FLAGS				SPROP_NUMFLAGBITS
 #define PROPINFOBITS_STRINGBUFFERLEN	10

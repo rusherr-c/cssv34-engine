@@ -156,7 +156,7 @@ void RecvProxy_Sequence( const CRecvProxyData *pData, void *pStruct, void *pOut 
 }
 
 IMPLEMENT_CLIENTCLASS_DT(C_BaseAnimating, DT_BaseAnimating, CBaseAnimating)
-	RecvPropInt(RECVINFO(m_nSequence), 0, RecvProxy_Sequence),
+	RecvPropInt(RECVINFO(m_nSequence)),
 	RecvPropInt(RECVINFO(m_nForceBone)),
 	RecvPropVector(RECVINFO(m_vecForce)),
 	RecvPropInt(RECVINFO(m_nSkin)),

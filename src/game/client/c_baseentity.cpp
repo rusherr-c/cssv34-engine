@@ -441,11 +441,7 @@ BEGIN_RECV_TABLE_NOBASE(C_BaseEntity, DT_BaseEntity)
 	RecvPropInt( RECVINFO(m_flSimulationTime), 0, RecvProxy_SimulationTime ),
 
 	RecvPropVector( RECVINFO_NAME( m_vecNetworkOrigin, m_vecOrigin ) ),
-#if PREDICTION_ERROR_CHECK_LEVEL > 1 
-	RecvPropVector( RECVINFO_NAME( m_angNetworkAngles, m_angRotation ) ),
-#else
 	RecvPropQAngles( RECVINFO_NAME( m_angNetworkAngles, m_angRotation ) ),
-#endif
 	RecvPropInt(RECVINFO(m_nModelIndex) ),
 
 	RecvPropInt(RECVINFO(m_fEffects), 0, RecvProxy_EffectFlags ),
@@ -475,8 +471,6 @@ BEGIN_RECV_TABLE_NOBASE(C_BaseEntity, DT_BaseEntity)
 	RecvPropBool	( RECVINFO( m_bAlternateSorting ) ),
 
 END_RECV_TABLE()
-
-const float coordTolerance = 2.0f / (float)( 1 << COORD_FRACTIONAL_BITS );
 
 BEGIN_PREDICTION_DATA_NO_BASE( C_BaseEntity )
 
@@ -508,7 +502,7 @@ BEGIN_PREDICTION_DATA_NO_BASE( C_BaseEntity )
 //	DEFINE_PRED_FIELD( m_pMovePeer, FIELD_EHANDLE ),
 //	DEFINE_PRED_FIELD( m_pMovePrevPeer, FIELD_EHANDLE ),
 
-	DEFINE_PRED_FIELD_TOL( m_vecNetworkOrigin, FIELD_VECTOR, FTYPEDESC_INSENDTABLE, coordTolerance ),
+	DEFINE_PRED_FIELD_TOL( m_vecNetworkOrigin, FIELD_VECTOR, FTYPEDESC_INSENDTABLE, 0.125f ),
 	DEFINE_PRED_FIELD( m_angNetworkAngles, FIELD_VECTOR, FTYPEDESC_INSENDTABLE | FTYPEDESC_NOERRORCHECK ),
 	DEFINE_FIELD( m_vecAbsOrigin, FIELD_VECTOR ),
 	DEFINE_FIELD( m_angAbsRotation, FIELD_VECTOR ),

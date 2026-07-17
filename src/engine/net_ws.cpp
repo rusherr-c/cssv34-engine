@@ -116,13 +116,7 @@ typedef struct
 	int		currentSequence;
 	int		splitCount;
 	int		totalSize;
-
-	// used when buffer is compressed
-	int		uncompressedSize;
-	int		crc32;
-
-	char	buffer[NET_MAX_MESSAGE - 8];
-
+	char	buffer[NET_MAX_MESSAGE];
 } LONGPACKET;
 
 // Use this to pick apart the network stream, must be packed
@@ -1016,7 +1010,6 @@ bool NET_LagPacket (bool newdata, netpacket_t * packet) // without newdata I gue
 	packet->pNext	= NULL;			// no next
 	packet->received = net_time;	// new time
 	packet->size	= p->size;		
-	packet->wiresize = p->wiresize;
 	packet->stream	= p->stream;
 			
 	Q_memcpy( packet->data, p->data, p->size );
@@ -1135,6 +1128,20 @@ static char const *DescribeSocket( int sock )
 	return "??";
 }
 
+bool NET_IsBZipData(const void* data, size_t size)
+{
+	if (size < 4)
+		return false;
+
+	const unsigned char* p = static_cast<const unsigned char*>(data);
+
+	return p[0] == 'B' &&
+		p[1] == 'Z' &&
+		p[2] == 'h' &&
+		p[3] >= '1' &&
+		p[3] <= '9';
+}
+
 //-----------------------------------------------------------------------------
 // Purpose: 
 // Input  : sock
@@ -1163,7 +1170,6 @@ bool NET_GetLong( const int sock, netpacket_t *packet )
 	sequenceNumber	= pHeader->sequenceNumber;
 	// is this split compressed?
 	bool bCompressed = (sequenceNumber & SPLIT_FLAG_COMPRESSED) != 0;
-	
 
 	if (bCompressed)
 		sequenceNumber &= ~SPLIT_FLAG_COMPRESSED;
@@ -1205,17 +1211,21 @@ bool NET_GetLong( const int sock, netpacket_t *packet )
 
 		entry->netsplit.splitCount--;		// Count packet
 		entry->splitflags[ packetNumber ] = sequenceNumber;
-
-		if ( net_showsplits.GetInt() && net_showsplits.GetInt() != 3 )
-		{
-			Msg( "<-- Split packet %i of %i from %s\n", packetNumber, packetCount, packet->from.ToString() );
-		}
 	}
 	else
 	{
 		Msg( "NET_GetLong:  Ignoring duplicated split packet %i of %i ( %i bytes ) from %s\n", packetNumber + 1, packetCount, size, packet->from.ToString() );
 	}
 
+	if (net_showsplits.GetInt() && net_showsplits.GetInt() != 3)
+	{
+		if (bCompressed)
+			Msg("<-- Split packet [compressed] %i of %i, size %i uncompressed %u, from %s\n",
+				packetNumber, packetCount, entry->netsplit.totalSize, *(uint32*)entry->netsplit.buffer, packet->from.ToString());
+		else
+			Msg("<-- Split packet [uncompressed] %i of %i, size %i, from %s\n",
+				packetNumber, packetCount, entry->netsplit.totalSize, packet->from.ToString());
+	}
 
 	// Copy the incoming data to the appropriate place in the buffer
 	offset = (packetNumber * SPLIT_SIZE);
@@ -1235,20 +1245,30 @@ bool NET_GetLong( const int sock, netpacket_t *packet )
 		{
 			memcpy(packet->data, entry->netsplit.buffer, entry->netsplit.totalSize);
 			packet->size = entry->netsplit.totalSize;
-			packet->wiresize = entry->netsplit.totalSize;
 		}
 		else
 		{
 			// First 8 bytes contains real size and CRC32_t
-			int uncompressedSize = entry->netsplit.uncompressedSize;
-			int expectedCRC = entry->netsplit.crc32;
+			uint32 uncompressedSize = *(uint32*)entry->netsplit.buffer;
+			int expectedCRC = *(uint32*)(entry->netsplit.buffer + 4);
 
 			uint32 outSize = NET_MAX_MESSAGE;
+
+			bool isBzip2 = NET_IsBZipData(entry->netsplit.buffer + 8, entry->netsplit.totalSize - 8);
+
+			DevMsg("<-- Split packet [bzip2: %d]\n", isBzip2);
+
+			if (!isBzip2) {
+				Warning("Error decompressing split packet %d bytes from %s, data is not compressed with bzip2\n",
+					entry->netsplit.totalSize,
+					packet->from.ToString());
+				return false;
+			}
 
 			if (!NET_BufferToBufferDecompress(
 				decompressBuffer,
 				&outSize,
-				entry->netsplit.buffer,
+				entry->netsplit.buffer + 8,
 				entry->netsplit.totalSize - 8))
 			{
 				Warning("Error decompressing split packet %d bytes from %s\n", entry->netsplit.totalSize, packet->from.ToString());
@@ -1279,7 +1299,7 @@ bool NET_GetLong( const int sock, netpacket_t *packet )
 
 			memcpy(packet->data, decompressBuffer, outSize);
 			packet->size = outSize;
-			packet->wiresize = outSize;
+			packet->size = outSize;
 		}
 
 		return true;
@@ -1313,7 +1333,6 @@ bool NET_GetLoopPacket ( netpacket_t * packet )
 	// copy data from loopback buffer to packet 
 	packet->from.SetType( NA_LOOPBACK );
 	packet->size = loop->datalen;
-	packet->wiresize = loop->datalen;	// didnt exist in src2006 I believe
 	Q_memcpy ( packet->data, loop->data, packet->size );
 	
 	loop->datalen = 0; // buffer is avalibale again
@@ -1359,7 +1378,7 @@ bool NET_ReceiveDatagram ( const int sock, netpacket_t * packet )
 	int ret = VCRHook_recvfrom(net_socket, (char *)packet->data, NET_MAX_MESSAGE, 0, (struct sockaddr *)&from, (int *)&fromlen );
 	if ( ret > 0 )
 	{
-		packet->wiresize = ret;
+		packet->size = ret;
 
 		MEM_ALLOC_CREDIT();
 		CUtlMemoryFixedGrowable< byte, NET_COMPRESSION_STACKBUF_SIZE > bufVoice( NET_COMPRESSION_STACKBUF_SIZE );
@@ -1378,30 +1397,7 @@ bool NET_ReceiveDatagram ( const int sock, netpacket_t * packet )
 				if ( !NET_GetLong( sock, packet ) )
 					return false;
 			}
-#if 0
-			if ( nVoiceBits > 0 )
-			{
-				// 9th byte is flag byte
-				byte flagByte = *( (byte *)packet->data + sizeof( unsigned int ) + sizeof( unsigned int ) );
-				unsigned int unPacketBits = packet->size << 3;
-				int nPadBits = DECODE_PAD_BITS( flagByte );
-				unPacketBits -= nPadBits;
 
-				bf_write fixup;
-				fixup.SetDebugName( "X360 Fixup" );
-				fixup.StartWriting( packet->data, NET_MAX_MESSAGE, unPacketBits );
-				fixup.WriteBits( bufVoice.Base(), nVoiceBits );
-
-				// Make sure we have enough bits to read a final net_NOP opcode before compressing 
-				int nRemainingBits = fixup.GetNumBitsWritten() % 8;
-				if ( nRemainingBits > 0 &&  nRemainingBits <= (8-NETMSG_TYPE_BITS) )
-				{
-					fixup.WriteUBitLong( net_NOP, NETMSG_TYPE_BITS );
-				}
-
-				packet->size = fixup.GetNumBytesWritten();
-			}
-#endif	
 			return NET_LagPacket( true, packet );
 		}
 		else
@@ -1447,7 +1443,6 @@ netpacket_t *NET_GetPacket (int sock, byte *scratch )
 	inpacket.source = sock;	
 	inpacket.data = scratch;
 	inpacket.size = 0;
-	inpacket.wiresize = 0;	// Didnt exist in src2006!
 	inpacket.pNext = NULL;
 	inpacket.message.SetDebugName("inpacket.message");
 
@@ -1725,7 +1720,7 @@ void NET_LogBadPacket(netpacket_t * packet)
 	}
 }
 
-int NET_SendToImpl( SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen, int iGameDataLength )
+int NET_SendToImpl( SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen )
 {
 	int nSend = 0;
 	nSend = sendto( s, buf, len, 0, to, tolen );
@@ -1746,7 +1741,8 @@ int NET_SendToImpl( SOCKET s, const char FAR * buf, int len, const struct sockad
 //-----------------------------------------------------------------------------
 bool CL_IsHL2Demo();
 bool CL_IsPortalDemo();
-int NET_SendTo( bool verbose, SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen, int iGameDataLength )
+// First argument is INetChannel* actually but, it's not used anyways so im not gonna add it :)
+int NET_SendTo( bool verbose, SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen )
 {	
 	int nSend = 0;
 	
@@ -1790,8 +1786,7 @@ int NET_SendTo( bool verbose, SOCKET s, const char FAR * buf, int len, const str
 			buf,
 			len,
 			to, 
-			tolen, 
-			iGameDataLength 
+			tolen
 		);
 	}
 
@@ -1912,7 +1907,7 @@ void NET_SendQueuedPacket( SendQueueItem_t *sq )
 		( const char FAR * )sq->m_Buffer.Base(), 
 		sq->m_Buffer.TellPut(), 
 		( const struct sockaddr FAR * )sq->m_To.Base(), 
-		sq->m_To.TellPut() , -1
+		sq->m_To.TellPut()
 	);
 
 	sq->m_pChannel->DecrementQueuedPackets();
@@ -2051,7 +2046,7 @@ int NET_SendLong( INetChannel *chan, int sock, SOCKET s, const char * buf, int l
 			// Also, we send the first packet no matter what
 			// w/o a netchan, if there are too many splits, its possible the packet can't be delivered.  However, this would only apply to out of band stuff like
 			//  server query packets, which should never require splitting anyway.
-			ret = NET_SendTo(false, s, packet, size + sizeof(SPLITPACKET), to, tolen, -1);
+			ret = NET_SendTo(false, s, packet, size + sizeof(SPLITPACKET), to, tolen);
 		}
 
 		// First split send
@@ -2104,8 +2099,7 @@ int NET_SendLong( INetChannel *chan, int sock, SOCKET s, const char * buf, int l
 // Output : void NET_SendPacket
 //-----------------------------------------------------------------------------
 
-int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const unsigned char *data, int length, 
-	bf_write *pVoicePayload /* = NULL */, bool bUseCompression /*=false*/ )	// didnt exist in 2006
+int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const unsigned char *data, int length )
 {
 	int		ret;
 	struct sockaddr	addr;
@@ -2117,7 +2111,7 @@ int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const uns
 		Msg("UDP -> %s: sz=%i OOB '%c'\n", to.ToString(), length, data[4] );
 	}
 
-	if ( !NET_IsMultiplayer() || to.type == NA_LOOPBACK || ( to.IsLocalhost() && !net_usesocketsforloopback.GetBool() ) )	// Just !NET_IsMultiplayer
+	if ( !NET_IsMultiplayer() )	// Just !NET_IsMultiplayer
 	{
 		Assert( !pVoicePayload );
 
@@ -2128,12 +2122,14 @@ int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const uns
 	if ( to.type == NA_BROADCAST )
 	{
 		net_socket = net_sockets[sock].hUDP;
+		ret = 16 * sock;
 		if (!net_socket)
 			return length;
 	}
 	else if ( to.type == NA_IP )
 	{
 		net_socket = net_sockets[sock].hUDP;
+		ret = (int)net_sockets.Base(); // thats strange
 		if (!net_socket)
 			return length;
 	}
@@ -2158,91 +2154,12 @@ int NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const uns
 
 	to.ToSockadr ( &addr );
 
-	MEM_ALLOC_CREDIT();
-	CUtlMemoryFixedGrowable< byte, NET_COMPRESSION_STACKBUF_SIZE > memCompressed( NET_COMPRESSION_STACKBUF_SIZE );
-	CUtlMemoryFixedGrowable< byte, NET_COMPRESSION_STACKBUF_SIZE > memCompressedVoice( NET_COMPRESSION_STACKBUF_SIZE );
-
-	int iGameDataLength = pVoicePayload ? length : -1;
-
-	bool bWroteVoice = false;
-	unsigned int nVoiceBytes = 0;
-
-	if ( pVoicePayload )
-	{
-		memCompressedVoice.EnsureCapacity( pVoicePayload->GetNumBytesWritten() + sizeof( unsigned short ) );
-
-		byte *pVoice = (byte *)memCompressedVoice.Base();
-
-		unsigned short usVoiceBits = pVoicePayload->GetNumBitsWritten();
-		*( unsigned short * )pVoice = LittleShort( usVoiceBits );
-		pVoice += sizeof( unsigned short );
-		
-		unsigned int nCompressedLength = pVoicePayload->GetNumBytesWritten();
-		byte *pOutput = NULL;
-		if ( !pOutput )
-		{
-			Q_memcpy( pVoice, pVoicePayload->GetData(), pVoicePayload->GetNumBytesWritten() );
-		}
-
-		nVoiceBytes = nCompressedLength + sizeof( unsigned short );
-	}
-
-#if 0
-	if ( bUseCompression )
-	{
-		CLZSS lzss;
-		unsigned int nCompressedLength = length;
-	
-		memCompressed.EnsureCapacity( length + nVoiceBytes + sizeof( unsigned int ) );
-
-		*(int *)memCompressed.Base() = LittleLong( NET_HEADER_FLAG_COMPRESSEDPACKET );
-
-		byte *pOutput = lzss.CompressNoAlloc( (byte *)data, length, memCompressed.Base() + sizeof( unsigned int ), &nCompressedLength );
-		if ( pOutput )
-		{
-			data	= memCompressed.Base();
-			length	= nCompressedLength + sizeof( unsigned int );
-
-			if ( pVoicePayload && pVoicePayload->GetNumBitsWritten() > 0 )
-			{
-				byte *pVoice = (byte *)memCompressed.Base() + length;
-				Q_memcpy( pVoice, memCompressedVoice.Base(), nVoiceBytes );
-			}
-			
-			iGameDataLength = length;
-
-			length += nVoiceBytes;
-
-			bWroteVoice = true;
-		}
-	}
-#endif
-
-	if ( !bWroteVoice && pVoicePayload && pVoicePayload->GetNumBitsWritten() > 0 )
-	{
-		memCompressed.EnsureCapacity( length + nVoiceBytes );
-
-		byte *pVoice = (byte *)memCompressed.Base();
-		Q_memcpy( pVoice, (const void *)data, length );
-		pVoice += length;
-		Q_memcpy( pVoice, memCompressedVoice.Base(), nVoiceBytes );
-		data	= memCompressed.Base();
-
-		length  += nVoiceBytes;
-	}
-
 	// Do we need to break this packet up?
-	int nMaxRoutable = MAX_ROUTABLE_PAYLOAD;
-	if ( chan )
-	{
-		nMaxRoutable = clamp(MAX_ROUTABLE_PAYLOAD, MIN_USER_MAXROUTABLE_SIZE, min( sv_maxroutable.GetInt(), MAX_USER_MAXROUTABLE_SIZE ) );
-	}
-
-	if ( length <= nMaxRoutable && 
+	if ( length <= MAX_ROUTABLE_PACKET && 
 		!(net_queued_packet_thread.GetInt() == NET_QUEUED_PACKET_THREAD_DEBUG_VALUE && chan ) )	
 	{
 		// simple case, small packet, just send it
-		ret = NET_SendTo( true, net_socket, (const char *)data, length, &addr, sizeof(addr), iGameDataLength );
+		ret = NET_SendTo( true, net_socket, (const char *)data, length, &addr, sizeof(addr) );
 	}
 	else
 	{
@@ -2348,7 +2265,9 @@ void NET_FlushAllSockets( void )
 	}
 }
 
-static void OpenSocketInternal( int nModule, int nSetPort, int nDefaultPort, const char *pName, int nProtocol, bool bTryAny )	// It seems that this func doesnt exist in src2006
+// It seems that this func doesnt exist in src2006
+// not deleting, i dont want to mess up with OpenSockets
+static void OpenSocketInternal( int nModule, int nSetPort, int nDefaultPort, const char *pName, int nProtocol, bool bTryAny )
 {
 	int port = nSetPort ? nSetPort : nDefaultPort;
 	int *handle = NULL;
@@ -2421,7 +2340,7 @@ int NET_AddExtraSocket( int port )
 
 	Q_memset( &net_sockets[newSocket], 0, sizeof(netsocket_t) );
 
-	OpenSocketInternal( newSocket, port, PORT_ANY, "etxra", IPPROTO_UDP, true );
+	OpenSocketInternal( newSocket, port, PORT_ANY, "extra", IPPROTO_UDP, true );
 
 	net_packets.EnsureCount( newSocket+1 );
 	net_splitpackets.EnsureCount( newSocket+1 );
@@ -2776,7 +2695,7 @@ A single player game will only use the loopback code
 ====================
 */
 
-void NET_SetDedicated ()	// Was inlined
+inline void NET_SetDedicated()
 {
 	if ( net_noip )
 	{

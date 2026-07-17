@@ -188,6 +188,7 @@ $Project
 		$File	"clientsideeffects.cpp"
 		$File	"clientsideeffects_test.cpp"
 		$File	"colorcorrectionmgr.cpp"
+		$File	"$SRCDIR\public\haptics\haptic_utils.cpp"
 		$File	"$SRCDIR\game\shared\collisionproperty.cpp"
 		$File	"$SRCDIR\game\shared\death_pose.cpp"
 		$File	"$SRCDIR\game\shared\debugoverlay_shared.cpp"

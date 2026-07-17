@@ -152,196 +152,161 @@ struct SoundInfo_t
 	// this cries for Send/RecvTables:
 	void WriteDelta( SoundInfo_t *delta, bf_write &buffer)
 	{
-		if ( nEntityIndex == delta->nEntityIndex )
+		WRITE_DELTA_UINT(nEntityIndex, MAX_EDICT_BITS);
+
+		WRITE_DELTA_UINT(nSoundNum, MAX_SOUND_INDEX_BITS);
+
+		WRITE_DELTA_UINT(nFlags, SND_FLAG_BITS_ENCODE);
+
+		WRITE_DELTA_UINT(nChannel, 3);
+
+		buffer.WriteOneBit(bIsAmbient ? 1 : 0);
+		buffer.WriteOneBit(bIsSentence ? 1 : 0); // NOTE: SND_STOP behavior is different depending on this flag
+
+		if (nFlags != SND_STOP)
 		{
-			buffer.WriteOneBit( 0 );
-		}
-		else
-		{
-			buffer.WriteOneBit( 1 );
-		
-			if ( nEntityIndex <= 31)
-			{
-				buffer.WriteOneBit( 1 );
-				buffer.WriteUBitLong( nEntityIndex, 5 );
-			}
-			else
-			{
-				buffer.WriteOneBit( 0 );
-				buffer.WriteUBitLong( nEntityIndex, MAX_EDICT_BITS );
-			}
-		}
-
-		WRITE_DELTA_UINT( nSoundNum, MAX_SOUND_INDEX_BITS );
-
-		WRITE_DELTA_UINT( nFlags, SND_FLAG_BITS_ENCODE );
-
-		WRITE_DELTA_UINT( nChannel, 3 );
-
-		buffer.WriteOneBit( bIsAmbient?1:0 );
-		buffer.WriteOneBit( bIsSentence?1:0 ); // NOTE: SND_STOP behavior is different depending on this flag
-
-		if ( nFlags != SND_STOP )
-		{
-			if ( nSequenceNumber == delta->nSequenceNumber )
+			if (nSequenceNumber == delta->nSequenceNumber)
 			{
 				// didn't change, most often case
-				buffer.WriteOneBit( 1 );
+				buffer.WriteOneBit(1);
 			}
-			else if ( nSequenceNumber == (delta->nSequenceNumber+1) )
+			else if (nSequenceNumber == (delta->nSequenceNumber + 1))
 			{
 				// increased by one
-				buffer.WriteOneBit( 0 );
-				buffer.WriteOneBit( 1 );
+				buffer.WriteOneBit(0);
+				buffer.WriteOneBit(1);
 			}
 			else
 			{
 				// send full seqnr
-				buffer.WriteUBitLong( 0, 2 ); // 2 zero bits
-				buffer.WriteUBitLong( nSequenceNumber, SOUND_SEQNUMBER_BITS ); 
-			}
-						
-			if ( fVolume == delta->fVolume )
-			{
-				buffer.WriteOneBit( 0 );
-			}
-			else
-			{
-				buffer.WriteOneBit( 1 );
-				buffer.WriteUBitLong( (unsigned int)(fVolume*127.0f), 7 );
+				buffer.WriteUBitLong(0, 2); // 2 zero bits
+				buffer.WriteUBitLong(nSequenceNumber, 31);
 			}
 
-			WRITE_DELTA_UINT( Soundlevel, MAX_SNDLVL_BITS );
-
-			WRITE_DELTA_UINT( nPitch, 8 );
-
-			if ( fDelay == delta->fDelay )
+			if (fVolume == delta->fVolume)
 			{
-				buffer.WriteOneBit( 0 );
+				buffer.WriteOneBit(0);
 			}
 			else
 			{
-				buffer.WriteOneBit( 1 );
+				buffer.WriteOneBit(1);
+				buffer.WriteByte((int)(fVolume * 255.0f));
+			}
 
-				// skipahead works in 10 ms increments
-				// bias results so that we only incur the precision loss on relatively large skipaheads
-				fDelay += SOUND_DELAY_OFFSET;
+			WRITE_DELTA_UINT(Soundlevel, MAX_SNDLVL_BITS);
 
-				// Convert to msecs
-				int iDelay = fDelay * 1000.0f;
+			WRITE_DELTA_UINT(nPitch, 8);
 
-				iDelay = clamp( iDelay, (int)(-10 * MAX_SOUND_DELAY_MSEC), (int)(MAX_SOUND_DELAY_MSEC) );
+			if (fDelay == delta->fDelay)
+			{
+				buffer.WriteOneBit(0);
+			}
+			else
+			{
+				buffer.WriteOneBit(1);
 
-				if ( iDelay < 0 )
+				// Skipahead works in 10 msec increments
+
+				int iDelay = fDelay * 1000.0f; // transmit as milliseconds
+
+				iDelay = clamp(iDelay, (int)(-10 * MAX_SOUND_DELAY_MSEC), (int)(MAX_SOUND_DELAY_MSEC));
+
+				if (iDelay < 0)
 				{
-					iDelay /=10;	
+					iDelay /= 10;
 				}
-				
-				buffer.WriteSBitLong( iDelay , MAX_SOUND_DELAY_MSEC_ENCODE_BITS );
+
+				buffer.WriteSBitLong(iDelay, MAX_SOUND_DELAY_MSEC_ENCODE_BITS);
 			}
 
-			// don't transmit sounds with high precision
-			WRITE_DELTA_SINT_SCALE( vOrigin.x, 8.0f, COORD_INTEGER_BITS - 2 );
-			WRITE_DELTA_SINT_SCALE( vOrigin.y, 8.0f, COORD_INTEGER_BITS - 2  );
-			WRITE_DELTA_SINT_SCALE( vOrigin.z, 8.0f, COORD_INTEGER_BITS - 2 );
+			// don't transmit sounds with high prcesion
+			WRITE_DELTA_SINT(vOrigin.x, COORD_INTEGER_BITS + 1);
+			WRITE_DELTA_SINT(vOrigin.y, COORD_INTEGER_BITS + 1);
+			WRITE_DELTA_SINT(vOrigin.z, COORD_INTEGER_BITS + 1);
 
-			WRITE_DELTA_SINT( nSpeakerEntity, MAX_EDICT_BITS + 1 );
-		}
-		else
-		{
-			ClearStopFields();
+			WRITE_DELTA_SINT(nSpeakerEntity, MAX_EDICT_BITS + 1);
 		}
 	};
 
 	void ReadDelta( SoundInfo_t *delta, bf_read &buffer)
 	{
-		if ( !buffer.ReadOneBit() )
-		{
-			nEntityIndex = delta->nEntityIndex;
-		}
-		else
-		{
-			if ( buffer.ReadOneBit() )
-			{
-				nEntityIndex = buffer.ReadUBitLong( 5 );
-			}
-			else
-			{
-				nEntityIndex = buffer.ReadUBitLong( MAX_EDICT_BITS );
-			}
-		}
+		READ_DELTA_UINT(nEntityIndex, MAX_EDICT_BITS);
 
-		READ_DELTA_UINT( nSoundNum, MAX_SOUND_INDEX_BITS );
+		READ_DELTA_UINT(nSoundNum, MAX_SOUND_INDEX_BITS);
 
-		READ_DELTA_UINT( nFlags, SND_FLAG_BITS_ENCODE );
+		READ_DELTA_UINT(nFlags, SND_FLAG_BITS_ENCODE);
 
-		READ_DELTA_UINT( nChannel, 3 );
+		READ_DELTA_UINT(nChannel, 3);
 
 		bIsAmbient = buffer.ReadOneBit() != 0;
 		bIsSentence = buffer.ReadOneBit() != 0; // NOTE: SND_STOP behavior is different depending on this flag
 
-		if ( nFlags != SND_STOP )
+		if (nFlags == SND_STOP)
 		{
-			if ( buffer.ReadOneBit() != 0 )
+			fVolume = 0;
+			Soundlevel = SNDLVL_NONE;
+			nPitch = PITCH_NORM;
+			pszName = NULL;
+			fDelay = 0.0f;
+			nSequenceNumber = 0;
+		}
+		else
+		{
+			if (buffer.ReadOneBit() != 0)
 			{
 				nSequenceNumber = delta->nSequenceNumber;
 			}
-			else if ( buffer.ReadOneBit() != 0 )
+			else if (buffer.ReadOneBit() != 0)
 			{
 				nSequenceNumber = delta->nSequenceNumber + 1;
 			}
 			else
 			{
-				nSequenceNumber = buffer.ReadUBitLong( SOUND_SEQNUMBER_BITS );
+
+				nSequenceNumber = buffer.ReadUBitLong(31);
 			}
-				
-			if ( buffer.ReadOneBit() != 0 )
+
+			if (buffer.ReadOneBit() != 0)
 			{
-				fVolume = (float)buffer.ReadUBitLong( 7 )/127.0f;
+				fVolume = (float)buffer.ReadByte() / 255.0f;
 			}
 			else
 			{
 				fVolume = delta->fVolume;
 			}
 
-			if ( buffer.ReadOneBit() != 0 )
+			if (buffer.ReadOneBit() != 0)
 			{
-				Soundlevel = (soundlevel_t)buffer.ReadUBitLong( MAX_SNDLVL_BITS );
+				Soundlevel = (soundlevel_t)buffer.ReadUBitLong(MAX_SNDLVL_BITS);
 			}
 			else
 			{
 				Soundlevel = delta->Soundlevel;
 			}
 
-			READ_DELTA_UINT( nPitch, 8 );
+			READ_DELTA_UINT(nPitch, 8);
 
 
-			if ( buffer.ReadOneBit() != 0 )
+			if (buffer.ReadOneBit() != 0)
 			{
 				// Up to 4096 msec delay
-				fDelay = (float)buffer.ReadSBitLong( MAX_SOUND_DELAY_MSEC_ENCODE_BITS ) / 1000.0f; ;
-				
-				if ( fDelay < 0 )
+				fDelay = (float)buffer.ReadSBitLong(MAX_SOUND_DELAY_MSEC_ENCODE_BITS) / 1000.0f; ;
+
+				if (fDelay < 0)
 				{
 					fDelay *= 10.0f;
 				}
-				// bias results so that we only incur the precision loss on relatively large skipaheads
-				fDelay -= SOUND_DELAY_OFFSET;
 			}
 			else
 			{
 				fDelay = delta->fDelay;
 			}
 
-			READ_DELTA_SINT_SCALE( vOrigin.x, 8.0f, COORD_INTEGER_BITS - 2 );
-			READ_DELTA_SINT_SCALE( vOrigin.y, 8.0f, COORD_INTEGER_BITS - 2 );
-			READ_DELTA_SINT_SCALE( vOrigin.z, 8.0f, COORD_INTEGER_BITS - 2 );
+			READ_DELTA_SINT(vOrigin.x, COORD_INTEGER_BITS + 1);
+			READ_DELTA_SINT(vOrigin.y, COORD_INTEGER_BITS + 1);
+			READ_DELTA_SINT(vOrigin.z, COORD_INTEGER_BITS + 1);
 
-			READ_DELTA_SINT( nSpeakerEntity, MAX_EDICT_BITS + 1 );
-		}
-		else
-		{
-			ClearStopFields();
+			READ_DELTA_SINT(nSpeakerEntity, MAX_EDICT_BITS + 1);
 		}
 	}
 };

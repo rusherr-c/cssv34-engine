@@ -128,7 +128,7 @@ enum SoundFlags_t
 	SND_IGNORE_NAME		= (1<<9),		// used to change all sounds emitted by an entity, regardless of scriptname
 };
 
-#define SND_FLAG_BITS_ENCODE 9
+#define SND_FLAG_BITS_ENCODE 8
 
 #define MAX_SOUND_INDEX_BITS	13
 #define	MAX_SOUNDS				(1<<MAX_SOUND_INDEX_BITS)

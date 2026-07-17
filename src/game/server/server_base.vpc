@@ -386,6 +386,7 @@ $Project
 		$file	"$SRCDIR\common\hl2orange.spa.h"
 		$File	"hltvdirector.cpp"
 		$File	"hltvdirector.h"
+		$File	"$SRCDIR\public\haptics\haptic_utils.cpp"
 		$File	"$SRCDIR\game\shared\hintmessage.cpp"
 		$File	"$SRCDIR\game\shared\hintmessage.h"
 		$File	"$SRCDIR\game\shared\hintsystem.cpp"

@@ -171,7 +171,7 @@ void CQueuedPacketSender::QueuePacket( INetChannel *pChan, SOCKET s, const char 
 	m_QueuedPacketsCS.Unlock();
 }
 
-extern int NET_SendToImpl( SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen, int iGameDataLength );
+extern int NET_SendToImpl( SOCKET s, const char FAR * buf, int len, const struct sockaddr FAR * to, int tolen );
 
 int CQueuedPacketSender::Run()
 {
@@ -239,8 +239,7 @@ int CQueuedPacketSender::Run()
 					pPacket->buf.Base(), 
 					pPacket->buf.Count(), 
 					(sockaddr*)pPacket->to.Base(),
-					pPacket->to.Count(), 
-					-1 
+					pPacket->to.Count() 
 				);
 			}	
 			

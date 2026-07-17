@@ -471,35 +471,35 @@ void CMaster::ProcessConnectionlessPacket(netpacket_t*packet )
 			if (msg.ReadByte() != 0x0A)
 				break;
 
-			if( !m_bRefreshing )
+			if (!m_bRefreshing)
 				break;
 
 			ip = htonl(msg.ReadLong());
 			port = htons(msg.ReadShort());
 
-			while( ip != 0 && port != 0 )
+			while (ip != 0 && port != 0)
 			{
 				netadr_t adr(ip, port);
 
 				unsigned short index = m_serverAddresses.Find(adr);
-				if( index != m_serverAddresses.InvalidIndex() )
+				if (index != m_serverAddresses.InvalidIndex())
 				{
-					ip = htonl(msg.ReadLong());
-					port = htons(msg.ReadShort());
+					ip = msg.ReadLong();
+					port = msg.ReadShort();
 					continue;
 				}
 
 				m_serverAddresses.Insert(adr, false);
 				RequestServerInfo(adr);
 
-				ip = htonl(msg.ReadLong());
-				port = htons(msg.ReadShort());
+				ip = msg.ReadLong();
+				port = msg.ReadShort();
 			}
 
-			if (m_lastServerAdr.ToString() == "0.0.0.0:0")
+			if (m_lastServerAdr.GetIPHostByteOrder() == 0 || m_lastServerAdr.GetPort() == 0)
 				m_lastServerAdr.SetIPAndPort(ip, port);
 
-			//RequestInternetServerList(m_szGameDir, m_serverListResponse);
+			RequestInternetServerList(m_szGameDir, m_serverListResponse);
 
 			break;
 		}
@@ -805,7 +805,7 @@ void CMaster::AddServer( netadr_t *adr )
 	n = m_pMasterAddresses;
 	while ( n )
 	{
-		if ( n->adr == *adr )
+		if ( n->adr.CompareAdr(*adr) )
 			break;
 		n = n->next;
 	}
@@ -844,9 +844,11 @@ void CMaster::UseDefault ( void )
 	for( int i = 0; i < ARRAYSIZE(g_MasterServers);i++ )
 	{
 		// Convert to netadr_t
-		adr.SetFromString(g_MasterServers[i]);
-		// Add to master list
-		AddServer( &adr );
+		if (NET_StringToAdr(g_MasterServers[i], &adr))
+		{
+			// Add to master list
+			AddServer(&adr);
+		}
 	}
 }
 
@@ -864,7 +866,7 @@ void CMaster::RespondToHeartbeatChallenge( netadr_t &from, bf_read &msg )
 	p = m_pMasterAddresses;
 	while ( p )
 	{
-		if ( from == p->adr )
+		if ( from.CompareAdr(p->adr) )
 			break;
 
 		p = p->next;
@@ -893,9 +895,8 @@ void CMaster::AddMaster_f(const CCommand& args)
 
 	netadr_t adr;
 
-	adr = cmd.String();
-
-	if (adr.GetIPNetworkByteOrder() == 0) {
+	if (!NET_StringToAdr(cmd.String(), &adr))
+	{
 		Warning("Invalid address\n");
 		return;
 	}

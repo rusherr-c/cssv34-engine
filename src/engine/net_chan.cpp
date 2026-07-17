@@ -1619,13 +1619,7 @@ int CNetChan::SendDatagram(bf_write *datagram)
 	bf_write flagsPos = send; // remember flags byte position
 
 	send.WriteByte ( 0 ); // write correct flags value later
-#if 0
-	if ( ShouldChecksumPackets() )
-	{
-		send.WriteShort( 0 );  // write correct checksum later
-		Assert( !(send.GetNumBitsWritten() % 8 ) );
-	}
-#endif
+
 	// Note, this only matters on the PC
 	int nCheckSumStart = send.GetNumBytesWritten();
 
@@ -1641,7 +1635,6 @@ int CNetChan::SendDatagram(bf_write *datagram)
 	{
 		flags |= PACKET_FLAG_RELIABLE;
 	}
-
 
 	// Is there room for given datagram data. the datagram data 
 	// is somewhat more important than the normal unreliable data
@@ -1670,15 +1663,7 @@ int CNetChan::SendDatagram(bf_write *datagram)
 	}
 
 	m_StreamUnreliable.Reset();	// clear unreliable data buffer
-#if 0
-	// On the PC the voice data is in the main packet
-	if ( !IsX360() && 
-		m_StreamVoice.GetNumBitsWritten() > 0 && m_StreamVoice.GetNumBitsWritten() < send.GetNumBitsLeft() )
-	{
-		send.WriteBits(m_StreamVoice.GetData(), m_StreamVoice.GetNumBitsWritten() );
-		m_StreamVoice.Reset();
-	}
-#endif
+
 	int nMinRoutablePayload = MIN_ROUTABLE_PAYLOAD;
 
 #if defined( _DEBUG ) || defined( MIN_ROUTABLE_TESTING )
@@ -1701,77 +1686,14 @@ int CNetChan::SendDatagram(bf_write *datagram)
 	{
 		send.WriteUBitLong( net_NOP, NETMSG_TYPE_BITS );
 	}
-#if 0
-	if ( IsX360() )
-	{
-	// Now round up to byte boundary
-		nRemainingBits = send.GetNumBitsWritten() % 8;
-		if ( nRemainingBits > 0 )
-		{
-			int nPadBits = 8 - nRemainingBits;
 
-			flags |= ENCODE_PAD_BITS( nPadBits );
-
-	// Pad with ones
-			if ( nPadBits > 0 )
-			{
-				unsigned int unOnes = GetBitForBitnum( nPadBits ) - 1;
-				send.WriteUBitLong( unOnes, nPadBits );
-			}
-		}
-	}
-
-
-	// FIXME:  This isn't actually correct since compression might make the main payload usage a bit smaller
-	bool bSendVoice = IsX360() && ( m_StreamVoice.GetNumBitsWritten() > 0 &&  m_StreamVoice.GetNumBitsWritten() < send.GetNumBitsLeft() );
-		
-	bool bCompress = false;
-	if ( net_compresspackets.GetBool() )
-	{
-		if ( send.GetNumBytesWritten() >= net_compresspackets_minsize.GetInt() )
-		{
-			bCompress = true;
-		}
-	}
-#endif
 	// write correct flags value and the checksum
 	flagsPos.WriteByte( flags ); 
 
-#if 0
-	// Compute checksum (must be aligned to a byte boundary!!)
-#if 0
-	if ( ShouldChecksumPackets() )
-	{
-		const void *pvData = send.GetData() + nCheckSumStart;
-		Assert( !(send.GetNumBitsWritten() % 8 ) );
-		int nCheckSumBytes = send.GetNumBytesWritten() - nCheckSumStart;
-		unsigned short usCheckSum = BufferToShortChecksum( pvData, nCheckSumBytes );
-		flagsPos.WriteUBitLong( usCheckSum, 16 );
-	}
-#endif
-	// Send the datagram
-	int	bytesSent = NET_SendPacket ( this, m_Socket, remote_address, send.GetData(), send.GetNumBytesWritten(), bSendVoice ? &m_StreamVoice : 0, bCompress );
-#endif
-	int	bytesSent = NET_SendPacket(this, m_Socket, remote_address, send.GetData(), send.GetNumBytesWritten(), NULL, false);
+	int	bytesSent = NET_SendPacket(this, m_Socket, remote_address, send.GetData(), send.GetNumBytesWritten());
 
-#if 0
-	if ( bSendVoice || !IsX360() )
-	{
-		m_StreamVoice.Reset();
-	}
-#endif
 	if ( net_showudp.GetInt() && net_showudp.GetInt() != 2 )
 	{
-#if 0
-		int mask = 63;
-		char comp[ 64 ] = { 0 };
-		if ( net_compresspackets.GetBool() && 
-			bytesSent && 
-			( bytesSent < send.GetNumBytesWritten() ) )
-		{
-			Q_snprintf( comp, sizeof( comp ), " compression=%5u [%5.2f %%]", bytesSent, 100.0f * float( bytesSent ) / float( send.GetNumBytesWritten() ) );
-		}
-#endif 
 		ConMsg("UDP -> %s: sz=%i seq=%i ack=%i rel=%i tm=%f\n",
 			GetName(),
 			send.GetNumBytesWritten(),
@@ -1782,7 +1704,6 @@ int CNetChan::SendDatagram(bf_write *datagram)
 	}
 
 	// update stats
-
 	int nTotalSize = bytesSent + UDP_HEADER_SIZE;
 
 	FlowNewPacket( FLOW_OUTGOING, m_nOutSequenceNr, m_nInSequenceNr, m_nChokedPackets, 0, nTotalSize );
@@ -1799,16 +1720,7 @@ int CNetChan::SendDatagram(bf_write *datagram)
 	double fAddTime = (float)nTotalSize / (float)m_Rate;
 
 	m_fClearTime += fAddTime;
-#if 0
-	if ( net_maxcleartime.GetFloat() > 0.0f )
-	{
-		double m_flLatestClearTime = net_time + net_maxcleartime.GetFloat();
-		if ( m_fClearTime > m_flLatestClearTime )
-		{
-			m_fClearTime = m_flLatestClearTime;
-		}
-	}
-#endif
+
 	m_nChokedPackets = 0;
 	m_nOutSequenceNr++;
 
@@ -1996,7 +1908,7 @@ void CNetChan::ProcessPlayback( void )
 	while ( ( packet = demoplayer->ReadPacket() ) != NULL )
 	{
 		// Update data flow stats
-		FlowNewPacket( FLOW_INCOMING, m_nInSequenceNr, m_nOutSequenceNrAck, 0, 0, packet->wiresize );
+		FlowNewPacket( FLOW_INCOMING, m_nInSequenceNr, m_nOutSequenceNrAck, 0, 0, packet->size );
 
 		last_received = net_time;
 
@@ -2071,7 +1983,7 @@ bool CNetChan::CheckReceivingList(int nList)
 	if ( net_showfragments.GetBool() )
 		ConMsg("Receiving complete: %i fragments, %i bytes\n", data->numFragments, data->bytes );
 
-	DevMsg("Received data compressed: %d\n", data->isCompressed);
+	//DevMsg(2, "Received data compressed: %d\n", data->isCompressed);
 	if ( data->isCompressed )
 	{
 		UncompressFragments( data );
@@ -2292,7 +2204,7 @@ int CNetChan::ProcessPacketHeader( netpacket_t * packet )
 		CheckWaitingList( i ); 
 
 // Update data flow stats (use wiresize (compressed))
-	FlowNewPacket( FLOW_INCOMING, m_nInSequenceNr, m_nOutSequenceNrAck, nChoked, m_PacketDrop, packet->wiresize + UDP_HEADER_SIZE );
+	FlowNewPacket( FLOW_INCOMING, m_nInSequenceNr, m_nOutSequenceNrAck, nChoked, m_PacketDrop, packet->size + UDP_HEADER_SIZE );
 
 	return flags;
 }
@@ -2320,7 +2232,7 @@ void CNetChan::ProcessPacket( netpacket_t * packet, bool bHasHeader )
 	}
 
 	// Update data flow stats
-	FlowUpdate( FLOW_INCOMING, packet->wiresize + UDP_HEADER_SIZE );
+	FlowUpdate( FLOW_INCOMING, packet->size + UDP_HEADER_SIZE );
 
 	int flags = 0;
 
@@ -2336,12 +2248,12 @@ void CNetChan::ProcessPacket( netpacket_t * packet, bool bHasHeader )
 	{
 		ConMsg ("UDP <- %s: sz=%i seq=%i ack=%i rel=%i tm=%f wire=%i\n"
 			, GetName()
-			, packet->wiresize
+			, packet->size
 			, m_nInSequenceNr & 63
 			, m_nOutSequenceNrAck & 63 
 			, flags & PACKET_FLAG_RELIABLE ? 1 : 0
 			, net_time
-			, packet->wiresize );
+			, packet->size );
 	}
 	
 	last_received = net_time;

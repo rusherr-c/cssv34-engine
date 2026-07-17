@@ -22,6 +22,29 @@ bool IsLANIP(uint32 ip)
 	return false;
 }
 
+inline void DumpPacket(const void* data, size_t size)
+{
+	const uint8* bytes = static_cast<const uint8*>(data);
+
+	Msg("'");
+
+	for (size_t i = 0; i < size; ++i)
+	{
+		unsigned char c = bytes[i];
+
+		if (c >= 32 && c <= 126 && c != '\\' && c != '\'')
+		{
+			Msg("%c", c);
+		}
+		else
+		{
+			Msg("\\x%02X", c);
+		}
+	}
+
+	Msg("'\n");
+}
+
 class CMasterNETHandler : public IMasterNETHandler {
 public:
 	CMasterNETHandler(void);
@@ -127,7 +150,7 @@ void CMasterNETHandler::RunFrame(CMasterNETHandler* This) {
 		lanservers->RunFrame();
 		favoriteservers->RunFrame();
 		monitoringservers->RunFrame();
-		//historyservers->RunFrame();
+		historyservers->RunFrame();
 
 		int bytesClient = recvfrom(This->m_nClientSocket, buffer, sizeof(buffer), 0,
 			(sockaddr*)&sender, &senderSize);
@@ -181,9 +204,11 @@ void CMasterNETHandler::NET_SendPacket(int ns, const netadr_t& to, const byte* d
 
 	int ret = sendto(*SendSocket, (const char*)data, length, 0, &addr, sizeof(addr));
 	if (ret == SOCKET_ERROR)
-		Warning("CMasterNETHandler: failed sending packet (socket %i, to %s, data %s, length %i), WSA Last Error %i\n", ns, to.ToString(), data, length, WSAGetLastError());
+		Warning("CMasterNETHandler: failed sending packet (socket %i, to %s, length %i), WSA Last Error %i\n", ns, to.ToString(), length, WSAGetLastError());
 	else
-		Msg("CMasterNETHandler: send packet socket %i, to %s, data %s, length %i\n", ns, to.ToString(), data, length);
+		Msg("CMasterNETHandler: send packet socket %i, to %s, length %i, data: \n", ns, to.ToString(), length);
+	
+	DumpPacket(data, length);
 }
 
 void CMasterNETHandler::PacketReceived(sockaddr_in& from, byte* data, int length) {
@@ -204,7 +229,7 @@ void CMasterNETHandler::PacketReceived(sockaddr_in& from, byte* data, int length
 
 	packet.size = length;
 
-	//Msg("CMasterNETHandler: packet received from %s, data %s, length %i\n", packet.from.ToString(), data, length);
+	Msg("CMasterNETHandler: packet received from %s, data %s, length %i\n", packet.from.ToString(), data, length);
 
 	if (serverqueries->IsValidQuery(k_eQuery_Any, packet.from)) {
 		serverqueries->ProcessConnectionlessPacket(&packet);
