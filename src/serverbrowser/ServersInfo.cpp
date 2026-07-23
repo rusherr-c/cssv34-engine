@@ -3,8 +3,8 @@
 // maximum masterservers that can be parsed from masterservers.vdf
 #define MAX_MASTERSERVERS 16
 
-static char masterServers[][32] =
-{
+static char masterServers[][37] =
+{	
 	"78.154.103.37:10232", // nttnmDev (https://github.com/nttnmDev/cssv34masterserver)
 };
 
@@ -79,7 +79,69 @@ void CServersInfo::Initialize() {
 	m_hThread = CreateSimpleThread((ThreadFunc_t)Thread, this);
 
 	m_pMasterSocket->AddHandler(this);
-	UseDefaultMasters();
+
+	// masterservers.vdf keyvalues file
+	KeyValues* kvMasterServers = new KeyValues("");
+
+	CUtlVector<netadr_t> vecMasterServers;
+
+	if (!kvMasterServers->LoadFromFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG"))
+	{
+		// cleanup first
+		kvMasterServers->deleteThis();
+
+		// next, create default configuration
+		kvMasterServers = new KeyValues("MasterServers");
+
+		KeyValues* entry = kvMasterServers->FindKey("0", true);
+		entry->SetString("addr", "default");
+
+		kvMasterServers->SaveToFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG");
+
+		// cleanup
+		kvMasterServers->deleteThis();
+
+		UseDefaultMasters();
+		return;
+	}
+
+	// 
+	// Next: parse all valid addresses
+	//
+	for (int i = 0; i < MAX_MASTERSERVERS; i++)
+	{
+		char keyName[16];
+		Q_snprintf(keyName, sizeof(keyName), "%d", i);
+
+		// find "i" key
+		KeyValues* numberKey = kvMasterServers->FindKey(keyName);
+		if (!numberKey)
+			continue;
+
+		// find addr key
+		KeyValues* addrKey = numberKey->FindKey("addr");
+		if (!addrKey)
+			continue;
+
+		const char* addrStr = addrKey->GetString();
+		if (!addrStr || !addrStr[0])
+			continue;
+
+		if (!strcmp(addrStr, "default"))	// Use default
+			UseDefaultMasters();
+		else if (!strstr(addrStr, ":"))		// Is this addr even valid?
+			continue;
+		else {								// Add this server
+			netadr_t addr;
+
+			// do a dns lookup
+			addr.SetFromString(addrStr, true);
+
+			vecMasterServers.AddToTail(addr);
+		}
+	}
+
+	AddMasterServers(vecMasterServers);
 }
 
 // Shutdown...
@@ -110,17 +172,17 @@ void CServersInfo::RunFrame()
 		{
 			if (m_pCurrentList->ServerCount() < 1)
 				if (m_pCurrentList->m_pResponseTarget)
-					m_pCurrentList->m_pResponseTarget->RefreshComplete(nNoServersListedOnMasterServer);
+					m_pCurrentList->m_pResponseTarget->RefreshComplete(eNoServersListedOnMasterServer);
 				else;
 			else
-				m_pCurrentList->m_pResponseTarget->RefreshComplete(nServerResponded);
+				m_pCurrentList->m_pResponseTarget->RefreshComplete(eServerResponded);
 		}
 		StopRefresh();
 	}
 }
 
 // Request Server List from master server
-void CServersInfo::RequestInternetServerList(const char* gamedir, IServerListResponse* response) {
+void CServersInfo::RequestInternetServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
 
@@ -139,7 +201,7 @@ void CServersInfo::RequestInternetServerList(const char* gamedir, IServerListRes
 }
 
 // Request LAN Server List
-void CServersInfo::RequestLANServerList(const char* gamedir, IServerListResponse* response) {
+void CServersInfo::RequestLANServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
 
@@ -165,7 +227,7 @@ void CServersInfo::RequestLANServerList(const char* gamedir, IServerListResponse
 }
 
 // Request Favorites List
-void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerListResponse* response) {
+void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
 
@@ -181,7 +243,7 @@ void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerListRe
 }
 
 // Request History List
-void CServersInfo::RequestHistoryServerList(const char* gamedir, IServerListResponse* response) {
+void CServersInfo::RequestHistoryServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
 
@@ -215,7 +277,7 @@ void CServersInfo::AddFavoriteServer(uint32 unIP, uint16 usPort) {
 	// todo
 }
 
-void CServersInfo::AddHistoryServer(uint32 unIP, uint16 usPort, time_t timeLastPlayed) {
+void CServersInfo::AddHistoryServer(uint32 unIP, uint16 usPort, int32 time32LastPlayed) {
 	// todo
 }
 
@@ -229,29 +291,40 @@ void CServersInfo::RemoveHistoryServer(uint32 unIP, uint16 usPort) {
 }
 
 // Query info about single server (TODO!)
-void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerPingResponse* response) {
+void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
 	// todo
 }
 
-void CServersInfo::PlayerDetails(uint32 unIP, uint16 usPort, IServerPlayersResponse* response) {
+void CServersInfo::PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
 	// todo
-}
-
-bool CServersInfo::CancelServerQuery(EServerQuery type, uint32 unIP, uint16 usPort) {
-	// todo
-	return true;
 }
 
 // Internal functions //
 
 void CServersInfo::AddMasterServer(const netadr_t& adr) {
-	if (adr.GetType() != NA_IP)
+	if (!adr.IsValid() || !adr.IsBaseAdrValid())
 		return;
-	
-	if (adr.GetIPHostByteOrder() == 0 || adr.GetPort() == 0)
-		return;
+
+	for (auto& s : m_vecMasterAddresses)
+	{
+		if (s.CompareAdr(adr))
+			return;
+	}
+
+	ConColorMsg(Color(150, 255, 150, 255), "Added master server %s\n", adr.ToString());
 	
 	m_vecMasterAddresses.AddToTail(adr);
+}
+
+void CServersInfo::AddMasterServers(const CUtlVector<netadr_t>& vec) {
+
+	FOR_EACH_VEC(vec, i)
+	{
+		if (!vec.IsValidIndex(i))
+			continue;
+
+		AddMasterServer(vec[i]);
+	}
 }
 
 // Use default master addresses
@@ -266,19 +339,22 @@ void CServersInfo::UseDefaultMasters()
 		if (i > MAX_MASTERSERVERS)
 			break;
 
-		adr.SetFromString(masterServers[i]);
+		adr.SetFromString(masterServers[i], true);
 		
 		AddMasterServer(adr);
 	}
 }
 
 // This is set and used by RequestServerList and ProcessServerList
-static netadr_t lastServerAddress;
+static netadr_t gLastAdr;
 
 // Request server list from masterserver
 void CServersInfo::RequestServerList(const netadr_t& adr) {
 	if (!m_bRefreshing)
 		return;
+
+	// reset request time
+	m_flStartRequestTime = Plat_FloatTime();
 
 	char gamedir[256];
 	strcpy(gamedir, "\\gamedir\\");
@@ -289,7 +365,7 @@ void CServersInfo::RequestServerList(const netadr_t& adr) {
 
 	msg.WriteByte(C2M_CLIENTQUERY);
 	msg.WriteByte(0xFF);
-	msg.WriteString(lastServerAddress.ToString());
+	msg.WriteString(gLastAdr.ToString());
 	msg.WriteString(gamedir);
 
 	m_pMasterSocket->Send(adr, msg);
@@ -301,34 +377,39 @@ void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg) {
 		return;
 
 	uint32 unIP = ntohl(msg.ReadLong());
-	uint16 usPort = ntohs(msg.ReadShort());
-	uint32 id = 0;
+	uint16 usPort = ntohs(msg.ReadWord());
 
-	while (unIP != 0 && usPort != 0)
+	int i = 0;
+
+	while (i < msg.m_nDataBytes)
 	{
 		serveritem_t server{};
 		server.m_NetAdr = netadr_t(unIP, usPort);
 
 		// Add this server to server list
-		id = m_pMainList->AddNewServer(server);
+		unsigned id = m_pMainList->AddNewServer(server);
 		// Add to refresh list
 		m_pMainList->AddServerToRefreshList(id);
 
 		// Next ip & port
 		unIP = ntohl(msg.ReadLong());
-		usPort = ntohs(msg.ReadShort());
+		usPort = ntohs(msg.ReadWord());
 
-		lastServerAddress.SetIPAndPort(unIP, usPort);
-		//RequestServerList(from);
+		if (!msg.IsOverflowed()) {
+			gLastAdr.SetIPAndPort(unIP, usPort);
+		}
+
+		i += 6;
 	}
 
-	if (lastServerAddress.IsValid())
+	if (gLastAdr.IsValid())
 	{
 		RequestServerList(from);
 	}
 
-	// Start Refreshing
+	// Start Refreshing the list
 	m_pMainList->StartRefresh();
+
 }
 
 // CMsgHandler

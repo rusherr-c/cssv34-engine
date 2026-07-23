@@ -15,6 +15,11 @@
 #include "ServerList.h"
 
 #define SPLITPACKET_HEADER 0xFFFFFFFE
+#define S2A_EDF_GAMEPORT 0x80
+#define S2A_EDF_STEAMID 0x10
+#define S2A_EDF_SOURCETV 0x40
+#define S2A_EDF_GAMETAGS 0x20
+#define S2A_EDF_GAMEID 0x01
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor

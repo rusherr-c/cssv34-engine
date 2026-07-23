@@ -38,7 +38,7 @@ bool QueryLessFunc( const query_t &item1, const query_t &item2 )
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
 //-----------------------------------------------------------------------------
-CServerList::CServerList(IServerListResponse *target) : m_Queries(0, MAX_QUERY_SOCKETS, QueryLessFunc)
+CServerList::CServerList(IServerRefreshResponse *target) : m_Queries(0, MAX_QUERY_SOCKETS, QueryLessFunc)
 {
 	m_pResponseTarget = target;
 	m_iUpdateSerialNumber = 1;
@@ -140,7 +140,7 @@ unsigned int CServerList::AddNewServer(serveritem_t &server)
 		if (server.m_NetAdr.CompareAdr(m_Servers[i].m_NetAdr))
 			return 0;
 	}
-	DevMsg("Adding %s to the list\n", server.m_NetAdr.ToString());
+	//DevMsg("Adding %s to the list\n", server.m_NetAdr.ToString());
 
 	unsigned int serverID = m_Servers.AddToTail(server);
 	//m_Servers[serverID].serverID = serverID;
@@ -192,7 +192,7 @@ void CServerList::AddServerToRefreshList(unsigned int serverID)
 
 	serveritem_t &server = m_Servers[serverID];
 	server.m_bHadSuccessfulResponse = NONE;
-
+	
 	m_RefreshList.AddToTail(serverID);
 }
 
@@ -354,7 +354,7 @@ void CServerList::QueryFrame()
 	if (m_Queries.Count() < 1)
 	{
 		m_bRefreshing = false;
-		m_pResponseTarget->RefreshComplete(nServerResponded);
+		m_pResponseTarget->RefreshComplete(eServerResponded);
 
 		// up the serial number, so that we ignore any late results
 		m_iUpdateSerialNumber++;

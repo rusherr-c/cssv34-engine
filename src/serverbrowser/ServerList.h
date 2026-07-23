@@ -18,7 +18,7 @@
 #include <UtlVector.h>
 
 class CSocket;
-class IServerListResponse;
+class IServerRefreshResponse;
 struct serveritem_t;
 
 // holds a single query - needs to public unfortunately
@@ -36,7 +36,8 @@ class CServerList
 {
 	friend class CServersInfo;
 public:
-	CServerList(IServerListResponse *gameList);
+	////////////////////
+	CServerList(IServerRefreshResponse *gameList);
 	~CServerList();
 
 	// Handles a frame of networking
@@ -81,7 +82,7 @@ private:
 	// recalculates a servers ping, from the last few ping times
 	int CalculateAveragePing(serveritem_t &server);
 
-	IServerListResponse *m_pResponseTarget;
+	IServerRefreshResponse *m_pResponseTarget;
 
 	enum
 	{

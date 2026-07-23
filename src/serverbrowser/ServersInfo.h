@@ -16,24 +16,11 @@
 #include "tier1/netadr.h"
 #include "proto_oob.h"
 #include "protocol.h"
+#include "IServerRefreshResponse.h"
 #include "Socket.h"
 #include "ServerList.h"
 
-#define S2A_EDF_GAMEPORT 0x80
-#define S2A_EDF_STEAMID 0x10
-#define S2A_EDF_SOURCETV 0x40
-#define S2A_EDF_GAMETAGS 0x20
-#define S2A_EDF_GAMEID 0x01
-
 #define LIST_REFRESH_TIMEOUT 3.5f // default timeout for all lists (excluding main list)
-
-// Server response status
-enum NServerResponse
-{
-	nServerResponded = 0,
-	nServerFailedToRespond,
-	nNoServersListedOnMasterServer,
-};
 
 //
 // class for each game server
@@ -96,42 +83,6 @@ public:
 
 };
 
-class IServerListResponse
-{
-public:
-	// Server has responded ok with updated data
-	virtual void ServerResponded(serveritem_t& server) = 0;
-	virtual void RefreshComplete(NServerResponse response) = 0;
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: Callback interface for receiving responses after pinging an individual server 
-//
-class IServerPingResponse
-{
-public:
-	// Server has responded successfully and has updated data
-	virtual void ServerResponded(serveritem_t& server) = 0;
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: Callback interface for receiving responses after requesting details on
-// who is playing on a particular server.
-//
-class IServerPlayersResponse
-{
-public:
-	// Got data on a new player on the server -- you'll get this callback once per player
-	// on the server which you have requested player data on.
-	virtual void AddPlayerToList(const char* pchName, int nScore, float flTimePlayed) = 0;
-
-	// The server failed to respond to the request for player details
-	virtual void PlayersFailedToRespond() = 0;
-
-	// The server has finished responding to the player details request
-	virtual void PlayersRefreshComplete() = 0;
-};
-
 enum EServerQuery
 {
 	k_eQuery_Any = -1,
@@ -156,27 +107,26 @@ public:
 
 public:
 	// Request Server List from master server...
-	void RequestInternetServerList(const char* gamedir, IServerListResponse* response);
-	void RequestLANServerList(const char* gamedir, IServerListResponse* response);
-	void RequestFavoritesServerList(const char* gamedir, IServerListResponse* response);
-	void RequestHistoryServerList(const char* gamedir, IServerListResponse* response);
+	void RequestInternetServerList(const char* gamedir, IServerRefreshResponse* response);
+	void RequestLANServerList(const char* gamedir, IServerRefreshResponse* response);
+	void RequestFavoritesServerList(const char* gamedir, IServerRefreshResponse* response);
+	void RequestHistoryServerList(const char* gamedir, IServerRefreshResponse* response);
 
 	// Stop refreshing current list
 	void StopRefresh();
 
 	// Add server to favorites/history list
 	void AddFavoriteServer(uint32 unIP, uint16 usPort);
-	void AddHistoryServer(uint32 unIP, uint16 usPort, time_t timeLastPlayed);
+	void AddHistoryServer(uint32 unIP, uint16 usPort, int32 time32LastPlayed);
 
 	// Remove server from favorites/history list
 	void RemoveFavoriteServer(uint32 unIP, uint16 usPort);
 	void RemoveHistoryServer(uint32 unIP, uint16 usPort);
 
 	// Query info about single server (TODO!)
-	void PingServer(uint32 unIP, uint16 usPort, IServerPingResponse* response);
-	void PlayerDetails(uint32 unIP, uint16 usPort, IServerPlayersResponse* response);
-	bool CancelServerQuery(EServerQuery type, uint32 unIP, uint16 usPort);
-
+	void PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
+	void PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
+	void ServerRules(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
 protected:
 	// Internal functions //
 
@@ -185,6 +135,9 @@ protected:
 
 	// Add master server to m_vecMasterAddresses
 	void AddMasterServer(const netadr_t& adr);
+
+	// Add vector of netadr to m_vecMasterAddresses
+	void AddMasterServers(const CUtlVector<netadr_t>& vec);
 
 	// Use default master addresses
 	void UseDefaultMasters();
