@@ -89,7 +89,7 @@ $Project "ServerBrowser"
 		$File	"QuickListPanel.h"
 
 		//$File	"$SRCDIR\common\ServerBrowser\blacklisted_server_manager.h"
-
+		$File	"IServerRefreshResponse.h"
 		$File	"ServerDetailsMsgHandler.h"
 		$File 	"ServerList.h"
 		$File 	"ServersInfo.h"

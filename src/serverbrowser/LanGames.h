@@ -29,7 +29,7 @@ public:
 
 	// IGameList handlers
 	// returns true if the game list supports the specified ui elements
-	virtual bool SupportsItem(IGameList::InterfaceItem_e item);
+	virtual bool SupportsItem(InterfaceItem_e item);
 
 	// Control which button are visible.
 	void ManualShowButtons( bool bShowConnect, bool bShowRefreshAll, bool bShowFilter );
@@ -46,10 +46,10 @@ public:
 
 	// IServerRefreshResponse handlers
 	// called when a server response has timed out
-	virtual void ServerFailedToRespond( int iServer );
+	virtual void ServerFailedToRespond( serveritem_t &server );
 
 	// called when the current refresh list is complete
-	virtual void RefreshComplete( NServerResponse response );
+	virtual void RefreshComplete( EMasterServerResponse response );
 
 	// Tell the game list what to put in there when there are no games found.
 	virtual void SetEmptyListText();

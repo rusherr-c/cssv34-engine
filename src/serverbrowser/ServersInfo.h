@@ -20,7 +20,8 @@
 #include "Socket.h"
 #include "ServerList.h"
 
-#define LIST_REFRESH_TIMEOUT 3.5f // default timeout for all lists (excluding main list)
+// default timeout for all lists (excluding main list)
+#define LIST_REFRESH_TIMEOUT 3.5f
 
 //
 // class for each game server
@@ -47,6 +48,7 @@ public:
 	int  m_nBotPlayers;						///< Number of bots (i.e simulated players) on this server
 	bool m_bPassword;						///< true if this server needs a password to join
 	bool m_bSecure;							///< server uses some kind of anticheat (e.g VAC)
+	uint m_ulTimeLastPlayed;				///< time (in unix time) when this server was last played on (for favorite/history servers)
 	char m_szGameVersion[64];
 
 	int  m_iFlags;
@@ -54,6 +56,7 @@ public:
 	/// Game server name
 	char m_szServerName[256];
 
+	// Format everything to a single string
 	char* ToString() noexcept {
 		static char buffer[1024];
 		memset(&buffer, 0, sizeof(buffer));
@@ -114,6 +117,7 @@ public:
 
 	// Stop refreshing current list
 	void StopRefresh();
+	bool IsRefreshing() { return m_bRefreshing; }
 
 	// Add server to favorites/history list
 	void AddFavoriteServer(uint32 unIP, uint16 usPort);

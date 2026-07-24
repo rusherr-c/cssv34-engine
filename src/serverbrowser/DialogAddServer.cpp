@@ -32,49 +32,29 @@ CDialogAddServer::CDialogAddServer(vgui::Panel *parent, IGameList *gameList) : F
 	m_pDiscoveredGames->AddColumnHeader(1, "Bots", "#ServerBrowser_Bots", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE | ListPanel::COLUMN_HIDDEN);
 	m_pDiscoveredGames->AddColumnHeader(2, "Secure", "#ServerBrowser_Secure", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
 
-	bool bGameSupportsReplay = false;
-
-	int nReplayWidth = 16;
-	if ( !bGameSupportsReplay )
-	{
-		nReplayWidth = 0;
-	}
-
-	m_pDiscoveredGames->AddColumnHeader(3, "Replay", "#ServerBrowser_Replay", nReplayWidth, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
-	m_pDiscoveredGames->AddColumnHeader(4, "Name", "#ServerBrowser_Servers", 20, ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE);
-	m_pDiscoveredGames->AddColumnHeader(5, "IPAddr", "#ServerBrowser_IPAddress", 60, ListPanel::COLUMN_HIDDEN);
-	m_pDiscoveredGames->AddColumnHeader(6, "GameDesc", "#ServerBrowser_Game", 150);
-	m_pDiscoveredGames->AddColumnHeader(7, "Players", "#ServerBrowser_Players", 60);
-	m_pDiscoveredGames->AddColumnHeader(8, "Map", "#ServerBrowser_Map", 80);
-	m_pDiscoveredGames->AddColumnHeader(9, "Ping", "#ServerBrowser_Latency", 60);
+	m_pDiscoveredGames->AddColumnHeader(3, "Name", "#ServerBrowser_Servers", 20, ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE);
+	m_pDiscoveredGames->AddColumnHeader(4, "IPAddr", "#ServerBrowser_IPAddress", 60, ListPanel::COLUMN_HIDDEN);
+	m_pDiscoveredGames->AddColumnHeader(5, "GameDesc", "#ServerBrowser_Game", 150);
+	m_pDiscoveredGames->AddColumnHeader(6, "Players", "#ServerBrowser_Players", 60);
+	m_pDiscoveredGames->AddColumnHeader(7, "Map", "#ServerBrowser_Map", 80);
+	m_pDiscoveredGames->AddColumnHeader(8, "Ping", "#ServerBrowser_Latency", 60);
 
 	m_pDiscoveredGames->SetColumnHeaderTooltip(0, "#ServerBrowser_PasswordColumn_Tooltip");
 	m_pDiscoveredGames->SetColumnHeaderTooltip(1, "#ServerBrowser_BotColumn_Tooltip");
 	m_pDiscoveredGames->SetColumnHeaderTooltip(2, "#ServerBrowser_SecureColumn_Tooltip");
 
-	if ( bGameSupportsReplay )
-	{
-		m_pDiscoveredGames->SetColumnHeaderTooltip(3, "#ServerBrowser_ReplayColumn_Tooltip");
-	}
-
 	// setup fast sort functions
 	m_pDiscoveredGames->SetSortFunc(0, PasswordCompare);
 	m_pDiscoveredGames->SetSortFunc(1, BotsCompare);
 	m_pDiscoveredGames->SetSortFunc(2, SecureCompare);
+	m_pDiscoveredGames->SetSortFunc(3, ServerNameCompare);
+	m_pDiscoveredGames->SetSortFunc(4, IPAddressCompare);
+	m_pDiscoveredGames->SetSortFunc(5, GameCompare);
+	m_pDiscoveredGames->SetSortFunc(6, PlayersCompare);
+	m_pDiscoveredGames->SetSortFunc(7, MapCompare);
+	m_pDiscoveredGames->SetSortFunc(8, PingCompare);
 
-	if ( bGameSupportsReplay )
-	{
-		m_pDiscoveredGames->SetSortFunc(3, ReplayCompare);
-	}
-
-	m_pDiscoveredGames->SetSortFunc(4, ServerNameCompare);
-	m_pDiscoveredGames->SetSortFunc(5, IPAddressCompare);
-	m_pDiscoveredGames->SetSortFunc(6, GameCompare);
-	m_pDiscoveredGames->SetSortFunc(7, PlayersCompare);
-	m_pDiscoveredGames->SetSortFunc(8, MapCompare);
-	m_pDiscoveredGames->SetSortFunc(9, PingCompare);
-
-	m_pDiscoveredGames->SetSortColumn(9); // sort on ping
+	m_pDiscoveredGames->SetSortColumn(8); // sort on ping
 
 	m_pTextEntry = new vgui::TextEntry( this, "ServerNameText" );
 	m_pTextEntry->AddActionSignalTarget( this );
@@ -273,7 +253,7 @@ void CDialogAddServer::ServerResponded( serveritem_t &server )
 	kv->SetString( "map", server.m_szMap );
 	kv->SetString( "GameDir", server.m_szGameDir );
 	kv->SetString( "GameDesc", server.m_szGameDescription );
-	//kv->SetString( "GameTags", server.m_szGameTags );
+	kv->SetString( "Rules", server.m_szServerRules );
 	kv->SetInt( "password", server.m_bPassword ? 1 : 0);
 	kv->SetInt( "bots", server.m_nBotPlayers ? 2 : 0);
 	kv->SetInt( "Replay", 0 );
@@ -352,7 +332,7 @@ void CDialogAddServer::OnItemSelected()
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void CDialogAddServer::FinishAddServer( serveritem_t &pServer )
+void CDialogAddServer::FinishAddServer( serveritem_t &server )
 {
-	ServerBrowserDialog().AddServerToFavorites( pServer );
+	ServerBrowserDialog().AddServerToFavorites( server );
 }

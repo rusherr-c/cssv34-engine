@@ -18,6 +18,7 @@ CServerBrowser &ServerBrowser()
 	return g_ServerBrowserSingleton;
 }
 
+CServersInfo* g_pServersInfo = NULL;
 IRunGameEngine *g_pRunGameEngine = NULL;
 
 ConVar sb_firstopentime( "sb_firstopentime", "0", FCVAR_DEVELOPMENTONLY, "Indicates the time the server browser was first opened." );
@@ -44,6 +45,7 @@ CServerBrowser::CServerBrowser()
 //-----------------------------------------------------------------------------
 CServerBrowser::~CServerBrowser()
 {
+	delete g_pServersInfo;
 }
 
 
@@ -70,7 +72,7 @@ bool CServerBrowser::Initialize(CreateInterfaceFn *factorylist, int factoryCount
 	ConnectTier2Libraries( factorylist, factoryCount );
 	ConnectTier3Libraries( factorylist, factoryCount );
 	g_pRunGameEngine = NULL;
-
+	
 	SteamAPI_Init();
 
 	for (int i = 0; i < factoryCount; i++)
@@ -80,6 +82,8 @@ bool CServerBrowser::Initialize(CreateInterfaceFn *factorylist, int factoryCount
 			g_pRunGameEngine = (IRunGameEngine *)(factorylist[i])(RUNGAMEENGINE_INTERFACE_VERSION, NULL);
 		}
 	}
+
+	g_pServersInfo = new CServersInfo();
 
 	// load the vgui interfaces
 #if defined( STEAM ) || defined( HL1 )
@@ -122,6 +126,50 @@ bool CServerBrowser::PostInitialize(CreateInterfaceFn *modules, int factoryCount
 bool CServerBrowser::IsVACBannedFromGame( int nAppID )
 {
 	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Marks that the tool/game loading us intends to feed us workshop information
+//-----------------------------------------------------------------------------
+void CServerBrowser::SetWorkshopEnabled( bool bManaged )
+{
+	m_bWorkshopEnabled = bManaged;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Add a mapname to our known user-subscribed workshop maps list
+//-----------------------------------------------------------------------------
+void CServerBrowser::AddWorkshopSubscribedMap( const char *pszMapName )
+{
+	CUtlString strMap( pszMapName );
+	if ( !IsWorkshopSubscribedMap( strMap ) )
+	{
+		m_vecWorkshopSubscribedMaps.AddToTail( strMap );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: remove a mapname to our known user-subscribed workshop maps list
+//-----------------------------------------------------------------------------
+void CServerBrowser::RemoveWorkshopSubscribedMap( const char *pszMapName )
+{
+	m_vecWorkshopSubscribedMaps.FindAndFastRemove( CUtlString( pszMapName ) );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Well, is it?
+//-----------------------------------------------------------------------------
+bool CServerBrowser::IsWorkshopEnabled()
+{
+	return m_bWorkshopEnabled;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Check if this map is in our subscribed list
+//-----------------------------------------------------------------------------
+bool CServerBrowser::IsWorkshopSubscribedMap( const char *pszMapName )
+{
+	return m_vecWorkshopSubscribedMaps.HasElement( CUtlString( pszMapName ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -278,11 +326,11 @@ bool CServerBrowser::OpenGameInfoDialog( uint64 ulSteamIDFriend )
 //-----------------------------------------------------------------------------
 bool CServerBrowser::JoinGame( uint64 ulSteamIDFriend )
 {
-/*	if ( OpenGameInfoDialog( ulSteamIDFriend, pszConnectCode ) )
+	if ( OpenGameInfoDialog( ulSteamIDFriend ) )
 	{
 		CDialogGameInfo *pDialogGameInfo = m_hInternetDlg->GetDialogGameInfoForFriend( ulSteamIDFriend );
 		pDialogGameInfo->Connect();
-	}*/
+	}
 
 	return false;
 }
@@ -293,7 +341,7 @@ bool CServerBrowser::JoinGame( uint64 ulSteamIDFriend )
 //-----------------------------------------------------------------------------
 bool CServerBrowser::JoinGame( uint32 unGameIP, uint16 usGamePort )
 {
-	m_hInternetDlg->JoinGame(unGameIP, usGamePort, "");
+    m_hInternetDlg->JoinGame( unGameIP, usGamePort, "" );
 	return true;
 }
 
@@ -303,13 +351,11 @@ bool CServerBrowser::JoinGame( uint32 unGameIP, uint16 usGamePort )
 //-----------------------------------------------------------------------------
 void CServerBrowser::CloseGameInfoDialog( uint64 ulSteamIDFriend )
 {
-#if 0
 	CDialogGameInfo *pDialogGameInfo = m_hInternetDlg->GetDialogGameInfoForFriend( ulSteamIDFriend );
 	if ( pDialogGameInfo )
 	{
 		pDialogGameInfo->Close();
 	}
-#endif
 }
 
 
@@ -329,16 +375,16 @@ CUtlVector< gametypes_t > g_GameTypes;
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-void LoadGameTypes(void)
+void LoadGameTypes( void )
 {
-	if (g_GameTypes.Count() > 0)
+	if ( g_GameTypes.Count() > 0 )
 		return;
 
-#define GAMETYPES_FILE				"servers/ServerBrowserGameTypes.txt"
+	#define GAMETYPES_FILE				"servers/ServerBrowserGameTypes.txt"
 
-	KeyValues* kv = new KeyValues(GAMETYPES_FILE);
+	KeyValues * kv = new KeyValues( GAMETYPES_FILE );
 
-	if (!kv->LoadFromFile(g_pFullFileSystem, GAMETYPES_FILE, "MOD"))
+	if  ( !kv->LoadFromFile( g_pFullFileSystem, GAMETYPES_FILE, "MOD" ) )
 	{
 		kv->deleteThis();
 		return;
@@ -346,27 +392,27 @@ void LoadGameTypes(void)
 
 	g_GameTypes.RemoveAll();
 
-	for (KeyValues* pData = kv->GetFirstSubKey(); pData != NULL; pData = pData->GetNextKey())
+	for ( KeyValues *pData = kv->GetFirstSubKey(); pData != NULL; pData = pData->GetNextKey() )
 	{
 		gametypes_t gametype;
 
-		gametype.pPrefix = CloneString(pData->GetString("prefix", ""));
-		gametype.pGametypeName = CloneString(pData->GetString("name", ""));
-		g_GameTypes.AddToTail(gametype);
+		gametype.pPrefix = CloneString( pData->GetString( "prefix", "" ) );
+		gametype.pGametypeName = CloneString( pData->GetString( "name", "" ) );
+		g_GameTypes.AddToTail( gametype );
 	}
-
+	
 
 	kv->deleteThis();
 }
 
-const char* GetGameTypeName(const char* pMapName)
+const char *GetGameTypeName( const char *pMapName )
 {
 	LoadGameTypes();
-	for (int i = 0; i < g_GameTypes.Count(); i++)
+	for ( int i = 0; i < g_GameTypes.Count(); i++ )
 	{
-		int iLength = strlen(g_GameTypes[i].pPrefix);
+		int iLength = strlen( g_GameTypes[i].pPrefix );
 
-		if (!Q_strncmp(pMapName, g_GameTypes[i].pPrefix, iLength))
+		if ( !Q_strncmp( pMapName, g_GameTypes[i].pPrefix, iLength ) )
 		{
 			return g_GameTypes[i].pGametypeName;
 		}
@@ -378,18 +424,18 @@ const char* GetGameTypeName(const char* pMapName)
 //-----------------------------------------------------------------------------
 // Purpose of comments like these: none
 //-----------------------------------------------------------------------------
-const char* CServerBrowser::GetMapFriendlyNameAndGameType(const char* pszMapName, char* szFriendlyMapName, int cchFriendlyName)
+const char *CServerBrowser::GetMapFriendlyNameAndGameType( const char *pszMapName, char *szFriendlyMapName, int cchFriendlyName )
 {
 	// Make sure game types are loaded
 	LoadGameTypes();
 
 	// Scan list
-	const char* pszFriendlyGameTypeName = "";
-	for (int i = 0; i < g_GameTypes.Count(); i++)
+	const char *pszFriendlyGameTypeName = "";
+	for ( int i = 0; i < g_GameTypes.Count(); i++ )
 	{
-		int iLength = strlen(g_GameTypes[i].pPrefix);
+		int iLength = strlen( g_GameTypes[i].pPrefix );
 
-		if (!Q_strnicmp(pszMapName, g_GameTypes[i].pPrefix, iLength))
+		if ( !Q_strnicmp( pszMapName, g_GameTypes[i].pPrefix, iLength ) )
 		{
 			pszMapName += iLength;
 			pszFriendlyGameTypeName = g_GameTypes[i].pGametypeName;
@@ -400,28 +446,28 @@ const char* CServerBrowser::GetMapFriendlyNameAndGameType(const char* pszMapName
 	// See how many characters from the name to copy.
 	// Start by assuming we'll copy the whole thing.
 	// (After any prefix we just skipped)
-	int l = V_strlen(pszMapName);
-	const char* pszFinal = Q_stristr(pszMapName, "_final");
-	if (pszFinal)
+	int l = V_strlen( pszMapName );
+	const char *pszFinal = Q_stristr( pszMapName, "_final" );
+	if ( pszFinal )
 	{
 		// truncate the _final (or _final1) part of the filename if it's at the end of the name
-		const char* pszNextChar = pszFinal + Q_strlen("_final");
-		if ((*pszNextChar == '\0') ||
-			((*pszNextChar == '1') && (*(pszNextChar + 1) == '\0')))
+		const char *pszNextChar = pszFinal + Q_strlen( "_final" );
+		if ( ( *pszNextChar == '\0' ) ||
+			( ( *pszNextChar == '1' ) && ( *(pszNextChar+1) == '\0' ) ) )
 		{
 			l = pszFinal - pszMapName;
 		}
 	}
 
 	// Safety check against buffer size
-	if (l >= cchFriendlyName)
+	if ( l >= cchFriendlyName )
 	{
-		Assert(!"Map name too long for buffer!");
-		l = cchFriendlyName - 1;
+		Assert( !"Map name too long for buffer!" );
+		l = cchFriendlyName-1;
 	}
 
 	// Copy friendly portion of name only
-	V_memcpy(szFriendlyMapName, pszMapName, l);
+	V_memcpy( szFriendlyMapName, pszMapName, l );
 
 	// It's like the Alamo.  We never forget.
 	szFriendlyMapName[l] = '\0';
@@ -429,3 +475,4 @@ const char* CServerBrowser::GetMapFriendlyNameAndGameType(const char* pszMapName
 	// Result should be the friendly game type name
 	return pszFriendlyGameTypeName;
 }
+

@@ -148,6 +148,22 @@ unsigned int CServerList::AddNewServer(serveritem_t &server)
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: removes server from the list
+//-----------------------------------------------------------------------------
+void CServerList::RemoveServer(unsigned int serverID) {
+	if (!m_Servers.IsValidIndex(serverID))
+		return;
+
+	m_Servers.Remove(serverID);
+	int refreshID = m_RefreshList.Find(serverID);
+
+	if (!m_RefreshList.IsValidIndex(refreshID))
+		return;
+
+	m_RefreshList.Remove(refreshID);
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Clears all servers from the list
 //-----------------------------------------------------------------------------
 void CServerList::Clear()
@@ -270,6 +286,9 @@ int CServerList::FindServer(netadr_t& adr)
 {
 	FOR_EACH_VEC(m_Servers, i)
 	{
+		if (!m_Servers.IsValidIndex(i))
+			continue;
+
 		if (adr.CompareAdr(m_Servers[i].m_NetAdr))
 			return i;
 	}
@@ -354,7 +373,7 @@ void CServerList::QueryFrame()
 	if (m_Queries.Count() < 1)
 	{
 		m_bRefreshing = false;
-		m_pResponseTarget->RefreshComplete(eServerResponded);
+		m_pResponseTarget->RefreshComplete(k_eServerResponded);
 
 		// up the serial number, so that we ignore any late results
 		m_iUpdateSerialNumber++;

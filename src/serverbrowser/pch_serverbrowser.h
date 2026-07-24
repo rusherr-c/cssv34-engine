@@ -6,6 +6,7 @@
 //=============================================================================
 
 #include <winlite.h>
+#include <winsock.h>
 #undef CreateDialog
 #ifdef WIN32
 #include <direct.h>
@@ -16,7 +17,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <winsock2.h>
 
 #include "vstdlib/pch_vstdlib.h"
 #include "tier0/memdbgoff.h"
@@ -30,7 +30,6 @@
 //#include "steam/steam_querypackets.h"
 #include "steam/steam_api.h"
 #include "steam/isteamuser.h"
-#include "steam/isteammatchmaking.h"
 #include "steam/isteamfriends.h"
 
 #include "ServerBrowser/IServerBrowser.h"
@@ -47,6 +46,11 @@
 
 // serverbrowser files
 
+#include "IServerRefreshResponse.h"
+#include "Socket.h"
+#include "ServerDetailsMsgHandler.h"
+#include "ServerList.h"
+#include "ServersInfo.h"
 #include "igamelist.h"
 #include "ServerListCompare.h"
 #include "ServerBrowser.h"
@@ -60,18 +64,13 @@
 #include "BaseGamesPage.h"
 #include "InternetGames.h"
 #include "FavoriteGames.h"
-//#include "SpectateGames.h"
+#include "SpectateGames.h"
 #include "LanGames.h"
 #include "HistoryGames.h"
+#include "SpectateGames.h"
 #include "ServerBrowserDialog.h"
 #include "QuickListPanel.h"
 #include "vgui_controls/PanelListPanel.h"
-
-#include "Socket.h"
-#include "ServerList.h"
-#include "ServersInfo.h"
-#include "ServerDetailsMsgHandler.h"
-
 
 #pragma warning( disable: 4355 )  //  warning C4355: 'this' : used in base member initializer list
 

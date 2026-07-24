@@ -140,11 +140,6 @@ void CQuickListPanel::SetRefreshing( void )
 		m_pReplayImage->SetVisible( false );
 	}
 
-	if (m_pMapImage)
-	{
-		m_pReplayImage->SetVisible(false);
-	}
-
 	if ( m_pLatencyLabel )
 	{
 		m_pLatencyLabel->SetVisible( false );
@@ -170,16 +165,16 @@ void CQuickListPanel::SetMapName( const char *pMapName )
 //-----------------------------------------------------------------------------
 void CQuickListPanel::SetGameType( const char *pGameType )
 {
-	m_pGameTypeLabel->SetVisible( false );
-
-	if ( strlen ( pGameType ) == 0 || !m_pMapNameLabel )
+	if ( strlen ( pGameType ) == 0 )
+	{
+		m_pGameTypeLabel->SetVisible( false );
 		return;
+	}
 
 	char gametype[ 512 ];
-	Q_snprintf( gametype, sizeof( gametype ), "%s (%s)", m_szMapName, pGameType );
+	Q_snprintf( gametype, sizeof( gametype ), "(%s)", pGameType );
 
-	m_pMapNameLabel->SetText( gametype );
-	m_pMapNameLabel->SizeToContents();
+	m_pGameTypeLabel->SetText( gametype );
 }
 
 //-----------------------------------------------------------------------------
@@ -210,14 +205,6 @@ void CQuickListPanel::SetServerInfo ( KeyValues *pKV, int iListID, int iTotalSer
 	}
 
 	m_pLatencyImage->SetVisible( false );
-
-	if ( false )
-	{
-		if ( pKV->GetInt( "Replay", 0 ) > 0 )
-		{
-			m_pReplayImage->SetVisible( true );
-		}
-	}
 
 	char ping[ 512 ];
 	Q_snprintf( ping, sizeof( ping ), "%d ms", iPing );
@@ -260,10 +247,8 @@ void CQuickListPanel::SetServerInfo ( KeyValues *pKV, int iListID, int iTotalSer
 //-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
-
 void CQuickListPanel::SetImage( const char *pMapName )
 {
-	/*
 	char path[ 512 ];
 	Q_snprintf( path, sizeof( path ), "materials/vgui/maps/menu_thumb_%s.vmt", pMapName );
 
@@ -290,7 +275,6 @@ void CQuickListPanel::SetImage( const char *pMapName )
 		m_pMapImage->SetImage ( imagename );
 		m_pMapImage->SetMouseInputEnabled( false );
 	}							
-	*/
 }
 
 void CQuickListPanel::OnMousePressed( vgui::MouseCode code )

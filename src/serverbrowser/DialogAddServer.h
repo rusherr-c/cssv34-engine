@@ -17,7 +17,7 @@ class IGameList;
 //-----------------------------------------------------------------------------
 // Purpose: Dialog which lets the user add a server by IP address
 //-----------------------------------------------------------------------------
-class CDialogAddServer : public vgui::Frame //, public ISteamMatchmakingPingResponse
+class CDialogAddServer : public vgui::Frame, public IServerQueryResponse
 {
 	DECLARE_CLASS_SIMPLE( CDialogAddServer, vgui::Frame );
 	friend class CAddServerGameList;
@@ -40,7 +40,7 @@ private:
 	void TestServers();
 	MESSAGE_FUNC( OnTextChanged, "TextChanged" );
 
-	virtual void FinishAddServer( serveritem_t &pServer );
+	virtual void FinishAddServer( serveritem_t &server );
 	virtual bool AllowInvalidIPs( void ) { return false; }
 
 protected:
@@ -55,7 +55,7 @@ protected:
 	vgui::ListPanel *m_pDiscoveredGames;
 	int m_OriginalHeight;
 	CUtlVector<serveritem_t> m_Servers;
-	CUtlVector<HServerQuery> m_Queries;
+	CUtlVector<int> m_Queries;
 };
 
 #endif // DIALOGADDSERVER_H

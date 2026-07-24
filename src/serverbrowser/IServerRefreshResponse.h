@@ -16,9 +16,9 @@ class serveritem_t;
 // Master Server response status
 enum EMasterServerResponse
 {
-	eServerResponded = 0,
-	eServerFailedToRespond,
-	eNoServersListedOnMasterServer,
+	k_eServerResponded = 0,
+	k_eServerFailedToRespond,
+	k_eNoServersListedOnMasterServer,
 };
 
 //-----------------------------------------------------------------------------

@@ -11,24 +11,15 @@
 #pragma once
 #endif
 
-struct challenge_s
-{
-	netadr_t addr;
-	int challenge;
-};
-
 //-----------------------------------------------------------------------------
 // Purpose: Dialog for displaying information about a game server
 //-----------------------------------------------------------------------------
-class CDialogGameInfo : public vgui::Frame, public IServerPlayersResponse, public IServerPingResponse//public ISteamMatchmakingPlayersResponse, public ISteamMatchmakingPingResponse
+class CDialogGameInfo : public vgui::Frame, public IServerQueryResponse
 {
 	DECLARE_CLASS_SIMPLE( CDialogGameInfo, vgui::Frame ); 
 
 public:
-	CDialogGameInfo(
-		vgui::Panel *parent, int serverIP, int queryPort,
-		unsigned short connectionPort, const char *pszConnectCode );
-
+	CDialogGameInfo(vgui::Panel *parent, int serverIP, int queryPort, unsigned short connectionPort, const char *pszConnectCode );
 	~CDialogGameInfo();
 
 	void Run(const char *titleName);
@@ -47,19 +38,18 @@ public:
 	virtual void ServerFailedToRespond();
 
 	// on individual player added
-	virtual void AddPlayerToList(const char *playerName, int score, float timePlayed);
-	virtual void PlayersFailedToRespond() { Msg("[DialogGameInfo] Players failed to respond\n"); }
-	virtual void PlayersRefreshComplete() { Msg("[DialogGameInfo] Players refresh complete\n"); }
+	virtual void AddPlayerToList(const char *playerName, int score, float timePlayedSeconds);
+	virtual void PlayersFailedToRespond() {}
+	virtual void PlayersRefreshComplete() { m_hPlayersQuery = HSERVERQUERY_INVALID; }
 
 	// called when the current refresh list is complete
-	virtual void RefreshComplete( EMatchMakingServerResponse response );
+	virtual void RefreshComplete( EMasterServerResponse response );
 
 	// player list received
 	virtual void ClearPlayerList();
 
-	//virtual void SendChallengeQuery( const netadr_t & to );
+	// send player list query
 	virtual void SendPlayerQuery( uint32 unIP, uint16 usQueryPort );
-	//virtual void InsertChallengeResponse( const netadr_t & to, int nChallenge );
 
 protected:
 	// message handlers
@@ -121,6 +111,8 @@ private:
 
 	CUtlString m_sConnectCode;
 	serveritem_t m_Server;
+	HServerQuery m_hPingQuery;
+	HServerQuery m_hPlayersQuery;
 	bool m_bPlayerListUpdatePending;
 };
 

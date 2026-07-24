@@ -9,35 +9,8 @@
 
 using namespace vgui;
 
-static const long RETRY_TIME = 10000;		// refresh server every 10 seconds
-static const long CHALLENGE_ENTRIES = 1024;
-
-extern "C"
-{
-	DLL_EXPORT bool JoiningSecureServerCall()
-	{
-		return true;
-	}
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Comparison function used in query redblack tree
-//-----------------------------------------------------------------------------
-bool QueryLessFunc( const struct challenge_s &item1, const struct challenge_s &item2 )
-{
-	// compare port then ip
-	if ( item1.addr.GetPort() < item2.addr.GetPort() )
-		return true;
-	else if ( item1.addr.GetPort() > item2.addr.GetPort() )
-		return false;
-
-	// change this to GetIPHostByteOrder!!
-	int ip1 = item1.addr.GetIPHostByteOrder();
-	int ip2 = item2.addr.GetIPHostByteOrder();
-
-	return ip1 < ip2;
-}
-
+// refresh server every 10 seconds
+static const long RETRY_TIME = 10000;
 
 //-----------------------------------------------------------------------------
 // Purpose: Constructor
@@ -267,7 +240,7 @@ void CDialogGameInfo::PerformLayout()
 	SetControlString( "ServerText", m_Server.m_szServerName );
 	SetControlString( "GameText", m_Server.m_szGameDescription );
 	SetControlString( "MapText", m_Server.m_szMap );
-	//SetControlString( "GameTags", m_Server.m_szGameTags );
+	SetControlString( "Rules", m_Server.m_szServerRules );
 
 
 	if ( !m_Server.m_bHadSuccessfulResponse )
@@ -661,7 +634,7 @@ void CDialogGameInfo::ConnectToServer()
 		char connectArgs[256];
 		ConstructConnectArgs( connectArgs, Q_ARRAYSIZE( connectArgs ), m_Server );
 		
-		if ( ( m_Server.m_bSecure && JoiningSecureServerCall() )|| !m_Server.m_bSecure )
+		if ( ( m_Server.m_bSecure )|| !m_Server.m_bSecure )
 		{
 			switch ( g_pRunGameEngine->RunEngine( m_Server.m_nAppID, gameDir, connectArgs ) )
 			{
@@ -703,7 +676,7 @@ void CDialogGameInfo::ConnectToServer()
 //-----------------------------------------------------------------------------
 // Purpose: called when the current refresh list is complete
 //-----------------------------------------------------------------------------
-void CDialogGameInfo::RefreshComplete( EMatchMakingServerResponse response )
+void CDialogGameInfo::RefreshComplete( EMasterServerResponse response )
 {
 }
 

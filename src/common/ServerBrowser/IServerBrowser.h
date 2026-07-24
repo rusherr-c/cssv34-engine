@@ -1,9 +1,9 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 // $NoKeywords: $
-//=============================================================================//
+//=============================================================================
 
 #ifndef ISERVERBROWSER_H
 #define ISERVERBROWSER_H
@@ -41,7 +41,7 @@ public:
 	virtual void CloseAllGameInfoDialogs() = 0;
 };
 
-#define SERVERBROWSER_INTERFACE_VERSION "ServerBrowser003"
+#define SERVERBROWSER_INTERFACE_VERSION "ServerBrowser004"
 
 
 

@@ -9,13 +9,10 @@ static char masterServers[][37] =
 };
 
 // Thread sleep interval (ms)
-#define THREAD_SLEEP_INTERVAL 40
+#define THREAD_SLEEP_INTERVAL 150
 
 #define LANBROADCAST_MIN_PORT 27000
 #define LANBROADCAST_MAX_PORT 27100
-
-static CServersInfo s_serversinfo;
-CServersInfo* g_pServersInfo = &s_serversinfo;
 
 void CServersInfo::Thread(CServersInfo* pthis)
 {
@@ -26,7 +23,7 @@ void CServersInfo::Thread(CServersInfo* pthis)
 
 	while (pthis->m_bWorking)
 	{
-		ThreadSleep(THREAD_SLEEP_INTERVAL);
+		Sleep(THREAD_SLEEP_INTERVAL);
 		pthis->RunFrame();
 	}
 
@@ -76,72 +73,49 @@ void CServersInfo::Initialize() {
 	m_bWorking = true;
 
 	// create our thread
-	m_hThread = CreateSimpleThread((ThreadFunc_t)Thread, this);
+	m_hThread = (ThreadHandle_t)
+		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Thread, this, 0, 0);
 
 	m_pMasterSocket->AddHandler(this);
 
-	// masterservers.vdf keyvalues file
-	KeyValues* kvMasterServers = new KeyValues("");
+	// load masters from config file
+	KeyValues* kv = new KeyValues("MasterServers");
 
-	CUtlVector<netadr_t> vecMasterServers;
+	CUtlStringList masterServerNames;
 
-	if (!kvMasterServers->LoadFromFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG"))
+	if (kv->LoadFromFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG"))
 	{
-		// cleanup first
-		kvMasterServers->deleteThis();
+		// iterate the list loading all the servers
+		for (KeyValues* srv = kv->GetFirstSubKey(); srv != NULL; srv = srv->GetNextKey())
+		{
+			// default?
+			if (!strcmp(srv->GetString("addr"), "default"))
+				UseDefaultMasters();
 
-		// next, create default configuration
-		kvMasterServers = new KeyValues("MasterServers");
+			masterServerNames.AddToTail((char*)srv->GetString("addr"));
+		}
+	}
+	else
+	{
+		Msg("Could not load file MasterServers.vdf, server browser will not function.\n");
+	}
 
-		KeyValues* entry = kvMasterServers->FindKey("0", true);
-		entry->SetString("addr", "default");
-
-		kvMasterServers->SaveToFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG");
-
-		// cleanup
-		kvMasterServers->deleteThis();
-
-		UseDefaultMasters();
+	// make sure we have at least one master listed
+	if (masterServerNames.Count() < 1)
+	{
+		// add the default master
+		UseDefaultMasters();	
 		return;
 	}
 
-	// 
-	// Next: parse all valid addresses
-	//
-	for (int i = 0; i < MAX_MASTERSERVERS; i++)
+	// add masters
+	FOR_EACH_VEC(masterServerNames, i)
 	{
-		char keyName[16];
-		Q_snprintf(keyName, sizeof(keyName), "%d", i);
-
-		// find "i" key
-		KeyValues* numberKey = kvMasterServers->FindKey(keyName);
-		if (!numberKey)
+		if (!masterServerNames.IsValidIndex(i))
 			continue;
 
-		// find addr key
-		KeyValues* addrKey = numberKey->FindKey("addr");
-		if (!addrKey)
-			continue;
-
-		const char* addrStr = addrKey->GetString();
-		if (!addrStr || !addrStr[0])
-			continue;
-
-		if (!strcmp(addrStr, "default"))	// Use default
-			UseDefaultMasters();
-		else if (!strstr(addrStr, ":"))		// Is this addr even valid?
-			continue;
-		else {								// Add this server
-			netadr_t addr;
-
-			// do a dns lookup
-			addr.SetFromString(addrStr, true);
-
-			vecMasterServers.AddToTail(addr);
-		}
+		AddMasterServer(masterServerNames[i]);
 	}
-
-	AddMasterServers(vecMasterServers);
 }
 
 // Shutdown...
@@ -172,10 +146,10 @@ void CServersInfo::RunFrame()
 		{
 			if (m_pCurrentList->ServerCount() < 1)
 				if (m_pCurrentList->m_pResponseTarget)
-					m_pCurrentList->m_pResponseTarget->RefreshComplete(eNoServersListedOnMasterServer);
+					m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eNoServersListedOnMasterServer);
 				else;
 			else
-				m_pCurrentList->m_pResponseTarget->RefreshComplete(eServerResponded);
+				m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eServerResponded);
 		}
 		StopRefresh();
 	}
@@ -274,20 +248,42 @@ void CServersInfo::StopRefresh() {
 
 // Add server to favorites/history list
 void CServersInfo::AddFavoriteServer(uint32 unIP, uint16 usPort) {
-	// todo
+	serveritem_t server{};
+	server.m_NetAdr.SetIPAndPort(unIP, usPort);
+
+	// Add this server to server list
+	unsigned id = m_pFavoritesList->AddNewServer(server);
+	// Add to refresh list
+	m_pFavoritesList->AddServerToRefreshList(id);
 }
 
 void CServersInfo::AddHistoryServer(uint32 unIP, uint16 usPort, int32 time32LastPlayed) {
-	// todo
+	serveritem_t server{};
+	server.m_NetAdr.SetIPAndPort(unIP, usPort);
+
+	// Add this server to server list
+	unsigned id = m_pHistoryList->AddNewServer(server);
+	// Add to refresh list
+	m_pHistoryList->AddServerToRefreshList(id);
 }
 
 // Remove server from favorites/history list
 void CServersInfo::RemoveFavoriteServer(uint32 unIP, uint16 usPort) {
-	// todo
+	netadr_t adr(unIP, usPort);
+
+	// Find server by id
+	uint id = m_pFavoritesList->FindServer(adr);
+
+	m_pFavoritesList->RemoveServer(id);
 }
 
 void CServersInfo::RemoveHistoryServer(uint32 unIP, uint16 usPort) {
-	// todo
+	netadr_t adr(unIP, usPort);
+
+	// Find server by id
+	uint id = m_pHistoryList->FindServer(adr);
+
+	m_pHistoryList->RemoveServer(id);
 }
 
 // Query info about single server (TODO!)

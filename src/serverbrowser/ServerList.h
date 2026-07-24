@@ -52,6 +52,9 @@ public:
 	// adds a new server to the list, returning a handle to the server
 	unsigned int AddNewServer(serveritem_t &server);
 
+	// removes server from server list and refresh list
+	void RemoveServer(unsigned int serverID);
+
 	// starts a refresh
 	void StartRefresh();
 

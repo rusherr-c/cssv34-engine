@@ -20,7 +20,7 @@ class gameserveritem_t;
 #include "FindSteamServers.h"
 #endif
 #include "netadr.h"
-#include "serversinfo.h"
+
 
 typedef enum
 {
