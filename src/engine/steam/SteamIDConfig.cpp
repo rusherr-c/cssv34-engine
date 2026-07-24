@@ -18,7 +18,7 @@ extern int g_iSteamAppID;
 bool g_bIsESTEAMATiON = true;
 static Color SteamIDCfg_LogColor(100, 255, 100, 255);
 
-ConVar steam_gen("steam_gen", "0", SIDCVARS_FLAGS, "Sets steam gen (development only, 0 = use default)");
+ConVar steam_gen("steam_gen", "4", SIDCVARS_FLAGS, "Sets steam gen (development only, 0 = use default)");
 ConVar steam_uid("steam_uid", "0", SIDCVARS_FLAGS, "Sets custom steam id (development only, 0 = use default)");
 ConVar steam_special("steam_special", "0", SIDCVARS_FLAGS, "Special number");
 ConVar steam_new("steam_new", "0", SIDCVARS_FLAGS, "Indicates to use new steam id instance or not");
@@ -28,26 +28,35 @@ ConVar steam_new("steam_new", "0", SIDCVARS_FLAGS, "Indicates to use new steam i
 * 
 * @output       Account ID as an integer.
 */
+
 int get_accountid()
 {
-	// Using SteamEmu type generation
-
-	unsigned long result = 0;
+	DWORD volumeSerial = 0;
+	DWORD maxComponentLen = 0;
 
 	GetVolumeInformationA(
 		"C:\\",
 		nullptr,
 		0,
-		&result,
-		nullptr,
-		nullptr,
+		&volumeSerial,
+		&maxComponentLen,
+		&maxComponentLen,
 		nullptr,
 		0
 	);
 
-	result = (result ^ 0xC9710266) & 0x7FFFFFFF;
+	char id[16];
+	sprintf_s(id, sizeof(id), "%u", volumeSerial);
 
-	return result;
+	uint32_t hash = 1315423911u;
+
+	for (int i = 0; id[i] != '\0'; i++)
+	{
+		uint8_t c = static_cast<uint8_t>(id[i]);
+		hash ^= (hash >> 2) + 32u * hash + c;
+	}
+
+	return static_cast<int>(hash);
 }
 
 SteamIDConfig::SteamIDConfig() : steamID(0) {
