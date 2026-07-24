@@ -56,7 +56,7 @@ protected:
 	CPanelAnimationVarAliasType( int, m_iCenterY, "center_y", "0", "proportional_int" );
 
 	bool		m_bLastLabelUpdateHack;
-	CPanelAnimationVar( float, m_flLabelSizePercentage, "HintSize", 1" );
+	CPanelAnimationVar( float, m_flLabelSizePercentage, "HintSize", "1" );
 };
 
 DECLARE_HUDELEMENT( CHudHintDisplay );
