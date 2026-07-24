@@ -75,7 +75,7 @@ void CEnvHudHint::InputShowHudHint( inputdata_t &inputdata )
 	if (AllPlayers())
 	{
 		CReliableBroadcastRecipientFilter user;
-		UserMessageBegin(user, "KeyHintText");
+		UserMessageBegin(user, "HintText");
 			WRITE_BYTE(1);	// one message
 			WRITE_STRING(STRING(m_iszMessage));
 		MessageEnd();
@@ -97,7 +97,7 @@ void CEnvHudHint::InputShowHudHint( inputdata_t &inputdata )
 		{
 			CSingleUserRecipientFilter user( (CBasePlayer *)pPlayer );
 			user.MakeReliable();
-			UserMessageBegin( user, "KeyHintText" );
+			UserMessageBegin( user, "HintText" );
 				WRITE_BYTE( 1 );	// one message
 				WRITE_STRING( STRING(m_iszMessage) );
 			MessageEnd();
@@ -112,7 +112,7 @@ void CEnvHudHint::InputHideHudHint( inputdata_t &inputdata )
 	if (AllPlayers())
 	{
 		CReliableBroadcastRecipientFilter user;
-		UserMessageBegin(user, "KeyHintText");
+		UserMessageBegin(user, "HintText");
 		WRITE_BYTE(1);	// one message
 		WRITE_STRING(STRING(NULL_STRING));
 		MessageEnd();
@@ -134,7 +134,7 @@ void CEnvHudHint::InputHideHudHint( inputdata_t &inputdata )
 		{
 			CSingleUserRecipientFilter user( (CBasePlayer *)pPlayer );
 			user.MakeReliable();
-			UserMessageBegin( user, "KeyHintText" );
+			UserMessageBegin( user, "HintText" );
 			WRITE_BYTE( 1 );	// one message
 			WRITE_STRING( STRING(NULL_STRING) );
 			MessageEnd();

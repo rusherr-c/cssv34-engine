@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2004, Valve Corporation, All rights reserved. =======
+//====== Copyright ï¿½ 1996-2004, Valve Corporation, All rights reserved. =======
 //
 // Purpose: 
 //
@@ -34,7 +34,7 @@ public:
 	void Init();
 	void Reset();
 	void MsgFunc_HintText( bf_read &msg );
-	void FireGameEvent( IGameEvent * event);
+	//void FireGameEvent( IGameEvent * event);
 
 	bool SetHintText( wchar_t *text );
 	void LocalizeAndDisplay( const char *pszHudTxtMsg, const char *szRawString );
@@ -56,7 +56,7 @@ protected:
 	CPanelAnimationVarAliasType( int, m_iCenterY, "center_y", "0", "proportional_int" );
 
 	bool		m_bLastLabelUpdateHack;
-	CPanelAnimationVar( float, m_flLabelSizePercentage, "HintSize", "0" );
+	CPanelAnimationVar( float, m_flLabelSizePercentage, "HintSize", 1" );
 };
 
 DECLARE_HUDELEMENT( CHudHintDisplay );
@@ -84,7 +84,7 @@ void CHudHintDisplay::Init()
 	HOOK_HUD_MESSAGE( CHudHintDisplay, HintText );
 
 	// listen for client side events
-	ListenForGameEvent( "player_hintmessage" );
+	//ListenForGameEvent( "player_hintmessage" );
 }
 
 //-----------------------------------------------------------------------------
@@ -256,6 +256,8 @@ void CHudHintDisplay::OnThink()
 //-----------------------------------------------------------------------------
 void CHudHintDisplay::MsgFunc_HintText( bf_read &msg )
 {
+	msg.ReadByte();
+
 	// Read the string(s)
 	char szString[255];
 	msg.ReadString( szString, sizeof(szString) );
@@ -267,12 +269,12 @@ void CHudHintDisplay::MsgFunc_HintText( bf_read &msg )
 //-----------------------------------------------------------------------------
 // Purpose: Activates the hint display upon recieving a hint
 //-----------------------------------------------------------------------------
-void CHudHintDisplay::FireGameEvent( IGameEvent * event)
-{
-	const char *hintmessage = event->GetString( "hintmessage" );
-	char *tmpStr = hudtextmessage->LookupString( hintmessage, NULL );
-	LocalizeAndDisplay( tmpStr, hintmessage );
-}
+//void CHudHintDisplay::FireGameEvent( IGameEvent * event)
+//{
+//	const char *hintmessage = event->GetString( "hintmessage" );
+//	char *tmpStr = hudtextmessage->LookupString( hintmessage, NULL );
+//	LocalizeAndDisplay( tmpStr, hintmessage );
+//}
 
 //-----------------------------------------------------------------------------
 // Purpose: Localize, display, and animate the hud element
@@ -295,7 +297,7 @@ void CHudHintDisplay::LocalizeAndDisplay( const char *pszHudTxtMsg, const char *
 	{
 		pszBuf = g_pVGuiLocalize->Find( szRawString );
 	}
-
+	
 	if ( !pszBuf )
 	{
 		// use plain ASCII string 
@@ -323,444 +325,5 @@ void CHudHintDisplay::LocalizeAndDisplay( const char *pszHudTxtMsg, const char *
 	else
 	{
 		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence( "HintMessageHide" ); 
-	}
-}
-
-
-
-
-//-----------------------------------------------------------------------------
-// Purpose: Displays small key-centric hints on the right hand side of the screen
-//-----------------------------------------------------------------------------
-class CHudHintKeyDisplay : public vgui::Panel, public CHudElement
-{
-	DECLARE_CLASS_SIMPLE( CHudHintKeyDisplay, vgui::Panel );
-
-public:
-	CHudHintKeyDisplay( const char *pElementName );
-	void Init();
-	void Reset();
-	void MsgFunc_KeyHintText( bf_read &msg );
-	bool ShouldDraw();
-
-	bool SetHintText( const char *text );
-
-protected:
-	virtual void ApplySchemeSettings( vgui::IScheme *pScheme );
-	virtual void OnThink();
-
-private:
-	CUtlVector<vgui::Label *> m_Labels;
-	vgui::HFont m_hSmallFont, m_hLargeFont;
-	char m_szHintText[128];
-	int		m_iBaseY;
-
-	CPanelAnimationVarAliasType( float, m_iTextX, "text_xpos", "8", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_iTextY, "text_ypos", "8", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_iTextGapX, "text_xgap", "8", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_iTextGapY, "text_ygap", "8", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_iYOffset, "YOffset", "0", "proportional_float" );
-};
-
-DECLARE_HUDELEMENT( CHudHintKeyDisplay );
-DECLARE_HUD_MESSAGE( CHudHintKeyDisplay, KeyHintText );
-
-//-----------------------------------------------------------------------------
-// Purpose: Constructor
-//-----------------------------------------------------------------------------
-CHudHintKeyDisplay::CHudHintKeyDisplay( const char *pElementName ) : BaseClass(NULL, "HudHintKeyDisplay"), CHudElement( pElementName )
-{
-	vgui::Panel *pParent = g_pClientMode->GetViewport();
-	SetParent( pParent );
-	SetVisible( false );
-	m_szHintText[0] = 0;
-	SetAlpha( 0 );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CHudHintKeyDisplay::Init()
-{
-	HOOK_HUD_MESSAGE( CHudHintKeyDisplay, KeyHintText );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CHudHintKeyDisplay::Reset()
-{
-	SetHintText( NULL );
-	SetAlpha( 0 );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void CHudHintKeyDisplay::ApplySchemeSettings( vgui::IScheme *pScheme )
-{
-	m_hSmallFont = pScheme->GetFont( "HudHintTextSmall", true );
-	m_hLargeFont = pScheme->GetFont( "HudHintTextLarge", true );
-
-	BaseClass::ApplySchemeSettings( pScheme );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Save CPU cycles by letting the HUD system early cull
-// costly traversal.  Called per frame, return true if thinking and 
-// painting need to occur.
-//-----------------------------------------------------------------------------
-bool CHudHintKeyDisplay::ShouldDraw( void )
-{
-	return ( ( GetAlpha() > 0 ) && CHudElement::ShouldDraw() );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Updates the label color each frame
-//-----------------------------------------------------------------------------
-void CHudHintKeyDisplay::OnThink()
-{
-	for (int i = 0; i < m_Labels.Count(); i++)
-	{
-		if ( IsX360() && ( i & 1 ) == 0 )
-		{
-			// Don't change the fg color for buttons (even numbered labels)
-			m_Labels[i]->SetAlpha( GetFgColor().a() );
-		}
-		else
-		{
-			m_Labels[i]->SetFgColor(GetFgColor());
-		}
-	}
-
-	int ox, oy;
-	GetPos(ox, oy);
-	SetPos( ox, m_iBaseY + m_iYOffset );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Sets the hint text, replacing variables as necessary
-//-----------------------------------------------------------------------------
-bool CHudHintKeyDisplay::SetHintText( const char *text )
-{
-	// clear the existing text
-	for (int i = 0; i < m_Labels.Count(); i++)
-	{
-		m_Labels[i]->MarkForDeletion();
-	}
-	m_Labels.RemoveAll();
-
-	if ( !text )
-	{
-		m_szHintText[0] = 0;
-		return false;
-	}
-
-	strcpy( m_szHintText, text );
-
-	// look up the text string
-	wchar_t *ws = g_pVGuiLocalize->Find( text );
-	if ( !ws || wcslen(ws) <= 0)
-		return false;
-
-	// parse out the text into a label set
-	while ( *ws )
-	{
-		wchar_t token[64];
-		bool isVar = false;
-
-		// check for variables
-		if ( *ws == '%' )
-		{
-			isVar = true;
-			++ws;
-		}
-
-		// parse out the string
-		wchar_t *end = wcschr( ws, '%' );
-		if ( end )
-		{
-			wcsncpy( token, ws, end - ws );
-			token[end - ws] = 0;
-		}
-		else
-		{
-			wcscpy( token, ws );
-		}
-		ws += wcslen( token );
-		if ( isVar )
-		{
-			// move over the end of the variable
-			++ws; 
-		}
-
-		// put it in a label
-		vgui::Label *label = vgui::SETUP_PANEL(new vgui::Label(this, NULL, token));
-
-		bool bIsBitmap = false;
-
-		// modify the label if necessary
-		if ( isVar )
-		{
-			label->SetFont( m_hLargeFont );
-
-			// lookup key names
-			char binding[64];
-			g_pVGuiLocalize->ConvertUnicodeToANSI( token, binding, sizeof(binding) );
-
-			//!! change some key names into better names
-			char friendlyName[64];
-
-			if ( IsX360() )
-			{
-				int iNumBinds = 0;
-
-				char szBuff[ 512 ];
-				wchar_t szWideBuff[ 64 ];
-
-				for ( int iCode = 0; iCode < BUTTON_CODE_LAST; ++iCode )
-				{
-					ButtonCode_t code = static_cast<ButtonCode_t>( iCode );
-
-					bool bUseThisKey = false;
-
-					// Only check against bind name if we haven't already forced this binding to be used
-					const char *pBinding = gameuifuncs->GetBindingForButtonCode( code );
-
-					if ( !pBinding )
-						continue;
-
-					bUseThisKey = ( Q_stricmp( pBinding, binding ) == 0 );
-
-					if ( !bUseThisKey && 
-						( Q_stricmp( pBinding, "+duck" ) == 0 || Q_stricmp( pBinding, "toggle_duck" ) == 0 ) && 
-						( Q_stricmp( binding, "+duck" ) == 0 || Q_stricmp( binding, "toggle_duck" ) == 0 ) )
-					{
-						// +duck and toggle_duck are interchangable
-						bUseThisKey = true;
-					}
-
-					if ( !bUseThisKey && 
-						( Q_stricmp( pBinding, "+zoom" ) == 0 || Q_stricmp( pBinding, "toggle_zoom" ) == 0 ) && 
-						( Q_stricmp( binding, "+zoom" ) == 0 || Q_stricmp( binding, "toggle_zoom" ) == 0 ) )
-					{
-						// +zoom and toggle_zoom are interchangable
-						bUseThisKey = true;
-					}
-
-					// Don't use this bind in out list
-					if ( !bUseThisKey )
-						continue;
-
-					// Turn localized string into icon character
-					Q_snprintf( szBuff, sizeof( szBuff ), "#GameUI_Icons_%s", g_pInputSystem->ButtonCodeToString( static_cast<ButtonCode_t>( iCode ) ) );
-					g_pVGuiLocalize->ConstructString( szWideBuff, sizeof( szWideBuff ), g_pVGuiLocalize->Find( szBuff ), 0 );
-					g_pVGuiLocalize->ConvertUnicodeToANSI( szWideBuff, szBuff, sizeof( szBuff ) );
-
-					// Add this icon to our list of keys to display
-					friendlyName[ iNumBinds ] = szBuff[ 0 ];
-					++iNumBinds;
-				}
-
-				friendlyName[ iNumBinds ] = '\0';
-
-				if ( iNumBinds == 0 )
-				{
-					friendlyName[ 0 ] = '\0';
-					label->SetFont( m_hSmallFont );
-					label->SetText( "#GameUI_Icons_NONE" );
-				}
-				else
-				{
-					// 360 always uses bitmaps
-					bIsBitmap = true;
-					label->SetText( friendlyName );
-				}
-			}
-			else
-			{
-				const char *key = engine->Key_LookupBinding( *binding == '+' ? binding + 1 : binding );
-				if ( !key )
-				{
-					key = "< not bound >";
-				}
-
-				Q_snprintf( friendlyName, sizeof(friendlyName), "#%s", key );
-				Q_strupr( friendlyName );
-
-				// set the variable text - key may need to be localized (button images for example)
-				wchar_t *locName = g_pVGuiLocalize->Find( friendlyName );
-				if ( !locName || wcslen(locName) <= 0)
-				{
-					label->SetText( friendlyName + 1 );
-				}
-				else
-				{
-					// Assuming localized vars must be using a bitmap image. *May* not be the case, but since
-					// keyboard bindings have never been locaized in the past, they probably won't in the future either.
-					bIsBitmap = true;
-					label->SetText( locName );
-				}
-			}
-		}
-		else
-		{
-			label->SetFont( m_hSmallFont );
-		}
-
-		label->SetPaintBackgroundEnabled( false );
-		label->SetPaintBorderEnabled( false );
-		label->SizeToContents();
-		label->SetContentAlignment( vgui::Label::a_west );
-		if ( bIsBitmap && isVar )
-		{
-			// Don't change the color of the button art
-			label->SetFgColor( Color(255,255,255,255) );
-		}
-		else
-		{
-			label->SetFgColor( GetFgColor() );
-		}
-		m_Labels.AddToTail( vgui::SETUP_PANEL(label) );
-	}
-
-	// find the bounds we need to show
-	int widest1 = 0, widest2 = 0;
-	for (int i = 0; i < m_Labels.Count(); i++)
-	{
-		vgui::Label *label = m_Labels[i];
-
-		if (i & 1)
-		{
-			// help text
-			if (label->GetWide() > widest2)
-			{
-				widest2 = label->GetWide();
-			}
-		}
-		else
-		{
-			// variable
-			if (label->GetWide() > widest1)
-			{
-				widest1 = label->GetWide();
-			}
-		}
-	}
-
-	int tallest1 = 0, tallest2 = 0;
-	for (int i = 0; i < m_Labels.Count(); i++)
-	{
-		vgui::Label *label = m_Labels[i];
-
-		if (i & 1)
-		{
-			// help text
-			if (label->GetTall() > tallest2)
-			{
-				tallest2 = label->GetTall();
-			}
-		}
-		else
-		{
-			// variable
-			if (label->GetTall() > tallest1)
-			{
-				tallest1 = label->GetTall();
-			}
-		}
-	}
-	int tallest = max( tallest1, tallest2 );
-
-	// position the labels
-	int col1_x = m_iTextX;
-	int col2_x = m_iTextX + widest1 + m_iTextGapX;
-	int col_y = m_iTextY;
-
-	// Difference between the variable and the help text
-	int col_y_extra = ( (tallest1 - tallest2) / 2 );
-	if ( col_y_extra < 0 )
-	{
-		// text is taller than the variable (multi-line text).
-		// Push the variable's y down by subtracting the negative value.
-		col_y -= col_y_extra;
-	}
-
-	for (int i = 0; i < m_Labels.Count(); i++)
-	{
-		vgui::Label *label = m_Labels[i];
-
-		if (i & 1)
-		{
-			label->SetPos( col2_x, col_y + col_y_extra );
-
-			col_y += tallest;
-			col_y += m_iTextGapY;
-		}
-		else
-		{
-			// variable
-			label->SetPos( col1_x, col_y );
-		}
-	}
-
-	// move ourselves relative to our start position
-	int newWide = col2_x + widest2 + m_iTextX;
-	int newTall = col_y;
-	int ox, oy;
-	GetPos(ox, oy);
-
-	if (IsRightAligned())
-	{
-		int oldWide = GetWide();
-		int diff = newWide - oldWide;
-		ox -= diff;
-	}
-
-	if (IsBottomAligned())
-	{
-		int oldTall = GetTall();
-		int diff = newTall - oldTall;
-		oy -= diff;
-	}
-
-	// set the size of the hint panel to fit
-	SetPos( ox, oy );
-	SetSize( newWide, newTall );
-
-	m_iBaseY = oy;
-
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Activates the hint display
-//-----------------------------------------------------------------------------
-void CHudHintKeyDisplay::MsgFunc_KeyHintText( bf_read &msg )
-{
-	// how many strings do we receive ?
-	int count = msg.ReadByte();
-
-	// here we expect only one string
-	if ( count != 1 )
-	{
-		DevMsg("CHudHintKeyDisplay::MsgFunc_KeyHintText: string count != 1.\n");
-		return;
-	}
-
-	// read the string
-	char szString[2048];
-	msg.ReadString( szString, sizeof(szString) );
-
-	// make it visible
-	if ( SetHintText( szString ) )
-	{
-		SetVisible( true );
-		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence( "KeyHintMessageShow" ); 
-	}
-	else
-	{
-		// it's being cleared, hide the panel
-		g_pClientMode->GetViewportAnimationController()->StartAnimationSequence( "KeyHintMessageHide" ); 
 	}
 }
