@@ -2441,8 +2441,17 @@ void CVTFTexture::GenerateMipmaps()
 	int numMipsClampedLod = 0;
 	if ( TextureLODControlSettings_t const *pLodSettings = ( TextureLODControlSettings_t const * ) GetResourceData( VTF_RSRC_TEXTURE_LOD_SETTINGS, NULL ) )
 	{
-		int iClampX = 1 << min( pLodSettings->m_ResolutionClampX, pLodSettings->m_ResolutionClampX_360 );
-		int iClampY = 1 << min( pLodSettings->m_ResolutionClampX, pLodSettings->m_ResolutionClampX_360 );
+		int clampx = min(pLodSettings->m_ResolutionClampX, pLodSettings->m_ResolutionClampX_360);
+		int clampy = min(pLodSettings->m_ResolutionClampY, pLodSettings->m_ResolutionClampY_360);
+		if (clampx < 0 || clampx >= 31 || clampy < 0 || clampy >= 31)
+		{
+			Warning("[VTF] Texture has invalid LOD Control Resource, and will cause infinite loop. Prevented\n");
+			clampx = 0;
+			clampy = 0;
+		}
+
+		int iClampX = 1 << clampx;
+		int iClampY = 1 << clampy;
 
 		while ( iClampX < m_nWidth || iClampY < m_nHeight )
 		{
