@@ -19,6 +19,10 @@ bool IsLANIP(uint32 ip)
 	if ((ip & 0xFFFF0000) == 0xC0A80000)
 		return true;
 
+	// 127.0.0.0/8
+	if ((ip & 0xFF000000) == 0x7f000000)
+		return true;
+
 	return false;
 }
 
