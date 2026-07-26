@@ -11,52 +11,52 @@
 #include "sys_dll.h"
 #include <ctime>
 
+#define SIDCVARS_FLAGS 0 //FCVAR_DEVELOPMENTONLY
+
 static bool g_bSidCfg_FirstStart = true;
 extern int g_iSteamAppID;
 bool g_bIsESTEAMATiON = true;
+static Color SteamIDCfg_LogColor(100, 255, 100, 255);
 
-#define SIDCVARS_FLAGS 0 //FCVAR_DEVELOPMENTONLY
-
-ConVar gen_cvar("steam_gen", "0", SIDCVARS_FLAGS, "Sets steam gen (development only, 0 = use default)");
-ConVar sid_cvar("steam_uid", "0", SIDCVARS_FLAGS, "Sets custom steam id (development only, 0 = use default)");
+ConVar steam_gen("steam_gen", "4", SIDCVARS_FLAGS, "Sets steam gen (development only, 0 = use default)");
+ConVar steam_uid("steam_uid", "0", SIDCVARS_FLAGS, "Sets custom steam id (development only, 0 = use default)");
+ConVar steam_special("steam_special", "0", SIDCVARS_FLAGS, "Special number");
+ConVar steam_new("steam_new", "0", SIDCVARS_FLAGS, "Indicates to use new steam id instance or not");
 
 /*
-* Generate account id using an external ip
+* Get account id
 * 
 * @output       Account ID as an integer.
 */
+
 int get_accountid()
 {
-	int Ip = GetExternalIPLong();
-	int First = (Ip >> 24) & 0xFF;
-	int Second = (Ip >> 16) & 0xFF;
-	int Third = 0;
-	int Fourth = 0;
+	DWORD volumeSerial = 0;
+	DWORD maxComponentLen = 0;
 
-	int result = 0;
+	GetVolumeInformationA(
+		"C:\\",
+		nullptr,
+		0,
+		&volumeSerial,
+		&maxComponentLen,
+		&maxComponentLen,
+		nullptr,
+		0
+	);
 
-	for (int i = 0; i < 256; i++) {
-		if (i == 255) {
-			Third /= 256;
-			Fourth /= 256;
-		}
+	char id[16];
+	sprintf_s(id, sizeof(id), "%u", volumeSerial);
 
-		Third += i;
-		Fourth += i;
+	uint32_t hash = 1315423911u;
+
+	for (int i = 0; id[i] != '\0'; i++)
+	{
+		uint8_t c = static_cast<uint8_t>(id[i]);
+		hash ^= (hash >> 2) + 32u * hash + c;
 	}
 
-	result = (int)(((unsigned int)First << 24) |
-		((unsigned int)Second << 16) |
-		((unsigned int)Third << 8) |
-		(unsigned int)Fourth);
-
-	if (result < 0) result *= -1;
-
-	do {
-		result -= 4;
-	} while (result > INT_MAX);
-
-	return result;
+	return static_cast<int>(hash);
 }
 
 SteamIDConfig::SteamIDConfig() : steamID(0) {
@@ -64,14 +64,11 @@ SteamIDConfig::SteamIDConfig() : steamID(0) {
 	if (g_bSidCfg_FirstStart) {
 		srand((unsigned)_time64(0));
 		
-		if (!SteamUser())
-			steamID = get_accountid();
-		else
-			steamID = SteamUser()->GetSteamID().GetAccountID() / 2;
+		steamID = get_accountid();
 
 		g_bSidCfg_FirstStart = false;
 
-		ConColorMsg(Color(100, 255, 100, 255), "[SteamIDConfig] ");
+		ConColorMsg(SteamIDCfg_LogColor, "[SteamIDConfig] ");
 		Msg("Using SteamID: STEAM_0:0:%i\n", steamID); 
 	}
 	else {
@@ -83,45 +80,41 @@ SteamIDConfig::~SteamIDConfig() {
 	steamID = 0;
 }
 
-int SteamIDConfig::CreateTicket(void* pData, CSteamID sid, uint32 ip, uint16 port, bool secure, int gen) {
+int SteamIDConfig::CreateOriginalTicket(void* pData, CSteamID sid, uint32 ip, uint16 port, bool secure) {
 
-	if (sid_cvar.GetInt() != 0)
-		steamID == sid_cvar.GetInt();
-
-	//ConColorMsg(Color(100, 255, 100, 255), "[SteamIDConfig] Generating for Gen %i", gen_cvar.GetInt() ? gen_cvar.GetInt() : gen);
-	Ticket = GenerateRevEmu(pData, steamID, gen_cvar.GetInt() ? gen_cvar.GetInt() : gen); // spoof the ticket
-
-	if (gen == 4) {
-		Msg("[SteamIDConfig] Forcing RevEmu to generate STEAM_ID for Gen 4\n");
-		if (SteamUser())
-			Ticket = SteamUser()->InitiateGameConnection(pData, 2048, sid, CGameID(g_iSteamAppID), ntohl(ip), ntohs(port), secure);
-	}
+	Msg("[SteamIDConfig] Creating ticket via SteamUser()\n");
+	Ticket = RevGenerator::GenerateRevEmu4(pData, steamID, 0);
+	if (SteamUser())
+		Ticket = SteamUser()->InitiateGameConnection(pData, 2048, sid, CGameID(g_iSteamAppID), ntohl(ip), ntohs(port), secure);
 
 	auto pTicket = (int*)pData;
 	
-	ConColorMsg(Color(100, 255, 100, 255), "[SteamIDConfig] ");
+	ConColorMsg(SteamIDCfg_LogColor, "[SteamIDConfig] ");
 	Msg("SteamID: %i\n", (pTicket[1]));
 
 	return Ticket;
 }
 
-const char* SteamIDConfig::GetEmulatorName() {
-	char result[MAX_PATH];
-	result[0] = 0;
-	strcpy(result, "None");
+int SteamIDConfig::CreateTicket(void* pData, int gen, int special) {
+	int nGen = steam_gen.GetInt() ? steam_gen.GetInt() : gen;
+	int nSpecial = steam_special.GetInt() ? steam_special.GetInt() : special;
+	int nSteamID = steam_uid.GetInt() ? steam_uid.GetInt() : steamID;
 
-	if (Ticket == 164)
-		strcpy(result, "RevEmu 9.83+");
+	if (steam_new.GetBool())
+		if (!(nSteamID & 1))
+			nSteamID -= 1;
 
-	if (Ticket == 178)
-		strcpy(result, "RevCrew SteamClient2009");
+	if (nGen == 1)
+		Ticket = RevGenerator::GenerateRevEmu1(pData, nSteamID, nSpecial);
+	if (nGen == 2)
+		Ticket = RevGenerator::GenerateRevEmu2(pData, nSteamID);
+	if (nGen == 3)
+		Ticket = RevGenerator::GenerateRevEmu3(pData, nSteamID, nSpecial);
+	if (nGen == 4)
+		Ticket = RevGenerator::GenerateRevEmu4(pData, nSteamID, nSpecial);
 
-	if (Ticket == 322)
-		strcpy(result, "RevEmu (CSSv34 ClientMod)");
+	ConColorMsg(SteamIDCfg_LogColor, "[SteamIDConfig] ");
+	Msg("Generated: gen %i, special %i, uid %i, ticket %i\n", nGen, nSpecial, nSteamID, Ticket);
 
-	if (Ticket == 768)
-		strcpy(result, "SteamEmu");
-
-
-	return result;
+	return Ticket;
 }

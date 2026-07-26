@@ -498,10 +498,10 @@ bool CBaseClientState::PrepareSteamConnectResponse( int keySize, const char *enc
 	// now append the steam3 cookie
 	char steam3Cookie[ STEAM_KEYSIZE ];
 	int steam3CookieLen = 0;
-	int gen = g_bIsESTEAMATiON ? 3 : 4;
+	int gen = 4;
 
 	//Msg("Generation = %i\n", generation);
-	steam3CookieLen = cfg.CreateTicket(steam3Cookie, unGSSteamID, checkAdr.GetIPNetworkByteOrder(), checkAdr.GetPort(), bGSSecure, gen);
+	steam3CookieLen = cfg.CreateTicket(steam3Cookie, gen, 0);
 
 	msg.WriteShort( steam3CookieLen );
 	if ( steam3CookieLen > 0 )

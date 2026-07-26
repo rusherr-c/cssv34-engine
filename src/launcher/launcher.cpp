@@ -1287,19 +1287,27 @@ extern "C" __declspec(dllexport) int LauncherMain(HINSTANCE hInstance, HINSTANCE
 	// Load steam.dll module
 	CSysModule* hSteamDLL = Sys_LoadModule("steam.dll");
 	if (!hSteamDLL)
-		return 0;
+	{
+		Warning("Failed loading steam.dll\n");
+		DebugBreak();
+	}
 
 	// Load & Init steam_api
 	CSysModule* hSteamAPIDLL = Sys_LoadModule("steam_api.dll");
 	if (hSteamAPIDLL)
 	{
-		decltype(SteamAPI_Init) *pInitSteamAPI = 0;
+		decltype(SteamAPI_Init)* pInitSteamAPI = 0;
 		pInitSteamAPI = (decltype(pInitSteamAPI))GetProcAddress((HMODULE)hSteamAPIDLL, "SteamAPI_Init");
 
 		if (!pInitSteamAPI)
 			return 0;
 
 		pInitSteamAPI();
+	}
+	else
+	{
+		Warning("Failed loading steam_api.dll\n");
+		DebugBreak();
 	}
 
 	return 0;

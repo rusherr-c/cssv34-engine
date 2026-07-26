@@ -16,7 +16,7 @@
 
 class CFrameSnapshot;
 
-#define MAX_CLIENT_FRAMES	128
+#define MAX_CLIENT_FRAMES	64
 
 class CClientFrame
 {

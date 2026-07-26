@@ -32,7 +32,6 @@ public:
 	virtual void OnApplyChanges();
 	virtual void OnCommand( const char *command );
 	bool RequiresRestart();
-   static char* GetUpdatedAudioLanguage() { return m_pchUpdatedAudioLanguage; }
 
 private:
 	MESSAGE_FUNC( OnControlModified, "ControlModified" );
@@ -49,10 +48,6 @@ private:
 	CCvarSlider					*m_pMusicSlider;
 	vgui::ComboBox				*m_pCloseCaptionCombo;
 	bool						   m_bRequireRestart;
-   
-   vgui::ComboBox				*m_pSpokenLanguageCombo;
-   ELanguage         m_nCurrentAudioLanguage;
-   static char             *m_pchUpdatedAudioLanguage;
 };
 
 

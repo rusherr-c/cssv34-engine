@@ -13,7 +13,7 @@
 
 class CEntityReadInfo;		
 
-void CL_DeleteDLLEntity( int iEnt, char *reason, bool bOnRecreatingAllEntities = false );
+void CL_DeleteDLLEntity( int iEnt, char *reason );
 void CL_CopyExistingEntity( CEntityReadInfo &u );
 void CL_CopyNewEntity( CEntityReadInfo &u, int iClass, int iSerialNum );
 void CL_PreprocessEntities( void );

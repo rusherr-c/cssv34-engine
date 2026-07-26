@@ -19,6 +19,10 @@ bool IsLANIP(uint32 ip)
 	if ((ip & 0xFFFF0000) == 0xC0A80000)
 		return true;
 
+	// 127.0.0.0/8
+	if ((ip & 0xFF000000) == 0x7f000000)
+		return true;
+
 	return false;
 }
 
@@ -143,6 +147,7 @@ void CMasterNETHandler::RunFrame(CMasterNETHandler* This) {
 	char buffer[2048];
 
 	while (This->workerRunning) {
+		Sleep(1);	// FIXME: Not a proper solution to fps jittering
 		sockaddr_in sender{};
 		int senderSize = sizeof(sender);
 

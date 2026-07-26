@@ -62,7 +62,6 @@ private:
 	vgui::DHANDLE<class CGammaDialog> m_hGammaDialog;
 
 	bool m_bRequireRestart;
-   vgui::URLButton   *m_pThirdPartyCredits;
 };
 
 

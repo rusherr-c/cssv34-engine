@@ -529,6 +529,8 @@ bool CParticleSystemDefinition::UsesPowerOfTwoFrameBufferTexture()
 {
 	// NOTE: This has to be this way to ensure we don't load every freaking material @ startup
 	Assert( IsPrecached() );
+	if (!m_Material) return false;
+
 	return m_Material->NeedsPowerOfTwoFrameBufferTexture( false ); // The false checks if it will ever need the frame buffer, not just this frame
 }
 
@@ -539,6 +541,8 @@ bool CParticleSystemDefinition::UsesFullFrameBufferTexture()
 {
 	// NOTE: This has to be this way to ensure we don't load every freaking material @ startup
 	Assert( IsPrecached() );
+	if (!m_Material) return false;
+
 	return m_Material->NeedsFullFrameBufferTexture( false ); // The false checks if it will ever need the frame buffer, not just this frame
 }
 
@@ -1367,6 +1371,9 @@ bool CParticleCollection::IsTranslucent() const
 bool CParticleCollection::ComputeIsTranslucent()
 {
 	if ( !m_pDef )
+		return false;
+
+	if (!m_pDef->GetMaterial())
 		return false;
 
 	if ( m_pDef->GetMaterial()->IsTranslucent() )
@@ -3193,7 +3200,10 @@ void CParticleSystemMgr::ResetRenderCache( void )
 
 void CParticleSystemMgr::AddToRenderCache( CParticleCollection *pParticles )
 {
-	if ( !pParticles->IsValid() || pParticles->m_pDef->GetMaterial()->IsTranslucent() )
+	if ( !pParticles->IsValid()
+		|| !pParticles->m_pDef
+		|| !pParticles->m_pDef->GetMaterial()
+		|| pParticles->m_pDef->GetMaterial()->IsTranslucent() )
 		return;
 
 	pParticles->m_flNextSleepTime = max ( pParticles->m_flNextSleepTime, ( g_pParticleSystemMgr->GetLastSimulationTime() + pParticles->m_pDef->m_flNoDrawTimeToGoToSleep ));

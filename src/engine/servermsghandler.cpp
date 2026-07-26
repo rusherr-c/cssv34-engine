@@ -90,17 +90,24 @@ void CClientState::ConnectionClosing( const char * reason )
 		SCR_EndLoadingPlaque();
 		Host_Disconnect(true);
 	}
-
-	/*
+	
 	if (strstr("Client dropped by server", reason)) {
-		Msg("Server uses eSTEAMATION, commencing connection retry...\n");
-		esteamation = true;
-		Sleep(2000);
+		Warning("eSTEAMATiON connection rejected with gen %i, special %i\n", steam_gen.GetInt(), steam_special.GetInt());
+		steam_special.SetValue(rand() & 1);
+
+		if (steam_gen.GetInt() == 0)
+			steam_gen.SetValue(4);
+
+		steam_gen.SetValue(steam_gen.GetInt() - 1);
+		Sleep(5000);
 		CL_Retry();
 	}
 	else
-		esteamation = false;
-		*/
+	{
+		//steam_special.SetValue(0);
+		//steam_gen.SetValue(0);
+	}
+		
 }
 
 

@@ -129,7 +129,6 @@ CSpectatorMenu::CSpectatorMenu( IViewPort *pViewPort ) : Frame( NULL, PANEL_SPEC
 	m_pViewOptions->SetMenu( menu );	// attach menu to combo box
 
 	LoadControlSettings("Resource/UI/BottomSpectator.res");
-	ListenForGameEvent( "spec_target_updated" );
 }
 
 void CSpectatorMenu::ApplySchemeSettings(IScheme *pScheme)
@@ -203,43 +202,6 @@ void CSpectatorMenu::OnCommand( const char *command )
 	else if (!stricmp(command, "specprev") )
 	{
 		engine->ClientCmd("spec_prev");
-	}
-}
-
-void CSpectatorMenu::FireGameEvent( IGameEvent * event )
-{
-	const char *pEventName = event->GetName();
-
- 	if ( Q_strcmp( "spec_target_updated", pEventName ) == 0 )
-	{
-		IGameResources *gr = GameResources();
-		if ( !gr )
-			return;
-
-		// make sure the player combo box is up to date
-		int playernum = GetSpectatorTarget();
-		if ( playernum < 1 || playernum > MAX_PLAYERS )
-			return;
-
-		const char *selectedPlayerName = gr->GetPlayerName( playernum );
-		const char *currentPlayerName = "";
-		KeyValues *kv = m_pPlayerList->GetActiveItemUserData();
-		if ( kv )
-		{
-			currentPlayerName = kv->GetString( "player" );
-		}
-		if ( !FStrEq( currentPlayerName, selectedPlayerName ) )
-		{
-			for ( int i=0; i<m_pPlayerList->GetItemCount(); ++i )
-			{
-				KeyValues *kv = m_pPlayerList->GetItemUserData( i );
-				if ( kv && FStrEq( kv->GetString( "player" ), selectedPlayerName ) )
-				{
-					m_pPlayerList->ActivateItemByRow( i );
-					break;
-				}
-			}
-		}
 	}
 }
 

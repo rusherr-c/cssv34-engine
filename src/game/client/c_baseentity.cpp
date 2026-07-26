@@ -327,7 +327,7 @@ void RecvProxy_AnimTime( const CRecvProxyData *pData, void *pStruct, void *pOut 
 	addt	= pData->m_Value.m_Int;
 
 	// Note, this needs to be encoded relative to packet timestamp, not raw client clock
-	tickbase = gpGlobals->GetNetworkBase( gpGlobals->tickcount, pEntity->entindex() );
+	tickbase = 100 * (int)(gpGlobals->tickcount / 100); // FIXME: hardcoded to 100 tickrate.
 
 	t = tickbase;
 											//  and then go back to floating point time.
@@ -355,7 +355,9 @@ void RecvProxy_SimulationTime( const CRecvProxyData *pData, void *pStruct, void 
 	addt	= pData->m_Value.m_Int;
 
 	// Note, this needs to be encoded relative to packet timestamp, not raw client clock
-	tickbase = gpGlobals->GetNetworkBase( gpGlobals->tickcount, pEntity->entindex() );
+	//tickbase = gpGlobals->GetNetworkBase( gpGlobals->tickcount, pEntity->entindex() );	
+
+	tickbase = 100 * (int)(gpGlobals->tickcount / 100); // FIXME: hardcoded to 100 tickrate.
 
 	t = tickbase;
 											//  and then go back to floating point time.
@@ -2699,7 +2701,10 @@ int CBaseEntity::BaseInterpolatePart1( float &currentTime, Vector &oldOrigin, QA
 	if ( GetPredictable() || IsClientCreated() )
 	{
 		C_BasePlayer *localplayer = C_BasePlayer::GetLocalPlayer();
-		if ( localplayer && currentTime == gpGlobals->curtime )
+		if ( localplayer 
+	// FIXME: hardcoded to 100 tickrate!
+	//		&& currentTime == gpGlobals->curtime 
+			)
 		{
 			currentTime = localplayer->GetFinalPredictedTime();
 			currentTime -= TICK_INTERVAL;

@@ -405,6 +405,8 @@ COptionsSubMultiplayer::COptionsSubMultiplayer(vgui::Panel *parent) : vgui::Prop
     m_LogoName[0] = 0;
 	InitLogoList( m_pLogoList );
 
+	m_pNameEntry = new CCvarTextEntry( this, "NameEntry", "name" );
+
 	m_pModelImage = new CBitmapImagePanel( this, "ModelImage", NULL );
 	m_pModelImage->AddActionSignalTarget( this );
 
@@ -424,34 +426,14 @@ COptionsSubMultiplayer::COptionsSubMultiplayer(vgui::Panel *parent) : vgui::Prop
 	m_pCrosshairTranslucencyCheckbox = new CCvarToggleCheckButton(this, "CrosshairTranslucencyCheckbox", "#GameUI_Translucent", "cl_crosshairusealpha");
 	m_pCrosshairImage = new CrosshairImagePanel( this, "CrosshairImage", m_pCrosshairTranslucencyCheckbox );
 
-	// advanced crosshair controls
-	//==========
-	m_pAdvCrosshairRedSlider = new CCvarSlider( this, "Red Color Slider", "#GameUI_CrosshairColor_Red",
-		0.0f, 255.0f, "cl_crosshair_red" );
-	m_pAdvCrosshairGreenSlider = new CCvarSlider( this, "Green Color Slider", "#GameUI_CrosshairColor_Green",
-		0.0f, 255.0f, "cl_crosshair_green" );
-	m_pAdvCrosshairBlueSlider = new CCvarSlider( this, "Blue Color Slider", "#GameUI_CrosshairColor_Blue",
-		0.0f, 255.0f, "cl_crosshair_blue" );
-
-	m_pAdvCrosshairScaleSlider = new CCvarSlider( this, "Scale Slider", "#GameUI_CrosshairScale",
-		16.0f, 48.0f, "cl_crosshair_scale" );
-
-	m_pAdvCrosshairRedSlider->AddActionSignalTarget( this );
-	m_pAdvCrosshairGreenSlider->AddActionSignalTarget( this );
-	m_pAdvCrosshairBlueSlider->AddActionSignalTarget( this );
-	m_pAdvCrosshairScaleSlider->AddActionSignalTarget( this );
-
-	m_pAdvCrosshairStyle = new CLabeledCommandComboBox( this, "AdvCrosshairList" );
-	m_pAdvCrosshairImage = new AdvancedCrosshairImagePanel( this, "AdvCrosshairImage" );
-
-	InitAdvCrosshairStyleList(m_pAdvCrosshairStyle);
-	RedrawAdvCrosshairImage();
 	//=========
 	
+	/*
 	m_pDownloadFilterCombo = new ComboBox( this, "DownloadFilterCheck", 3, false );
 	m_pDownloadFilterCombo->AddItem( "#GameUI_DownloadFilter_ALL", NULL );
 	m_pDownloadFilterCombo->AddItem( "#GameUI_DownloadFilter_NoSounds", NULL );
 	m_pDownloadFilterCombo->AddItem( "#GameUI_DownloadFilter_None", NULL );
+	*/
 
 	//=========
 
@@ -528,27 +510,6 @@ COptionsSubMultiplayer::COptionsSubMultiplayer(vgui::Panel *parent) : vgui::Prop
 		if ( m_pHighQualityModelCheckBox )
 		{
 			m_pHighQualityModelCheckBox->SetVisible( false );
-		}
-	}
-
-	// Advanced crosshair selection
-	if  ( !ModInfo().AdvCrosshair() )
-	{
-		m_pAdvCrosshairImage->SetVisible( false );
-
-		m_pAdvCrosshairRedSlider->SetVisible( false );		
-		m_pAdvCrosshairBlueSlider->SetVisible( false );
-		m_pAdvCrosshairGreenSlider->SetVisible( false );
-		m_pAdvCrosshairScaleSlider->SetVisible( false );
-		m_pAdvCrosshairStyle->SetVisible( false );
-
-		Panel *pTempPanel = NULL;
-
-		// #GameUI_AdvCrosshairDescription (from "Resource/OptionsSubMultiplayer.res")
-		pTempPanel = FindChildByName( "AdvCrosshairLabel" );
-		if ( pTempPanel )
-		{
-			pTempPanel->SetVisible( false );
 		}
 	}
 }
@@ -2106,38 +2067,6 @@ void COptionsSubMultiplayer::RedrawCrosshairImage()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: takes the settings from the crosshair settings combo boxes and sliders
-//          and apply it to the crosshair illustrations.
-//-----------------------------------------------------------------------------
-void COptionsSubMultiplayer::RedrawAdvCrosshairImage()
-{
-	if ( !ModInfo().AdvCrosshair() )
-	{
-		return;
-	}
-
-	// get the color selected in the combo box.
-	int r,g,b;
-
-	r = clamp( m_pAdvCrosshairRedSlider->GetSliderValue(), 0, 255 );
-	g = clamp( m_pAdvCrosshairGreenSlider->GetSliderValue(), 0, 255 );
-	b = clamp( m_pAdvCrosshairBlueSlider->GetSliderValue(), 0, 255 );
-
-	float scale = m_pAdvCrosshairScaleSlider->GetSliderValue();
-
-	if ( m_pAdvCrosshairImage && m_pAdvCrosshairStyle )
-	{
-		char crosshairname[256];
-		m_pAdvCrosshairStyle->GetText( crosshairname, sizeof(crosshairname)	);
-
-		char texture[ 256 ];
-		Q_snprintf ( texture, sizeof( texture ), "vgui/crosshairs/%s", crosshairname );
-
-		m_pAdvCrosshairImage->UpdateCrosshair( r, g, b, scale, texture );
-	}
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: initialize the crosshair size list.
 //-----------------------------------------------------------------------------
 void COptionsSubMultiplayer::InitCrosshairSizeList(CLabeledCommandComboBox *cb)
@@ -2179,60 +2108,6 @@ void COptionsSubMultiplayer::InitCrosshairSizeList(CLabeledCommandComboBox *cb)
 		}
 	}
 	cb->SetInitialItem( initialScale );
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: initialize the crosshair style list
-//-----------------------------------------------------------------------------
-void COptionsSubMultiplayer::InitAdvCrosshairStyleList(CLabeledCommandComboBox *cb)
-{
-	// Find out images
-	FileFindHandle_t fh;
-	char directory[ 512 ];
-
-	ConVarRef cl_crosshair_file( "cl_crosshair_file" );
-	if ( !cl_crosshair_file.IsValid() )
-		return;
-
-	cb->DeleteAllItems();
-
-	char crosshairfile[256];
-	Q_snprintf( crosshairfile, sizeof(crosshairfile), "materials/vgui/crosshairs/%s.vtf", cl_crosshair_file.GetString() );
-
-	Q_snprintf( directory, sizeof( directory ), "materials/vgui/crosshairs/*.vtf" );
-	const char *fn = g_pFullFileSystem->FindFirst( directory, &fh );
-	int i = 0, initialItem = 0; 
-	while (fn)
-	{
-		char filename[ 512 ];
-		Q_snprintf( filename, sizeof(filename), "materials/vgui/crosshairs/%s", fn );
-		if ( strlen( filename ) >= 4 )
-		{
-			filename[ strlen( filename ) - 4 ] = 0;
-			Q_strncat( filename, ".vmt", sizeof( filename ), COPY_ALL_CHARACTERS );
-			if ( g_pFullFileSystem->FileExists( filename ) )
-			{
-				// strip off the extension
-				Q_strncpy( filename, fn, sizeof( filename ) );
-				filename[ strlen( filename ) - 4 ] = 0;
-				cb->AddItem( filename, "" );
-
-				// check to see if this is the one we have set
-				Q_snprintf( filename, sizeof(filename), "materials/vgui/crosshairs/%s", fn );
-				if (!stricmp(filename, crosshairfile))
-				{
-					initialItem = i;
-				}
-
-				++i;
-			}
-		}
-
-		fn = g_pFullFileSystem->FindNext( fh );
-	}
-
-	g_pFullFileSystem->FindClose( fh );
-	cb->SetInitialItem(initialItem);
 }
 
 //-----------------------------------------------------------------------------
@@ -2305,8 +2180,6 @@ void COptionsSubMultiplayer::OnTextChanged(vgui::Panel *panel)
 	RemapLogo();
 
 	RedrawCrosshairImage(); // redraw the crosshair.
-
-	RedrawAdvCrosshairImage();
 }
 
 //-----------------------------------------------------------------------------
@@ -2318,7 +2191,6 @@ void COptionsSubMultiplayer::OnSliderMoved(KeyValues *data)
     m_nBottomColor = (int) m_pSecondaryColorSlider->GetSliderValue();
 
 	RemapModel();
-	RedrawAdvCrosshairImage();
 }
 
 //-----------------------------------------------------------------------------
@@ -2503,6 +2375,7 @@ void COptionsSubMultiplayer::ColorForName( char const *pszColorName, int&r, int&
 //-----------------------------------------------------------------------------
 void COptionsSubMultiplayer::OnResetData()
 {
+	/*
 	// reset the DownloadFilter combo box
 	if ( m_pDownloadFilterCombo )
 	{
@@ -2522,6 +2395,7 @@ void COptionsSubMultiplayer::OnResetData()
 			m_pDownloadFilterCombo->ActivateItem( 0 );
 		}
 	}
+	*/
 }
 
 //-----------------------------------------------------------------------------
@@ -2533,6 +2407,7 @@ void COptionsSubMultiplayer::OnApplyChanges()
 	m_pSecondaryColorSlider->ApplyChanges();
 //	m_pModelList->ApplyChanges();
 	m_pLogoList->ApplyChanges();
+	m_pNameEntry->ApplyChanges();
     m_pLogoList->GetText(m_LogoName, sizeof(m_LogoName));
 	m_pHighQualityModelCheckBox->ApplyChanges();
 
@@ -2558,22 +2433,6 @@ void COptionsSubMultiplayer::OnApplyChanges()
 		}
 
 		ApplyCrosshairColorChanges();
-	}
-
-	if ( ModInfo().AdvCrosshair() )
-	{
-		m_pAdvCrosshairRedSlider->ApplyChanges();
-		m_pAdvCrosshairGreenSlider->ApplyChanges();
-		m_pAdvCrosshairBlueSlider->ApplyChanges();
-		m_pAdvCrosshairScaleSlider->ApplyChanges();
-		m_pAdvCrosshairStyle->ApplyChanges();
-
-		// save the crosshair
-		char cmd[512];
-		char crosshair[256];
-		m_pAdvCrosshairStyle->GetText(crosshair, sizeof(crosshair));
-		Q_snprintf(cmd, sizeof(cmd), "cl_crosshair_file %s\n", crosshair);
-		engine->ClientCmd_Unrestricted(cmd);
 	}
 
 	// save the logo name
@@ -2602,6 +2461,7 @@ void COptionsSubMultiplayer::OnApplyChanges()
 		m_ModelName[0] = 0;
 	}
 
+	/*
 	// set the DownloadFilter cvar
 	if ( m_pDownloadFilterCombo )
 	{
@@ -2621,6 +2481,7 @@ void COptionsSubMultiplayer::OnApplyChanges()
 			break;
 		}
 	}
+	*/
 }
 
 //-----------------------------------------------------------------------------

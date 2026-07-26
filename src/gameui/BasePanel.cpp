@@ -1870,38 +1870,6 @@ void CBasePanel::RunMenuCommand(const char *command)
 	{
 		XBX_SetStorageDeviceId( XBX_STORAGE_DECLINED );
 	}
-	else if ( !Q_stricmp( command, "RestartWithNewLanguage" ) )
-	{
-		if ( !IsX360() )
-		{
-			char szSteamURL[50];
-			char szAppId[50];
-
-			// hide everything while we quit
-			SetVisible( false );
-			vgui::surface()->RestrictPaintToSinglePanel( GetVPanel() );
-			engine->ClientCmd_Unrestricted( "quit\n" );
-
-			// Construct Steam URL. Pattern is steam://run/<appid>/<language>. (e.g. Ep1 In French ==> steam://run/380/french)
-			V_strcpy(szSteamURL, "steam://run/");
-			itoa( engine->GetAppID(), szAppId, 10 );
-			V_strcat( szSteamURL, szAppId, sizeof( szSteamURL ) );
-			V_strcat( szSteamURL, "/", sizeof( szSteamURL ) );
-			V_strcat( szSteamURL, COptionsSubAudio::GetUpdatedAudioLanguage(), sizeof( szSteamURL ) );
-
-			// Set Steam URL for re-launch in registry. Launcher will check this registry key and exec it in order to re-load the game in the proper language
-#ifndef _X360
-			HKEY hKey;
-
-			if ( IsPC() && RegOpenKeyEx( HKEY_CURRENT_USER, "Software\\Valve\\Source", NULL, KEY_WRITE, &hKey) == ERROR_SUCCESS )
-			{
-				RegSetValueEx( hKey, "Relaunch URL", 0, REG_SZ, (const unsigned char *)szSteamURL, sizeof( szSteamURL ) );
-
-				RegCloseKey(hKey);
-			}
-#endif
-		}
-	}
 	else
 	{
 		BaseClass::OnCommand( command);

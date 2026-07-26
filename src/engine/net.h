@@ -65,7 +65,7 @@
 #error Bit buffers must be a multiple of 4 bytes
 #endif
 
-#define MIN_ROUTABLE_PAYLOAD		16		// minimum payload size
+#define MIN_ROUTABLE_PAYLOAD		128		// minimum payload size
 
 #define NETMSG_TYPE_BITS	5	// must be 2^NETMSG_TYPE_BITS > SVC_LASTMSG. Correct!
 
@@ -124,7 +124,7 @@ void		NET_ListenSocket( int sock, bool listen );
 // Send connectionsless string over the wire
 void		NET_OutOfBandPrintf(int sock, const netadr_t &adr, const char *format, ...);
 // Send a raw packet, connectionless must be provided (chan can be NULL)
-int			NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const  unsigned char *data, int length );
+void		NET_SendPacket ( INetChannel *chan, int sock,  const netadr_t &to, const  unsigned char *data, int length );
 // Called periodically to maybe send any queued packets (up to 4 per frame)
 void		NET_SendQueuedPackets();
 // Start set current network configuration

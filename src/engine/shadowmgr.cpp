@@ -1834,6 +1834,8 @@ void CShadowMgr::AddShadowToBrushModel( ShadowHandle_t handle, model_t* pModel,
 //-----------------------------------------------------------------------------
 void CShadowMgr::RemoveAllShadowsFromBrushModel( model_t* pModel )
 {
+	if (!pModel) return;
+
 	SurfaceHandle_t surfID = SurfaceHandleFromIndex( pModel->brush.firstmodelsurface, pModel->brush.pShared );
 	for (int i=0; i<pModel->brush.nummodelsurfaces; ++i, ++surfID)
 	{

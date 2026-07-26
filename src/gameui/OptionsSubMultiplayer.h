@@ -101,6 +101,7 @@ private:
     CCvarSlider *m_pPrimaryColorSlider;
     CCvarSlider *m_pSecondaryColorSlider;
 	CCvarToggleCheckButton *m_pHighQualityModelCheckBox;
+	CCvarTextEntry* m_pNameEntry;
 
 	// Mod specific general checkboxes
 	vgui::Dar< CCvarToggleCheckButton * > m_cvarToggleCheckButtons;
@@ -121,20 +122,9 @@ private:
 	void RedrawCrosshairImage();
 	// ---------------------------------------------------------
 
-	// --- advanced crosshair controls
-	AdvancedCrosshairImagePanel *m_pAdvCrosshairImage;
-	CCvarSlider *m_pAdvCrosshairRedSlider;		
-	CCvarSlider *m_pAdvCrosshairBlueSlider;
-	CCvarSlider *m_pAdvCrosshairGreenSlider;
-	CCvarSlider *m_pAdvCrosshairScaleSlider;
-	CLabeledCommandComboBox *m_pAdvCrosshairStyle;
-
-	void InitAdvCrosshairStyleList(CLabeledCommandComboBox *cb);
-	void RedrawAdvCrosshairImage();
-	// -----
-
 	// --- client download filter
-	vgui::ComboBox	*m_pDownloadFilterCombo;
+	// --- cs:s v34 doesn't have this, i just commented out for future use
+	// vgui::ComboBox	*m_pDownloadFilterCombo;
 
 	// Begin Spray Import Functions
 	ConversionErrorType ConvertJPEGToTGA(const char *jpgPath, const char *tgaPath);

@@ -93,60 +93,60 @@ bool CBaseEntity::s_bAbsQueriesValid = true;
 ConVar sv_netvisdist( "sv_netvisdist", "10000", FCVAR_CHEAT | FCVAR_DEVELOPMENTONLY, "Test networking visibility distance" );
 
 // This table encodes edict data.
-void SendProxy_AnimTime( const SendProp *pProp, const void *pStruct, const void *pVarData, DVariant *pOut, int iElement, int objectID )
+void SendProxy_AnimTime(const SendProp* pProp, const void* pStruct, const void* pVarData, DVariant* pOut, int iElement, int objectID)
 {
-	CBaseEntity *pEntity = (CBaseEntity *)pStruct;
+	CBaseEntity* pEntity = (CBaseEntity*)pStruct;
 
 #if defined( _DEBUG )
-	CBaseAnimating *pAnimating = pEntity->GetBaseAnimating();
-	Assert( pAnimating );
+	CBaseAnimating* pAnimating = pEntity->GetBaseAnimating();
+	Assert(pAnimating);
 
-	if ( pAnimating )
+	if (pAnimating)
 	{
-		Assert( !pAnimating->IsUsingClientSideAnimation() );
+		Assert(!pAnimating->IsUsingClientSideAnimation());
 	}
 #endif
-	
-	int ticknumber = TIME_TO_TICKS( pEntity->m_flAnimTime );
+
+	int ticknumber = TIME_TO_TICKS(pEntity->m_flAnimTime);
 	// Tickbase is current tick rounded down to closes 100 ticks
-	int tickbase = gpGlobals->GetNetworkBase( gpGlobals->tickcount, pEntity->entindex() );
+	int tickbase = 100 * (int)(gpGlobals->tickcount / 100);
 	int addt = 0;
 	// If it's within the last tick interval through the current one, then we can encode it
-	if ( ticknumber >= ( tickbase - 100 ) )
+	if (ticknumber >= (tickbase - 100))
 	{
-		addt = ( ticknumber - tickbase ) & 0xFF;
+		addt = (ticknumber - tickbase) & 0xFF;
 	}
 
 	pOut->m_Int = addt;
 }
 
 // This table encodes edict data.
-void SendProxy_SimulationTime( const SendProp *pProp, const void *pStruct, const void *pVarData, DVariant *pOut, int iElement, int objectID )
+void SendProxy_SimulationTime(const SendProp* pProp, const void* pStruct, const void* pVarData, DVariant* pOut, int iElement, int objectID)
 {
-	CBaseEntity *pEntity = (CBaseEntity *)pStruct;
+	CBaseEntity* pEntity = (CBaseEntity*)pStruct;
 
-	int ticknumber = TIME_TO_TICKS( pEntity->m_flSimulationTime );
-	// tickbase is current tick rounded down to closest 100 ticks
-	int tickbase = gpGlobals->GetNetworkBase( gpGlobals->tickcount, pEntity->entindex() );
+	int ticknumber = TIME_TO_TICKS(pEntity->m_flSimulationTime);
+	// Tickbase is current tick rounded down to closes 100 ticks
+	int tickbase = 100 * (int)(gpGlobals->tickcount / 100);
 	int addt = 0;
-	if ( ticknumber >= tickbase )
+	if (ticknumber >= tickbase)
 	{
-		addt = ( ticknumber - tickbase ) & 0xff;
+		addt = (ticknumber - tickbase) & 0xFF;
 	}
 
 	pOut->m_Int = addt;
 }
 
-void* SendProxy_ClientSideAnimation( const SendProp *pProp, const void *pStruct, const void *pVarData, CSendProxyRecipients *pRecipients, int objectID )
+void* SendProxy_ClientSideAnimation(const SendProp* pProp, const void* pStruct, const void* pVarData, CSendProxyRecipients* pRecipients, int objectID)
 {
-	CBaseEntity *pEntity = (CBaseEntity *)pStruct;
-	CBaseAnimating *pAnimating = pEntity->GetBaseAnimating();
+	CBaseEntity* pEntity = (CBaseEntity*)pStruct;
+	CBaseAnimating* pAnimating = pEntity->GetBaseAnimating();
 
-	if ( pAnimating && !pAnimating->IsUsingClientSideAnimation() )
+	if (pAnimating && !pAnimating->IsUsingClientSideAnimation())
 		return (void*)pVarData;
 	else
 		return NULL;	// Don't send animtime unless the client needs it.
-}	
+}
 REGISTER_SEND_PROXY_NON_MODIFIED_POINTER( SendProxy_ClientSideAnimation );
 
 

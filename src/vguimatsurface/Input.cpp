@@ -185,7 +185,13 @@ static LRESULT CALLBACK MatSurfaceWindowProc( HWND hwnd, UINT uMsg, WPARAM wPara
 		if ( !s_bIMEComposing )
 		{
 			event.m_nType = IE_KeyTyped;
-			event.m_nData = (int)wParam;
+
+			char ansi = wParam;
+			wchar_t utf16 = 0;
+			MultiByteToWideChar(1251, 0, &ansi, 1, &utf16, 1);
+
+			event.m_nData = (int)utf16;
+
 			g_pInputSystem->PostUserEvent( event );
 		}
 		break;

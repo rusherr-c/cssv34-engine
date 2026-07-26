@@ -103,7 +103,7 @@ protected:
 // Purpose: the bottom bar panel, this is a separate panel because it
 // wants mouse input and the main window doesn't
 //----------------------------------------------------------------------------
-class CSpectatorMenu : public vgui::Frame, public IViewPortPanel, public CGameEventListener
+class CSpectatorMenu : public vgui::Frame, public IViewPortPanel
 {
 	DECLARE_CLASS_SIMPLE(  CSpectatorMenu, vgui::Frame );
 
@@ -118,7 +118,6 @@ public:
 	virtual bool NeedsUpdate( void ) { return false; }
 	virtual bool HasInputElements( void ) { return true; }
 	virtual void ShowPanel( bool bShow );
-	virtual void FireGameEvent( IGameEvent *event );
 
 	// both vgui::Frame and IViewPortPanel define these, so explicitly define them here as passthroughs to vgui
 	virtual bool IsVisible() { return BaseClass::IsVisible(); }

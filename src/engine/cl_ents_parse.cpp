@@ -114,7 +114,7 @@ void SpewToFile( char const* pFmt, ... )
 // Purpose: Frees the client DLL's binding to the object.
 // Input  : iEnt - 
 //-----------------------------------------------------------------------------
-void CL_DeleteDLLEntity( int iEnt, char *reason, bool bOnRecreatingAllEntities )
+void CL_DeleteDLLEntity( int iEnt, char *reason )
 {
 	IClientNetworkable *pNet = entitylist->GetClientNetworkable( iEnt );
 
@@ -125,10 +125,10 @@ void CL_DeleteDLLEntity( int iEnt, char *reason, bool bOnRecreatingAllEntities )
 #ifndef _XBOX
 		CL_RecordDeleteEntity( iEnt, pClientClass );
 #endif
-		if ( bOnRecreatingAllEntities )
-		{
-			pNet->SetDestroyedOnRecreateEntities();
-		}
+		//if ( bOnRecreatingAllEntities )
+		//{
+		//	pNet->SetDestroyedOnRecreateEntities();
+		//}
 
 		pNet->Release();
 	}
@@ -350,7 +350,7 @@ void CL_CopyNewEntity(
 	const void *pFromData;
 	int nFromBits;
 
-	PackedEntity *baseline = u.m_bAsDelta ? cl.GetEntityBaseline( u.m_nBaseline, u.m_nNewEntity ) : NULL;
+	PackedEntity *baseline = cl.GetEntityBaseline( u.m_nBaseline, u.m_nNewEntity );
 	if ( baseline && baseline->m_pClientClass == pClass )
 	{
 		Assert( !baseline->IsCompressed() );
@@ -582,7 +582,7 @@ bool CL_ProcessPacketEntities ( SVC_PacketEntities *entmsg )
 		// Clear out the client's entity states..
 		for ( int i=0; i < entitylist->GetHighestEntityIndex(); i++ )
 		{
-			CL_DeleteDLLEntity( i, "ProcessPacketEntities", true );
+			CL_DeleteDLLEntity( i, "ProcessPacketEntities" );
 		}
 	}
 

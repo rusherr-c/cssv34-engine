@@ -946,8 +946,6 @@ COptionsSubVideo::COptionsSubVideo(vgui::Panel *parent) : PropertyPage(parent, N
 	m_pAdvanced->SetCommand(new KeyValues("OpenAdvanced"));
 	m_pBenchmark = new Button( this, "BenchmarkButton", "#GameUI_LaunchBenchmark" );
 	m_pBenchmark->SetCommand(new KeyValues("LaunchBenchmark"));
-   m_pThirdPartyCredits = new URLButton(this, "ThirdPartyVideoCredits", "#GameUI_ThirdPartyTechCredits");
-   m_pThirdPartyCredits->SetCommand(new KeyValues("OpenThirdPartyVideoCreditsDialog"));
 
 	char pszAspectName[3][64];
 	wchar_t *unicodeText = g_pVGuiLocalize->Find("#GameUI_AspectNormal");

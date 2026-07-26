@@ -39,7 +39,7 @@ If you're somehow having problems with `MkSln**.bat` scripts, run `src\VCReg_Fix
 ---
 
 ## License:
-[SOURCE 1 SDK LICENSE](https://github.com/rusherr-c/cssv34-engine/blob/dev/LICENSE)<br>
+[PROJECT TERMS AND LICENSE](https://github.com/rusherr-c/cssv34-engine/blob/dev/LICENSE)<br>
 [THIRD PARTY LEGAL NOTICES](https://github.com/rusherr-c/cssv34-engine/blob/dev/thirdpartylegalnotices.txt)
 
 ## Contributing:

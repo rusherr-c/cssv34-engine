@@ -44,37 +44,11 @@ COptionsSubMouse::COptionsSubMouse(vgui::Panel *parent) : PropertyPage(parent, N
 		"#GameUI_Joystick", 
 		"joystick" );
 
-	m_pJoystickSouthpawCheckBox = new CCvarToggleCheckButton( 
-		this, 
-		"JoystickSouthpaw", 
-		"#GameUI_JoystickSouthpaw", 
-		"joy_movement_stick" );
-
-	m_pReverseJoystickCheckBox = new CCvarToggleCheckButton( 
-		this, 
-		"ReverseJoystick", 
-		"#GameUI_ReverseJoystick", 
-		"joy_inverty" );
-
-	m_pQuickInfoCheckBox = new CCvarToggleCheckButton(
-		this,
-		"HudQuickInfo",
-		"#GameUI_HudQuickInfo",
-		"hud_quickinfo" );
-
 	m_pMouseSensitivitySlider = new CCvarSlider( this, "Slider", "#GameUI_MouseSensitivity",
 		1.0f, 20.0f, "sensitivity", true );
 
     m_pMouseSensitivityLabel = new TextEntry(this, "SensitivityLabel");
     m_pMouseSensitivityLabel->AddActionSignalTarget(this);
-
-	m_pJoyYawSensitivitySlider = new CCvarSlider( this, "JoystickYawSlider", "#GameUI_JoystickYawSensitivity",
-		-0.5f, -7.0f, "joy_yawsensitivity", true );
-	m_pJoyYawSensitivityPreLabel = new Label(this, "JoystickYawSensitivityPreLabel", "#GameUI_JoystickLookSpeedYaw" );
-
-	m_pJoyPitchSensitivitySlider = new CCvarSlider( this, "JoystickPitchSlider", "#GameUI_JoystickPitchSensitivity",
-		0.5f, 7.0f, "joy_pitchsensitivity", true );
-	m_pJoyPitchSensitivityPreLabel = new Label(this, "JoystickPitchSensitivityPreLabel", "#GameUI_JoystickLookSpeedPitch" );
 
 	LoadControlSettings("Resource\\OptionsSubMouse.res");
 
@@ -88,8 +62,6 @@ COptionsSubMouse::COptionsSubMouse(vgui::Panel *parent) : PropertyPage(parent, N
 		Q_snprintf(buf, sizeof(buf), " %.1f", sensitivity);
 		m_pMouseSensitivityLabel->SetText(buf);
 	}
-
-	UpdateJoystickPanels();
 }
 
 //-----------------------------------------------------------------------------
@@ -107,12 +79,7 @@ void COptionsSubMouse::OnResetData()
 	m_pReverseMouseCheckBox->Reset();
 	m_pMouseFilterCheckBox->Reset();
 	m_pJoystickCheckBox->Reset();
-	m_pJoystickSouthpawCheckBox->Reset();
 	m_pMouseSensitivitySlider->Reset();
-	m_pQuickInfoCheckBox->Reset();
-	m_pReverseJoystickCheckBox->Reset();
-	m_pJoyYawSensitivitySlider->Reset();
-	m_pJoyPitchSensitivitySlider->Reset();
 }
 
 //-----------------------------------------------------------------------------
@@ -123,12 +90,7 @@ void COptionsSubMouse::OnApplyChanges()
 	m_pReverseMouseCheckBox->ApplyChanges();
 	m_pMouseFilterCheckBox->ApplyChanges();
 	m_pJoystickCheckBox->ApplyChanges();
-	m_pJoystickSouthpawCheckBox->ApplyChanges();
 	m_pMouseSensitivitySlider->ApplyChanges();
-	m_pQuickInfoCheckBox->ApplyChanges();
-	m_pReverseJoystickCheckBox->ApplyChanges();
-	m_pJoyYawSensitivitySlider->ApplyChanges();
-	m_pJoyPitchSensitivitySlider->ApplyChanges();
 
 	engine->ClientCmd_Unrestricted( "joyadvancedupdate" );
 }
@@ -155,10 +117,6 @@ void COptionsSubMouse::OnControlModified(Panel *panel)
     {
         UpdateSensitivityLabel();
     }
-	else if (panel == m_pJoystickCheckBox)
-	{
-		UpdateJoystickPanels();
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -188,19 +146,4 @@ void COptionsSubMouse::UpdateSensitivityLabel()
     char buf[64];
     Q_snprintf(buf, sizeof( buf ), " %.1f", m_pMouseSensitivitySlider->GetSliderValue());
     m_pMouseSensitivityLabel->SetText(buf);
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: 
-//-----------------------------------------------------------------------------
-void COptionsSubMouse::UpdateJoystickPanels()
-{
-	bool bEnabled = m_pJoystickCheckBox->IsSelected();
-
-	m_pReverseJoystickCheckBox->SetEnabled( bEnabled );
-	m_pJoystickSouthpawCheckBox->SetEnabled( bEnabled );
-	m_pJoyYawSensitivitySlider->SetEnabled( bEnabled );
-	m_pJoyYawSensitivityPreLabel->SetEnabled( bEnabled );
-	m_pJoyPitchSensitivitySlider->SetEnabled( bEnabled );
-	m_pJoyPitchSensitivityPreLabel->SetEnabled( bEnabled );
 }

@@ -23,9 +23,6 @@
 
 using namespace vgui;
 
-// This member is static so that the updated audio language can be referenced during shutdown
-char* COptionsSubAudio::m_pchUpdatedAudioLanguage = (char*)GetLanguageShortName( k_Lang_English );
-
 enum SoundQuality_e
 {
 	SOUNDQUALITY_LOW,
@@ -57,8 +54,6 @@ COptionsSubAudio::COptionsSubAudio(vgui::Panel *parent) : PropertyPage(parent, N
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_4Speakers", new KeyValues("SpeakerSetup", "speakers", 4) );
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_5Speakers", new KeyValues("SpeakerSetup", "speakers", 5) );
 	m_pSpeakerSetupCombo->AddItem( "#GameUI_7Speakers", new KeyValues("SpeakerSetup", "speakers", 7) );
-
-	m_pSpokenLanguageCombo = new ComboBox (this, "AudioSpokenLanguage", 6, false );
 
 	LoadControlSettings("Resource\\OptionsSubAudio.res");
 }
@@ -134,49 +129,6 @@ void COptionsSubAudio::OnResetData()
 			m_pSoundQualityCombo->ActivateItem(itemID);
 		}
 	}}
-
-   //
-   // Audio Languages
-   //
-   char szCurrentLanguage[50];
-   char szAvailableLanguages[512];
-   szAvailableLanguages[0] = NULL;
-
-   // Fallback to current engine language
-   engine->GetUILanguage( szCurrentLanguage, sizeof( szCurrentLanguage ));
-
-   // Get the spoken language and store it for comparison purposes
-   m_nCurrentAudioLanguage = PchLanguageToELanguage( szCurrentLanguage );
-
-   // Check to see if we have a list of languages from Steam
-   if ( V_strlen( szAvailableLanguages ) )
-   {
-      // Populate the combo box with each available language
-      CUtlVector<char*> languagesList;
-      V_SplitString( szAvailableLanguages, ",", languagesList );
-
-      for ( int i=0; i < languagesList.Count(); i++ )
-      {
-         const ELanguage languageCode = PchLanguageToELanguage( languagesList[i] );
-         m_pSpokenLanguageCombo->AddItem( GetLanguageVGUILocalization( languageCode ), new KeyValues ("Audio Languages", "language", languageCode) );
-      }
-   }
-   else
-   {
-      // Add the current language to the combo
-      m_pSpokenLanguageCombo->AddItem( GetLanguageVGUILocalization( m_nCurrentAudioLanguage ), new KeyValues ("Audio Languages", "language", m_nCurrentAudioLanguage) );
-   }
-
-   // Activate the current language in the combo
-   {for (int itemID = 0; itemID < m_pSpokenLanguageCombo->GetItemCount(); itemID++)
-   {
-      KeyValues *kv = m_pSpokenLanguageCombo->GetItemUserData( itemID );
-      if ( kv && kv->GetInt( "language" ) == m_nCurrentAudioLanguage )
-      {
-         m_pSpokenLanguageCombo->ActivateItem( itemID );
-         break;
-      }
-   }}
 }
 
 //-----------------------------------------------------------------------------
@@ -255,27 +207,6 @@ void COptionsSubAudio::OnApplyChanges()
 	{
 		dsp_enhance_stereo.SetValue( 0 );
 	}
-
-   // Audio spoken language
-   KeyValues *kv = m_pSpokenLanguageCombo->GetItemUserData( m_pSpokenLanguageCombo->GetActiveItem() );
-   const ELanguage nUpdatedAudioLanguage = (ELanguage)( kv ? kv->GetInt( "language" ) : k_Lang_English );
-
-   if ( nUpdatedAudioLanguage != m_nCurrentAudioLanguage )
-   {
-      // Store new language in static member so that it can be accessed during shutdown when this instance is gone
-      m_pchUpdatedAudioLanguage = (char *) GetLanguageShortName( nUpdatedAudioLanguage );
-      
-      // Inform user that they need to restart in order change language at this time
-      QueryBox *qb = new QueryBox( "#GameUI_ChangeLanguageRestart_Title", "#GameUI_ChangeLanguageRestart_Info", GetParent()->GetParent()->GetParent() );
-      if (qb != NULL)
-      {
-         qb->SetOKCommand( new KeyValues( "Command", "command", "RestartWithNewLanguage" ) );
-         qb->SetOKButtonText( "#GameUI_ChangeLanguageRestart_OkButton" );
-         qb->SetCancelButtonText( "#GameUI_ChangeLanguageRestart_CancelButton" );
-         qb->AddActionSignalTarget( GetParent()->GetParent()->GetParent() );
-         qb->DoModal();
-      }
-   }
 }
 
 //-----------------------------------------------------------------------------

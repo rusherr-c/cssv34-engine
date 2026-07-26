@@ -1,3 +1,50 @@
+              CSSV34 ENGINE
+Copyright (c) 2025 RuSHeRR and Contributors
+
+This project is based on the Valve Source SDK and contains
+original modifications, fixes and new code.
+
+Additional project terms:
+
+1. This repository is intended for research, education,
+   compatibility and preservation purposes.
+
+2. Any binaries (engine.dll, server.dll, client.dll or other
+   compiled components) built from this project may only be
+   distributed free of charge.
+
+3. Selling, licensing, renting, sublicensing, monetizing or
+   otherwise commercially distributing this project or binaries
+   built from it is prohibited.
+
+4. If you distribute modified versions of this project,
+   whether in source code or binary form, you must:
+
+   - clearly state that your version has been modified;
+   - not represent your version as an official CSSV34 Engine release;
+   - make the complete corresponding source code of your
+     modifications publicly available under these same terms.
+
+5. Redistributions must include the LICENSE file distributed with 
+   the version being redistributed.
+
+6. Any redistribution of this project, in source or binary form,
+   must include this LICENSE file and
+   thirdpartylegalnotices.txt in their entirety, without
+   modification or removal.
+
+7. This project incorporates software originally released under
+   the Valve Source SDK License. The original Valve license
+   remains applicable to the corresponding portions of the
+   source code and is reproduced below.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.
+
+////////////////////////////////////////////////////
+
                SOURCE 1 SDK LICENSE
 
 Source SDK Copyright(c) Valve Corp.  
@@ -6,7 +53,7 @@ THIS DOCUMENT DESCRIBES A CONTRACT BETWEEN YOU AND VALVE
 CORPORATION ("Valve").  PLEASE READ IT BEFORE DOWNLOADING OR USING 
 THE SOURCE ENGINE SDK ("SDK"). BY DOWNLOADING AND/OR USING THE 
 SOURCE ENGINE SDK YOU ACCEPT THIS LICENSE. IF YOU DO NOT AGREE TO 
-THE TERMS OF THIS LICENSE PLEASE DON’T DOWNLOAD OR USE THE SDK.  
+THE TERMS OF THIS LICENSE PLEASE DONâ€™T DOWNLOAD OR USE THE SDK.  
 
   You may, free of charge, download and use the SDK to develop a modified Valve game 
 running on the Source engine.  You may distribute your modified Valve game in source and 
