@@ -51,6 +51,7 @@
 #include "ServerDetailsMsgHandler.h"
 #include "ServerList.h"
 #include "ServersInfo.h"
+#include "TrackerProtocol.h"
 #include "igamelist.h"
 #include "ServerListCompare.h"
 #include "ServerBrowser.h"

@@ -32,7 +32,7 @@
 #include "vox.h"
 #include "EngineSoundInternal.h"
 #include "checksum_engine.h"
-#include "master.h"
+#include "sv_master.h"
 #include "host.h"
 #include "keys.h"
 #include "vengineserver_impl.h"

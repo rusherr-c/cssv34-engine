@@ -68,6 +68,9 @@ public:
 	// marks a server to be refreshed
 	void AddServerToRefreshList(unsigned int serverID);
 
+	// marks all server to be refreshed
+	void AddAllServersToRefreshList();
+
 	// responses
 	void UpdateServer(netadr_t& adr, serveritem_t& server, double recvTime);
 

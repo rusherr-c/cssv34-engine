@@ -117,11 +117,14 @@ void CServersInfo::Thread(CServersInfo* pthis)
 
 	while (pthis->m_bWorking)
 	{
+		if (!pthis->m_bInitialized)
+			break;
+
 		Sleep(THREAD_SLEEP_INTERVAL);
 		pthis->RunFrame();
 	}
 
-	DevMsg("ServersInfo receive thread shutting down.\n");
+	Msg("ServersInfo receive thread shutting down.\n");
 
 	return;
 }
@@ -143,8 +146,6 @@ CServersInfo::CServersInfo()
 	m_pFavoritesList = new CServerList(nullptr);
 	m_pHistoryList = new CServerList(nullptr);
 	m_pLanServerList = new CServerList(nullptr);
-
-	Initialize();
 }
 
 CServersInfo::~CServersInfo()
@@ -160,7 +161,7 @@ CServersInfo::~CServersInfo()
 	delete m_pLanServerList;
 }
 
-// Do some things like parsing masterservers.vdf
+// Do some things like parsing masterservers.vdf (do not call in constructor!)
 void CServersInfo::Initialize() {
 	if (m_bInitialized)
 		return;
@@ -223,7 +224,12 @@ void CServersInfo::Shutdown() {
 	m_bInitialized = false;
 	m_bWorking = false;
 
+	WaitForSingleObject(m_hThread, INFINITE);
+
 	CloseHandle(m_hThread);
+	m_hThread = nullptr;
+
+	Msg("ServersInfo shutting down.\n");
 }
 
 // Runs every frame
@@ -289,7 +295,7 @@ void CServersInfo::RequestLANServerList(const char* gamedir, IServerRefreshRespo
 	bf_write msg(buffer, sizeof(buffer));
 
 	msg.WriteLong(CONNECTIONLESS_HEADER);
-	msg.WriteByte(A2S_INFOREQUEST);
+	msg.WriteByte(A2S_INFO_REQUEST);
 	msg.WriteString(A2S_KEY_STRING);
 
 	for (int i = LANBROADCAST_MIN_PORT; i < LANBROADCAST_MAX_PORT + 1; i++)
@@ -311,6 +317,7 @@ void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerRefres
 	m_pCurrentList = m_pFavoritesList;
 	m_flStartRequestTime = Plat_FloatTime();
 
+	m_pFavoritesList->AddAllServersToRefreshList();
 	m_pFavoritesList->StartRefresh();
 }
 
@@ -327,6 +334,7 @@ void CServersInfo::RequestHistoryServerList(const char* gamedir, IServerRefreshR
 	m_pCurrentList = m_pHistoryList;
 	m_flStartRequestTime = Plat_FloatTime();
 
+	m_pHistoryList->AddAllServersToRefreshList();
 	m_pHistoryList->StartRefresh();
 }
 
@@ -393,7 +401,7 @@ void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* 
 	bf_write msg(buf, sizeof(buf));
 
 	msg.WriteLong(CONNECTIONLESS_HEADER);
-	msg.WriteByte(A2S_INFOREQUEST);
+	msg.WriteByte(A2S_INFO_REQUEST);
 	msg.WriteString(A2S_KEY_STRING);
 
 	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
@@ -566,11 +574,6 @@ bool CServersInfo::Process(const netadr_t& from, bf_read& msg) {
 
 		ProcessServerList(from, msg);
 
-		break;
-	}
-	case S2A_INFOREPLY:
-	{
-		// todo
 		break;
 	}
 	default:

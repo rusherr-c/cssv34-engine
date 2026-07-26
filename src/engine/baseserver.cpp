@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+ï»¿//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,7 +29,7 @@
 #include "quakedef.h"
 #include "host.h"
 #include "netmessages.h"
-#include "master.h"
+#include "sv_master.h"
 #include "sys.h"
 #include "framesnapshot.h"
 #include "sv_packedentities.h"
@@ -68,15 +68,86 @@
 // machine, not the Steam servers).
 #define MASTER_SERVER_UPDATE_INTERVAL		2.0
 
+// Steam has a matching one in matchmakingtypes.h
+#define MAX_TAG_STRING_LENGTH		128
+
+int SortServerTags(char* const* p1, char* const* p2)
+{
+	return (Q_strcmp(*p1, *p2) > 0);
+}
+
+static void ServerTagsCleanUp(void)
+{
+	CUtlVector<char*> TagList;
+	ConVarRef sv_tags("sv_tags");
+	if (sv_tags.IsValid())
+	{
+		int i;
+		char tmptags[MAX_TAG_STRING_LENGTH];
+		tmptags[0] = '\0';
+
+		V_SplitString(sv_tags.GetString(), ",", TagList);
+
+		// make a pass on the tags to eliminate preceding whitespace and empty tags
+		for (i = 0; i < TagList.Count(); i++)
+		{
+			if (i > 0)
+			{
+				Q_strncat(tmptags, ",", MAX_TAG_STRING_LENGTH);
+			}
+
+			char* pChar = TagList[i];
+			while (*pChar && *pChar == ' ')
+			{
+				pChar++;
+			}
+
+			// make sure we don't have an empty string (all spaces or ,,)
+			if (*pChar)
+			{
+				Q_strncat(tmptags, pChar, MAX_TAG_STRING_LENGTH);
+			}
+		}
+
+		// reset our lists and sort the tags
+		TagList.PurgeAndDeleteElements();
+		V_SplitString(tmptags, ",", TagList);
+		TagList.Sort(SortServerTags);
+		tmptags[0] = '\0';
+
+		// create our new, sorted list of tags
+		for (i = 0; i < TagList.Count(); i++)
+		{
+			if (i > 0)
+			{
+				Q_strncat(tmptags, ",", MAX_TAG_STRING_LENGTH);
+			}
+
+			Q_strncat(tmptags, TagList[i], MAX_TAG_STRING_LENGTH);
+		}
+
+		// set our convar and purge our list
+		sv_tags.SetValue(tmptags);
+		TagList.PurgeAndDeleteElements();
+	}
+}
+
 static void SvTagsChangeCallback(IConVar* pConVar, const char* pOldValue, float flOldValue)
 {
+	// We're going to modify the sv_tags convar here, which will cause this to be called again. Prevent recursion.
+	static bool bTagsChangeCallback = false;
+	if (bTagsChangeCallback)
+		return;
+
+	bTagsChangeCallback = true;
+
+	ServerTagsCleanUp();
+
 	ConVarRef var(pConVar);
-#ifndef NO_STEAM
-	if (SteamGameServer())
-	{
-		SteamGameServer()->GSSetGameType(var.GetString());
-	}
-#endif
+
+	sv.RecalculateTags();
+
+	bTagsChangeCallback = false;
 }
 
 ConVar			sv_region( "sv_region","-1", FCVAR_NONE, "The region of the world to report this server in." );
@@ -94,8 +165,12 @@ ConVar			sv_allow_color_correction( "sv_allow_color_correction", "1", FCVAR_REPL
 #define MAX_TAG_STRING_LENGTH		128
 
 extern CNetworkStringTableContainer *networkStringTableContainerServer;
+extern char gpszVersionString[32];
 extern int g_iSteamAppID;
 extern ConVar sv_stressbots;
+
+extern char gpszVersionString[32];
+extern char gpszProductString[32];
 
 int g_CurGameServerID = 1;
 
@@ -111,43 +186,29 @@ bool AllowDebugDedicatedServerOutsideSteam()
 }
 
 
-static void SetMasterServerKeyValue(ISteamMasterServerUpdater* pUpdater, IConVar* pConVar)
+static void SetMasterServerKeyValue( ISteamMasterServerUpdater *pUpdater, IConVar *pConVar )
 {
-	ConVarRef var(pConVar);
-#ifndef NO_STEAM
-	// For protected cvars, don't send the string
-	if (var.IsFlagSet(FCVAR_PROTECTED))
-	{
-		// If it has a value string and the string is not "none"
-		if ((strlen(var.GetString()) > 0) &&
-			stricmp(var.GetString(), "none"))
-		{
-			pUpdater->SetKeyValue(var.GetName(), "1");
-		}
-		else
-		{
-			pUpdater->SetKeyValue(var.GetName(), "0");
-		}
-	}
-	else
-	{
-		pUpdater->SetKeyValue(var.GetName(), var.GetString());
-	}
+	ConVarRef var( pConVar );
 
-	if (SteamGameServer())
-	{
-		sv.RecalculateTags();
-	}
-#endif
+	sv.RecalculateTags();
 }
 
 
-static void ServerNotifyVarChangeCallback(IConVar* pConVar, const char* pOldValue, float flOldValue)
+static void ServerNotifyVarChangeCallback( IConVar *pConVar, const char *pOldValue, float flOldValue )
 {
-	if (!pConVar->IsFlagSet(FCVAR_NOTIFY))
+	if ( !pConVar->IsFlagSet( FCVAR_NOTIFY ) )
 		return;
-
-	sv.BroadcastPrintf("NOTIFY: Server cvar %s changed its value. (previous %s) \n", pConVar->GetName(), pOldValue);
+#ifndef NO_STEAM
+	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
+	if ( !pUpdater )
+	{
+		// This will force it to send all the rules whenever the master server updater is there.
+		sv.SetMasterServerRulesDirty();
+		return;
+	}
+	SetMasterServerKeyValue( pUpdater, pConVar );
+#endif
+	
 }
 
 
@@ -540,7 +601,6 @@ bool CBaseServer::ValidInfoChallenge( netadr_t & adr, const char *nugget )
 
 bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 {
-
 	bf_read msg = packet->message;	// handy shortcut 
 
 	char c = msg.ReadChar();
@@ -611,6 +671,11 @@ bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 							
 		default:
 		{
+			CGameServer *pThis = NULL;
+			if ( !IsHLTV() )
+				pThis = (CGameServer*)this;
+				
+			master->HandleUnknown( packet, this, pThis );
 		}
 		break;
 	}
@@ -1673,12 +1738,57 @@ bool CBaseServer::ShouldUpdateMasterServer()
 
 void CBaseServer::CheckMasterServerRequestRestart()
 {
+#ifndef NO_STEAM
+	if ( !SteamMasterServerUpdater() || !SteamMasterServerUpdater()->WasRestartRequested() )
+		return;
+#else
+	return;
+#endif
 
+	// Connection was rejected by the HLMaster (out of date version)
+
+	// hack, vgui console looks for this string; 
+	Msg("%cMasterRequestRestart\n", 3);
+
+#ifndef _WIN32
+	if (CommandLine()->FindParm(AUTO_RESTART))
+	{
+		Msg("Your server will be restarted on map change.\n");
+		Log("Your server will be restarted on map change.\n");
+		SetRestartOnLevelChange( true );
+	}
+#endif
+#ifdef _WIN32
+	if (g_pFileSystem->IsSteam())
+#else
+	else if ( 1 ) // under linux assume steam
+#endif
+	{
+		Msg("Your server needs to be restarted in order to receive the latest update.\n");
+		Log("Your server needs to be restarted in order to receive the latest update.\n");
+	}
+	else
+	{
+		Msg("Your server is out of date.  Please update and restart.\n");
+	}
 }
 
 
 void CBaseServer::UpdateMasterServer()
 {
+#ifndef NO_STEAM
+	if ( !ShouldUpdateMasterServer() )
+		return;
+
+	if ( IsUsingMasterLegacyMode() )
+	{
+		master->CheckHeartbeat( this );
+		return;
+	}
+	
+	if ( !SteamMasterServerUpdater() )
+		return;
+	
 	// Only update every so often.
 	double flCurTime = Plat_FloatTime();
 	if ( flCurTime - m_flLastMasterServerUpdateTime < MASTER_SERVER_UPDATE_INTERVAL )
@@ -1705,10 +1815,11 @@ void CBaseServer::UpdateMasterServer()
 	if ( !bUpdateMasterServers )
 		return;
 
-	bool bActive = IsActive() && IsMultiplayer();
+	bool bActive = IsActive() && IsMultiplayer() && g_bEnableMasterServerUpdater;
 	if ( serverGameDLL && serverGameDLL->ShouldHideServer() )
 		bActive = false;
 	
+	SteamMasterServerUpdater()->SetActive( bActive );
 
 	if ( !bActive )
 		return;
@@ -1716,7 +1827,7 @@ void CBaseServer::UpdateMasterServer()
 	UpdateMasterServerRules();
 	UpdateMasterServerPlayers();
 	UpdateMasterServerBasicData();
-
+#endif
 }
 
 
@@ -1724,8 +1835,14 @@ void CBaseServer::UpdateMasterServerRules()
 {
 #ifndef NO_STEAM
 	// Only do this if the rules vars are dirty.
-	if (!m_bMasterServerRulesDirty)
+	if ( !m_bMasterServerRulesDirty )
 		return;
+
+	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
+	if ( !pUpdater )
+		return;
+		
+	pUpdater->ClearAllKeyValues();
 	
 	// Need to respond with game directory, game name, and any server variables that have been set that
 	//  effect rules.  Also, probably need a hook into the .dll to respond with additional rule information.
@@ -1738,6 +1855,8 @@ void CBaseServer::UpdateMasterServerRules()
 		ConVar *pConVar = dynamic_cast< ConVar* >( var );
 		if ( !pConVar )
 			continue;
+
+		SetMasterServerKeyValue( pUpdater, pConVar );
 	}
 
 	if ( SteamGameServer() )
@@ -1753,13 +1872,48 @@ void CBaseServer::UpdateMasterServerRules()
 
 void CBaseServer::UpdateMasterServerBasicData()
 {
+#ifndef NO_STEAM
+	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
 
+	Assert( SteamMasterServerUpdater() != NULL );
+
+	unsigned short nMaxReportedClients = GetMaxClients();
+	if ( sv_visiblemaxplayers.GetInt() > 0 && sv_visiblemaxplayers.GetInt() < GetMaxClients() )
+		nMaxReportedClients = sv_visiblemaxplayers.GetInt();
+
+	pUpdater->SetBasicServerData(
+		PROTOCOL_VERSION,
+		IsDedicated(),
+		sv_region.GetString(),
+		gpszProductString,
+		nMaxReportedClients,
+		(GetPassword() != NULL),
+		serverGameDLL->GetGameDescription() );
+#endif
 }
 
 
 void CBaseServer::ForwardPacketsFromMasterServerUpdater()
 {
-
+#ifndef NO_STEAM
+	ISteamMasterServerUpdater *p = SteamMasterServerUpdater();
+	if ( !p )
+		return;
+	
+	while ( 1 )
+	{
+		uint32 netadrAddress;
+		uint16 netadrPort;
+		unsigned char packetData[16 * 1024];
+ 		int len = p->GetNextOutgoingPacket( packetData, sizeof( packetData ), &netadrAddress, &netadrPort );
+		if ( len <= 0 )
+			break;
+		
+		// Send this packet for them..
+		netadr_t adr( netadrAddress, netadrPort );
+		NET_SendPacket( NULL, m_Socket, adr, packetData, len );
+	}
+#endif
 }
 
 
@@ -1959,6 +2113,16 @@ void CBaseServer::Shutdown( void )
 
 	// clear everthing
 	Clear();
+
+#ifndef _XBOX
+#ifndef NO_STEAM
+	//  Tell master we are shutting down
+	if ( SteamMasterServerUpdater() )
+		SteamMasterServerUpdater()->NotifyShutdown();
+
+	master->ShutdownConnection( this );
+#endif
+#endif
 }
 
 //-----------------------------------------------------------------------------

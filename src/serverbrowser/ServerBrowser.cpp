@@ -18,7 +18,9 @@ CServerBrowser &ServerBrowser()
 	return g_ServerBrowserSingleton;
 }
 
-CServersInfo* g_pServersInfo = NULL;
+static CServersInfo s_serversInfo;
+CServersInfo* g_pServersInfo = &s_serversInfo;
+
 IRunGameEngine *g_pRunGameEngine = NULL;
 
 ConVar sb_firstopentime( "sb_firstopentime", "0", FCVAR_DEVELOPMENTONLY, "Indicates the time the server browser was first opened." );
@@ -45,7 +47,6 @@ CServerBrowser::CServerBrowser()
 //-----------------------------------------------------------------------------
 CServerBrowser::~CServerBrowser()
 {
-	delete g_pServersInfo;
 }
 
 
@@ -83,7 +84,7 @@ bool CServerBrowser::Initialize(CreateInterfaceFn *factorylist, int factoryCount
 		}
 	}
 
-	g_pServersInfo = new CServersInfo();
+	g_pServersInfo->Initialize();
 
 	// load the vgui interfaces
 #if defined( STEAM ) || defined( HL1 )
@@ -280,6 +281,8 @@ void CServerBrowser::Shutdown()
 #if defined( STEAM )
 	vgui::VGuiControls_Shutdown();
 #endif
+
+	g_pServersInfo->Shutdown();
 
 	DisconnectTier3Libraries();
 	DisconnectTier2Libraries();

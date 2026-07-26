@@ -14,8 +14,8 @@
 #include "tier0/threadtools.h"
 #include "tier1/bitbuf.h"
 #include "tier1/netadr.h"
-#include "proto_oob.h"
 #include "protocol.h"
+#include "proto_oob.h"
 #include "Socket.h"
 #include "ServerList.h"
 

@@ -118,32 +118,13 @@ bool CServerList::IsRefreshing()
 //-----------------------------------------------------------------------------
 unsigned int CServerList::AddNewServer(serveritem_t &server)
 {
-	// make sure the server isn't already here
-	// this is a bug in the master server, sending us servers we already have
-	/*
-	for (int i = 0; i < m_Servers.Count(); i++)
-	{
-		if (m_Servers[i].ip[0] == server.ip[0]
-			&& m_Servers[i].ip[1] == server.ip[1]
-			&& m_Servers[i].ip[2] == server.ip[2]
-			&& m_Servers[i].ip[3] == server.ip[3]
-			&& m_Servers[i].port == server.port)
-		{
-			// assert(!("ADDING DUPLICATE SERVER"));
-			return i;
-		}
-	}
-	*/
-
 	FOR_EACH_VEC(m_Servers, i)
 	{
 		if (server.m_NetAdr.CompareAdr(m_Servers[i].m_NetAdr))
 			return 0;
 	}
-	//DevMsg("Adding %s to the list\n", server.m_NetAdr.ToString());
 
 	unsigned int serverID = m_Servers.AddToTail(server);
-	//m_Servers[serverID].serverID = serverID;
 	return serverID;
 }
 
@@ -207,9 +188,26 @@ void CServerList::AddServerToRefreshList(unsigned int serverID)
 		return;
 
 	serveritem_t &server = m_Servers[serverID];
-	server.m_bHadSuccessfulResponse = NONE;
+	server.m_nReceivedStatus = NONE;
 	
 	m_RefreshList.AddToTail(serverID);
+}
+
+
+//-----------------------------------------------------------------------------
+// Purpose: marks all server to be refreshed
+//-----------------------------------------------------------------------------
+void CServerList::AddAllServersToRefreshList() {
+	FOR_EACH_VEC(m_Servers, i)
+	{
+		if (!m_Servers.IsValidIndex(i))
+			return;
+
+		serveritem_t& server = m_Servers[i];
+		server.m_nReceivedStatus = NONE;
+
+		m_RefreshList.AddToTail(i);
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -414,7 +412,7 @@ void CServerList::QueryServer(unsigned int serverID)
 	bf_write msg(buffer,sizeof(buffer));
 
 	msg.WriteLong(CONNECTIONLESS_HEADER);
-	msg.WriteByte(A2S_INFOREQUEST);
+	msg.WriteByte(A2S_INFO_REQUEST);
 	msg.WriteString(A2S_KEY_STRING);
 
 	// Sendmessage

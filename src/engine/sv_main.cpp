@@ -1,4 +1,4 @@
-//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
+﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose:
 //
@@ -16,7 +16,7 @@
 #include "vox.h"
 #include "EngineSoundInternal.h"
 #include "checksum_engine.h"
-#include "master.h"
+#include "sv_master.h"
 #include "host.h"
 #include "keys.h"
 #include "vengineserver_impl.h"
@@ -1791,9 +1791,9 @@ bool SV_ActivateServer()
 
 	// Heartbeat the master server in case we turned SrcTV on or off.
 	Steam3Server().SendUpdatedServerDetails();
-#ifndef NOMASTER
-		master->Heartbeat_f();
-#endif
+		
+	master->Heartbeat_f();
+
 	COM_TimestampedLog( "SV_ActivateServer(finished)" );
 
 	return true;

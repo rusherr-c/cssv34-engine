@@ -16,8 +16,6 @@
 // This is used, unless overridden in the registry
 #define VALVE_MASTER_ADDRESS "207.173.177.10:27011"
 
-#define HB_TIMEOUT 15
-
 #define PORT_RCON			27015	// defualt RCON port, TCP
 #define	PORT_MASTER			27011	// Default master port, UDP
 #define PORT_CLIENT			27005	// Default client port, UDP/TCP
@@ -79,23 +77,16 @@
 
 
 // A user is requesting the list of master servers, auth servers, and titan dir servers from the Client Master server
+#define A2M_GETMASTERSERVERS	'v' // + byte (type of request, TYPE_CLIENT_MASTER or TYPE_SERVER_MASTER)
 
-// Master Server list response
-#define S2M_HEARTBEAT			'a'
-#define S2M_HEARTBEAT2			'0'
-#define S2M_SHUTDOWN			'b'
-#define M2A_CHALLENGE			's'
-#define M2C_QUERY				'f'
-#define C2M_CLIENTQUERY			'1'
+// Master server list response
+#define M2A_MASTERSERVERS		'w'	// + byte type + 6 byte IP/Port List
 
-#define A2S_INFOREQUEST			'T'
-#define S2A_INFOREPLY			'I'
+#define A2M_GETACTIVEMODS		'x' // + string Request to master to provide mod statistics ( current usage ).  "1" for first mod.
 
-#define A2S_PLAYER_REQUEST		'U'
-#define S2A_PLAYER_REPLY		'D'
+#define M2A_ACTIVEMODS			'y' // response:  modname\r\nusers\r\nservers
 
-#define A2S_RULES_REQUEST		'V'
-#define S2A_RULES_REPLY			'E'
+#define M2M_MSG					'z' // Master peering message
 
 // SERVER TO CLIENT/ANY
 

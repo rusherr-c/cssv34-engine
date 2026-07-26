@@ -8,11 +8,8 @@
 // normally pragma warning is disabled in vgui.h
 #pragma warning( disable: 4800 )	// disables 'performance warning converting int to bool'
 
-#include <cstdlib>		// atoi
+#include "pch_serverbrowser.h"
 #include "..\utils\bzip2\bzlib.h" // BZ2_bzBuffToBuffDecompress
-
-#include "ServerDetailsMsgHandler.h"
-#include "ServersInfo.h"
 
 #define SPLITPACKET_HEADER -2
 #define SPLIT_FLAG_COMPRESSED 0x80000000
@@ -80,7 +77,7 @@ bool CServerDetailsMsgHandler::Process(const netadr_t& from, bf_read& msg) {
 	switch (c)
 	{
 
-	case S2A_INFOREPLY:
+	case S2A_INFO_REPLY:
 	{
 		if (!ProcessInfo(msg, server))
 			Warning("Failed processing info for server %s\n", server.m_NetAdr.ToString());
