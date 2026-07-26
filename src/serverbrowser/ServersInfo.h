@@ -16,7 +16,6 @@
 #include "tier1/netadr.h"
 #include "proto_oob.h"
 #include "protocol.h"
-#include "IServerRefreshResponse.h"
 #include "Socket.h"
 #include "ServerList.h"
 
@@ -40,7 +39,7 @@ public:
 	bool m_bDoNotRefresh;					///< server is marked as not responding and should no longer be refreshed
 	char m_szGameDir[64];					///< current game directory
 	char m_szMap[64];						///< current map
-	char m_szServerRules[256];				///< server rules
+	char m_szGameTags[256];					///< sv_tags
 	char m_szGameDescription[128];			///< game description
 	int  m_nAppID;
 	int  m_nPlayers;
@@ -51,7 +50,7 @@ public:
 	uint m_ulTimeLastPlayed;				///< time (in unix time) when this server was last played on (for favorite/history servers)
 	char m_szGameVersion[64];
 
-	int  m_iFlags;
+	byte m_iFlags;
 
 	/// Game server name
 	char m_szServerName[256];
@@ -69,7 +68,7 @@ public:
 			m_bDoNotRefresh,
 			m_szGameDir,
 			m_szMap,
-			m_szServerRules,
+			m_szGameTags,
 			m_szGameDescription,
 			m_nAppID,
 			m_nPlayers,
@@ -83,7 +82,6 @@ public:
 
 		return buffer;
 	}
-
 };
 
 enum EServerQuery
@@ -91,7 +89,59 @@ enum EServerQuery
 	k_eQuery_Any = -1,
 	k_ePingServer = 1,
 	k_ePlayerDetails,
-//	k_eServerRules
+	k_eServerRules
+};
+
+class ServersInfoQueryResponse : public IServerQueryResponse
+{
+public:
+	ServersInfoQueryResponse();
+	virtual ~ServersInfoQueryResponse();
+
+	// Set response target
+	void SetResponseTarget(IServerQueryResponse* response);
+
+	// Set current query
+	void SetCurrentQuery(EServerQuery query, uint32 unIP, uint16 usPort);
+
+	// Get challenge number received in ChallengeReceived callback
+	int GetChallengeNr();
+
+	// Got challenge number from the server
+	virtual void ChallengeReceived(int challenge);
+
+	// Server has responded successfully and has updated data
+	virtual void ServerResponded(serveritem_t& server);
+
+	// Got data on a server rule -- you'll get this callback once per FCVAR_NOTIFY
+	// cvar on the server which you have requested rules data on.
+	virtual void RulesResponded(const char* pchRule, const char* pchValue);
+
+	// The server failed to respond to the request for server rules
+	virtual void RulesFailedToRespond();
+
+	// The server has finished responding to the server rules request
+	virtual void RulesRefreshComplete();
+
+	// Got data on a new player on the server -- you'll get this callback once per player
+	// on the server which you have requested player data on.
+	virtual void AddPlayerToList(const char* pchName, int nScore, float flTimePlayed);
+
+	// The server failed to respond to the request for player details
+	virtual void PlayersFailedToRespond();
+
+	// The server has finished responding to the player details request
+	virtual void PlayersRefreshComplete();
+
+private:
+	EServerQuery m_currentQuery;
+	uint32 m_unIP;
+	uint16 m_usPort;
+
+	int m_nChallengeNr;
+	
+	bool m_bResponseSet;
+	IServerQueryResponse* m_pResponseTarget;
 };
 
 //-----------------------------------------------------------------------------
@@ -118,6 +168,10 @@ public:
 	// Stop refreshing current list
 	void StopRefresh();
 	bool IsRefreshing() { return m_bRefreshing; }
+
+	// Get/Update start request time
+	double GetStartRequestTime() { return m_flStartRequestTime; }
+	void UpdateStartRequestTime() { m_flStartRequestTime = Plat_FloatTime(); }
 
 	// Add server to favorites/history list
 	void AddFavoriteServer(uint32 unIP, uint16 usPort);
@@ -168,8 +222,12 @@ private:
 	double			m_flStartRequestTime;
 	bool			m_bRefreshing;
 
-	CSocket*		m_pMasterSocket;		//<
-	CSocket*		m_pQuerySocket;			//< used for server queries (TODO!)
+	CSocket*		m_pMasterSocket;		//< used for master server
+
+	// used for server queries (TODO!)
+	CSocket* m_pQuerySocket;
+	ServersInfoQueryResponse* m_pQueryResponse;
+	CServerDetailsMsgHandler *m_pQueryHandler;
 
 	CServerList*	m_pCurrentList;			//< current server list (one of those)
 	CServerList*	m_pMainList;			//< main internet list

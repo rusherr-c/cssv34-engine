@@ -39,17 +39,26 @@ public:
 
 //-----------------------------------------------------------------------------
 // Purpose: Callback interface for receiving responses after pinging an
-// individual server or requesting details on
-// who is playing on a particular server.
+// individual server
 // 
 class IServerQueryResponse
 {
 public:
+	// Got challenge number from the server
+	virtual void ChallengeReceived(int challenge) {}
+
 	// Server has responded successfully and has updated data
 	virtual void ServerResponded(serveritem_t& server) {}
 
-	// The server has responded successfully with updated game rules
-	virtual void ServerRulesUpdated(serveritem_t& server) {}
+	// Got data on a server rule -- you'll get this callback once per FCVAR_NOTIFY
+	// cvar on the server which you have requested rules data on.
+	virtual void RulesResponded(const char* pchRule, const char* pchValue) {};
+
+	// The server failed to respond to the request for server rules
+	virtual void RulesFailedToRespond() {};
+
+	// The server has finished responding to the server rules request
+	virtual void RulesRefreshComplete() {};
 
 	// Got data on a new player on the server -- you'll get this callback once per player
 	// on the server which you have requested player data on.

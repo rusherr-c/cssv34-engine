@@ -26,6 +26,10 @@
 #include "xbox/xbox_win32stubs.h"
 #endif
 
+// [max 5], dont set to higher values otherwise 
+// some servers will be dropped
+#define RUNFRAME_SLEEP_INTERVAL 0
+
 #define SOCKET_DEBUGGING 0
 const Color SocketDebugColor(255, 100, 255, 255);
 
@@ -251,6 +255,9 @@ void CSocket::Frame()
 
 	while (true)
 	{
+		if (RUNFRAME_SLEEP_INTERVAL > 0)
+			Sleep(RUNFRAME_SLEEP_INTERVAL);
+
 		sockaddr_in from{};
 		int fromlen = sizeof(from);
 

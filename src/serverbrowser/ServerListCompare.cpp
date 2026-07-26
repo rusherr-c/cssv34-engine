@@ -242,7 +242,7 @@ int __cdecl LastPlayedCompare(ListPanel *pPanel, const ListPanelItem &p1, const 
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Tag comparison function
+// Purpose: Tags comparison function
 //-----------------------------------------------------------------------------
 int __cdecl TagsCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
 {
@@ -256,14 +256,7 @@ int __cdecl TagsCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPa
 	if ( !s1 && !s2 )
 		return 0;
 
-	return Q_stricmp( s1->m_szServerRules, s2->m_szServerRules );
+	return Q_stricmp( s1->m_szGameTags, s2->m_szGameTags );
 }
 
-//-----------------------------------------------------------------------------
-// Purpose: Replay comparison function
-//-----------------------------------------------------------------------------
-int __cdecl ReplayCompare(ListPanel *pPanel, const ListPanelItem &p1, const ListPanelItem &p2)
-{
-	return 0;
-}
 

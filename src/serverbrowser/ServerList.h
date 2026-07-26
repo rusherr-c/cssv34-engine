@@ -11,7 +11,8 @@
 #pragma once
 #endif
 
-#include "ServersInfo.h"
+#include "IServerRefreshResponse.h"
+#include "ServerDetailsMsgHandler.h"
 #include "netadr.h"
 
 #include <UtlRBTree.h>
@@ -19,7 +20,7 @@
 
 class CSocket;
 class IServerRefreshResponse;
-struct serveritem_t;
+class serveritem_t;
 
 // holds a single query - needs to public unfortunately
 struct query_t
@@ -70,7 +71,9 @@ public:
 	// responses
 	void UpdateServer(netadr_t& adr, serveritem_t& server, double recvTime);
 
+	// find server by address
 	int  FindServer(netadr_t& adr);
+
 	// returns true if servers are currently being refreshed
 	bool IsRefreshing();
 
@@ -80,8 +83,10 @@ public:
 private:
 	// Run query logic for this frame
 	void QueryFrame();
+
 	// Send query to specified server on specified socket
-	void QueryServer(CSocket *query, unsigned int serverID);
+	void QueryServer(unsigned int serverID);
+
 	// recalculates a servers ping, from the last few ping times
 	int CalculateAveragePing(serveritem_t &server);
 
@@ -92,7 +97,7 @@ private:
 		MAX_QUERY_SOCKETS = 255,
 	};
 
-	CSocket	*m_pQuery;	// Game server query socket
+	CSocket	*m_pQuery;	// Query socket for game server info
 
 	// holds the list of all the currently active queries
 	CUtlRBTree<query_t, unsigned short> m_Queries;

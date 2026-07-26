@@ -253,7 +253,7 @@ void CDialogAddServer::ServerResponded( serveritem_t &server )
 	kv->SetString( "map", server.m_szMap );
 	kv->SetString( "GameDir", server.m_szGameDir );
 	kv->SetString( "GameDesc", server.m_szGameDescription );
-	kv->SetString( "Rules", server.m_szServerRules );
+	kv->SetString( "Tags", server.m_szGameTags );
 	kv->SetInt( "password", server.m_bPassword ? 1 : 0);
 	kv->SetInt( "bots", server.m_nBotPlayers ? 2 : 0);
 	kv->SetInt( "Replay", 0 );

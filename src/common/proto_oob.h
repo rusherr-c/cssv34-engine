@@ -94,6 +94,9 @@
 #define A2S_PLAYER_REQUEST		'U'
 #define S2A_PLAYER_REPLY		'D'
 
+#define A2S_RULES_REQUEST		'V'
+#define S2A_RULES_REPLY			'E'
+
 // SERVER TO CLIENT/ANY
 
 // Client connection is initiated by requesting a challenge value

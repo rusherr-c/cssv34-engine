@@ -146,23 +146,28 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	m_pGameList->AddColumnHeader( k_nColumn_Password, "Password", "#ServerBrowser_Password", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
 	m_pGameList->AddColumnHeader( k_nColumn_Secure, "Secure", "#ServerBrowser_Secure", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
 
-	m_pGameList->AddColumnHeader( k_nColumn_Name, "Name", "#ServerBrowser_Servers", 100, ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE);
-	m_pGameList->AddColumnHeader( k_nColumn_IPAddr, "IPAddr", "#ServerBrowser_IPAddress", 64, ListPanel::COLUMN_HIDDEN);
-	m_pGameList->AddColumnHeader( k_nColumn_GameDesc, "GameDesc", "#ServerBrowser_Game", 180,
+	m_pGameList->AddColumnHeader( k_nColumn_Name, "Name", "#ServerBrowser_Servers", 50, 
+		50,
+		280,
+		ListPanel::COLUMN_RESIZEWITHWINDOW | ListPanel::COLUMN_UNHIDABLE
+	);
+
+	m_pGameList->AddColumnHeader( k_nColumn_IPAddr, "IPAddr", "#ServerBrowser_IPAddress", 64, ListPanel::COLUMN_HIDDEN | ListPanel::COLUMN_RESIZEWITHWINDOW);
+	m_pGameList->AddColumnHeader( k_nColumn_GameDesc, "GameDesc", "#ServerBrowser_Game", 210,
 		112,	// minwidth
 		300,	// maxwidth
 		0		// flags
 		);
 	m_pGameList->AddColumnHeader( k_nColumn_Players, "Players", "#ServerBrowser_Players", 55, ListPanel::COLUMN_FIXEDSIZE);
-	m_pGameList->AddColumnHeader( k_nColumn_Bots, "Bots", "#ServerBrowser_Bots", 40, ListPanel::COLUMN_FIXEDSIZE);
-	m_pGameList->AddColumnHeader( k_nColumn_Map, "Map", "#ServerBrowser_Map", 90, 
+	m_pGameList->AddColumnHeader( k_nColumn_Bots, "Bots", "#ServerBrowser_Bots", 16, ListPanel::COLUMN_FIXEDSIZE);
+	m_pGameList->AddColumnHeader( k_nColumn_Map, "Map", "#ServerBrowser_Map", 120, 
 		90,		// minwidth
 		300,	// maxwidth
 		0		// flags
 		);
-	m_pGameList->AddColumnHeader(k_nColumn_Rules, "Rules", "Server Rules", 64, ListPanel::COLUMN_RESIZEWITHWINDOW);
 
-	m_pGameList->AddColumnHeader(k_nColumn_Ping, "Ping", "#ServerBrowser_Latency", 32, ListPanel::COLUMN_RESIZEWITHWINDOW);
+	m_pGameList->AddColumnHeader(k_nColumn_Ping, "Ping", "#ServerBrowser_Latency", 55, ListPanel::COLUMN_FIXEDSIZE);
+	m_pGameList->AddColumnHeader(k_nColumn_Tags, "Rules", "#ServerBrowser_Tags", 130);
 
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Password, "#ServerBrowser_PasswordColumn_Tooltip");
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Bots, "#ServerBrowser_BotColumn_Tooltip");
@@ -178,6 +183,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	m_pGameList->SetSortFunc( k_nColumn_Players, PlayersCompare);
 	m_pGameList->SetSortFunc( k_nColumn_Map, MapCompare);
 	m_pGameList->SetSortFunc( k_nColumn_Ping, PingCompare);
+	m_pGameList->SetSortFunc( k_nColumn_Tags, TagsCompare);
 
 	// Sort by ping time by default
 	m_pGameList->SetSortColumn( k_nColumn_Ping );
@@ -780,7 +786,7 @@ void CBaseGamesPage::ServerResponded( serveritem_t &server )
 	
 	kv->SetInt("Ping", pServerItem->m_nPing);
 
-	kv->SetString("Rules", pServerItem->m_szServerRules );
+	kv->SetString("Tags", pServerItem->m_szGameTags );
 
 	if (pServerItem->m_bDoNotRefresh )
 	{
@@ -972,11 +978,9 @@ void CBaseGamesPage::UpdateStatus()
 	{
 		wchar_t header[256];
 		wchar_t count[128];
-		wchar_t blacklistcount[128];
 
 		_snwprintf( count, Q_ARRAYSIZE(count), L"%d", m_pGameList->GetItemCount() );
-		_snwprintf( blacklistcount, Q_ARRAYSIZE(blacklistcount), L"%d", m_iServersBlacklisted );
-		g_pVGuiLocalize->ConstructString( header, sizeof( header ), g_pVGuiLocalize->Find( "#ServerBrowser_ServersCountWithBlacklist"), 2, count, blacklistcount );
+		g_pVGuiLocalize->ConstructString( header, sizeof( header ), g_pVGuiLocalize->Find( "#ServerBrowser_ServersCount"), 1, count );
 		m_pGameList->SetColumnHeaderText( k_nColumn_Name, header);
 	}
 	else

@@ -240,7 +240,7 @@ void CDialogGameInfo::PerformLayout()
 	SetControlString( "ServerText", m_Server.m_szServerName );
 	SetControlString( "GameText", m_Server.m_szGameDescription );
 	SetControlString( "MapText", m_Server.m_szMap );
-	SetControlString( "Rules", m_Server.m_szServerRules );
+	SetControlString( "GameTags", m_Server.m_szGameTags );
 
 
 	if ( !m_Server.m_bHadSuccessfulResponse )

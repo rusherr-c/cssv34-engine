@@ -3,16 +3,110 @@
 // maximum masterservers that can be parsed from masterservers.vdf
 #define MAX_MASTERSERVERS 16
 
+// Thread sleep interval (ms)
+#define THREAD_SLEEP_INTERVAL 50
+
+#define LANBROADCAST_MIN_PORT 27000
+#define LANBROADCAST_MAX_PORT 27100
+
 static char masterServers[][37] =
 {	
 	"78.154.103.37:10232", // nttnmDev (https://github.com/nttnmDev/cssv34masterserver)
 };
 
-// Thread sleep interval (ms)
-#define THREAD_SLEEP_INTERVAL 150
+// This is set and used by RequestServerList and ProcessServerList
+static netadr_t gLastAdr;
 
-#define LANBROADCAST_MIN_PORT 27000
-#define LANBROADCAST_MAX_PORT 27100
+ServersInfoQueryResponse::ServersInfoQueryResponse() {
+	m_unIP = 0;
+	m_usPort = 0;
+	m_nChallengeNr = -1;
+	m_bResponseSet = 0;
+	m_pResponseTarget = 0;
+	m_currentQuery = k_eQuery_Any;
+}
+ServersInfoQueryResponse::~ServersInfoQueryResponse() {
+
+}
+
+void ServersInfoQueryResponse::SetResponseTarget(IServerQueryResponse* response)
+{
+	if (response)
+	{
+		m_bResponseSet = true;
+		m_pResponseTarget = response;
+	}
+}
+
+// Set current query
+void ServersInfoQueryResponse::SetCurrentQuery(EServerQuery query, uint32 unIP, uint16 usPort) {
+	m_currentQuery = query;
+	m_unIP = unIP;
+	m_usPort = usPort;
+}
+
+// Get challenge number received in ChallengeReceived callback
+int ServersInfoQueryResponse::GetChallengeNr()
+{
+	return m_nChallengeNr;
+}
+
+// Got challenge number from the server
+void ServersInfoQueryResponse::ChallengeReceived(int challenge) {
+	m_nChallengeNr = challenge;
+
+	if (m_currentQuery == k_ePlayerDetails)
+		return g_pServersInfo->PlayerDetails(m_unIP, m_usPort, this);
+	else if (m_currentQuery == k_eServerRules)
+		return g_pServersInfo->ServerRules(m_unIP, m_usPort, this);
+
+	m_pResponseTarget->ChallengeReceived(challenge);
+}
+
+// Server has responded successfully and has updated data
+void ServersInfoQueryResponse::ServerResponded(serveritem_t& server) {
+	if (m_bResponseSet)
+		m_pResponseTarget->ServerResponded(server);
+}
+
+// Got data on a server rule -- you'll get this callback once per FCVAR_NOTIFY
+// cvar on the server which you have requested rules data on.
+void ServersInfoQueryResponse::RulesResponded(const char* pchRule, const char* pchValue) {
+	if (m_bResponseSet)
+		m_pResponseTarget->RulesResponded(pchRule, pchValue);
+}
+
+// The server failed to respond to the request for server rules
+void ServersInfoQueryResponse::RulesFailedToRespond() {
+	if (m_bResponseSet)
+		m_pResponseTarget->RulesFailedToRespond();
+}
+
+// The server has finished responding to the server rules request
+void ServersInfoQueryResponse::RulesRefreshComplete() {
+	if (m_bResponseSet)
+		m_pResponseTarget->RulesRefreshComplete();
+}
+
+// Got data on a new player on the server -- you'll get this callback once per player
+// on the server which you have requested player data on.
+void ServersInfoQueryResponse::AddPlayerToList(const char* pchName, int nScore, float flTimePlayed) {
+	if (m_bResponseSet)
+		m_pResponseTarget->AddPlayerToList(pchName, nScore, flTimePlayed);
+}
+
+// The server failed to respond to the request for player details
+void ServersInfoQueryResponse::PlayersFailedToRespond() {
+	if (m_bResponseSet)
+		m_pResponseTarget->PlayersFailedToRespond();
+}
+
+// The server has finished responding to the player details request
+void ServersInfoQueryResponse::PlayersRefreshComplete() {
+	if (m_bResponseSet)
+		m_pResponseTarget->PlayersRefreshComplete();
+}
+
 
 void CServersInfo::Thread(CServersInfo* pthis)
 {
@@ -36,7 +130,9 @@ CServersInfo::CServersInfo()
 {
 	m_bInitialized = false;
 	m_pMasterSocket = new CSocket();
+	m_pQueryResponse = new ServersInfoQueryResponse();
 	m_pQuerySocket = new CSocket();
+	m_pQueryHandler = new CServerDetailsMsgHandler(m_pQueryResponse);
 
 	m_szGameDir[0] = 0;
 	m_bRefreshing = false;
@@ -77,6 +173,7 @@ void CServersInfo::Initialize() {
 		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Thread, this, 0, 0);
 
 	m_pMasterSocket->AddHandler(this);
+	m_pQuerySocket->AddHandler(m_pQueryHandler);
 
 	// load masters from config file
 	KeyValues* kv = new KeyValues("MasterServers");
@@ -167,6 +264,7 @@ void CServersInfo::RequestInternetServerList(const char* gamedir, IServerRefresh
 	m_pMainList->m_pResponseTarget = response;
 	m_pCurrentList = m_pMainList;
 	m_flStartRequestTime = Plat_FloatTime();
+	gLastAdr = netadr_t();
 
 	FOR_EACH_VEC(m_vecMasterAddresses, i)
 	{
@@ -288,13 +386,46 @@ void CServersInfo::RemoveHistoryServer(uint32 unIP, uint16 usPort) {
 
 // Query info about single server (TODO!)
 void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
-	// todo
+	m_pQueryResponse->SetResponseTarget(response);
+	m_pQueryResponse->SetCurrentQuery(k_ePingServer, unIP, usPort);
+
+	char buf[64];
+	bf_write msg(buf, sizeof(buf));
+
+	msg.WriteLong(CONNECTIONLESS_HEADER);
+	msg.WriteByte(A2S_INFOREQUEST);
+	msg.WriteString(A2S_KEY_STRING);
+
+	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
 }
 
 void CServersInfo::PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
-	// todo
+	m_pQueryResponse->SetResponseTarget(response);
+	m_pQueryResponse->SetCurrentQuery(k_ePlayerDetails, unIP, usPort);
+
+	char buf[16];
+	bf_write msg(buf, sizeof(buf));
+
+	msg.WriteLong(CONNECTIONLESS_HEADER);
+	msg.WriteByte(A2S_PLAYER_REQUEST);
+	msg.WriteLong(m_pQueryResponse->GetChallengeNr());
+
+	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
 }
 
+void CServersInfo::ServerRules(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
+	m_pQueryResponse->SetResponseTarget(response);
+	m_pQueryResponse->SetCurrentQuery(k_eServerRules, unIP, usPort);
+
+	char buf[16];
+	bf_write msg(buf, sizeof(buf));
+
+	msg.WriteLong(CONNECTIONLESS_HEADER);
+	msg.WriteByte(A2S_RULES_REQUEST);
+	msg.WriteLong(m_pQueryResponse->GetChallengeNr());
+
+	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
+}
 // Internal functions //
 
 void CServersInfo::AddMasterServer(const netadr_t& adr) {
@@ -340,9 +471,6 @@ void CServersInfo::UseDefaultMasters()
 		AddMasterServer(adr);
 	}
 }
-
-// This is set and used by RequestServerList and ProcessServerList
-static netadr_t gLastAdr;
 
 // Request server list from masterserver
 void CServersInfo::RequestServerList(const netadr_t& adr) {

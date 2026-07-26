@@ -267,6 +267,10 @@ void CServerBrowserDialog::SaveUserData()
 
 	m_pSavedData->RemoveSubKey( m_pSavedData->FindKey( "Filters" ) ); // remove the saved subkey and add our subkey
 	m_pSavedData->AddSubKey( m_pFilterData->MakeCopy() );
+	
+	// remove subkeys
+	m_pSavedData->RemoveSubKey(m_pSavedData->FindKey("Favorites"));
+	m_pSavedData->RemoveSubKey(m_pSavedData->FindKey("History"));
 
 	// save the favorites list
 	KeyValues* favorites = m_pSavedData->FindKey("Favorites", true);

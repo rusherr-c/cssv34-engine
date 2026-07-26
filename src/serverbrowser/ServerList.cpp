@@ -228,7 +228,7 @@ void CServerList::StartRefresh()
 //-----------------------------------------------------------------------------
 void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 {
-	if (!m_pResponseTarget)
+	if (!m_pResponseTarget || !m_bRefreshing)
 		return;
 
 	// find the reply in the query list
@@ -256,7 +256,8 @@ void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 
 	// update the server
 	serveritem_t& server = m_Servers[serverIndex];
-	if (server.m_nReceivedStatus != INFO_RECEIVED)
+
+	if (server.m_nReceivedStatus == INFO_REQUESTED)
 	{
 		m_nRefreshedServers++;
 		server = sv;
@@ -272,8 +273,8 @@ void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 
 	int ping = (int)((recvTime - sendTime) * 1000);
 
+	// janky!
 	server.m_nPing = ping;
-	server.m_nReceivedStatus = INFO_RECEIVED;
 
 	// notify the UI of the new server info
 	m_pResponseTarget->ServerResponded(server);
@@ -301,7 +302,7 @@ int CServerList::FindServer(netadr_t& adr)
 //-----------------------------------------------------------------------------
 int CServerList::CalculateAveragePing(serveritem_t &server)
 {
-	// you should not use that
+	// todo: implement this
 	return 0;
 }
 
@@ -324,7 +325,11 @@ void CServerList::QueryFrame()
 	while (m_Queries.IsValidIndex(idx))
 	{
 		query_t &query = m_Queries[idx];
-		if ((curtime - query.sendTime) > 1.2f)
+
+		// default timeout time, for info requests
+		float timeoutTime = 1.2f;
+
+		if ((curtime - query.sendTime) > timeoutTime)
 		{
 			// server has timed out
 			serveritem_t &item = m_Servers[query.serverID];
@@ -363,7 +368,7 @@ void CServerList::QueryFrame()
 		if (!m_Servers.IsValidIndex(currentServer))
 			break;
 
-		QueryServer(m_pQuery, currentServer);
+		QueryServer(currentServer);
 
 		// remove the server from the refresh list
 		m_RefreshList.Remove((int)0);
@@ -383,7 +388,7 @@ void CServerList::QueryFrame()
 //-----------------------------------------------------------------------------
 // Purpose: sends a status query packet to a single server
 //-----------------------------------------------------------------------------
-void CServerList::QueryServer(CSocket *socket, unsigned int serverID)
+void CServerList::QueryServer(unsigned int serverID)
 {
 	serveritem_t &server = m_Servers[serverID];
 
@@ -413,11 +418,9 @@ void CServerList::QueryServer(CSocket *socket, unsigned int serverID)
 	msg.WriteString(A2S_KEY_STRING);
 
 	// Sendmessage
-	socket->Send(server.m_NetAdr, msg);
+	m_pQuery->Send(server.m_NetAdr, msg);
 
 	// insert the query into the list and set the time
 	int idx = m_Queries.Insert(query);
 	m_Queries[idx].sendTime = Plat_FloatTime();
 }
-
-

@@ -108,8 +108,8 @@ public:
 		k_nColumn_Players = 5,
 		k_nColumn_Bots = 6,
 		k_nColumn_Map = 7,
-		k_nColumn_Rules = 8,
-		k_nColumn_Ping = 9,
+		k_nColumn_Ping = 8,
+		k_nColumn_Tags = 9,
 	};
 
 	CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType eType, const char *pCustomResFilename=NULL);
