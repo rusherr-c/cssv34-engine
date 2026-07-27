@@ -1,7 +1,6 @@
 #pragma once
 // EVERYTHING WAS CAPTURED USING WIRESHARK
 // SOME DATA MAY BE WRONG
-// Fuck Reg1oxeN
 
 // ip address
 const char* cm_netip = "212.41.8.114:27070";
