@@ -492,68 +492,59 @@ static bool IsWin98OrOlder()
 
 
 //-----------------------------------------------------------------------------
-// Purpose: Figure out if Steam is running, then load the GameOverlayRenderer.dll
+// Purpose: Figure out if Steam is running, then load the steam dlls
 //-----------------------------------------------------------------------------
-void TryToLoadSteamOverlayDLL()
+void TryToLoadSteamDLLs()
 {
-#if !defined( _X360 )
-	// First, check if the module is already loaded, perhaps because we were run from Steam directly
-	HMODULE hMod = GetModuleHandle("GameOverlayRenderer.dll");
-	if (hMod)
-	{
+	// Fix multiple values in registry
+	IRegistry* steam_registry = InstanceRegistry("Steam\\ActiveProcess");
+
+	char steamClientPath[MAX_PATH];
+	char* ret = getcwd(steamClientPath, MAX_PATH);
+	if (!ret) // failed!
 		return;
-	}
 
-	bool bSteamActive = false;
-	HKEY hKey;
-	char rgchSteamPath[MAX_PATH];
+	strcat(steamClientPath, "\\bin\\steamclient.dll");
+	Msg("%s\n", steamClientPath);
 
-	if (RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Valve\\Steam\\ActiveProcess", NULL, KEY_READ, &hKey) == ERROR_SUCCESS)
+	// This is set by steamclient.dll,
+	// which is in bin/steamclient.dll. But steam can override this values,
+	// causing steamclient.dll to crash. So there is a quick fix
+	steam_registry->WriteInt("pid", GetCurrentProcessId());
+	steam_registry->WriteString("SteamClientDll", steamClientPath);
+
+	// release our registry
+	ReleaseInstancedRegistry(steam_registry);
+
+	// This can also crash the game
+	registry->WriteInt("AutoConfigVersion", 1);
+	registry->WriteInt("DXLevel_V1", 0); // 0 = default (means 95)
+
+	// Load steam.dll module
+	HMODULE hSteamDLL = LoadLibrary("Steam.dll");
+	if (!hSteamDLL)
 	{
-		// Get the pid
-		DWORD dwSteamPID = 0;
-		DWORD dwLength = sizeof(DWORD);
-		if (RegQueryValueEx(hKey, "pid", NULL, NULL, (LPBYTE)&dwSteamPID, &dwLength) == ERROR_SUCCESS)
-		{
-			HANDLE hProcess = ::OpenProcess(PROCESS_QUERY_INFORMATION, false, dwSteamPID);
-			if (hProcess != NULL)
-			{
-				DWORD dwExitCode = 0;
-				bSteamActive = (::GetExitCodeProcess(hProcess, &dwExitCode) && dwExitCode == STILL_ACTIVE);
-				::CloseHandle(hProcess);
-			}
-		}
-
-		// If active we also need to get the pathname
-		if (bSteamActive)
-		{
-			dwLength = sizeof(rgchSteamPath);
-			if (RegQueryValueEx(hKey, "SteamClientDll", NULL, NULL, (unsigned char*)rgchSteamPath, &dwLength) == ERROR_SUCCESS)
-			{
-				if (dwLength < 1 || Q_strlen(rgchSteamPath) < 1)
-				{
-					// If we can't figure out the path we can't do anything, so flag inactive
-					bSteamActive = false;
-				}
-				else
-				{
-					// Need to strip the filename since we got the steamclient.dll filename, but we want the path
-					Q_StripFilename(rgchSteamPath);
-				}
-			}
-		}
-
-		RegCloseKey(hKey);
+		Warning("Failed loading Steam.dll\n");
+		DebuggerBreakIfDebugging();
 	}
 
-	if (bSteamActive)
+	// Load & Init steam_api
+	HMODULE hSteamAPIDLL = LoadLibrary("steam_api.dll");
+	if (hSteamAPIDLL)
 	{
-		Q_strcat(rgchSteamPath, "\\GameOverlayRenderer.dll", Q_ARRAYSIZE(rgchSteamPath));
+		decltype(SteamAPI_Init)* pInitSteamAPI = 0;
+		pInitSteamAPI = (decltype(pInitSteamAPI))GetProcAddress((HMODULE)hSteamAPIDLL, "SteamAPI_Init");
 
-		// This could fail, but we can't fix it if it does so just ignore failures
-		LoadLibrary(rgchSteamPath);
+		if (!pInitSteamAPI)
+			return;
+
+		pInitSteamAPI();
 	}
-#endif
+	else
+	{
+		Warning("Failed loading steam_api.dll\n");
+		DebuggerBreakIfDebugging();
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -1074,10 +1065,8 @@ extern "C" __declspec(dllexport) int LauncherMain(HINSTANCE hInstance, HINSTANCE
 	XBX_SetPrimaryUserId(userID);
 #endif
 
-	// This call is to emulate steam's injection of the GameOverlay DLL into our process if we
-	// are running from the command line directly, this allows the same experience the user gets
-	// to be present when running from perforce, the call has no effect on X360
-	TryToLoadSteamOverlayDLL();
+	// Load steam dlls
+	TryToLoadSteamDLLs();
 
 	// Start VCR mode?
 	if (CommandLine()->CheckParm("-vcrrecord", &filename))
@@ -1267,48 +1256,6 @@ extern "C" __declspec(dllexport) int LauncherMain(HINSTANCE hInstance, HINSTANCE
 	}
 
 #endif
-
-	// Fix multiple values in registry
-	IRegistry* steam_registry = InstanceRegistry("Steam\\ActiveProcess");
-
-	// This is set by steamclient.dll,
-	// which is in bin/steamclient.dll. But steam can override this values,
-	// causing steamclient.dll to crash. So there is a quick fix
-	steam_registry->WriteInt("pid", 0);
-	steam_registry->WriteString("SteamClientDll", "");
-
-	// release our registry
-	ReleaseInstancedRegistry(steam_registry);
-
-	// This can also crash the game
-	registry->WriteInt("AutoConfigVersion", 1);
-	registry->WriteInt("DXLevel_V1", 0); // 0 = default (means 95)
-
-	// Load steam.dll module
-	CSysModule* hSteamDLL = Sys_LoadModule("steam.dll");
-	if (!hSteamDLL)
-	{
-		Warning("Failed loading steam.dll\n");
-		DebugBreak();
-	}
-
-	// Load & Init steam_api
-	CSysModule* hSteamAPIDLL = Sys_LoadModule("steam_api.dll");
-	if (hSteamAPIDLL)
-	{
-		decltype(SteamAPI_Init)* pInitSteamAPI = 0;
-		pInitSteamAPI = (decltype(pInitSteamAPI))GetProcAddress((HMODULE)hSteamAPIDLL, "SteamAPI_Init");
-
-		if (!pInitSteamAPI)
-			return 0;
-
-		pInitSteamAPI();
-	}
-	else
-	{
-		Warning("Failed loading steam_api.dll\n");
-		DebugBreak();
-	}
 
 	return 0;
 }
