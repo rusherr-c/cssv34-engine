@@ -394,6 +394,7 @@ void CServersInfo::RemoveHistoryServer(uint32 unIP, uint16 usPort) {
 
 // Query info about single server (TODO!)
 void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
+	Warning("PingServer %s\n", netadr_t(unIP, usPort).ToString());
 	m_pQueryResponse->SetResponseTarget(response);
 	m_pQueryResponse->SetCurrentQuery(k_ePingServer, unIP, usPort);
 

@@ -282,8 +282,6 @@ void CServerBrowser::Shutdown()
 	vgui::VGuiControls_Shutdown();
 #endif
 
-	g_pServersInfo->Shutdown();
-
 	DisconnectTier3Libraries();
 	DisconnectTier2Libraries();
 	ConVar_Unregister();

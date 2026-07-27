@@ -57,7 +57,7 @@ public:
 
 	// Format everything to a single string
 	char* ToString() noexcept {
-		static char buffer[1024];
+		char *buffer = new char[1024];
 		memset(&buffer, 0, sizeof(buffer));
 
 		sprintf(buffer, "%s, %i, %i, %d, %d, %s, %s, %s, %s, %i, %i, %i, %i, %d, %d, %s, %i, %s",

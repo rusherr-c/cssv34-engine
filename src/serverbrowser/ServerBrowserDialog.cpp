@@ -34,6 +34,7 @@ using namespace vgui;
 ConVar sb_quick_list_bit_field( "sb_quick_list_bit_field", "-1" );
 
 static CServerBrowserDialog *s_InternetDlg = NULL;
+static double g_flTimeLastSaved = NULL;
 
 CServerBrowserDialog &ServerBrowserDialog()
 {
@@ -178,6 +179,12 @@ void CServerBrowserDialog::OnTick()
 {
 	BaseClass::OnTick();
 	vgui::GetAnimationController()->UpdateAnimations( system()->GetFrameTime() );
+
+	// save every 10 sec
+	if (g_flTimeLastSaved < Plat_FloatTime() - 10.0f)
+	{
+		SaveUserData();
+	}
 }
 
 
@@ -244,6 +251,7 @@ void CServerBrowserDialog::LoadUserData()
 //-----------------------------------------------------------------------------
 void CServerBrowserDialog::SaveUserData()
 {
+	g_flTimeLastSaved = Plat_FloatTime();
 	m_pSavedData->Clear();
 	m_pSavedData->LoadFromFile( g_pFullFileSystem, "ServerBrowser.vdf", "CONFIG");
 
@@ -267,10 +275,6 @@ void CServerBrowserDialog::SaveUserData()
 
 	m_pSavedData->RemoveSubKey( m_pSavedData->FindKey( "Filters" ) ); // remove the saved subkey and add our subkey
 	m_pSavedData->AddSubKey( m_pFilterData->MakeCopy() );
-	
-	// remove subkeys
-	m_pSavedData->RemoveSubKey(m_pSavedData->FindKey("Favorites"));
-	m_pSavedData->RemoveSubKey(m_pSavedData->FindKey("History"));
 
 	// save the favorites list
 	KeyValues* favorites = m_pSavedData->FindKey("Favorites", true);

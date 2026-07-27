@@ -16,6 +16,7 @@ CFavoriteGames::CFavoriteGames(vgui::Panel *parent) :
 	CBaseGamesPage(parent, "FavoriteGames", eFavoritesServer )
 {
 	m_bRefreshOnListReload = false;
+	ivgui()->AddTickSignal(GetVPanel());
 }
 
 //-----------------------------------------------------------------------------
