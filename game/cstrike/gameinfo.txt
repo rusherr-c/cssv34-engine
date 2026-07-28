@@ -37,6 +37,7 @@
 		//
 		SearchPaths
 		{
+			game				platform/hl2_patch.vpk
 			gamebin				|gameinfo_path|bin
 			game+mod			cstrike_content
 
@@ -52,8 +53,6 @@
 
             		game				cstrike_content/cstrike_pak.vpk
 			platform			platform/platform_misc.vpk
-			
-			game				platform/hl2_patch.vpk
 
             		game	 			cstrike_content
 			game				hl2

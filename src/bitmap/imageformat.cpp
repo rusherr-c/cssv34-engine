@@ -1,17 +1,16 @@
-//======= Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+//========= Copyright Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
 //=============================================================================//
 
-#if defined( _WIN32 ) && !defined( _X360 )
+#if defined( _WIN32 ) && !defined( _X360 ) && !defined( DX_TO_GL_ABSTRACTION )
 #include <windows.h>
-#include "d3d9types.h"
+#include "../dx9sdk/include/d3d9types.h"
 #endif
 #include "bitmap/imageformat.h"
 #include "basetypes.h"
 #include "tier0/dbg.h"
-#include <malloc.h>
 #include <memory.h>
 #include "nvtc.h"
 #include "mathlib/mathlib.h"
@@ -26,7 +25,7 @@
 //-----------------------------------------------------------------------------
 // Various important function types for each color format
 //-----------------------------------------------------------------------------
-static ImageFormatInfo_t g_ImageFormatInfo[] =
+static const ImageFormatInfo_t g_ImageFormatInfo[] =
 {
 	{ "UNKNOWN",					0, 0, 0, 0, 0, false },			// IMAGE_FORMAT_UNKNOWN,
 	{ "RGBA8888",					4, 8, 8, 8, 8, false },			// IMAGE_FORMAT_RGBA8888,
@@ -91,6 +90,9 @@ static ImageFormatInfo_t g_ImageFormatInfo[] =
 	{ "LE_BGRX8888",				4, 8, 8, 8, 8, false },			// IMAGE_FORMAT_LE_BGRX8888
 	{ "LE_BGRA8888",				4, 8, 8, 8, 8, false },			// IMAGE_FORMAT_LE_BGRA8888
 #endif
+
+	{ "DXT1_RUNTIME",				0, 0, 0, 0, 0, true, },			// IMAGE_FORMAT_DXT1_RUNTIME
+	{ "DXT5_RUNTIME",				0, 0, 0, 0, 8, true, },			// IMAGE_FORMAT_DXT5_RUNTIME
 };
 
 
@@ -117,9 +119,8 @@ int GetMemRequired( int width, int height, int depth, ImageFormat imageFormat, b
 	if ( !mipmap )
 	{
 		// Block compressed formats
-		if ( imageFormat == IMAGE_FORMAT_DXT1 || imageFormat == IMAGE_FORMAT_DXT3 ||
-			 imageFormat == IMAGE_FORMAT_DXT5  || imageFormat == IMAGE_FORMAT_ATI2N ||
-			 imageFormat == IMAGE_FORMAT_ATI1N )
+		
+		if ( IsCompressed( imageFormat ) )
 		{
 /*
 			DDSURFACEDESC desc;
@@ -153,11 +154,13 @@ int GetMemRequired( int width, int height, int depth, ImageFormat imageFormat, b
 			switch ( imageFormat )
 			{
 			case IMAGE_FORMAT_DXT1:
+			case IMAGE_FORMAT_DXT1_RUNTIME:
 			case IMAGE_FORMAT_ATI1N:
 				return numBlocks * 8;
 
 			case IMAGE_FORMAT_DXT3:
 			case IMAGE_FORMAT_DXT5:
+			case IMAGE_FORMAT_DXT5_RUNTIME:
 			case IMAGE_FORMAT_ATI2N:
 				return numBlocks * 16;
 			}
@@ -282,10 +285,16 @@ int GetNumMipMapLevels( int width, int height, int depth )
 	return numMipLevels;
 }
 
-#ifndef _LINUX
 // Turn off warning about FOURCC formats below...
 #pragma warning (disable:4063)
 
+#ifdef DX_TO_GL_ABSTRACTION
+#ifndef MAKEFOURCC
+#define MAKEFOURCC(ch0, ch1, ch2, ch3)                              \
+	((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) |   \
+	((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24 ))
+#endif //defined(MAKEFOURCC)
+#endif	
 //-----------------------------------------------------------------------------
 // convert back and forth from D3D format to ImageFormat, regardless of
 // whether it's supported or not
@@ -302,12 +311,17 @@ ImageFormat D3DFormatToImageFormat( D3DFORMAT format )
 
 	switch ( format )
 	{
-#if !defined( _X360 )
+#ifdef TOGLES
+	case D3DFMT_R8G8B8:
+		return IMAGE_FORMAT_RGB888;
+	case D3DFMT_A8R8G8B8:
+		return IMAGE_FORMAT_RGBA8888;
+#else
 	case D3DFMT_R8G8B8:
 		return IMAGE_FORMAT_BGR888;
-#endif
 	case D3DFMT_A8R8G8B8:
 		return IMAGE_FORMAT_BGRA8888;
+#endif
 	case D3DFMT_X8R8G8B8:
 		return IMAGE_FORMAT_BGRX8888;
 	case D3DFMT_R5G6B5:
@@ -416,6 +430,10 @@ D3DFORMAT ImageFormatToD3DFormat( ImageFormat format )
 #endif
 	case IMAGE_FORMAT_BGRA8888:
 		return D3DFMT_A8R8G8B8;
+	case IMAGE_FORMAT_RGB888:
+		return D3DFMT_R8G8B8;
+	case IMAGE_FORMAT_RGBA8888:
+		return D3DFMT_A8R8G8B8;
 	case IMAGE_FORMAT_BGRX8888:
 		return D3DFMT_X8R8G8B8;
 	case IMAGE_FORMAT_BGR565:
@@ -498,6 +516,11 @@ D3DFORMAT ImageFormatToD3DFormat( ImageFormat format )
 	case IMAGE_FORMAT_X360_DST24F:
 		return D3DFMT_D24FS8;
 #endif
+
+	case IMAGE_FORMAT_DXT1_RUNTIME:
+		return D3DFMT_DXT1;
+	case IMAGE_FORMAT_DXT5_RUNTIME:
+		return D3DFMT_DXT5;
 	}
 
 	Assert( 0 );
@@ -506,7 +529,6 @@ D3DFORMAT ImageFormatToD3DFormat( ImageFormat format )
 }
 
 #pragma warning (default:4063)
-#endif
 
 } // ImageLoader namespace ends
 
