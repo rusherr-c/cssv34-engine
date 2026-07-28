@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+ï»¿//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: Implementation of a material
 //
@@ -2896,7 +2896,7 @@ bool CMaterial::IsErrorMaterial() const
 void CMaterial::FindRepresentativeTexture( void )
 {
 	Precache();
-	//Msg("findrepresentativetexture");
+	
 	// First try to find the base texture...
 	bool found;
 	IMaterialVar *textureVar = FindVar( "$baseTexture", &found, false );

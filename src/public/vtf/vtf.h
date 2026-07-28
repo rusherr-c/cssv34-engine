@@ -1,4 +1,4 @@
-//========= Copyright Valve Corporation, All rights reserved. ============//
+//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
@@ -56,15 +56,14 @@ enum CompiledVtfFlags
 	TEXTUREFLAGS_NODEBUGOVERRIDE               = 0x00020000,
 	TEXTUREFLAGS_SINGLECOPY		               = 0x00040000,
 	
-	TEXTUREFLAGS_STAGING_MEMORY                = 0x00080000,
-	TEXTUREFLAGS_IMMEDIATE_CLEANUP			   = 0x00100000,
-	TEXTUREFLAGS_IGNORE_PICMIP				   = 0x00200000,
-
-		TEXTUREFLAGS_UNUSED_00400000		   = 0x00400000,
+		TEXTUREFLAGS_UNUSED_00080000		   = 0x00080000,
+		TEXTUREFLAGS_UNUSED_00100000		   = 0x00100000,
+		TEXTUREFLAGS_UNUSED_00200000           = 0x00200000,
+		TEXTUREFLAGS_UNUSED_00400000           = 0x00400000,
 
 	TEXTUREFLAGS_NODEPTHBUFFER                 = 0x00800000,
 
-		TEXTUREFLAGS_UNUSED_01000000		   = 0x01000000,
+		TEXTUREFLAGS_UNUSED_01000000           = 0x01000000,
 
 	TEXTUREFLAGS_CLAMPU                        = 0x02000000,
 
@@ -77,10 +76,8 @@ enum CompiledVtfFlags
 	// Clamp to border color on all texture coordinates
 	TEXTUREFLAGS_BORDER						   = 0x20000000,
 
-	TEXTUREFLAGS_STREAMABLE_COARSE			   = 0x40000000,
-	TEXTUREFLAGS_STREAMABLE_FINE		       = 0x80000000, 
-	TEXTUREFLAGS_STREAMABLE					   = ( TEXTUREFLAGS_STREAMABLE_COARSE | TEXTUREFLAGS_STREAMABLE_FINE )
-
+		TEXTUREFLAGS_UNUSED_40000000		   = 0x40000000,
+		TEXTUREFLAGS_UNUSED_80000000		   = 0x80000000,
 };
 
 enum VersionedVtfFlags
@@ -141,11 +138,11 @@ enum CubeMapFaceIndex_t
 	CUBEMAP_FACE_UP,
 	CUBEMAP_FACE_DOWN,
 
-	// This is the fallback for low-end
-	CUBEMAP_FACE_SPHEREMAP,
+	CUBEMAP_FACE_COUNT,
 
-	// NOTE: Cubemaps have *7* faces; the 7th is the fallback spheremap
-	CUBEMAP_FACE_COUNT
+	// vtf 7.5: spheremap isn't used anymore, just
+	// here for backward compatibility.
+	CUBEMAP_FACE_SPHEREMAP = CUBEMAP_FACE_COUNT,
 };
 
 
@@ -162,10 +159,6 @@ enum LookDir_t
 	LOOK_DOWN_NEGZ,
 };
 
-//-----------------------------------------------------------------------------
-// What mipmap (and coarser) is always available when we ship 
-//-----------------------------------------------------------------------------
-#define STREAMING_START_MIPMAP 3
 
 //-----------------------------------------------------------------------------
 // Use this image format if you want to perform tool operations on the texture
@@ -178,8 +171,6 @@ enum LookDir_t
 class IVTFTexture
 {
 public:
-	virtual ~IVTFTexture() {}
-
 	// Initializes the texture and allocates space for the bits
 	// In most cases, you shouldn't force the mip count.
 	virtual bool Init( int nWidth, int nHeight, int nDepth, ImageFormat fmt, int nFlags, int iFrameCount, int nForceMipCount = -1 ) = 0;
@@ -353,13 +344,6 @@ public:
 
 	// Sets post-processing flags (settings are copied, pointer passed to distinguish between structure versions)
 	virtual void SetPostProcessingSettings( VtfProcessingOptions const *pOptions ) = 0;
-
-	// Like Unserialize, but allows you to additionally specify some flags to forcibly enable. 
-	virtual bool UnserializeEx( CUtlBuffer &buf, bool bHeaderOnly = false, int nForceFlags = 0, int nSkipMipLevels = 0 ) = 0;
-
-	// Data is included in [ finest, coarsest ] mips--other ranges have garbage. This is particularly useful for 
-	// streaming textures.
-	virtual void GetMipmapRange( int* pOutFinest, int* pOutCoarsest ) = 0;
 };
 
 //-----------------------------------------------------------------------------
@@ -471,7 +455,7 @@ struct VTFFileHeaderV7_1_t : public VTFFileBaseHeader_t
 	unsigned int	flags;
 	unsigned short	numFrames;
 	unsigned short	startFrame;
-#if !defined( POSIX ) && !defined( _X360 )
+#if !defined( _X360 )
 	VectorAligned	reflectivity;
 #else
 	// must manually align in order to maintain pack(1) expected layout with existing binaries
@@ -545,7 +529,7 @@ struct VTFFileHeaderV7_3_t : public VTFFileHeaderV7_2_t
 	char			pad4[3];
 	unsigned int	numResources;
 
-#if defined( _X360 ) || defined( POSIX )
+#if defined( _X360 )
 	// must manually align in order to maintain pack(1) expected layout with existing binaries
 	char			pad5[8];
 #endif
@@ -616,16 +600,6 @@ struct TextureSettingsEx_t
 };
 
 #define VTF_RSRC_TEXTURE_CRC ( MK_VTF_RSRC_ID( 'C','R','C' ) )
-
-#define VTF_RSRC_TEXTURE_STREAM_SETTINGS ( MK_VTF_RSRC_ID( 'S', 'T', 'R' ) )
-struct TextureStreamSettings_t
-{
-	uint8 m_firstAvailableMip;
-	uint8 m_lastAvailableMip;
-
-	uint8 m_reserved0;
-	uint8 m_reserved1;
-};
 
 #pragma pack()
 
