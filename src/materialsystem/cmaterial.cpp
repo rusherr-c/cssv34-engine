@@ -2896,7 +2896,7 @@ bool CMaterial::IsErrorMaterial() const
 void CMaterial::FindRepresentativeTexture( void )
 {
 	Precache();
-	
+	//Msg("findrepresentativetexture");
 	// First try to find the base texture...
 	bool found;
 	IMaterialVar *textureVar = FindVar( "$baseTexture", &found, false );
