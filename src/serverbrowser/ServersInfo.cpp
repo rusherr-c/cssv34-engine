@@ -12,7 +12,31 @@
 static char masterServers[][37] =
 {	
 	"78.154.103.37:10232", // nttnmDev (https://github.com/nttnmDev/cssv34masterserver)
+	"91.218.230.217:27011",
 };
+
+//
+// Purpose: used internally in engine,
+// returns how many master servers we have in the list
+//
+DLL_EXPORT int GetNumMasterServers()
+{
+	return _ARRAYSIZE(masterServers);
+}
+
+//
+// Purpose: used internally in engine,
+// get master server address at nServer
+//
+DLL_EXPORT int GetMasterServer(int nServer, char* szIpAddrPort, int nLen)
+{
+	if (!masterServers[nServer])
+		return -1;
+
+	V_strncpy(szIpAddrPort, masterServers[nServer], nLen);
+
+	return 0;
+}
 
 // This is set and used by RequestServerList and ProcessServerList
 static netadr_t gLastAdr;

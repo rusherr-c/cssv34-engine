@@ -41,6 +41,7 @@
 #include "usermessages.h"
 #include "prediction.h"
 #include "datacache/imdlcache.h"
+#include "c_plantedc4.h"
 
 class CHudChat;
 
@@ -437,6 +438,13 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 		else if ( winningTeam == TEAM_TERRORIST )
 		{
 			C_BaseEntity::EmitSound( filter, SOUND_FROM_LOCAL_PLAYER, "Event.TERWin");
+
+			if (g_PlantedC4s.Count() > 0)
+			{
+				// bomb is planted
+				C_PlantedC4* pC4 = g_PlantedC4s[0];
+				pC4->Explode();
+			}
 		}
 		else
 		{
@@ -520,6 +528,16 @@ void ClientModeCSNormal::FireGameEvent( IGameEvent *event )
 	else if ( Q_strcmp( "bomb_defused", eventname ) == 0 )
 	{
 		// C_BasePlayer *pPlayer = USERID2PLAYER( event->GetInt("userid") );
+	}
+
+	else if ( Q_strcmp( "bomb_exploded", eventname ) == 0 )
+	{
+		if (g_PlantedC4s.Count() > 0)
+		{
+			// bomb is planted
+			C_PlantedC4* pC4 = g_PlantedC4s[0];
+			pC4->Explode();
+		}
 	}
 
 	else if ( Q_strcmp( "hostage_killed", eventname ) == 0 )

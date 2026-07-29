@@ -26,6 +26,8 @@
 
 extern bool g_bMovementOptimizations;
 
+ConVar sv_enableboost("sv_enableboost", "1", FCVAR_REPLICATED | FCVAR_NOTIFY, "Allow boost exploits");
+
 class CCSGameMovement : public CGameMovement
 {
 public:
@@ -36,6 +38,7 @@ public:
 	virtual void ProcessMovement( CBasePlayer *pPlayer, CMoveData *pMove );
 	virtual bool CanAccelerate();
 	virtual bool CheckJumpButton( void );
+	virtual void PreventBunnyJumping( void );
 	virtual void ReduceTimers( void );
 	virtual void WalkMove( void );
 	virtual void AirMove( void );
@@ -586,6 +589,32 @@ void CCSGameMovement::ReduceTimers( void )
 	BaseClass::ReduceTimers();
 }
 
+ConVar sv_enablebunnyhopping("sv_enablebunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY);
+ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY); // ref: csgo
+
+// Only allow bunny jumping up to 1.1x server / player maxspeed setting
+#define BUNNYJUMP_MAX_SPEED_FACTOR 1.4f
+
+// taken from TF2 but changed BUNNYJUMP_MAX_SPEED_FACTOR from 1.1 to 1.0
+void CCSGameMovement::PreventBunnyJumping()
+{
+	// Speed at which bunny jumping is limited
+	float maxscaledspeed = BUNNYJUMP_MAX_SPEED_FACTOR * player->m_flMaxspeed;
+	if (maxscaledspeed <= 0.0f)
+		return;
+
+	// Current player speed
+	float spd = mv->m_vecVelocity.Length();
+
+	if (spd <= maxscaledspeed)
+		return;
+
+	// Apply this cropping fraction to velocity
+	float fraction = (maxscaledspeed / spd);
+	fraction = max(0.8f, fraction);
+
+	mv->m_vecVelocity *= fraction;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -637,8 +666,13 @@ bool CCSGameMovement::CheckJumpButton( void )
 		return false;		// in air, so no effect
 	}
 
-	if ( mv->m_nOldButtons & IN_JUMP )
+	if ( !sv_autobunnyhopping.GetBool() && mv->m_nOldButtons & IN_JUMP )
 		return false;		// don't pogo stick
+
+	if (!sv_enablebunnyhopping.GetBool())
+	{
+		PreventBunnyJumping();
+	}
 
 	// In the air now.
 	SetGroundEntity( NULL );

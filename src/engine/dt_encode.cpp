@@ -55,17 +55,17 @@ static inline void EncodeFloat( const SendProp *pProp, float fVal, bf_write *pOu
 	if( fVal < pProp->m_fLowValue )
 	{
 		// clamp < 0
-		ulVal = 0;
+		//ulVal = 0;
 		
 		if(!(pProp->GetFlags() & SPROP_ROUNDUP))
 		{
-			DataTable_Warning("(class %s): Out-of-range value (%f) in SendPropFloat '%s', clamping.\n", GetObjectClassName( objectID ), fVal, pProp->m_pVarName );
+			DataTable_Warning("%s: Out-of-range value (%f) in SendPropFloat '%s', clamping.\n", GetObjectClassName( objectID ), fVal, pProp->m_pVarName );
 		}
 	}
 	else if( fVal > pProp->m_fHighValue )
 	{
 		// clamp > 1
-		ulVal = ((1 << pProp->m_nBits) - 1);
+		//ulVal = ((1 << pProp->m_nBits) - 1);
 
 		if(!(pProp->GetFlags() & SPROP_ROUNDDOWN))
 		{

@@ -397,6 +397,7 @@ void CMaster::UseDefault ( void )
 extern "C"
 {
 	extern void * __stdcall GetProcAddress( void *hModule, const char *pszProcName );
+	extern void * __stdcall GetModuleHandleA( const char* pszModuleName );
 };
 #endif
 
@@ -425,37 +426,24 @@ void CMaster::InitConnection( void )
 		return;
 	}
 
-#if !defined( NO_STEAM )
+	typedef int (*PFGetNumMasterServers)();
+	typedef int (*PFGetMasterServer)(int nServer, char* szIpAddrPort, int nLen);
+	PFGetNumMasterServers pfnGetNumMasterServers = NULL;
+	PFGetMasterServer pfnGetMasterServer = NULL;
 
-	if ( !m_hSteamDLL )
+	HANDLE hServersInfoDll = GetModuleHandleA("serverbrowser.dll");
+	if (!hServersInfoDll)
 	{
-#ifdef _WIN32
-		m_hSteamDLL = Sys_LoadModule( "steam.dll" );
-#elif _LINUX
-		m_hSteamDLL = Sys_LoadModule( "libsteamvalidateuseridtickets_i486.so" );
-#else
-		#error "Define the steam.dll I should load!"
-#endif
-
+		m_bNoMasters = true;
+		bInitialized = true;
+		return;
 	}
 
-	typedef int (*PFSteamFindServersNumServers)( ESteamServerType eServerType);
-	typedef int (*PFSteamFindServersIterateServer)( ESteamServerType eServerType, unsigned int nServer, char *szIpAddrPort, int szIpAddrPortLen);
-	PFSteamFindServersNumServers pfnSteamFindServersNumServers = NULL;
-	PFSteamFindServersIterateServer pfnSteamFindServersIterateServer = NULL;
+	pfnGetNumMasterServers = (PFGetNumMasterServers)GetProcAddress(hServersInfoDll, "GetNumMasterServers" );
+	pfnGetMasterServer = (PFGetMasterServer)GetProcAddress(hServersInfoDll, "GetMasterServer" );
 
-	if ( m_hSteamDLL )
+	if ( !hServersInfoDll || !pfnGetNumMasterServers || !pfnGetMasterServer)
 	{
-#ifdef _LINUX
-#define GetProcAddress dlsym
-#endif
-		pfnSteamFindServersNumServers = (PFSteamFindServersNumServers) GetProcAddress( m_hSteamDLL, "SteamFindServersNumServers" );
-		pfnSteamFindServersIterateServer = (PFSteamFindServersIterateServer)GetProcAddress( m_hSteamDLL, "SteamFindServersIterateServer" );
-	}
-
-	if ( !m_hSteamDLL || !pfnSteamFindServersNumServers || !pfnSteamFindServersIterateServer )
-	{
-		ConMsg( "Unable to load Steam library.\n" );
 		m_bNoMasters = true;
 		bInitialized = true;
 		return;
@@ -464,19 +452,19 @@ void CMaster::InitConnection( void )
 	unsigned int numServers = 0;
 	if ( VCRGetMode() != VCR_Playback )
 	{
-		numServers = pfnSteamFindServersNumServers( eSteamHalfLife2MasterServer );
+		numServers = pfnGetNumMasterServers();
 	}
 #if !defined( NO_VCR )
 	VCRGenericValue( "a", &numServers, sizeof( numServers ) );
 #endif
 	int nCount = 0; // number of servers added
-	if ( numServers == eSteamFindSteamServersLibraryError )
+	if ( numServers == -1 )
 	{
 		//const char * err = SteamFindServersGetErrorString();
 		//Assert( err );
 		return;
 	}
-	else if ( numServers == eSteamFindSteamServersLibraryBusy )
+	else if ( numServers == -2 )
 	{
 		return; 
 	}
@@ -502,7 +490,7 @@ void CMaster::InitConnection( void )
 
 			if ( VCRGetMode() != VCR_Playback )
 			{
-				pfnSteamFindServersIterateServer( eSteamHalfLife2MasterServer, i, szAdr, sizeof(szAdr) );
+				pfnGetMasterServer( i, szAdr, sizeof(szAdr) );
 			}
 #if !defined( NO_VCR )
 			VCRGenericValue( "a", szAdr, sizeof( szAdr ) );
@@ -535,7 +523,6 @@ void CMaster::InitConnection( void )
 		ConMsg( "No masters loaded\nUsing default master\n" );
 		UseDefault();
 	}
-#endif // NO_STEAM
 }
 
 //-----------------------------------------------------------------------------

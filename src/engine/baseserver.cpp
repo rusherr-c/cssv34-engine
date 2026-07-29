@@ -199,14 +199,7 @@ static void ServerNotifyVarChangeCallback( IConVar *pConVar, const char *pOldVal
 	if ( !pConVar->IsFlagSet( FCVAR_NOTIFY ) )
 		return;
 #ifndef NO_STEAM
-	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
-	if ( !pUpdater )
-	{
-		// This will force it to send all the rules whenever the master server updater is there.
-		sv.SetMasterServerRulesDirty();
-		return;
-	}
-	SetMasterServerKeyValue( pUpdater, pConVar );
+	SetMasterServerKeyValue( 0, pConVar );
 #endif
 	
 }
@@ -1738,39 +1731,8 @@ bool CBaseServer::ShouldUpdateMasterServer()
 
 void CBaseServer::CheckMasterServerRequestRestart()
 {
-#ifndef NO_STEAM
-	if ( !SteamMasterServerUpdater() || !SteamMasterServerUpdater()->WasRestartRequested() )
-		return;
-#else
-	return;
-#endif
-
 	// Connection was rejected by the HLMaster (out of date version)
-
-	// hack, vgui console looks for this string; 
-	Msg("%cMasterRequestRestart\n", 3);
-
-#ifndef _WIN32
-	if (CommandLine()->FindParm(AUTO_RESTART))
-	{
-		Msg("Your server will be restarted on map change.\n");
-		Log("Your server will be restarted on map change.\n");
-		SetRestartOnLevelChange( true );
-	}
-#endif
-#ifdef _WIN32
-	if (g_pFileSystem->IsSteam())
-#else
-	else if ( 1 ) // under linux assume steam
-#endif
-	{
-		Msg("Your server needs to be restarted in order to receive the latest update.\n");
-		Log("Your server needs to be restarted in order to receive the latest update.\n");
-	}
-	else
-	{
-		Msg("Your server is out of date.  Please update and restart.\n");
-	}
+	/// ...
 }
 
 
@@ -1780,14 +1742,7 @@ void CBaseServer::UpdateMasterServer()
 	if ( !ShouldUpdateMasterServer() )
 		return;
 
-	if ( IsUsingMasterLegacyMode() )
-	{
-		master->CheckHeartbeat( this );
-		return;
-	}
-	
-	if ( !SteamMasterServerUpdater() )
-		return;
+	master->CheckHeartbeat( this );
 	
 	// Only update every so often.
 	double flCurTime = Plat_FloatTime();
@@ -1796,32 +1751,17 @@ void CBaseServer::UpdateMasterServer()
 
 	m_flLastMasterServerUpdateTime = flCurTime;
 
-
-	ForwardPacketsFromMasterServerUpdater();
 	CheckMasterServerRequestRestart();
-	
 
 	if ( NET_IsDedicated() && sv_region.GetInt() == -1 )
     {
 		sv_region.SetValue( 255 ); // HACK!HACK! undo me once we want to enforce regions
 
-        //Log_Printf( "You must set sv_region in your server.cfg or use +sv_region on the command line\n" );
-		//Con_Printf( "You must set sv_region in your server.cfg or use +sv_region on the command line\n" );
-        //Cbuf_AddText( "quit\n" );
-        //return;
+		Msg( "You must set sv_region in your server.cfg or use +sv_region on the command line\n" );
     }
 
 	static bool bUpdateMasterServers = !CommandLine()->FindParm( "-nomaster" );
 	if ( !bUpdateMasterServers )
-		return;
-
-	bool bActive = IsActive() && IsMultiplayer() && g_bEnableMasterServerUpdater;
-	if ( serverGameDLL && serverGameDLL->ShouldHideServer() )
-		bActive = false;
-	
-	SteamMasterServerUpdater()->SetActive( bActive );
-
-	if ( !bActive )
 		return;
 
 	UpdateMasterServerRules();
@@ -1837,12 +1777,6 @@ void CBaseServer::UpdateMasterServerRules()
 	// Only do this if the rules vars are dirty.
 	if ( !m_bMasterServerRulesDirty )
 		return;
-
-	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
-	if ( !pUpdater )
-		return;
-		
-	pUpdater->ClearAllKeyValues();
 	
 	// Need to respond with game directory, game name, and any server variables that have been set that
 	//  effect rules.  Also, probably need a hook into the .dll to respond with additional rule information.
@@ -1856,7 +1790,7 @@ void CBaseServer::UpdateMasterServerRules()
 		if ( !pConVar )
 			continue;
 
-		SetMasterServerKeyValue( pUpdater, pConVar );
+		SetMasterServerKeyValue( 0, pConVar );
 	}
 
 	if ( SteamGameServer() )
@@ -1873,49 +1807,11 @@ void CBaseServer::UpdateMasterServerRules()
 void CBaseServer::UpdateMasterServerBasicData()
 {
 #ifndef NO_STEAM
-	ISteamMasterServerUpdater *pUpdater = SteamMasterServerUpdater();
-
-	Assert( SteamMasterServerUpdater() != NULL );
-
 	unsigned short nMaxReportedClients = GetMaxClients();
 	if ( sv_visiblemaxplayers.GetInt() > 0 && sv_visiblemaxplayers.GetInt() < GetMaxClients() )
 		nMaxReportedClients = sv_visiblemaxplayers.GetInt();
-
-	pUpdater->SetBasicServerData(
-		PROTOCOL_VERSION,
-		IsDedicated(),
-		sv_region.GetString(),
-		gpszProductString,
-		nMaxReportedClients,
-		(GetPassword() != NULL),
-		serverGameDLL->GetGameDescription() );
 #endif
 }
-
-
-void CBaseServer::ForwardPacketsFromMasterServerUpdater()
-{
-#ifndef NO_STEAM
-	ISteamMasterServerUpdater *p = SteamMasterServerUpdater();
-	if ( !p )
-		return;
-	
-	while ( 1 )
-	{
-		uint32 netadrAddress;
-		uint16 netadrPort;
-		unsigned char packetData[16 * 1024];
- 		int len = p->GetNextOutgoingPacket( packetData, sizeof( packetData ), &netadrAddress, &netadrPort );
-		if ( len <= 0 )
-			break;
-		
-		// Send this packet for them..
-		netadr_t adr( netadrAddress, netadrPort );
-		NET_SendPacket( NULL, m_Socket, adr, packetData, len );
-	}
-#endif
-}
-
 
 /*
 =================
@@ -2116,9 +2012,6 @@ void CBaseServer::Shutdown( void )
 
 #ifndef _XBOX
 #ifndef NO_STEAM
-	//  Tell master we are shutting down
-	if ( SteamMasterServerUpdater() )
-		SteamMasterServerUpdater()->NotifyShutdown();
 
 	master->ShutdownConnection( this );
 #endif
@@ -2386,8 +2279,14 @@ struct convar_tags_t
 convar_tags_t convars_to_check_for_tags[] =
 {
 	{ "mp_friendlyfire", "friendlyfire" },
+	{ "bot_quota", "bots" },
+	{ "sv_nostats", "nostats" },
+	{ "mp_startmoney", "startmoney" },
+	{ "sv_allowminmodels", "nominmodels" },
+	{ "sv_enablebunnyhopping", "bunnyhopping" },
 	{ "mp_stalemate_enable", "suddendeath" },
 	{ "sv_gravity", "gravity" },
+	{ "sv_cheats", "cheats" },
 	{ "tf_birthday", "birthday" },
 	{ "mp_respawnwavetime", "respawntimes" },
 	{ "sv_alltalk", "alltalk" },

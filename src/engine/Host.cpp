@@ -2453,7 +2453,7 @@ void Host_ShowIPCCallCount()
 		ISteamClient *pSteamClient = SteamClient();
 		if ( pSteamClient )
 		{
-			callCount = pSteamClient->GetIPCCallCount();
+			callCount = (uint32)SteamGameServer_GetIPCCallCount();
 		}
 		else
 		{

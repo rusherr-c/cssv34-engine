@@ -21,10 +21,7 @@
 #define COMPILER_CLANG 1
 #endif
 
-#define NO_STEAM
-
 #if defined( _X360 )
-	#define NO_STEAM
 	#define NO_VOICE
 	// for the 360, the ppc platform and the rtos are tightly coupled
 	// setup the 360 environment here !once! for much less leaf module include wackiness
