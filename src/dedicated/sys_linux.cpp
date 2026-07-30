@@ -1,4 +1,4 @@
-//========= Copyright Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose:
 //
@@ -12,16 +12,12 @@
 #include <stdarg.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#ifdef OSX
-#include <malloc/malloc.h>
-#else
 #include <malloc.h>
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
 #include "isys.h"
-#include "console/conproc.h"
+#include "conproc.h"
 #include "dedicated.h"
 #include "engine_hlds_api.h"
 #include "checksum_md5.h"
@@ -39,14 +35,42 @@
 #include "datacache/imdlcache.h"
 #include "vphysics_interface.h"
 #include "icvar.h"
-#include "filesystem/IQueuedLoader.h"
-#include "console/TextConsoleUnix.h"
+
+
 
 bool InitInstance( );
+void ProcessConsoleInput( void );
 
-char g_szEXEName[ MAX_PATH ];
+#define stringize(a) #a
+#define engine_binary(a,b,c) a stringize(b) c
 
+static const char *g_pszengine = engine_binary("bin/engine_", i486,".so");
+static const char *g_pszsoundemitter = "bin/soundemitter_i486.so";
+
+char g_szEXEName[ 256 ];
+
+#include "console/TextConsoleUnix.h"
 extern CTextConsoleUnix console;
+
+//-----------------------------------------------------------------------------
+// Implementation of IVCRHelpers.
+//-----------------------------------------------------------------------------
+
+class CVCRHelpers : public IVCRHelpers
+{
+public:
+    virtual void    ErrorMessage( const char *pMsg )
+    {
+            printf( "ERROR: %s\n", pMsg );
+    }
+
+    virtual void*   GetMainWindow()
+    {
+            return 0;
+    }
+};
+static CVCRHelpers g_VCRHelpers;
+
 
 //-----------------------------------------------------------------------------
 // Purpose: Implements OS Specific layer ( loosely )
@@ -73,8 +97,8 @@ public:
 	void		DestroyConsoleWindow( void );
 
 	void		ConsoleOutput ( char *string );
-	char		*ConsoleInput ( int index, char *buf, int buflen );
-	void		Printf( const char *fmt, ...);
+	char		*ConsoleInput (void);
+	void		Printf(char *fmt, ...);
 };
 
 static CSys g_Sys;
@@ -95,7 +119,7 @@ CSys::~CSys()
 //-----------------------------------------------------------------------------
 void CSys::Sleep( int msec )
 {
-	usleep(msec * 1000);
+    usleep(msec * 1000);
 }
 
 //-----------------------------------------------------------------------------
@@ -117,22 +141,22 @@ long CSys::LoadLibrary( char *lib )
 {
 	void *hDll = NULL;
 
-	char cwd[1024];
-	char absolute_lib[1024];
-
-	if (!getcwd(cwd, sizeof(cwd)))
-		ErrorMessage(1, "Sys_LoadLibrary: Couldn't determine current directory.");
-
-	if (cwd[strlen(cwd)-1] == '/')
-		cwd[strlen(cwd)-1] = 0;
-
-	Q_snprintf(absolute_lib, sizeof( absolute_lib ), "%s/%s", cwd, lib);
-
-	hDll = dlopen( absolute_lib, RTLD_NOW );
-	if ( !hDll )
-	{
-		ErrorMessage( 1, dlerror() );
-	}
+    char    cwd[1024];
+    char    absolute_lib[1024];
+    
+    if (!getcwd(cwd, sizeof(cwd)))
+        ErrorMessage(1, "Sys_LoadLibrary: Couldn't determine current directory.");
+        
+    if (cwd[strlen(cwd)-1] == '/')
+        cwd[strlen(cwd)-1] = 0;
+        
+    Q_snprintf(absolute_lib, sizeof( absolute_lib ), "%s/%s", cwd, lib);
+    
+    hDll = dlopen( absolute_lib, RTLD_NOW );
+    if ( !hDll )
+    {
+        ErrorMessage( 1, dlerror() );
+    }   
 	return (long)hDll;
 }
 
@@ -194,7 +218,7 @@ Printf
 Engine is printing to console
 ==============
 */
-void CSys::Printf( const char *fmt, ...)
+void CSys::Printf(char *fmt, ...)
 {
 	// Dump text to debugging console.
 	va_list argptr;
@@ -214,9 +238,9 @@ ConsoleInput
 
 ================
 */
-char *CSys::ConsoleInput( int index, char *buf, int buflen )
+char *CSys::ConsoleInput( void )
 {
-	return console.GetLine( index, buf, buflen );
+	return console.GetLine();
 }
 
 /*
@@ -260,27 +284,25 @@ bool CSys::LoadModules( CDedicatedAppSystemGroup *pAppSystemGroup )
 {
 	AppSystemInfo_t appSystems[] = 
 	{
- 		{ "engine" DLL_EXT_STRING,				CVAR_QUERY_INTERFACE_VERSION },
-		{ "soundemittersystem" DLL_EXT_STRING,	SOUNDEMITTERSYSTEM_INTERFACE_VERSION }, // loaded for backwards compatability, prevents crash on exit for old game dlls
-		{ "materialsystem" DLL_EXT_STRING,		MATERIAL_SYSTEM_INTERFACE_VERSION },
-		{ "studiorender" DLL_EXT_STRING,		STUDIO_RENDER_INTERFACE_VERSION },
-		{ "vphysics" DLL_EXT_STRING,			VPHYSICS_INTERFACE_VERSION },
-		{ "datacache" DLL_EXT_STRING,			DATACACHE_INTERFACE_VERSION },
-		{ "datacache" DLL_EXT_STRING,			MDLCACHE_INTERFACE_VERSION },
-		{ "datacache" DLL_EXT_STRING,			STUDIO_DATA_CACHE_INTERFACE_VERSION },
-		{ "dedicated" DLL_EXT_STRING,			QUEUEDLOADER_INTERFACE_VERSION },
-		{ "engine" DLL_EXT_STRING,				VENGINE_HLDS_API_VERSION },
+		{ "bin/soundemittersystem_i486.so",	SOUNDEMITTERSYSTEM_INTERFACE_VERSION }, // loaded for backwards compatability, prevents crash on exit for old game dlls
+		{ "bin/materialsystem_i486.so",	MATERIAL_SYSTEM_INTERFACE_VERSION },
+		{ "bin/studiorender_i486.so",	STUDIO_RENDER_INTERFACE_VERSION },
+		{ "bin/vphysics_i486.so",                       VPHYSICS_INTERFACE_VERSION },
+		{ "bin/datacache_i486.so",                      DATACACHE_INTERFACE_VERSION },
+		{ "bin/datacache_i486.so",                      MDLCACHE_INTERFACE_VERSION },
+		{ "bin/datacache_i486.so",                      STUDIO_DATA_CACHE_INTERFACE_VERSION },
+		{ g_pszengine,				VENGINE_HLDS_API_VERSION },
 		{ "", "" }	// Required to terminate the list
 	};
 
 	if ( !pAppSystemGroup->AddSystems( appSystems ) ) 
 		return false;
-
+	
 	engine = (IDedicatedServerAPI *)pAppSystemGroup->FindSystem( VENGINE_HLDS_API_VERSION );
-	// obsolete i think SetCVarIF( (ICvar*)pAppSystemGroup->FindSystem( VENGINE_CVAR_INTERFACE_VERSION ) );
+															// obsolete i think SetCVarIF( (ICvar*)pAppSystemGroup->FindSystem( VENGINE_CVAR_INTERFACE_VERSION ) );
 
 	IMaterialSystem* pMaterialSystem = (IMaterialSystem*)pAppSystemGroup->FindSystem( MATERIAL_SYSTEM_INTERFACE_VERSION );
-	pMaterialSystem->SetShaderAPI( "shaderapiempty" DLL_EXT_STRING );	
+	pMaterialSystem->SetShaderAPI( "bin/shaderapiempty_i486.so" );	
 	return true;
 }
 
@@ -294,9 +316,7 @@ void NET_Shutdown()
 }
 
 extern int main(int argc, char *argv[]);
-DLL_EXPORT int DedicatedMain( int argc, char *argv[] );
-
-int DedicatedMain( int argc, char *argv[] )
+extern "C" int DedicatedMain( int argc, char *argv[] )
 {
 	return main(argc,argv);
 }

@@ -569,8 +569,6 @@ bool CServerGameDLL::DLLInit( CreateInterfaceFn appSystemFactory,
 	// cache the globals
 	gpGlobals = pGlobals;
 
-	Warning("gameeventmanager ptr: %p\n", gameeventmanager);
-
 	g_pSharedChangeInfo = engine->GetSharedEdictChangeInfo();
 	
 	MathLib_Init( 2.2f, 2.2f, 0.0f, 2.0f );
@@ -742,7 +740,6 @@ bool CServerGameDLL::GameInit( void )
 	engine->ServerExecute( );
 	CBaseEntity::sm_bAccurateTriggerBboxChecks = true;
 
-	Warning("gameeventmanager ptr: %p\n", gameeventmanager);
 	if (!gameeventmanager) {
 		gameeventmanager = (IGameEventManager2*)Sys_GetFactory("engine.dll")(INTERFACEVERSION_GAMEEVENTSMANAGER2, NULL);
 		Warning("gameeventmanager was reloaded since it was NULL\n");

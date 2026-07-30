@@ -1,4 +1,4 @@
-//========= Copyright Valve Corporation, All rights reserved. ============//
+//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -13,7 +13,6 @@
 #include "conproc.h"
 #include "isys.h"
 #include "tier0/icommandline.h"
-#include "tier1/strtools.h"
 
 static HANDLE	heventDone;
 static HANDLE	hfileBuffer;
@@ -211,10 +210,10 @@ int CharToCode (char c)
 			break;
 	}
 
-	if (V_isalpha(c))
+	if (isalpha(c))
 		return (30 + upper - 65); 
 
-	if (V_isdigit(c))
+	if (isdigit(c))
 		return (1 + upper - 47);
 
 	return c;
@@ -249,7 +248,7 @@ BOOL WriteText (LPCTSTR szText)
 		rec.Event.KeyEvent.wVirtualScanCode = CharToCode (*sz);
 		rec.Event.KeyEvent.uChar.AsciiChar = *sz;
 		rec.Event.KeyEvent.uChar.UnicodeChar = *sz;
-		rec.Event.KeyEvent.dwControlKeyState = V_isupper(*sz) ? 0x80 : 0x0; 
+		rec.Event.KeyEvent.dwControlKeyState = isupper(*sz) ? 0x80 : 0x0; 
 
 		WriteConsoleInput(
 			hStdin,
