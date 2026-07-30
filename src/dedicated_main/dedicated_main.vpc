@@ -6,34 +6,20 @@
 
 $Macro SRCDIR		".."
 $Macro OUTBINDIR	"$SRCDIR\..\game"
-$Macro OUTBINNAME	"srcds" [$WINDOWS||$X360]
-$Macro OUTBINNAME	"srcds_osx" [$OSXALL]
-$Macro OUTBINNAME	"srcds_linux" [$LINUXALL]
+$Macro OUTBINNAME	"srcds"
 
-$Include "$SRCDIR\vpc_scripts\source_exe_base.vpc"
+$Include "$SRCDIR\vpc_scripts\source_exe_win_win32_base.vpc"
+
+$Linux
+{
+	$BuildForLinux	1
+}
 
 $Configuration
 {
-	$Linker [$WINDOWS]
+	$Linker
 	{
 		$AdditionalDependencies				"$BASE Advapi32.lib"
-		$EnableLargeAddresses		"Support Addresses Larger Than 2 Gigabytes (/LARGEADDRESSAWARE)"
-		$FixedBaseAddress			"Generate a relocation section (/FIXED:NO)"
-	}
-}
-
-$Project
-{
-	$Folder	"Source Files"
-	{
-		-$File	"$SRCDIR\public\tier0\memoverride.cpp"
-	}
-
-	$Folder	"Link Libraries" 
-	{
-		-$File	"$SRCDIR\lib\public\tier0.lib" 			[$WIN32||$LINUX]	
-		-$File	"$SRCDIR\lib\public\tier1.lib"			[$WIN32||$LINUX]
-		-$File	"$SRCDIR\lib\public\vstdlib.lib"		[$WIN32||$LINUX]
 	}
 }
 
@@ -42,8 +28,7 @@ $Project "Dedicated_main"
 	$Folder	"Source Files"
 	{
 		$File	"main.cpp"
-		$File	"$SRCDIR\common\SteamAppStartup.cpp"
-		$File	"$SRCDIR\common\SteamAppStartup.h"
+		-$File	"$SRCDIR\public\tier0\memoverride.cpp"
 	}
 
 	$Folder	"Resources"
@@ -51,5 +36,11 @@ $Project "Dedicated_main"
 		$File	"$SRCDIR\launcher\res\launcher.ico"
 		$File	"dedicated_main.rc"
 	}
-
+	
+	$Folder "Link Libraries"
+	{
+		-$file	"$SRCDIR\lib\public\tier0.lib"
+		-$file	"$SRCDIR\lib\public\tier1.lib"
+		-$file	"$SRCDIR\lib\public\vstdlib.lib"
+	}
 }

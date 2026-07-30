@@ -1,4 +1,4 @@
-//========= Copyright Valve Corporation, All rights reserved. ============//
+//========= Copyright � 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -389,7 +389,6 @@ void S3TC_SetPaletteIndex(
 	char *pBlock = S3TC_GetBlock( pFaceData, format, imageWidth>>2, x>>2, y>>2 );
 	S3TC_SetPixelPaletteIndex( format, pBlock, x&3, y&3, paletteIndex );
 }
-
 
 
 

@@ -172,7 +172,7 @@ static	ConVar	sv_cacheencodedents("sv_cacheencodedents", "1", 0, "If set to 1, d
 		ConVar	sv_voicecodec("sv_voicecodec", "vaudio_speex", 0, "Specifies which voice codec DLL to use in a game. Set to the name of the DLL without the extension.");
 static	ConVar	sv_voiceenable( "sv_voiceenable", "1", FCVAR_ARCHIVE|FCVAR_NOTIFY ); // set to 0 to disable all voice forwarding.
 		ConVar  sv_downloadurl( "sv_downloadurl", "", FCVAR_REPLICATED, "Location from which clients can download missing files" );
-		ConVar  sv_consistency( "sv_consistency", "1", FCVAR_REPLICATED, "Whether the server enforces file consistency for critical files" );
+		ConVar  sv_consistency( "sv_consistency", "0", FCVAR_REPLICATED, "Whether the server enforces file consistency for critical files" );
 		ConVar	sv_maxreplay("sv_maxreplay", "0", 0, "Maximum replay time in seconds", true, 0, true, 15 );
 
 ConVar  sv_mincmdrate( "sv_mincmdrate", "0", FCVAR_REPLICATED, "This sets the minimum value for cl_cmdrate. 0 == unlimited." );
