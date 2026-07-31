@@ -3,7 +3,7 @@
 #include "sys_dll.h"
 #include "dbg.h"
 #include "color.h"
-#include "steam/http.h"
+#include "http.h"
 #include "master.h"
 #include "../thirdparty/nlohmann/json.hpp"
 

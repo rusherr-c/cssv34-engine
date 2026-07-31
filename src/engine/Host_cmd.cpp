@@ -856,21 +856,83 @@ CON_COMMAND( disconnect, "Disconnect game from server." )
 	Host_Disconnect(true);
 }
 
+void Host_Version_f()
+{
+	// Setup colors
+	Color red(255, 84, 84, 255);
+	Color orange(255, 130, 84, 255);
+	Color green(108, 245, 66, 255);
+	Color lime(66, 245, 144, 255);
+	Color blue(153, 161, 255, 255);
+	Color purple(207, 153, 255, 255);
+
+	// Get steam.inf
+	const SteamInfVersionInfo_t& prod_info = GetSteamInfIDVersionInfo();
+
+	// Output base info
+	ConColorMsg(orange, "cssv34-engine ");
+	ConColorMsg(red, "%s ", GIT_BRANCH);
+	ConColorMsg(orange, "%s (%s)\n", GIT_VERSION, g_pBuildInfo->GetHexTimestamp());
+	ConColorMsg(orange, "revision %s\n", GIT_REVISION);
+	ConColorMsg(orange, "*****************\n\n");
+	ConColorMsg(lime, "Network version:	");
+	ConColorMsg(green, "%i\n", PROTOCOL_VERSION);
+	ConColorMsg(lime, "Product version:	");
+	ConColorMsg(green, "%s (%s), app %u\n", prod_info.szVersionString, prod_info.szProductString, prod_info.AppID);
+	ConColorMsg(lime, "Built on:		");
+	ConColorMsg(green, __TIME__ " " __DATE__ " (%i)\n", build_number());
+
+	// Check for updates
+	Msg("Checking for updates...\n");
+	commit_info_t &info = g_pBuildInfo->GetCommitInfo(GIT_BRANCH);
+
+	Msg("Your copy is ");
+
+	if (strcmp(info.sha_short, GIT_COMMIT_SHORT) != 0) {
+		ConColorMsg(red, "OUTDATED\n");
+		ConColorMsg(orange, "(%s)%s", GIT_BRANCH, GIT_COMMIT_SHORT);
+		Msg(" doesn't match ");
+		ConColorMsg(orange, "(origin/%s)%s\n", GIT_BRANCH, info.sha_short);
+		ConColorMsg(red, "Please update your local copy as soon as you can\n\n");
+	}
+	else
+	{
+		ConColorMsg(green, "UP TO DATE\n");
+		ConColorMsg(lime, "(%s)%s", GIT_BRANCH, GIT_COMMIT_SHORT);
+		Msg(" matches ");
+		ConColorMsg(lime, "(origin/%s)%s\n\n", GIT_BRANCH, info.sha_short);
+	}
+
+	// Unstaged?
+	if (GIT_DIRTY)
+	{
+		ConColorMsg(red, "Latest unstaged changes:\n");
+		ConColorMsg(green, "modified %i, untracked %i\n", GIT_MODIFIED, GIT_UNTRACKED);
+		ConColorMsg(lime, "(%s) %s\n", GIT_BRANCH, GIT_VERSION);
+		ConColorMsg(red, "%s\n\n", __DATE__);
+		ConColorMsg(orange, "%s\n", GIT_CHANGED_FILES);
+	}
+
+	// Print latest commit
+	ConColorMsg(blue, "Latest commit:\n");
+	ConColorMsg(purple, "(origin/%s) %s\n", GIT_BRANCH, info.sha);
+	ConColorMsg(blue, "%s\n", info.date);
+	ConColorMsg(purple, "%s%s", info.message, strlen(info.message) > 50 ? "..." : "");
+	ConColorMsg(blue, " (%s)\n", info.author);
+	ConColorMsg(purple, "\n*****************\n");
+
+	// Print all contributors
+	ConColorMsg(purple, "Contributors:\n");
+	ConColorMsg(blue, "-- RuSHeRR (github.com/rusherr-c)\n");
+	ConColorMsg(blue, "-- Raelc (github.com/NotRaelc)\n");
+	ConColorMsg(blue, "-- entityname (github.com/sl1mshady-cs)\n");
+	ConColorMsg(blue, "-- urur4s (github.com/urur4s)\n");
+	ConColorMsg(blue, "-- couldknow (github.com/couldknow)\n\n");
+}
 
 CON_COMMAND( version, "Print version info string." )
 {
-	Color clr(108, 245, 66, 255);
-
-	const SteamInfVersionInfo_t& info = GetSteamInfIDVersionInfo();
-	ConColorMsg(clr, "Source Engine %s (%u)\n", build_hex(), build_timestamp());
-	ConColorMsg(clr, "/////////////////////\n");
-	ConColorMsg(clr, "Network version:	%i\n"
-		             "Product version:	%s (%s)\n", PROTOCOL_VERSION, info.szVersionString, info.szProductString);
-	ConColorMsg(clr, "Build info:		" __TIME__ " " __DATE__ " (%i) (%i)\n", build_number(), info.AppID);
-
-	ConColorMsg(Color(100, 144, 252, 255), "-- Made by RuSHeRR (https://github.com/rusherr-c)\n\n");
-	ConColorMsg(Color(100, 144, 252, 255), "-- with Raelc (https://github.com/NotRaelc)\n\n");
-	ConColorMsg(Color(100, 144, 252, 255), "-- and entityname (https://github.com/nttnmDev)\n\n");
+	Host_Version_f();
 }
 
 

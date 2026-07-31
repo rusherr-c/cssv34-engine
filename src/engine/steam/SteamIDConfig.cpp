@@ -1,4 +1,13 @@
-﻿#include "tier0/dbg.h"
+﻿/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: Steam ID Helper
+ *	for shmelle's RevEmu
+ *
+*/
+
+#include "tier0/dbg.h"
 #include "convar.h"
 #include "color.h"
 #include "steamCommon.h"
@@ -11,22 +20,28 @@
 #include "sys_dll.h"
 #include <ctime>
 
-#define SIDCVARS_FLAGS 0 //FCVAR_DEVELOPMENTONLY
+#define SIDCVARS_FLAGS 0 // should be FCVAR_DEVELOPMENTONLY on release
 
+// global variables
 static bool g_bSidCfg_FirstStart = true;
 extern int g_iSteamAppID;
 bool g_bIsESTEAMATiON = true;
-static Color SteamIDCfg_LogColor(100, 255, 100, 255);
 
+// Various cvars
 ConVar steam_gen("steam_gen", "4", SIDCVARS_FLAGS, "Sets steam gen (development only, 0 = use default)");
 ConVar steam_uid("steam_uid", "0", SIDCVARS_FLAGS, "Sets custom steam id (development only, 0 = use default)");
 ConVar steam_special("steam_special", "0", SIDCVARS_FLAGS, "Special number");
 ConVar steam_new("steam_new", "0", SIDCVARS_FLAGS, "Indicates to use new steam id instance or not");
 
+// Logging color
+static Color SteamIDCfg_LogColor(100, 255, 100, 255);
+
 /*
 * Get account id
 * 
 * @output       Account ID as an integer.
+* 
+* Author: urur4s
 */
 
 int get_accountid()
@@ -59,6 +74,7 @@ int get_accountid()
 	return static_cast<int>(hash);
 }
 
+// constructor
 SteamIDConfig::SteamIDConfig() : steamID(0) {
 
 	if (g_bSidCfg_FirstStart) {
@@ -80,6 +96,7 @@ SteamIDConfig::~SteamIDConfig() {
 	steamID = 0;
 }
 
+// Calls SteamUser()->InitiateGameConnection
 int SteamIDConfig::CreateOriginalTicket(void* pData, CSteamID sid, uint32 ip, uint16 port, bool secure) {
 
 	Msg("[SteamIDConfig] Creating ticket via SteamUser()\n");
@@ -95,6 +112,7 @@ int SteamIDConfig::CreateOriginalTicket(void* pData, CSteamID sid, uint32 ip, ui
 	return Ticket;
 }
 
+// Generates ticket for given gen
 int SteamIDConfig::CreateTicket(void* pData, int gen, int special) {
 	int nGen = steam_gen.GetInt() ? steam_gen.GetInt() : gen;
 	int nSpecial = steam_special.GetInt() ? steam_special.GetInt() : special;

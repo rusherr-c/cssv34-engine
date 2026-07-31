@@ -13,6 +13,7 @@
 #endif
 
 #include "convar.h"
+#include "buildinfo.h"
 
 #define SCRIPT_DIR			"scripts/"
 
@@ -83,12 +84,6 @@ void Host_EndGame (bool bShowMainMenu, const char *message, ...);
 
 // user message
 #define MAX_USER_MSG_DATA 255
-
-// build info
-// day counter from Sep 30 2003
-extern int build_number( void );
-extern char* build_hex();
-extern uint32 build_timestamp();
 
 // Choke local client's/server's packets?
 extern  ConVar		host_limitlocal;      
