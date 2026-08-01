@@ -1,9 +1,13 @@
-//====== Copyright © 1996-2008, Valve Corporation, All rights reserved. =======
-//
-// Purpose: interface to steam managing game server/client match making
-//
-//=============================================================================
-
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: implementation of class that works
+ *	like SteamClient's SteamMatchmakingServers on Master Server Query Protocol
+ *
+ * VDC: https://developer.valvesoftware.com/wiki/Master_Server_Query_Protocol
+ *
+*/
 #ifndef ISERVERSINFO_H
 #define ISERVERSINFO_H
 #ifdef _WIN32
@@ -58,7 +62,7 @@ public:
 	// Format everything to a single string
 	char* ToString() noexcept {
 		char *buffer = new char[1024];
-		memset(&buffer, 0, sizeof(buffer));
+		memset(buffer, 0, 1024);
 
 		sprintf(buffer, "%s, %i, %i, %d, %d, %s, %s, %s, %s, %i, %i, %i, %i, %d, %d, %s, %i, %s",
 			m_NetAdr.ToString(),
@@ -90,58 +94,6 @@ enum EServerQuery
 	k_ePingServer = 1,
 	k_ePlayerDetails,
 	k_eServerRules
-};
-
-class ServersInfoQueryResponse : public IServerQueryResponse
-{
-public:
-	ServersInfoQueryResponse();
-	virtual ~ServersInfoQueryResponse();
-
-	// Set response target
-	void SetResponseTarget(IServerQueryResponse* response);
-
-	// Set current query
-	void SetCurrentQuery(EServerQuery query, uint32 unIP, uint16 usPort);
-
-	// Get challenge number received in ChallengeReceived callback
-	int GetChallengeNr();
-
-	// Got challenge number from the server
-	virtual void ChallengeReceived(int challenge);
-
-	// Server has responded successfully and has updated data
-	virtual void ServerResponded(serveritem_t& server);
-
-	// Got data on a server rule -- you'll get this callback once per FCVAR_NOTIFY
-	// cvar on the server which you have requested rules data on.
-	virtual void RulesResponded(const char* pchRule, const char* pchValue);
-
-	// The server failed to respond to the request for server rules
-	virtual void RulesFailedToRespond();
-
-	// The server has finished responding to the server rules request
-	virtual void RulesRefreshComplete();
-
-	// Got data on a new player on the server -- you'll get this callback once per player
-	// on the server which you have requested player data on.
-	virtual void AddPlayerToList(const char* pchName, int nScore, float flTimePlayed);
-
-	// The server failed to respond to the request for player details
-	virtual void PlayersFailedToRespond();
-
-	// The server has finished responding to the player details request
-	virtual void PlayersRefreshComplete();
-
-private:
-	EServerQuery m_currentQuery;
-	uint32 m_unIP;
-	uint16 m_usPort;
-
-	int m_nChallengeNr;
-	
-	bool m_bResponseSet;
-	IServerQueryResponse* m_pResponseTarget;
 };
 
 //-----------------------------------------------------------------------------
@@ -185,9 +137,8 @@ public:
 	void PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
 	void PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
 	void ServerRules(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
-protected:
-	// Internal functions //
 
+protected:
 	// Thread
 	static void Thread(CServersInfo* pthis);
 
@@ -224,10 +175,8 @@ private:
 
 	CSocket*		m_pMasterSocket;		//< used for master server
 
-	// used for server queries (TODO!)
-	CSocket* m_pQuerySocket;
-	ServersInfoQueryResponse* m_pQueryResponse;
-	CServerDetailsMsgHandler *m_pQueryHandler;
+	// server queries
+	CServerCommunication* m_pServerCommunication;
 
 	CServerList*	m_pCurrentList;			//< current server list (one of those)
 	CServerList*	m_pMainList;			//< main internet list

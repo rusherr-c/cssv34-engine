@@ -82,7 +82,8 @@ struct gametypes_t
 //-----------------------------------------------------------------------------
 // Purpose: Base property page for all the games lists (internet/favorites/lan/etc.)
 //-----------------------------------------------------------------------------
-class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public IServerRefreshResponse
+class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public IServerRefreshResponse,
+	public IServerQueryResponse
 {
 	DECLARE_CLASS_SIMPLE( CBaseGamesPage, vgui::PropertyPage );
 
@@ -171,10 +172,17 @@ protected:
 	// updates server count UI
 	void UpdateStatus();
 
-	// ISteamMatchmakingServerListResponse callbacks
+	// IServerRefreshResponse callbacks
 	virtual void ServerResponded( serveritem_t& server );
 	virtual void ServerFailedToRespond( serveritem_t& server );
 	virtual void RefreshComplete( EMasterServerResponse response ) = 0;
+
+	// IServerQueryResponse callbacks for server rules
+	virtual void RulesResponded(const char* pchRule, const char* pchValue);
+	virtual void RulesFailedToRespond();
+	virtual void RulesRefreshComplete();
+
+	void WaitForRule();
 
 	// Removes server from list
 	void RemoveServer( serverdisplay_t &server );
@@ -232,6 +240,7 @@ protected:
 	CUtlMap<netadr_t, int> m_mapServerIP;
 
 	CUtlVector<serveritem_t> m_vecServers;
+	int m_nPendingRuleRequestId;
 
 	CUtlVector<MatchMakingKeyValuePair_t> m_vecServerFilters;
 	CUtlDict< CQuickListMapServerList, int > m_quicklistserverlist;

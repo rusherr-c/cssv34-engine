@@ -13,6 +13,8 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
 //char *date = "Nov 07 1998"; // "Oct 24 1996";
 char *date = __DATE__ ;
 
@@ -21,69 +23,61 @@ char *mon[12] =
 char mond[12] = 
 { 31,    28,    31,    30,    31,    30,    31,    31,    30,    31,    30,    31 };
 
-class CBuildNumber
+class CBuildInfo
 {
 public:
-	CBuildNumber( void )
+	CBuildInfo()
 	{
-		ComputeBuildNumber();
+		Init();
 	}
-	
+
+	~CBuildInfo()
+	{
+
+	}
+
 	// returns days since Nov 07 1998
-	int	GetBuildNumber( void ) 
+	int GetBuildNumber()
 	{
 		return m_nBuildNumber;
 	}
 
-private:
-	void		ComputeBuildNumber( void )
+	uint32 GetBuildTimestamp()
 	{
-		int m = 0; 
-		int d = 0;
-		int y = 0;
+		return m_nTimestamp;
+	}
 
-		for (m = 0; m < 11; m++)
-		{
-			if (Q_strncasecmp( &date[0], mon[m], 3 ) == 0)
-				break;
-			d += mond[m];
-		}
+	void GetHexTimestamp(char* out)
+	{
+		sprintf(out, "%x", m_nTimestamp);
+	}
 
-		d += atoi( &date[4] ) - 1;
+private:
+	void Init()
+	{
+		auto base = (BYTE*)&__ImageBase;
 
-		y = atoi( &date[7] ) - 1900;
+		auto dos = (PIMAGE_DOS_HEADER)base;
+		auto nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
 
-		m_nBuildNumber = d + (int)((y - 1) * 365.25);
-
-		if (((y % 4) == 0) && m > 1)
-		{
-			m_nBuildNumber += 1;
-		}
+		m_nTimestamp = nt->FileHeader.TimeDateStamp;
+		m_nBuildNumber = m_nTimestamp / 86400;
 
 		//m_nBuildNumber -= 34995; // Oct 24 1996
 		m_nBuildNumber -= 35739;  // Nov 7 1998 (HL1 Gold Date)
 	}
 
 	int			m_nBuildNumber;
+	uint32		m_nTimestamp;
 };
 
 // Singleton
-static CBuildNumber g_BuildNumber;
-
-//-----------------------------------------------------------------------------
-// Purpose: Old build number value implementation 
-// Output : int
-//-----------------------------------------------------------------------------
-int build_number( void )
-{
-	return g_BuildNumber.GetBuildNumber();
-}
+static CBuildInfo s_buildInfo;
+CBuildInfo* g_pBuildInfo = &s_buildInfo;
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////// New style build number implementation using timestamp. //////////////
 ///////////////////////////////////////////////////////////////////////////////
-
-extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 //-----------------------------------------------------------------------------
 // Purpose: Get timestamp from nt header

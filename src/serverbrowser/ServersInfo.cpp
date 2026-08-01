@@ -1,3 +1,13 @@
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: implementation of class that works
+ *	like SteamClient's SteamMatchmakingServers on Master Server Query Protocol
+ * 
+ * VDC: https://developer.valvesoftware.com/wiki/Master_Server_Query_Protocol
+ * 
+*/
 #include "pch_serverbrowser.h"
 
 // maximum masterservers that can be parsed from masterservers.vdf
@@ -12,7 +22,7 @@
 static char masterServers[][37] =
 {	
 	"78.154.103.37:10232", // nttnmDev (https://github.com/nttnmDev/cssv34masterserver)
-	"91.218.230.217:27011",
+	"91.218.230.217:27011", // reserved
 };
 
 //
@@ -41,97 +51,6 @@ DLL_EXPORT int GetMasterServer(int nServer, char* szIpAddrPort, int nLen)
 // This is set and used by RequestServerList and ProcessServerList
 static netadr_t gLastAdr;
 
-ServersInfoQueryResponse::ServersInfoQueryResponse() {
-	m_unIP = 0;
-	m_usPort = 0;
-	m_nChallengeNr = -1;
-	m_bResponseSet = 0;
-	m_pResponseTarget = 0;
-	m_currentQuery = k_eQuery_Any;
-}
-ServersInfoQueryResponse::~ServersInfoQueryResponse() {
-
-}
-
-void ServersInfoQueryResponse::SetResponseTarget(IServerQueryResponse* response)
-{
-	if (response)
-	{
-		m_bResponseSet = true;
-		m_pResponseTarget = response;
-	}
-}
-
-// Set current query
-void ServersInfoQueryResponse::SetCurrentQuery(EServerQuery query, uint32 unIP, uint16 usPort) {
-	m_currentQuery = query;
-	m_unIP = unIP;
-	m_usPort = usPort;
-}
-
-// Get challenge number received in ChallengeReceived callback
-int ServersInfoQueryResponse::GetChallengeNr()
-{
-	return m_nChallengeNr;
-}
-
-// Got challenge number from the server
-void ServersInfoQueryResponse::ChallengeReceived(int challenge) {
-	m_nChallengeNr = challenge;
-
-	if (m_currentQuery == k_ePlayerDetails)
-		return g_pServersInfo->PlayerDetails(m_unIP, m_usPort, this);
-	else if (m_currentQuery == k_eServerRules)
-		return g_pServersInfo->ServerRules(m_unIP, m_usPort, this);
-
-	m_pResponseTarget->ChallengeReceived(challenge);
-}
-
-// Server has responded successfully and has updated data
-void ServersInfoQueryResponse::ServerResponded(serveritem_t& server) {
-	if (m_bResponseSet)
-		m_pResponseTarget->ServerResponded(server);
-}
-
-// Got data on a server rule -- you'll get this callback once per FCVAR_NOTIFY
-// cvar on the server which you have requested rules data on.
-void ServersInfoQueryResponse::RulesResponded(const char* pchRule, const char* pchValue) {
-	if (m_bResponseSet)
-		m_pResponseTarget->RulesResponded(pchRule, pchValue);
-}
-
-// The server failed to respond to the request for server rules
-void ServersInfoQueryResponse::RulesFailedToRespond() {
-	if (m_bResponseSet)
-		m_pResponseTarget->RulesFailedToRespond();
-}
-
-// The server has finished responding to the server rules request
-void ServersInfoQueryResponse::RulesRefreshComplete() {
-	if (m_bResponseSet)
-		m_pResponseTarget->RulesRefreshComplete();
-}
-
-// Got data on a new player on the server -- you'll get this callback once per player
-// on the server which you have requested player data on.
-void ServersInfoQueryResponse::AddPlayerToList(const char* pchName, int nScore, float flTimePlayed) {
-	if (m_bResponseSet)
-		m_pResponseTarget->AddPlayerToList(pchName, nScore, flTimePlayed);
-}
-
-// The server failed to respond to the request for player details
-void ServersInfoQueryResponse::PlayersFailedToRespond() {
-	if (m_bResponseSet)
-		m_pResponseTarget->PlayersFailedToRespond();
-}
-
-// The server has finished responding to the player details request
-void ServersInfoQueryResponse::PlayersRefreshComplete() {
-	if (m_bResponseSet)
-		m_pResponseTarget->PlayersRefreshComplete();
-}
-
-
 void CServersInfo::Thread(CServersInfo* pthis)
 {
 	if (!pthis)
@@ -156,10 +75,8 @@ void CServersInfo::Thread(CServersInfo* pthis)
 CServersInfo::CServersInfo()
 {
 	m_bInitialized = false;
-	m_pMasterSocket = new CSocket();
-	m_pQueryResponse = new ServersInfoQueryResponse();
-	m_pQuerySocket = new CSocket();
-	m_pQueryHandler = new CServerDetailsMsgHandler(m_pQueryResponse);
+	m_pMasterSocket = new CSocket(24010);
+	m_pServerCommunication = new CServerCommunication();
 
 	m_szGameDir[0] = 0;
 	m_bRefreshing = false;
@@ -179,7 +96,7 @@ CServersInfo::~CServersInfo()
 	m_szGameDir[0] = 0;
 
 	delete m_pMasterSocket;
-	delete m_pQuerySocket;
+	delete m_pServerCommunication;
 	delete m_pMainList;
 	delete m_pHistoryList;
 	delete m_pLanServerList;
@@ -198,7 +115,7 @@ void CServersInfo::Initialize() {
 		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Thread, this, 0, 0);
 
 	m_pMasterSocket->AddHandler(this);
-	m_pQuerySocket->AddHandler(m_pQueryHandler);
+	//m_pQuerySocket->AddHandler(m_pQueryHandler);
 
 	// load masters from config file
 	KeyValues* kv = new KeyValues("MasterServers");
@@ -219,7 +136,14 @@ void CServersInfo::Initialize() {
 	}
 	else
 	{
-		Msg("Could not load file MasterServers.vdf, server browser will not function.\n");
+		Msg("Could not load file MasterServers.vdf.\n");
+
+		// Save defaults
+		KeyValues* entry = kv->FindKey("0", true);
+		entry->SetString("addr", "default");
+
+		kv->SaveToFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG");
+		kv->deleteThis();
 	}
 
 	// make sure we have at least one master listed
@@ -252,18 +176,18 @@ void CServersInfo::Shutdown() {
 
 	CloseHandle(m_hThread);
 	m_hThread = nullptr;
-
-	Msg("ServersInfo shutting down.\n");
 }
 
 // Runs every frame
 void CServersInfo::RunFrame()
 {
+	// This needs to be runned before refresh check!
+	m_pServerCommunication->RunFrame();
+
 	if (!m_bRefreshing)
 		return;
 
 	m_pMasterSocket->Frame();
-	m_pQuerySocket->Frame();
 
 	if (m_pCurrentList)
 		m_pCurrentList->RunFrame();
@@ -418,46 +342,15 @@ void CServersInfo::RemoveHistoryServer(uint32 unIP, uint16 usPort) {
 
 // Query info about single server (TODO!)
 void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
-	Warning("PingServer %s\n", netadr_t(unIP, usPort).ToString());
-	m_pQueryResponse->SetResponseTarget(response);
-	m_pQueryResponse->SetCurrentQuery(k_ePingServer, unIP, usPort);
-
-	char buf[64];
-	bf_write msg(buf, sizeof(buf));
-
-	msg.WriteLong(CONNECTIONLESS_HEADER);
-	msg.WriteByte(A2S_INFO_REQUEST);
-	msg.WriteString(A2S_KEY_STRING);
-
-	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
+	int handle = m_pServerCommunication->QueryServerInfo(netadr_t(unIP, usPort), response);
 }
 
 void CServersInfo::PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
-	m_pQueryResponse->SetResponseTarget(response);
-	m_pQueryResponse->SetCurrentQuery(k_ePlayerDetails, unIP, usPort);
-
-	char buf[16];
-	bf_write msg(buf, sizeof(buf));
-
-	msg.WriteLong(CONNECTIONLESS_HEADER);
-	msg.WriteByte(A2S_PLAYER_REQUEST);
-	msg.WriteLong(m_pQueryResponse->GetChallengeNr());
-
-	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
+	int handle = m_pServerCommunication->QueryPlayerDetails(netadr_t(unIP, usPort), response);
 }
 
 void CServersInfo::ServerRules(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
-	m_pQueryResponse->SetResponseTarget(response);
-	m_pQueryResponse->SetCurrentQuery(k_eServerRules, unIP, usPort);
-
-	char buf[16];
-	bf_write msg(buf, sizeof(buf));
-
-	msg.WriteLong(CONNECTIONLESS_HEADER);
-	msg.WriteByte(A2S_RULES_REQUEST);
-	msg.WriteLong(m_pQueryResponse->GetChallengeNr());
-
-	m_pQuerySocket->Send(netadr_t(unIP, usPort), msg);
+	int handle = m_pServerCommunication->QueryServerRules(netadr_t(unIP, usPort), response);
 }
 // Internal functions //
 
@@ -571,10 +464,6 @@ void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg) {
 
 // CMsgHandler
 bool CServersInfo::Process(const netadr_t& from, bf_read& msg) {
-
-	// check connectionless header
-	if (msg.ReadLong() != CONNECTIONLESS_HEADER)
-		return false;
 
 	char c = msg.ReadByte();
 

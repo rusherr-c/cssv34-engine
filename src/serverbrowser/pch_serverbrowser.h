@@ -49,6 +49,7 @@
 #include "IServerRefreshResponse.h"
 #include "Socket.h"
 #include "ServerDetailsMsgHandler.h"
+#include "ServerCommunication.h"
 #include "ServerList.h"
 #include "ServersInfo.h"
 #include "TrackerProtocol.h"

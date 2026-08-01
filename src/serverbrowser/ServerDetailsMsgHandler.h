@@ -1,10 +1,13 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
-//
-// Purpose: 
-//
-// $NoKeywords: $
-//=============================================================================
-
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: processes network packets from 
+ *	the Source Engine server
+ *
+ * VDC: https://developer.valvesoftware.com/wiki/Server_queries
+ * 
+*/
 #ifndef SERVERMSGHANDLERDETAILS_H
 #define SERVERMSGHANDLERDETAILS_H
 #ifdef _WIN32
@@ -24,29 +27,18 @@ class CServerDetailsMsgHandler : public CMsgHandler
 {
 public:
 	CServerDetailsMsgHandler(CServerList* list);
-	CServerDetailsMsgHandler(IServerQueryResponse* response);
 	~CServerDetailsMsgHandler();
 
 	// CMsgHandler
 	virtual bool Process(const netadr_t& from, bf_read& msg);
 
 protected:
-	// Internal function //
 
-	// process multi packet response
-	bool ProcessLong(const netadr_t& from, bf_read& msg);
 	// process info
 	bool ProcessInfo(bf_read& msg, serveritem_t &server);
-	// process rules
-	bool ProcessRules(bf_read& msg);
-	// something
-	bool ProcessPlayers(bf_read& msg);
-	// returns processed challenge
-	int ProcessChallenge(bf_read& msg);
 
 private:
 	CServerList* m_pServerList;
-	IServerQueryResponse* m_pResponseTarget;
 
 	int m_nServersResponded;
 };

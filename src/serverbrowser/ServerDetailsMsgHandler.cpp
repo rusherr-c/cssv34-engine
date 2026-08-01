@@ -1,18 +1,19 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
-//
-// Purpose: 
-//
-// $NoKeywords: $
-//=============================================================================
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: processes network packets from
+ *	the Source Engine server
+ *
+ * VDC: https://developer.valvesoftware.com/wiki/Server_queries
+ *
+*/
 
 // normally pragma warning is disabled in vgui.h
 #pragma warning( disable: 4800 )	// disables 'performance warning converting int to bool'
 
 #include "pch_serverbrowser.h"
-#include "..\utils\bzip2\bzlib.h" // BZ2_bzBuffToBuffDecompress
 
-#define SPLITPACKET_HEADER -2
-#define SPLIT_FLAG_COMPRESSED 0x80000000
 #define S2A_EDF_GAMEPORT 0x80
 #define S2A_EDF_STEAMID 0x10
 #define S2A_EDF_SOURCETV 0x40
@@ -26,18 +27,8 @@ CServerDetailsMsgHandler::CServerDetailsMsgHandler(CServerList* list)
 	: CMsgHandler()
 {
 	m_pServerList = list;
-	m_pResponseTarget = 0;
 	m_nServersResponded = 0;
 }
-
-CServerDetailsMsgHandler::CServerDetailsMsgHandler(IServerQueryResponse* response)
-	: CMsgHandler()
-{
-	m_pServerList = 0;
-	m_pResponseTarget = response;
-	m_nServersResponded = 0;
-}
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Destructor
@@ -65,10 +56,6 @@ bool CServerDetailsMsgHandler::Process(const netadr_t& from, bf_read& msg) {
 
 	serveritem_t server{};
 
-	// check connectionless header
-	if (msg.ReadLong() != CONNECTIONLESS_HEADER)
-		return false;
-
 	char c = msg.ReadByte();
 
 	// set server address
@@ -86,25 +73,14 @@ bool CServerDetailsMsgHandler::Process(const netadr_t& from, bf_read& msg) {
 	}
 	case S2A_PLAYER_REPLY:
 	{
-		if (!ProcessPlayers(msg))
-			Warning("Failed processing players for server %s\n", server.m_NetAdr.ToString());
-
 		break;
 	}
 	case S2A_RULES_REPLY:
 	{
-		if (!ProcessRules(msg))
-			Warning("Failed processing rules for server %s\n", server.m_NetAdr.ToString());
-
 		break;
 	}
 	case S2C_CHALLENGE:
 	{
-		int challenge = ProcessChallenge(msg);
-
-		if (challenge == -1)
-			return false; // invalid response
-		
 		break;
 	}
 	default:
@@ -119,38 +95,6 @@ bool CServerDetailsMsgHandler::Process(const netadr_t& from, bf_read& msg) {
 
 	if (m_nServersResponded & 1)
 		g_pServersInfo->UpdateStartRequestTime();
-
-	return true;
-}
-
-// process multi packet response
-bool CServerDetailsMsgHandler::ProcessLong(const netadr_t& from, bf_read& msg) {
-	// Check if this packet is split
-	if (msg.ReadLong() != SPLITPACKET_HEADER)
-	{
-		msg.Seek(0);
-		return false;
-	}
-
-	int netID = msg.ReadLong();
-
-	// is this split compressed?
-	bool isCompressed = (netID & SPLIT_FLAG_COMPRESSED) != 0;
-
-	if (isCompressed)
-		netID &= ~SPLIT_FLAG_COMPRESSED;
-
-	byte totalPackets = msg.ReadByte();
-	byte packetNumber = msg.ReadByte();
-
-	unsigned long uncompressedSize = 0;
-	unsigned long crc32 = 0;
-
-	// first packet, read size and crc32 sum
-	if (packetNumber == 0)
-	{
-
-	}
 
 	return true;
 }
@@ -178,6 +122,9 @@ bool CServerDetailsMsgHandler::ProcessInfo(bf_read& msg, serveritem_t& server) {
 	server.m_bPassword = msg.ReadByte();
 	server.m_bSecure = msg.ReadByte();
 	msg.ReadString(server.m_szGameVersion, sizeof(server.m_szGameVersion));
+
+	// EDF - Extra data flags, only Source2007+
+	// ********
 
 	server.m_iFlags = msg.ReadByte();
 
@@ -210,90 +157,5 @@ bool CServerDetailsMsgHandler::ProcessInfo(bf_read& msg, serveritem_t& server) {
 		msg.ReadBytes(&ulGameID, 8);
 	}
 
-	if (m_pResponseTarget)
-		m_pResponseTarget->ServerResponded(server);
-
 	return true;
-}
-
-// process rules
-bool CServerDetailsMsgHandler::ProcessRules(bf_read& msg) {
-	int numRules = msg.ReadShort();
-
-	if (m_pResponseTarget) {
-		if (!numRules) {
-			m_pResponseTarget->RulesFailedToRespond();
-			return false;
-		}
-	}
-
-	char name[64];
-	char value[64];
-
-	for (int i = 0; i < numRules; i++)
-	{
-		if (msg.IsOverflowed())
-			break; // we've reached end of the message
-
-		memset(name, 0, sizeof(name)); memset(value, 0, sizeof(value));
-		msg.ReadString(name, sizeof(name));
-		msg.ReadString(value, sizeof(value));
-
-		if (m_pResponseTarget)
-			m_pResponseTarget->RulesResponded(name, value);
-	}
-
-	if (m_pResponseTarget)
-		m_pResponseTarget->RulesRefreshComplete();
-}
-
-// something
-bool CServerDetailsMsgHandler::ProcessPlayers(bf_read& msg) {
-	int numPlayers = msg.ReadByte();
-
-	if (m_pResponseTarget) {
-		if (!numPlayers) {
-			m_pResponseTarget->PlayersFailedToRespond();
-			return false;
-		}
-	}
-
-	char name[64];
-	long score = 0;
-	float duration = 0.0f;
-	for (int i = 0; i < numPlayers; i++)
-	{
-		// id
-		msg.ReadByte();
-
-		memset(name, 0, sizeof(name));
-		msg.ReadString(name, sizeof(name));
-		
-		score = msg.ReadLong();
-		duration = msg.ReadFloat();
-
-		m_pResponseTarget->AddPlayerToList(name, score, duration);
-	}
-
-	delete[] name;
-
-	if (m_pResponseTarget)
-	{
-		m_pResponseTarget->PlayersRefreshComplete();
-	}
-
-	return true;
-}
-
-// returns processed challenge
-int CServerDetailsMsgHandler::ProcessChallenge(bf_read& msg) {
-	int chnr = -1;
-
-	if (msg.m_pData[4] == 'A')
-		chnr = msg.ReadLong();
-
-	if (m_pResponseTarget)
-		m_pResponseTarget->ChallengeReceived(chnr);
-
-	return chnr;
 }

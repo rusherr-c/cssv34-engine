@@ -1,9 +1,11 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
-//
-// Purpose: 
-//
-// $NoKeywords: $
-//=============================================================================
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: easy socket
+ *	class implementation
+ *
+*/
 #if !defined( SOCKET_H )
 #define SOCKET_H
 #ifdef _WIN32

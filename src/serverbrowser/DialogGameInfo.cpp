@@ -706,8 +706,6 @@ void CDialogGameInfo::ClearPlayerList()
 //-----------------------------------------------------------------------------
 void CDialogGameInfo::AddPlayerToList(const char *playerName, int score, float timePlayedSeconds)
 {
-	Msg("[DialogGameInfo] player added: %s %i %f\n", playerName, score, timePlayedSeconds);
-
 	if ( m_bPlayerListUpdatePending )
 	{
 		m_bPlayerListUpdatePending = false;

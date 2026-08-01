@@ -1,12 +1,18 @@
-//=============================================================================
-// Purpose: Holds all the protocol bits and defines used in master networking
-//
-
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: holds all defines used in
+ *	serversinfo networking
+ *
+*/
 #ifndef TRACKERPROTOCOL_H
 #define TRACKERPROTOCOL_H
 #ifdef _WIN32
 #pragma once
 #endif
+
+#define LONGPACKET_HEADER 0xFFFFFFFE
 
 #define M2C_QUERY				'f'
 #define C2M_CLIENTQUERY			'1'

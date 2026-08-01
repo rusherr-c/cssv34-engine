@@ -100,8 +100,8 @@ CServerBrowserDialog::CServerBrowserDialog(vgui::Panel *parent) : Frame(parent, 
 
 	m_pStatusLabel->SetText("");
 
-	// load current tab
-	const char *gameList = m_pSavedData->GetString("GameList");
+	// load current tab, set to internet because of the ui bugs
+	const char* gameList = "internet";//m_pSavedData->GetString("GameList");
 
 	if (!Q_stricmp(gameList, "favorites"))
 	{
@@ -425,13 +425,9 @@ CServerContextMenu *CServerBrowserDialog::GetContextMenu(vgui::Panel *pPanel)
 //-----------------------------------------------------------------------------
 CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, unsigned int serverIndex)
 {
-	// open the game info dialog, then mark it to attempt to connect right away
-	CDialogGameInfo *gameDialog = OpenGameInfoDialog(gameList, serverIndex);
+	serveritem_t* pServer = gameList->GetServer(serverIndex);
 
-	// set the dialog name to be the server name
-	gameDialog->Connect();
-
-	return gameDialog;
+	return JoinGame(pServer->m_NetAdr.GetIPHostByteOrder(), pServer->m_NetAdr.GetPort(), "");
 }
 
 //-----------------------------------------------------------------------------
@@ -439,13 +435,14 @@ CDialogGameInfo *CServerBrowserDialog::JoinGame(IGameList *gameList, unsigned in
 //-----------------------------------------------------------------------------
 CDialogGameInfo *CServerBrowserDialog::JoinGame(int serverIP, int serverPort, const char *pszConnectCode)
 {
-	// open the game info dialog, then mark it to attempt to connect right away
-	CDialogGameInfo *gameDialog = OpenGameInfoDialog( serverIP, serverPort, serverPort, pszConnectCode );
+	char command[256];
 
-	// set the dialog name to be the server name
-	gameDialog->Connect();
+	// send engine command to change servers
+	Q_snprintf(command, Q_ARRAYSIZE(command), "connect %s %s\n", 
+		netadr_t(serverIP, serverPort).ToString(), pszConnectCode);
 
-	return gameDialog;
+	g_pRunGameEngine->AddTextCommand(command);
+	return nullptr;
 }
 
 //-----------------------------------------------------------------------------

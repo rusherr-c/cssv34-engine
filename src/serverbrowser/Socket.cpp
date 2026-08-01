@@ -1,9 +1,11 @@
-//========= Copyright © 1996-2001, Valve LLC, All rights reserved. ============
-//
-// Purpose: 
-//
-// $NoKeywords: $
-//=============================================================================
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: easy socket
+ *	class implementation
+ *
+*/
 #if !defined( _X360 )
 #define FD_SETSIZE 1024
 #endif
@@ -17,8 +19,10 @@
 #include "winsockx.h"
 #endif
 #include "socket.h"
+#include "protocol.h"
 #include "tier0/vcrmode.h"
 #include "color.h"
+#include "TrackerProtocol.h"
 
 #include <VGUI/IVGui.h>
 
@@ -28,10 +32,11 @@
 
 // [max 5], dont set to higher values otherwise 
 // some servers will be dropped
-#define RUNFRAME_SLEEP_INTERVAL 0
+#define RUNFRAME_SLEEP_INTERVAL 1
 
 #define SOCKET_DEBUGGING 0
-const Color SocketDebugColor(255, 100, 255, 255);
+const Color SocketDebugColor1(255, 100, 255, 255);
+const Color SocketDebugColor2(255, 255, 100, 255);
 
 //-----------------------------------------------------------------------------
 // Purpose: Default message handler for received messages
@@ -59,6 +64,7 @@ CSocket::CSocket(uint16 port)
 //-----------------------------------------------------------------------------
 CSocket::~CSocket()
 {
+	m_Handlers.Purge();
 	Close();
 }
 
@@ -125,7 +131,7 @@ bool CSocket::Open(uint16 port)
 		(sockaddr*)&local);
 
 #if (SOCKET_DEBUGGING)
-	ConColorMsg(SocketDebugColor, "Opened socket %u at port %d\n", m_hSocket, local.sin_port);
+	ConColorMsg(SocketDebugColor1, "Opened socket %u at port %d\n", m_hSocket, ntohs(local.sin_port));
 #endif
 	return true;
 }
@@ -136,7 +142,7 @@ bool CSocket::Open(uint16 port)
 void CSocket::Close()
 {
 #if (SOCKET_DEBUGGING)
-	ConColorMsg(SocketDebugColor, "Closed socket %u\n", m_hSocket);
+	ConColorMsg(SocketDebugColor2, "Closed socket %u\n", m_hSocket);
 #endif
 
 	if (m_hSocket != INVALID_SOCKET)
@@ -162,14 +168,14 @@ int CSocket::Send(
 	int length)
 {
 #if (SOCKET_DEBUGGING)
-	ConColorMsg(SocketDebugColor, "--> Send to %s data %s len %i sock %u\n", to.ToString(), (const char*)data, length, m_hSocket);
+	ConColorMsg(SocketDebugColor1, "--> Send to %s data %s len %i sock %u\n", to.ToString(), (const char*)data, length, m_hSocket);
 #endif
 
 	sockaddr addr{};
 
 	to.ToSockadr(&addr);
 
-	return sendto(
+	int ret = sendto(
 		m_hSocket,
 		(const char*)data,
 		length,
@@ -177,6 +183,13 @@ int CSocket::Send(
 		&addr,
 		sizeof(sockaddr_in))
 		!= SOCKET_ERROR;
+
+	if (ret == SOCKET_ERROR)
+	{
+		Warning("!!! sendto failed: %d\n", WSAGetLastError());
+	}
+
+	return ret;
 }
 
 //-----------------------------------------------------------------------------
@@ -208,7 +221,7 @@ int CSocket::Broadcast(
 	int length)
 {
 #if (SOCKET_DEBUGGING)
-	ConColorMsg(SocketDebugColor, "--> Broadcast port %d data %s len %i sock %u\n", port, (const char*)data, length, m_hSocket);
+	ConColorMsg(SocketDebugColor2, "--> Broadcast port %d data %s len %i sock %u\n", port, (const char*)data, length, m_hSocket);
 #endif
 
 	sockaddr_in addr{};
@@ -251,7 +264,7 @@ void CSocket::Frame()
 	if (!IsValid())
 		return;
 
-	byte buffer[65536];
+	byte buffer[1400];
 
 	while (true)
 	{
@@ -278,7 +291,7 @@ void CSocket::Frame()
 			return;
 		}
 #if (SOCKET_DEBUGGING)
-		ConColorMsg(SocketDebugColor, "--> Received from %s bytes %i sock %u\n", inet_ntoa(from.sin_addr), bytes, m_hSocket);
+		ConColorMsg(SocketDebugColor2, "<-- Received from %s bytes %i sock %u\n", inet_ntoa(from.sin_addr), bytes, m_hSocket);
 #endif
 
 		if (bytes <= 0)
@@ -291,13 +304,21 @@ void CSocket::Frame()
 			buffer,
 			bytes);
 
+		unsigned long header = msg.ReadLong();
+
+		if (header != CONNECTIONLESS_HEADER)
+		{
+			if (header != LONGPACKET_HEADER)
+				break;
+		}
+
 		for (int i = 0; i < m_Handlers.Count(); i++)
 		{
 			if (m_Handlers[i]->Process(
 				adr,
 				msg))
 			{
-				break;
+				continue;
 			}
 
 			msg.Seek(0);

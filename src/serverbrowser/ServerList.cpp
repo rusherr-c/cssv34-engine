@@ -226,7 +226,7 @@ void CServerList::StartRefresh()
 //-----------------------------------------------------------------------------
 void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 {
-	if (!m_pResponseTarget || !m_bRefreshing)
+	if (!m_bRefreshing)
 		return;
 
 	// find the reply in the query list
@@ -243,7 +243,7 @@ void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 		return;
 	}
 
-	DevMsg("CServerList::UpdateServer: Updating \"%s\" server\n", sv.m_szServerName);
+	//DevMsg("CServerList::UpdateServer: Updating \"%s\" server\n", sv.m_szServerName);
 
 	query_t& query = m_Queries[queryIndex];
 	int serverIndex = query.serverID;
@@ -275,7 +275,8 @@ void CServerList::UpdateServer(netadr_t& adr, serveritem_t& sv, double recvTime)
 	server.m_nPing = ping;
 
 	// notify the UI of the new server info
-	m_pResponseTarget->ServerResponded(server);
+	if (m_pResponseTarget)
+		m_pResponseTarget->ServerResponded(server);
 }
 
 //-----------------------------------------------------------------------------
@@ -311,9 +312,6 @@ int CServerList::CalculateAveragePing(serveritem_t &server)
 void CServerList::QueryFrame()
 {
 	if (!m_bRefreshing)
-		return;
-
-	if (!m_pResponseTarget)
 		return;
 
 	double curtime = Plat_FloatTime();
@@ -376,7 +374,9 @@ void CServerList::QueryFrame()
 	if (m_Queries.Count() < 1)
 	{
 		m_bRefreshing = false;
-		m_pResponseTarget->RefreshComplete(k_eServerResponded);
+
+		if (m_pResponseTarget)
+			m_pResponseTarget->RefreshComplete(k_eServerResponded);
 
 		// up the serial number, so that we ignore any late results
 		m_iUpdateSerialNumber++;

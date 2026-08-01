@@ -113,6 +113,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	SetDefLessFunc( m_mapServers );
 	SetDefLessFunc( m_mapServerIP );
 	SetDefLessFunc( m_mapGamesFilterItem );
+	m_nPendingRuleRequestId = 0;
 
 	// Not always loaded
 	m_pWorkshopFilter = NULL;
@@ -805,7 +806,6 @@ void CBaseGamesPage::ServerResponded( serveritem_t &server )
 	m_pGameList->SetItemVisible(iListID, true);
 	kv->deleteThis();
 
-
 	PrepareQuickListMap( pServerItem->m_szMap, iListID );
 	UpdateStatus();
 	m_iServerRefreshCount++;
@@ -816,6 +816,49 @@ void CBaseGamesPage::ServerResponded( serveritem_t &server )
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::ServerFailedToRespond( serveritem_t& server ) {
 	// voided
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: we got a cvar, yaay!
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::RulesResponded(const char* pchRule, const char* pchValue)
+{
+	// check if we have pending request
+	if (!m_nPendingRuleRequestId)
+		return;
+
+	KeyValues* kv = m_pGameList->GetItem(m_nPendingRuleRequestId);
+	char existingRules[1024];
+	strcpy(existingRules, kv->GetString("Tags"));
+
+	sprintf(existingRules, "%s;%s = %s", existingRules, pchRule, pchValue);
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: rules failed to respond...
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::RulesFailedToRespond()
+{
+	m_nPendingRuleRequestId = 0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: rules refresh complete
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::RulesRefreshComplete()
+{
+	m_nPendingRuleRequestId = 0;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void CBaseGamesPage::WaitForRule()
+{
+	while (m_nPendingRuleRequestId != 0)
+	{
+		// wait.
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -987,6 +1030,18 @@ void CBaseGamesPage::UpdateStatus()
 	{
 		m_pGameList->SetColumnHeaderText( k_nColumn_Name, g_pVGuiLocalize->Find("#ServerBrowser_Servers"));
 	}
+
+	// pseudo percentage calculation
+
+	int max = 300;
+	int count = m_pGameList->GetItemCount();
+	wchar_t refreshstr[256];
+
+	swprintf(refreshstr, L"%s (%i%s)", g_pVGuiLocalize->Find("#ServerBrowser_RefreshingServerList"),
+		(100 * count) / max, "%");
+
+	ServerBrowserDialog().UpdateStatusText(refreshstr);
+
 }
 
 //-----------------------------------------------------------------------------
@@ -1675,6 +1730,8 @@ void CBaseGamesPage::RefreshComplete( EMasterServerResponse response )
 {
 	SelectQuickListServers();
 	OnItemSelected();
+
+	ServerBrowserDialog().UpdateStatusText("");
 }
 
 //-----------------------------------------------------------------------------

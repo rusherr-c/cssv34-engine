@@ -44,9 +44,6 @@ public:
 class IServerQueryResponse
 {
 public:
-	// Got challenge number from the server
-	virtual void ChallengeReceived(int challenge) {}
-
 	// Server has responded successfully and has updated data
 	virtual void ServerResponded(serveritem_t& server) {}
 
