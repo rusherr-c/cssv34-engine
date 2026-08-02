@@ -113,5 +113,6 @@ $Project "ServerBrowser"
 		$Lib	tier3
 		$Lib	vgui_controls
 		$Lib	mathlib
+		$Lib	"$LIBCOMMON/vc7/bzip2"
 	}
 }

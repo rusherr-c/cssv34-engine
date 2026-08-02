@@ -113,7 +113,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	SetDefLessFunc( m_mapServers );
 	SetDefLessFunc( m_mapServerIP );
 	SetDefLessFunc( m_mapGamesFilterItem );
-	m_nPendingRuleRequestId = 0;
+	SetDefLessFunc( m_RulesQueued );
 
 	// Not always loaded
 	m_pWorkshopFilter = NULL;
@@ -168,7 +168,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 		);
 
 	m_pGameList->AddColumnHeader(k_nColumn_Ping, "Ping", "#ServerBrowser_Latency", 55, ListPanel::COLUMN_FIXEDSIZE);
-	m_pGameList->AddColumnHeader(k_nColumn_Tags, "Rules", "#ServerBrowser_Tags", 130);
+	m_pGameList->AddColumnHeader(k_nColumn_Tags, "Tags", "#ServerBrowser_Tags", 130);
 
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Password, "#ServerBrowser_PasswordColumn_Tooltip");
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Bots, "#ServerBrowser_BotColumn_Tooltip");
@@ -193,6 +193,8 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	LoadFilterSettings();
 
 	m_bAutoSelectFirstItemInGameList = false;
+
+	ivgui()->AddTickSignal(GetVPanel());
 }
 
 //-----------------------------------------------------------------------------
@@ -787,7 +789,7 @@ void CBaseGamesPage::ServerResponded( serveritem_t &server )
 	
 	kv->SetInt("Ping", pServerItem->m_nPing);
 
-	kv->SetString("Tags", pServerItem->m_szGameTags );
+	kv->SetString("Tags", "");
 
 	if (pServerItem->m_bDoNotRefresh )
 	{
@@ -798,13 +800,64 @@ void CBaseGamesPage::ServerResponded( serveritem_t &server )
 		kv->SetString("map", "");
 	}
 
-	int iServerIndex = m_vecServers.AddToTail(server);
+	int iListID = 0;
+
+	// check if server already exists
+	for (int idx = m_pGameList->FirstItem(); m_pGameList->IsValidItemID(idx);
+		idx = m_pGameList->NextItem(idx))
+	{
+		KeyValues* kv = m_pGameList->GetItem(idx);
+		const char* ipaddr = kv->GetString("IPAddr", "unknown");
+		if (ipaddr == 0)
+			return;
+
+		// we found existing server, update some values
+		if (!strcmp(ipaddr, pServerItem->m_NetAdr.ToString()))
+		{
+			iListID = idx;
+			KeyValues* item = m_pGameList->GetItem(iListID);
+
+			item->SetString("name", pServerItem->m_szServerName);
+			item->SetString("map", pServerItem->m_szMap);
+			item->SetString("GameDesc", pServerItem->m_szGameDescription);
+			item->SetInt("PlayerCount", nAdjustedForBotsPlayers);
+			item->SetInt("MaxPlayerCount", pServerItem->m_nMaxPlayers);
+			item->SetInt("Ping", pServerItem->m_nPing);
+
+			break;
+		}
+	}
 
 	// new server, add to list
-	int iListID = m_pGameList->AddItem(kv, iServerIndex, false, false);
+	if (!iListID) {
+		int iServerIndex = m_vecServers.AddToTail(server);
+
+		iListID = m_pGameList->AddItem(kv, iServerIndex, false, false);
+
+		// get tags
+		g_pServersInfo->ServerRules(pServerItem->m_NetAdr.GetIPHostByteOrder(),
+			pServerItem->m_NetAdr.GetPort(), this);
+	}
 
 	m_pGameList->SetItemVisible(iListID, true);
 	kv->deleteThis();
+
+	m_nServersSinceRules++;
+
+	if (m_nServersSinceRules >= 5)
+	{
+		m_nServersSinceRules = 0;
+
+		for (int i = 0; i < m_vecServers.Count(); i++)
+		{
+			netadr_t adr = m_vecServers[i].m_NetAdr;
+			if (m_RulesQueued.Find(adr) == m_RulesQueued.InvalidIndex())
+			{
+				m_RulesQueued.Insert(adr, true);
+				m_vecPendingRules.AddToTail(adr);
+			}
+		}
+	}
 
 	PrepareQuickListMap( pServerItem->m_szMap, iListID );
 	UpdateStatus();
@@ -821,17 +874,29 @@ void CBaseGamesPage::ServerFailedToRespond( serveritem_t& server ) {
 //-----------------------------------------------------------------------------
 // Purpose: we got a cvar, yaay!
 //-----------------------------------------------------------------------------
-void CBaseGamesPage::RulesResponded(const char* pchRule, const char* pchValue)
+void CBaseGamesPage::RulesResponded(netadr_t& address, const char* pchRule, const char* pchValue)
 {
-	// check if we have pending request
-	if (!m_nPendingRuleRequestId)
-		return;
+	for (int idx = m_pGameList->FirstItem(); m_pGameList->IsValidItemID(idx);
+		idx = m_pGameList->NextItem(idx))
+	{
+		KeyValues* kv = m_pGameList->GetItem(idx);
+		const char *ipaddr = kv->GetString("IPAddr", "unknown");
+		if (ipaddr == 0)
+			return;
 
-	KeyValues* kv = m_pGameList->GetItem(m_nPendingRuleRequestId);
-	char existingRules[1024];
-	strcpy(existingRules, kv->GetString("Tags"));
+		if (!strcmp(ipaddr, address.ToString()))
+		{
+			if (!strcmp(pchRule, "sv_tags")) {
+				Msg("Adding tags %s for server %s\n", pchValue, ipaddr);
+				kv->SetString("Tags", pchValue);
 
-	sprintf(existingRules, "%s;%s = %s", existingRules, pchRule, pchValue);
+				int idx = m_RulesQueued.Find(address);
+
+				if (m_RulesQueued.IsValidIndex(idx))
+					m_RulesQueued.RemoveAt(idx);
+			}
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -839,7 +904,7 @@ void CBaseGamesPage::RulesResponded(const char* pchRule, const char* pchValue)
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::RulesFailedToRespond()
 {
-	m_nPendingRuleRequestId = 0;
+
 }
 
 //-----------------------------------------------------------------------------
@@ -847,17 +912,29 @@ void CBaseGamesPage::RulesFailedToRespond()
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::RulesRefreshComplete()
 {
-	m_nPendingRuleRequestId = 0;
+	m_nRulesRefreshed++;
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
+// Purpose: runs every frame
 //-----------------------------------------------------------------------------
-void CBaseGamesPage::WaitForRule()
+void CBaseGamesPage::OnTick()
 {
-	while (m_nPendingRuleRequestId != 0)
+	BaseClass::OnTick();
+
+	while (m_nActiveRuleQueries < MAX_ACTIVE_RULES &&
+		m_vecPendingRules.Count() > 0)
 	{
-		// wait.
+		netadr_t adr = m_vecPendingRules[0];
+
+		m_vecPendingRules.Remove(0);
+
+		g_pServersInfo->ServerRules(
+			adr.GetIPHostByteOrder(),
+			adr.GetPort(),
+			this);
+
+		++m_nActiveRuleQueries;
 	}
 }
 
@@ -1032,9 +1109,8 @@ void CBaseGamesPage::UpdateStatus()
 	}
 
 	// pseudo percentage calculation
-
 	int max = 300;
-	int count = m_pGameList->GetItemCount();
+	int count = min(m_pGameList->GetItemCount(), 100);
 	wchar_t refreshstr[256];
 
 	swprintf(refreshstr, L"%s (%i%s)", g_pVGuiLocalize->Find("#ServerBrowser_RefreshingServerList"),
@@ -1634,6 +1710,7 @@ void CBaseGamesPage::StartRefresh()
 	int nFilters = GetServerFilters( &pFilters );
 
 	m_vecServers.SetCount(0);
+	m_nRulesRefreshed = 0;
 
 	// Servers info: request server list
 	switch ( m_eMatchMakingType )
@@ -1732,6 +1809,16 @@ void CBaseGamesPage::RefreshComplete( EMasterServerResponse response )
 	OnItemSelected();
 
 	ServerBrowserDialog().UpdateStatusText("");
+
+	for (int i = 0; i < m_vecServers.Count(); i++)
+	{
+		netadr_t adr = m_vecServers[i].m_NetAdr;
+		if (m_RulesQueued.Find(adr) == m_RulesQueued.InvalidIndex())
+		{
+			m_RulesQueued.Insert(adr, true);
+			m_vecPendingRules.AddToTail(adr);
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------

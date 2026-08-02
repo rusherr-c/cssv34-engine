@@ -23,6 +23,9 @@
 #include "tier0/vcrmode.h"
 #include "color.h"
 #include "TrackerProtocol.h"
+#include "convar.h"
+#include "../utils/bzip2/bzlib.h"
+#include "checksum_crc.h"
 
 #include <VGUI/IVGui.h>
 
@@ -34,9 +37,20 @@
 // some servers will be dropped
 #define RUNFRAME_SLEEP_INTERVAL 1
 
-#define SOCKET_DEBUGGING 0
+static ConVar sb_sock_debugging("sb_sock_debugging", "0", FCVAR_NONE, "Enable socket debugging messages");
 const Color SocketDebugColor1(255, 100, 255, 255);
 const Color SocketDebugColor2(255, 255, 100, 255);
+
+bool SplitPacketLessFunc(const netadr_t& a, const netadr_t& b)
+{
+    int ip1 = *(int*)a.ip;
+    int ip2 = *(int*)b.ip;
+
+    if (ip1 != ip2)
+        return ip1 < ip2;
+
+    return a.port < b.port;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: Default message handler for received messages
@@ -53,6 +67,7 @@ bool CMsgHandler::Process( const netadr_t &from, bf_read &msg )
 //  specified, binds it to listen on that port, otherwise, chooses a random port.
 //-----------------------------------------------------------------------------
 CSocket::CSocket(uint16 port)
+    : m_SplitPackets(0, 128, SplitPacketLessFunc)
 {
 	m_hSocket = INVALID_SOCKET;
 
@@ -130,9 +145,8 @@ bool CSocket::Open(uint16 port)
 	m_Address.SetFromSockadr(
 		(sockaddr*)&local);
 
-#if (SOCKET_DEBUGGING)
 	ConColorMsg(SocketDebugColor1, "Opened socket %u at port %d\n", m_hSocket, ntohs(local.sin_port));
-#endif
+
 	return true;
 }
 
@@ -141,9 +155,7 @@ bool CSocket::Open(uint16 port)
 //-----------------------------------------------------------------------------
 void CSocket::Close()
 {
-#if (SOCKET_DEBUGGING)
 	ConColorMsg(SocketDebugColor2, "Closed socket %u\n", m_hSocket);
-#endif
 
 	if (m_hSocket != INVALID_SOCKET)
 	{
@@ -167,9 +179,8 @@ int CSocket::Send(
 	const void* data,
 	int length)
 {
-#if (SOCKET_DEBUGGING)
-	ConColorMsg(SocketDebugColor1, "--> Send to %s data %s len %i sock %u\n", to.ToString(), (const char*)data, length, m_hSocket);
-#endif
+	if (sb_sock_debugging.GetBool())
+		ConColorMsg(SocketDebugColor1, "--> Send to %s data %s len %i sock %u\n", to.ToString(), (const char*)data, length, m_hSocket);
 
 	sockaddr addr{};
 
@@ -220,9 +231,8 @@ int CSocket::Broadcast(
 	const void* data,
 	int length)
 {
-#if (SOCKET_DEBUGGING)
-	ConColorMsg(SocketDebugColor2, "--> Broadcast port %d data %s len %i sock %u\n", port, (const char*)data, length, m_hSocket);
-#endif
+	if (sb_sock_debugging.GetBool())
+		ConColorMsg(SocketDebugColor2, "--> Broadcast port %d data %s len %i sock %u\n", port, (const char*)data, length, m_hSocket);
 
 	sockaddr_in addr{};
 
@@ -264,65 +274,37 @@ void CSocket::Frame()
 	if (!IsValid())
 		return;
 
-	byte buffer[1400];
+    CleanupSplitPackets();
+
+    static float flLastCleanTime = Plat_FloatTime();
 
 	while (true)
 	{
-		if (RUNFRAME_SLEEP_INTERVAL > 0)
-			Sleep(RUNFRAME_SLEEP_INTERVAL);
+        float curtime = Plat_FloatTime();
+        if (curtime - flLastCleanTime > 10.0f)
+            CleanupSplitPackets();
 
-		sockaddr_in from{};
-		int fromlen = sizeof(from);
+        if (!ReceiveData())
+        {
+            int error = WSAGetLastError();
 
-		int bytes =
-			recvfrom(
-				m_hSocket,
-				(char*)buffer,
-				sizeof(buffer),
-				0,
-				(sockaddr*)&from,
-				&fromlen);
+            // No more data on socket
+            if (error == WSAEWOULDBLOCK)
+                break;
 
-		if (bytes == SOCKET_ERROR)
-		{
-			if (WSAGetLastError() == WSAEWOULDBLOCK)
-				break;
+            // recvfrom returned error
+            if (error != 0)
+            {
+                Warning("Socket %u recvfrom failed (%d)\n",
+                    m_hSocket, error);
+            }
 
-			return;
-		}
-#if (SOCKET_DEBUGGING)
-		ConColorMsg(SocketDebugColor2, "<-- Received from %s bytes %i sock %u\n", inet_ntoa(from.sin_addr), bytes, m_hSocket);
-#endif
+            break;
+        }
 
-		if (bytes <= 0)
-			break;
-
-		netadr_t adr;
-		adr.SetFromSockadr((sockaddr*)&from);
-
-		bf_read msg(
-			buffer,
-			bytes);
-
-		unsigned long header = msg.ReadLong();
-
-		if (header != CONNECTIONLESS_HEADER)
-		{
-			if (header != LONGPACKET_HEADER)
-				break;
-		}
-
-		for (int i = 0; i < m_Handlers.Count(); i++)
-		{
-			if (m_Handlers[i]->Process(
-				adr,
-				msg))
-			{
-				continue;
-			}
-
-			msg.Seek(0);
-		}
+        // Optimization
+        if (RUNFRAME_SLEEP_INTERVAL > 0)
+            Sleep(RUNFRAME_SLEEP_INTERVAL);
 	}
 }
 
@@ -361,4 +343,293 @@ SOCKET CSocket::GetSocket(void) const
 const netadr_t& CSocket::GetAddress() const
 {
 	return m_Address;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Called once FD_ISSET is detected
+//-----------------------------------------------------------------------------
+bool CSocket::ReceiveData()
+{
+    sockaddr from{};
+    int fromlen = sizeof(from);
+
+    char buffer[MAX_RECEIVE_PACKET];
+
+    int bytes = recvfrom(
+        m_hSocket,
+        buffer,
+        sizeof(buffer),
+        0,
+        &from,
+        &fromlen);
+
+    if (bytes == SOCKET_ERROR)
+        return false;
+
+    if (bytes < 4 || bytes >= MAX_ROUTABLE_PACKET)
+        return false;
+
+    netadr_t adr;
+    adr.SetFromSockadr(&from);
+
+    //---------------------------------------------------------
+    // Split packet?
+    //---------------------------------------------------------
+
+    if (*(int*)buffer == SPLITPACKET_HEADER)
+    {
+        splitpacket_t* entry = FindOrCreateSplitPacket(adr);
+        LONGPACKET& packet = entry->packet;
+
+        // update receive time
+        entry->lastReceiveTime = Plat_FloatTime();
+
+        SPLITPACKET *header = (SPLITPACKET*)buffer;
+
+        int sequence = LittleLong(header->sequenceNumber);
+
+        bool compressed = (sequence < 0);
+
+        if (compressed)
+            sequence &= 0x7FFFFFFF;
+
+        short packetID = LittleShort(header->packetID);
+
+        int packetNumber = packetID >> 8;
+        int packetCount  = packetID & 0xFF;
+
+        if (packetCount <= 0 || packetNumber > 69 || packetCount > 69)
+        {
+            Warning(
+                "Split packet from %s has invalid packet count (%d/%d)\n",
+                adr.ToString(),
+                packetNumber,
+                packetCount);
+
+            return false;
+        }
+
+        //-----------------------------------------------------
+        // Start assembling new packet
+        //-----------------------------------------------------
+
+        if (packet.currentSequence != sequence)
+        {
+            memset(&packet, 0, sizeof(packet));
+            memset(entry->flags, 0, sizeof(entry->flags));
+
+            packet.currentSequence = sequence;
+            packet.splitCount = packetCount;
+        }
+
+        //-----------------------------------------------------
+        // Copy payload
+        //-----------------------------------------------------
+
+        int payloadSize = bytes - sizeof(SPLITPACKET);
+
+        if (entry->flags[packetNumber] != sequence)
+        {
+            entry->flags[packetNumber] = sequence;
+
+            packet.splitCount--;
+
+            if (packetNumber == packetCount - 1)
+            {
+                packet.totalSize =
+                    packetNumber * SPLIT_SIZE + payloadSize;
+            }
+
+            if (sb_sock_debugging.GetBool())
+            {
+                Msg("<-- Split packet %i of %i, seq %i, size %i from %s\n",
+                    packetNumber + 1,
+                    packetCount,
+                    sequence,
+                    payloadSize,
+                    adr.ToString());
+            }
+
+            int offset = packetNumber * SPLIT_SIZE;
+
+            if (offset + payloadSize > sizeof(packet.buffer) || payloadSize <= 0)
+            {
+                RemoveSplitPacket(adr);
+                return false;
+            }
+
+            memcpy(
+                packet.buffer + packetNumber * SPLIT_SIZE,
+                buffer + sizeof(SPLITPACKET),
+                payloadSize);
+        }
+
+        //-----------------------------------------------------
+        // Waiting for remaining fragments
+        //-----------------------------------------------------
+
+        if (packet.splitCount > 0)
+            return true;
+
+        //-----------------------------------------------------
+        // Packet complete
+        //-----------------------------------------------------
+
+        bytes = packet.totalSize;
+
+        if (bytes > sizeof(packet.buffer))
+        {
+            Warning(
+                "Split packet from %s is too large (%d bytes)\n",
+                adr.ToString(),
+                bytes);
+
+            RemoveSplitPacket(adr);
+
+            return false;
+        }
+
+        if (!compressed)
+        {
+            memcpy(
+                buffer,
+                packet.buffer,
+                bytes);
+        }
+        else
+        {
+            SPLITPACKET_COMPRESSED *cmp =
+                (SPLITPACKET_COMPRESSED*)packet.buffer;
+
+            CUtlMemory<byte> decompressed;
+            decompressed.EnsureCapacity(NET_MAX_MESSAGE);
+
+            unsigned int outSize = NET_MAX_MESSAGE;
+
+            int result =
+                BZ2_bzBuffToBuffDecompress(
+                    (char*)decompressed.Base(),
+                    &outSize,
+                    (char*)packet.buffer + sizeof(SPLITPACKET_COMPRESSED),
+                    bytes - sizeof(SPLITPACKET_COMPRESSED),
+                    0,
+                    0);
+
+            if (result != BZ_OK)
+            {
+                Warning(
+                    "Failed to decompress packet from %s (bz2 error %d)\n",
+                    adr.ToString(),
+                    result);
+
+                RemoveSplitPacket(adr);
+
+                return false;
+            }
+
+            if (outSize != cmp->decompressedSize)
+            {
+                Warning(
+                    "Decompressed packet has invalid size (%u != %u)\n",
+                    outSize,
+                    cmp->decompressedSize);
+
+                RemoveSplitPacket(adr);
+
+                return false;
+            }
+
+            if (CRC32_ProcessSingleBuffer(
+                (char*)decompressed.Base(),
+                    outSize) != cmp->crc)
+            {
+                Warning(
+                    "Split packet CRC mismatch from %s\n",
+                    adr.ToString());
+
+                RemoveSplitPacket(adr);
+
+                return false;
+            }
+
+            memcpy(buffer, (char*)decompressed.Base(), outSize);
+
+            bytes = outSize;
+        }
+
+        // Ready for next split packet
+        RemoveSplitPacket(adr);
+    }
+    else if (*(int*)buffer != CONNECTIONLESS_HEADER)
+    {
+        return false;
+    }
+
+    //---------------------------------------------------------
+    // Dispatch packet
+    //---------------------------------------------------------
+
+    bf_read msg(buffer, bytes);
+
+    msg.Seek(sizeof(int) * 8);
+
+    FOR_EACH_VEC(m_Handlers, i)
+    {
+        if (m_Handlers[i]->Process(adr, msg))
+            break;
+
+        msg.Seek(sizeof(int) * 8);
+    }
+
+    if (sb_sock_debugging.GetBool())
+    {
+        Msg("<-- Connectionless packet, size %i from %s\n",
+            bytes,
+            adr.ToString());
+    }
+
+    return true;
+}
+
+splitpacket_t* CSocket::FindOrCreateSplitPacket(const netadr_t& adr)
+{
+    int idx = m_SplitPackets.Find(adr);
+
+    if (!m_SplitPackets.IsValidIndex(idx))
+    {
+        splitpacket_t entry;
+        idx = m_SplitPackets.Insert(adr, entry);
+    }
+
+    return &m_SplitPackets[idx];
+}
+
+void CSocket::RemoveSplitPacket(const netadr_t& adr)
+{
+    int idx = m_SplitPackets.Find(adr);
+
+    if (m_SplitPackets.IsValidIndex(idx))
+        m_SplitPackets.RemoveAt(idx);
+}
+
+void CSocket::CleanupSplitPackets()
+{
+    double curtime = Plat_FloatTime();
+
+    unsigned short idx = m_SplitPackets.FirstInorder();
+
+    while (m_SplitPackets.IsValidIndex(idx))
+    {
+        unsigned short next = m_SplitPackets.NextInorder(idx);
+
+        if (curtime - m_SplitPackets[idx].lastReceiveTime > 5.0)
+        {
+            Warning("Dropping incomplete split packet from %s\n",
+                m_SplitPackets.Key(idx).ToString());
+
+            m_SplitPackets.RemoveAt(idx);
+        }
+
+        idx = next;
+    }
 }

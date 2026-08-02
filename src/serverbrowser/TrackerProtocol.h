@@ -12,7 +12,7 @@
 #pragma once
 #endif
 
-#define LONGPACKET_HEADER 0xFFFFFFFE
+#define SPLITPACKET_HEADER 0xFFFFFFFE
 
 #define M2C_QUERY				'f'
 #define C2M_CLIENTQUERY			'1'

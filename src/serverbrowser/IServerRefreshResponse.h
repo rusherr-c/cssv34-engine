@@ -49,7 +49,7 @@ public:
 
 	// Got data on a server rule -- you'll get this callback once per FCVAR_NOTIFY
 	// cvar on the server which you have requested rules data on.
-	virtual void RulesResponded(const char* pchRule, const char* pchValue) {};
+	virtual void RulesResponded(netadr_t& address, const char* pchRule, const char* pchValue) {};
 
 	// The server failed to respond to the request for server rules
 	virtual void RulesFailedToRespond() {};

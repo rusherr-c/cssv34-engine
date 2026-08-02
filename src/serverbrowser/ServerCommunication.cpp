@@ -348,6 +348,7 @@ bool CServerCommunication::ProcessServerRules(scquery_t& query)
 		query.response->RulesFailedToRespond();
 		return false;
 	}
+	DevWarning("ProcessServerRules for %s\n", query.addr.ToString());
 
 	char name[64];
 	char value[64];
@@ -359,7 +360,8 @@ bool CServerCommunication::ProcessServerRules(scquery_t& query)
 		msg.ReadString(name, 64);
 		msg.ReadString(value, 64);
 
-		query.response->RulesResponded(name, value);
+		query.response->RulesResponded(query.addr, name, value);
+		DevMsg("Rule responded: %s = %s\n", name, value);
 	}
 
 	query.response->RulesRefreshComplete();
@@ -442,19 +444,35 @@ void CServerCommunication::QueryFrame() {
 	{
 		scquery_t& query = m_Queries[idx];
 
-		if ((curtime - query.sendTime) > 
-			(query.type > 1 ? 2.2f : 1.5f))
+		float timeout =
+			query.type == k_eServerRules ? 3.5f :
+			query.type == k_ePlayerDetails ? 2.5f :
+			1.5f;
+
+		timeout += m_Queries.Count() * 0.015f;
+
+		if (curtime - query.sendTime > timeout)
 		{
-			Warning("Query timed out! addr: %s, type %u, id %u\n", query.addr.ToString(), query.type, idx);	
+			if (query.retries < 2)
+			{
+				RetryRequest(idx);
 
-			// get the next server now, since we're about to delete it from query list
-			unsigned short nextidx = m_Queries.NextInorder(idx);
+				query.sendTime = curtime;
+				query.retries++;
+			}
+			else
+			{
+				DevWarning("Query timed out! addr: %s, type %u, id %u\n", query.addr.ToString(), query.type, idx);	
 
-			// delete the query
-			m_Queries.RemoveAt(idx);
+				// get the next server now, since we're about to delete it from query list
+				unsigned short nextidx = m_Queries.NextInorder(idx);
 
-			// move to next item
-			idx = nextidx;
+				// delete the query
+				m_Queries.RemoveAt(idx);
+
+				// move to next item
+				idx = nextidx;
+			}
 		}
 		else
 		{

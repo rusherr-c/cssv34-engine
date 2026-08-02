@@ -28,6 +28,9 @@ struct scquery_t
 
 	double	sendTime;	// send time
 	int		ping;		// response timeout (in ms)
+
+	// how many retries we have done
+	byte	retries;
 };
 #pragma pack(pop)
 
