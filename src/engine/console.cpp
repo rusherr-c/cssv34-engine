@@ -1124,11 +1124,11 @@ void CConPanel::PaintBackground()
 
 	int wide = GetWide();
 	char ver[ 200 ];
-	Q_snprintf(ver, sizeof( ver ), "Source Engine %s (network ver. %i, build %i)", build_hex(), PROTOCOL_VERSION, build_number());
+	Q_snprintf(ver, sizeof( ver ), "cssv34-engine %s %s (rev %s)", GIT_BRANCH, GIT_VERSION, GIT_REVISION);
 	wchar_t unicode[ 400 ];
 	g_pVGuiLocalize->ConvertANSIToUnicode( ver, unicode, sizeof( unicode ) );
 
-	vgui::surface()->DrawSetTextColor( Color( 255, 255, 255, 255 ) );
+	vgui::surface()->DrawSetTextColor( Color( 255, 130, 84, 255 ) );
 	int x = wide - DrawTextLen( m_hFont, unicode ) - 2;
 	DrawText( m_hFont, x, 0, unicode );
 
@@ -1147,7 +1147,8 @@ void CConPanel::PaintBackground()
 
 		int tall = vgui::surface()->GetFontTall( m_hFont );
 
-		int x = wide - DrawTextLen( m_hFont, unicode ) - 2;
+		vgui::surface()->DrawSetTextColor( Color( 255, 255, 255, 255 ) );
+		int x = wide - DrawTextLen( m_hFont, unicode ) - 3;
 		DrawText( m_hFont, x, tall + 1, unicode );
 	}
 }

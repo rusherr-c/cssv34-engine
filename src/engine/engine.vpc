@@ -32,6 +32,12 @@ $Configuration
 		$AdditionalDependencies			"$BASE dinput8.lib winmm.lib wsock32.lib ws2_32.lib wininet.lib vfw32.lib Rpcrt4.lib" [$WIN32]
 		$AdditionalLibraryDirectories	"$BASE;$SRCDIR\lib\common\vc7;$SRCDIR\dx9sdk\lib" [$WIN32]
 	}
+
+	$PreBuildEvent [$WIN32]
+	{
+		$CommandLine	"$BASE" "\n" \
+				"$(SolutionDir)devtools\generategitinfo"
+	}
 }
 
 $Configuration "Debug"
@@ -71,7 +77,6 @@ $Project "engine"
 
 			$File	"steam\ExternIP.cpp"
 			$File	"steam\ExternIP.h"
-			$File	"steam\HTTP.h"
 			$File	"steam\RevSpoofer.cpp"
 			$File	"steam\RevSpoofer.h"
 			$File	"steam\RevEmu.h"			
@@ -247,7 +252,7 @@ $Project "engine"
 		$File	"$SRCDIR\public\blockingudpsocket.cpp"
 		$File	"$SRCDIR\public\BSPTreeData.cpp"
 		$File	"$SRCDIR\public\builddisp.cpp"
-		$File	"buildnum.cpp"
+		$File	"buildinfo.cpp"
 		$File	"changeframelist.cpp"
 		$File	"checksum_engine.cpp"
 		$File	"clockdriftmgr.cpp"
@@ -579,6 +584,8 @@ $Project "engine"
 		$File	"baseclientstate.h"
 		$File	"baseserver.h"
 		$File	"bitbuf_errorhandler.h"
+		$File	"buildinfo.h"
+		$File	"git_info.h"
 		$File	"$SRCDIR\public\BSPTreeData.h"
 		$File	"cbenchmark.h"
 		$File	"cdll_engine_int.h"
@@ -687,6 +694,7 @@ $Project "engine"
 		$File	"host_jmp.h"
 		$File	"host_saverestore.h"
 		$File	"host_state.h"
+		$File	"http.h"
 		//$File	"$SRCDIR\public\ibxmovietools.h"
 		$File	"$SRCDIR\public\iclient.h"
 		$File	"$SRCDIR\public\icliententity.h"

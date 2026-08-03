@@ -1,3 +1,12 @@
+/*
+ *
+ * Copyright (c) 2026 RuSHeRR
+ *
+ * Purpose: Steam ID generators
+ *	for multiple RevEmu versions
+ *
+*/
+
 #pragma once
 
 #include "RevSpoofer.h"
