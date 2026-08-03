@@ -11,6 +11,8 @@
 #pragma once
 #endif
 
+#include <mutex>
+#include <thread>
 #include "tier1/utldict.h"
 
 class CBaseGamesPage;
@@ -103,14 +105,15 @@ public:
 	{
 		k_nColumn_Password = 0,
 		k_nColumn_Secure = 1,
-		k_nColumn_Name = 2,
-		k_nColumn_IPAddr = 3,
-		k_nColumn_GameDesc = 4,
-		k_nColumn_Players = 5,
-		k_nColumn_Bots = 6,
-		k_nColumn_Map = 7,
-		k_nColumn_Ping = 8,
-		k_nColumn_Tags = 9,
+		k_nColumn_AntiCheat = 2,
+		k_nColumn_Name = 3,
+		k_nColumn_IPAddr = 4,
+		k_nColumn_GameDesc = 5,
+		k_nColumn_Players = 6,
+		k_nColumn_Bots = 7,
+		k_nColumn_Map = 8,
+		k_nColumn_Ping = 9,
+		k_nColumn_Tags = 10,
 	};
 
 	CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType eType, const char *pCustomResFilename=NULL);
@@ -161,9 +164,6 @@ public:
 	{
 		StopRefresh();
 	}
-
-	// called every frame
-	virtual void OnTick();
 
 protected:
 	virtual void OnCommand(const char *command);
@@ -246,19 +246,6 @@ protected:
 	CUtlDict< CQuickListMapServerList, int > m_quicklistserverlist;
 	int m_iServerRefreshCount;
 	CUtlVector< servermaps_t > m_vecMapNamesFound;
-	
-	// Pending rules queue
-	CUtlVector<netadr_t> m_vecPendingRules;
-	
-	int m_nServersSinceRules;
-	CUtlMap<netadr_t, bool> m_RulesQueued;
-
-	// Active queries
-	int m_nActiveRuleQueries;
-	int m_nRulesRefreshed;
-
-	// Maximum simultaneously active rule queries
-	static const int MAX_ACTIVE_RULES = 32;
 
 	EPageType m_eMatchMakingType;
 	int m_hRequest;

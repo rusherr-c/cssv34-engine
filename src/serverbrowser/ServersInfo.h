@@ -25,6 +25,7 @@
 
 // default timeout for all lists (excluding main list)
 #define LIST_REFRESH_TIMEOUT 3.5f
+#define MAIN_LIST_REFRESH_TIMEOUT 10.0f
 
 //
 // class for each game server
@@ -108,7 +109,7 @@ public:
 	void Initialize(); // Do some things like parsing masterservers.vdf
 	void Shutdown(); // Shutdown...
 
-	void RunFrame(); // Runs every frame
+	void RunFrame(int threadNum = 0); // Runs every frame
 
 public:
 	// Request Server List from master server...
@@ -138,9 +139,16 @@ public:
 	void PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
 	void ServerRules(uint32 unIP, uint16 usPort, IServerQueryResponse* response);
 
+public:
+	static void MultiThreadingChangeCallback(IConVar* var, const char* pOldValue, float flOldValue);
+	static void ThreadCountChangeCallback(IConVar* var, const char* pOldValue, float flOldValue);
+
 protected:
-	// Thread
-	static void Thread(CServersInfo* pthis);
+	
+	void CreateAllThreads();
+
+	// ThreadProc
+	static void Thread(int* pThreadNum);
 
 	// Add master server to m_vecMasterAddresses
 	void AddMasterServer(const netadr_t& adr);
@@ -163,7 +171,9 @@ protected:
 private:
 	bool			m_bInitialized;
 	bool			m_bWorking;
-	ThreadHandle_t	m_hThread;
+
+	ThreadHandle_t	m_hThreads[3];
+	int				m_nThreadCount;
 
 	// MasterServers.vdf
 	CUtlVector<netadr_t> m_vecMasterAddresses;

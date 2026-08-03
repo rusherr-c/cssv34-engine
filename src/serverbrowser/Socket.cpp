@@ -591,19 +591,25 @@ bool CSocket::ReceiveData()
     return true;
 }
 
+/*
+ * Find split packet, if nothing was found, create one
+*/
 splitpacket_t* CSocket::FindOrCreateSplitPacket(const netadr_t& adr)
 {
     int idx = m_SplitPackets.Find(adr);
 
     if (!m_SplitPackets.IsValidIndex(idx))
     {
-        splitpacket_t entry;
-        idx = m_SplitPackets.Insert(adr, entry);
+        idx = m_SplitPackets.Insert(adr);
+        memset(&m_SplitPackets[idx], 0, sizeof(splitpacket_t));
     }
 
     return &m_SplitPackets[idx];
 }
 
+/*
+ * Remove split packet
+*/
 void CSocket::RemoveSplitPacket(const netadr_t& adr)
 {
     int idx = m_SplitPackets.Find(adr);
@@ -612,6 +618,9 @@ void CSocket::RemoveSplitPacket(const netadr_t& adr)
         m_SplitPackets.RemoveAt(idx);
 }
 
+/*
+ * Cleanup split packets
+*/
 void CSocket::CleanupSplitPackets()
 {
     double curtime = Plat_FloatTime();

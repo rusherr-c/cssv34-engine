@@ -704,8 +704,10 @@ void CDialogGameInfo::ClearPlayerList()
 //-----------------------------------------------------------------------------
 // Purpose: on individual player added
 //-----------------------------------------------------------------------------
+std::mutex g_PlayersMutex;
 void CDialogGameInfo::AddPlayerToList(const char *playerName, int score, float timePlayedSeconds)
 {
+	std::lock_guard<std::mutex> lock(g_PlayersMutex);
 	if ( m_bPlayerListUpdatePending )
 	{
 		m_bPlayerListUpdatePending = false;

@@ -348,7 +348,7 @@ bool CServerCommunication::ProcessServerRules(scquery_t& query)
 		query.response->RulesFailedToRespond();
 		return false;
 	}
-	DevWarning("ProcessServerRules for %s\n", query.addr.ToString());
+	//DevWarning("ProcessServerRules for %s\n", query.addr.ToString());
 
 	char name[64];
 	char value[64];
@@ -361,7 +361,7 @@ bool CServerCommunication::ProcessServerRules(scquery_t& query)
 		msg.ReadString(value, 64);
 
 		query.response->RulesResponded(query.addr, name, value);
-		DevMsg("Rule responded: %s = %s\n", name, value);
+		//DevMsg("Rule responded: %s = %s\n", name, value);
 	}
 
 	query.response->RulesRefreshComplete();

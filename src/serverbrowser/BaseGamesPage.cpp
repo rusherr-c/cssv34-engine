@@ -113,7 +113,6 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	SetDefLessFunc( m_mapServers );
 	SetDefLessFunc( m_mapServerIP );
 	SetDefLessFunc( m_mapGamesFilterItem );
-	SetDefLessFunc( m_RulesQueued );
 
 	// Not always loaded
 	m_pWorkshopFilter = NULL;
@@ -146,6 +145,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	// Add the column headers
 	m_pGameList->AddColumnHeader( k_nColumn_Password, "Password", "#ServerBrowser_Password", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
 	m_pGameList->AddColumnHeader( k_nColumn_Secure, "Secure", "#ServerBrowser_Secure", 16, ListPanel::COLUMN_FIXEDSIZE | ListPanel::COLUMN_IMAGE);
+	m_pGameList->AddColumnHeader( k_nColumn_AntiCheat, "SecureName", "Anti-Cheat", 64, ListPanel::COLUMN_FIXEDSIZE);
 
 	m_pGameList->AddColumnHeader( k_nColumn_Name, "Name", "#ServerBrowser_Servers", 50, 
 		50,
@@ -173,6 +173,7 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Password, "#ServerBrowser_PasswordColumn_Tooltip");
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Bots, "#ServerBrowser_BotColumn_Tooltip");
 	m_pGameList->SetColumnHeaderTooltip( k_nColumn_Secure, "#ServerBrowser_SecureColumn_Tooltip");
+	m_pGameList->SetColumnHeaderTooltip( k_nColumn_AntiCheat, "Anti-Cheat technology that this server is using");
 
 	// setup fast sort functions
 	m_pGameList->SetSortFunc( k_nColumn_Password, PasswordCompare);
@@ -193,8 +194,6 @@ CBaseGamesPage::CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType
 	LoadFilterSettings();
 
 	m_bAutoSelectFirstItemInGameList = false;
-
-	ivgui()->AddTickSignal(GetVPanel());
 }
 
 //-----------------------------------------------------------------------------
@@ -842,23 +841,6 @@ void CBaseGamesPage::ServerResponded( serveritem_t &server )
 	m_pGameList->SetItemVisible(iListID, true);
 	kv->deleteThis();
 
-	m_nServersSinceRules++;
-
-	if (m_nServersSinceRules >= 5)
-	{
-		m_nServersSinceRules = 0;
-
-		for (int i = 0; i < m_vecServers.Count(); i++)
-		{
-			netadr_t adr = m_vecServers[i].m_NetAdr;
-			if (m_RulesQueued.Find(adr) == m_RulesQueued.InvalidIndex())
-			{
-				m_RulesQueued.Insert(adr, true);
-				m_vecPendingRules.AddToTail(adr);
-			}
-		}
-	}
-
 	PrepareQuickListMap( pServerItem->m_szMap, iListID );
 	UpdateStatus();
 	m_iServerRefreshCount++;
@@ -872,30 +854,100 @@ void CBaseGamesPage::ServerFailedToRespond( serveritem_t& server ) {
 }
 
 //-----------------------------------------------------------------------------
+// Purpose:
+//-----------------------------------------------------------------------------
+void AppendTag(char* tags, const char* tag)
+{
+	if (!tags)
+		return;
+
+	int len = strlen(tags);
+
+	if (len > 128)
+		return;
+
+	if (!V_strnistr(tags, tag, len))
+	{
+		if (tags[0])
+			V_strncat(tags, ",", len);
+
+		V_strncat(tags, tag, len);
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: we got a cvar, yaay!
 //-----------------------------------------------------------------------------
+std::mutex g_RulesMutex;
 void CBaseGamesPage::RulesResponded(netadr_t& address, const char* pchRule, const char* pchValue)
 {
+	std::lock_guard<std::mutex> lock(g_RulesMutex);
+	char tags[128];
+
 	for (int idx = m_pGameList->FirstItem(); m_pGameList->IsValidItemID(idx);
 		idx = m_pGameList->NextItem(idx))
 	{
 		KeyValues* kv = m_pGameList->GetItem(idx);
-		const char *ipaddr = kv->GetString("IPAddr", "unknown");
-		if (ipaddr == 0)
+		if (!kv)
 			return;
 
-		if (!strcmp(ipaddr, address.ToString()))
+		const char* ipaddr = kv->GetString("IPAddr", "unknown");
+		if (!ipaddr)
+			return;
+
+		if (strcmp(ipaddr, address.ToString()))
 		{
-			if (!strcmp(pchRule, "sv_tags")) {
-				Msg("Adding tags %s for server %s\n", pchValue, ipaddr);
-				kv->SetString("Tags", pchValue);
-
-				int idx = m_RulesQueued.Find(address);
-
-				if (m_RulesQueued.IsValidIndex(idx))
-					m_RulesQueued.RemoveAt(idx);
-			}
+			continue;
 		}
+
+		// Add tags
+		if (!strcmp(pchRule, "sv_tags")) {
+			kv->SetString("Tags", pchValue);
+		}
+
+		// Simulate tags
+		memset(tags, 0, sizeof(tags));
+		const char* pTags = kv->GetString("Tags");
+
+		if (!pTags) {
+			strcpy(tags, "66tick");
+		} else
+			strcpy(tags, pTags);
+
+		if (strstr(pchRule, "cssdm"))
+			AppendTag(tags, "deathmatch");
+
+		if ((strstr(pchRule, "zr") || strstr(pchRule, "zombie")))
+			AppendTag(tags, "zombiemod");
+
+		if (strstr(pchRule, "quickdefuse") ||
+			strstr(pchRule, "revival") ||
+			strstr(pchRule, "c4_timer"))
+		{
+			AppendTag(tags, "public");
+		}
+
+		if (strstr(pchRule, "infinitejumping"))
+			AppendTag(tags, "autobhop");
+
+		if (strlen(tags) > 1)
+			kv->SetString("Tags", tags);
+
+		// Next, add anticheat
+		if (!strcmp(pchRule, "kac_version")) {
+			kv->SetString("SecureName", "KAC");
+		}
+		else if (!strcmp(pchRule, "smac_version")) {
+			kv->SetString("SecureName", "SMAC");
+		}
+		else if (!strcmp(pchRule, "SMAC_Ultr@_version")) {
+			kv->SetString("SecureName", "SMAC Ultr@");
+		}
+		else if (!strcmp(pchRule, "clientmod_private")) {
+			if (!strcmp(pchValue, "1"))
+				kv->SetString("SecureName", "ClientMod");
+		}
+	
 	}
 }
 
@@ -904,7 +956,7 @@ void CBaseGamesPage::RulesResponded(netadr_t& address, const char* pchRule, cons
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::RulesFailedToRespond()
 {
-
+	std::lock_guard<std::mutex> lock(g_RulesMutex);
 }
 
 //-----------------------------------------------------------------------------
@@ -912,30 +964,7 @@ void CBaseGamesPage::RulesFailedToRespond()
 //-----------------------------------------------------------------------------
 void CBaseGamesPage::RulesRefreshComplete()
 {
-	m_nRulesRefreshed++;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: runs every frame
-//-----------------------------------------------------------------------------
-void CBaseGamesPage::OnTick()
-{
-	BaseClass::OnTick();
-
-	while (m_nActiveRuleQueries < MAX_ACTIVE_RULES &&
-		m_vecPendingRules.Count() > 0)
-	{
-		netadr_t adr = m_vecPendingRules[0];
-
-		m_vecPendingRules.Remove(0);
-
-		g_pServersInfo->ServerRules(
-			adr.GetIPHostByteOrder(),
-			adr.GetPort(),
-			this);
-
-		++m_nActiveRuleQueries;
-	}
+	std::lock_guard<std::mutex> lock(g_RulesMutex);
 }
 
 //-----------------------------------------------------------------------------
@@ -1710,7 +1739,6 @@ void CBaseGamesPage::StartRefresh()
 	int nFilters = GetServerFilters( &pFilters );
 
 	m_vecServers.SetCount(0);
-	m_nRulesRefreshed = 0;
 
 	// Servers info: request server list
 	switch ( m_eMatchMakingType )
@@ -1809,16 +1837,6 @@ void CBaseGamesPage::RefreshComplete( EMasterServerResponse response )
 	OnItemSelected();
 
 	ServerBrowserDialog().UpdateStatusText("");
-
-	for (int i = 0; i < m_vecServers.Count(); i++)
-	{
-		netadr_t adr = m_vecServers[i].m_NetAdr;
-		if (m_RulesQueued.Find(adr) == m_RulesQueued.InvalidIndex())
-		{
-			m_RulesQueued.Insert(adr, true);
-			m_vecPendingRules.AddToTail(adr);
-		}
-	}
 }
 
 //-----------------------------------------------------------------------------

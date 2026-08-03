@@ -13,7 +13,6 @@
 
 #include "socket.h"
 #include "utlmap.h"
-#include "tslist.h"
 
 #pragma pack(push, 1)
 // Public server query structure

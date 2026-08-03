@@ -25,19 +25,19 @@ static char masterServers[][37] =
 	"91.218.230.217:27011", // reserved
 };
 
-//
-// Purpose: used internally in engine,
-// returns how many master servers we have in the list
-//
+/*
+ * Purpose: used internally in engine,
+ * returns how many master servers we have in the list
+*/
 DLL_EXPORT int GetNumMasterServers()
 {
 	return _ARRAYSIZE(masterServers);
 }
 
-//
-// Purpose: used internally in engine,
-// get master server address at nServer
-//
+/*
+ * Purpose: used internally in engine,
+ * get master server address at nServer
+*/
 DLL_EXPORT int GetMasterServer(int nServer, char* szIpAddrPort, int nLen)
 {
 	if (!masterServers[nServer])
@@ -48,30 +48,40 @@ DLL_EXPORT int GetMasterServer(int nServer, char* szIpAddrPort, int nLen)
 	return 0;
 }
 
+static ConVar sb_serversinfo_multithreading("sb_serversinfo_multithreading", "1", FCVAR_ARCHIVE,
+	"Enable multithreading (fixes socket bugs & memory leaks)", CServersInfo::MultiThreadingChangeCallback);
+
+static ConVar sb_serversinfo_threads("sb_serversinfo_threads", "3", FCVAR_ARCHIVE,
+	"Maximum serversinfo threads (2 or higher only if multithreading is enabled)", 1, 1, 3, 3,
+	CServersInfo::ThreadCountChangeCallback);
+
 // This is set and used by RequestServerList and ProcessServerList
 static netadr_t gLastAdr;
 
-void CServersInfo::Thread(CServersInfo* pthis)
+void CServersInfo::Thread(int* pThreadNum)
 {
-	if (!pthis)
+	if (!g_pServersInfo)
 		return;
 
-	DevMsg("ServersInfo receive thread started.\n");
+	int threadNum = (int)pThreadNum;
 
-	while (pthis->m_bWorking)
+	DevMsg("ServersInfo thread %i started.\n", threadNum + 1);
+
+	while (g_pServersInfo->m_bWorking)
 	{
-		if (!pthis->m_bInitialized)
+		if (!g_pServersInfo->m_bInitialized)
 			break;
 
 		Sleep(THREAD_SLEEP_INTERVAL);
-		pthis->RunFrame();
+		g_pServersInfo->RunFrame(threadNum);
 	}
 
-	Msg("ServersInfo receive thread shutting down.\n");
+	Msg("ServersInfo thread %i shutting down.\n", threadNum + 1);
 
 	return;
 }
- 
+
+/* CONSTRUCTOR */
 CServersInfo::CServersInfo()
 {
 	m_bInitialized = false;
@@ -89,6 +99,7 @@ CServersInfo::CServersInfo()
 	m_pLanServerList = new CServerList(nullptr);
 }
 
+/* DESTRUCTOR */
 CServersInfo::~CServersInfo()
 {
 	Shutdown();
@@ -102,7 +113,9 @@ CServersInfo::~CServersInfo()
 	delete m_pLanServerList;
 }
 
-// Do some things like parsing masterservers.vdf (do not call in constructor!)
+/*
+ * Purpose: Do some things like parsing masterservers.vdf
+*/
 void CServersInfo::Initialize() {
 	if (m_bInitialized)
 		return;
@@ -110,17 +123,16 @@ void CServersInfo::Initialize() {
 	m_bInitialized = true;
 	m_bWorking = true;
 
-	// create our thread
-	m_hThread = (ThreadHandle_t)
-		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Thread, this, 0, 0);
+	// create our threads
+	CreateAllThreads();
 
 	m_pMasterSocket->AddHandler(this);
-	//m_pQuerySocket->AddHandler(m_pQueryHandler);
 
 	// load masters from config file
 	KeyValues* kv = new KeyValues("MasterServers");
 
 	CUtlStringList masterServerNames;
+	m_vecMasterAddresses.RemoveAll();
 
 	if (kv->LoadFromFile(g_pFullFileSystem, "masterservers.vdf", "CONFIG"))
 	{
@@ -164,49 +176,98 @@ void CServersInfo::Initialize() {
 	}
 }
 
-// Shutdown...
+/*
+ * Purpose: Shutdown
+*/
 void CServersInfo::Shutdown() {
 	if (!m_bInitialized)
 		return;
 
+	m_pMasterSocket->RemoveHandler(this);
 	m_bInitialized = false;
 	m_bWorking = false;
 
-	WaitForSingleObject(m_hThread, INFINITE);
+	// Wait until all threads have finished
+	WaitForMultipleObjects(m_nThreadCount, (HANDLE*)m_hThreads, TRUE, INFINITE);
 
-	CloseHandle(m_hThread);
-	m_hThread = nullptr;
-}
-
-// Runs every frame
-void CServersInfo::RunFrame()
-{
-	// This needs to be runned before refresh check!
-	m_pServerCommunication->RunFrame();
-
-	if (!m_bRefreshing)
-		return;
-
-	m_pMasterSocket->Frame();
-
-	if (m_pCurrentList)
-		m_pCurrentList->RunFrame();
-
-	if (m_flStartRequestTime < Plat_FloatTime() - LIST_REFRESH_TIMEOUT) {
-		if (m_pCurrentList)
-		{
-			if (m_pCurrentList->ServerCount() < 1)
-				if (m_pCurrentList->m_pResponseTarget)
-					m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eNoServersListedOnMasterServer);
-				else;
-			else
-				m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eServerResponded);
-		}
-		StopRefresh();
+	// Clean up handles
+	for (int i = 0; i < m_nThreadCount; ++i) {
+		CloseHandle(m_hThreads[i]);
 	}
 }
 
-// Request Server List from master server
+/*
+ * Purpose: RunFrame
+*/
+void CServersInfo::RunFrame(int threadNum)
+{
+	if (threadNum == 0 && m_nThreadCount > 1) {
+		m_pServerCommunication->RunFrame();
+		return;
+	}
+
+	if (threadNum == 1 && m_nThreadCount > 1 && m_nThreadCount > 2) {
+		m_pMasterSocket->Frame();
+		return;
+	}
+	else if (threadNum == 2 || m_nThreadCount == 2)
+	{
+		if (!m_bRefreshing)
+			return;
+
+		if (m_pCurrentList)
+			m_pCurrentList->RunFrame();
+
+		float timeout = ((m_pCurrentList == m_pMainList) ?
+			MAIN_LIST_REFRESH_TIMEOUT : LIST_REFRESH_TIMEOUT);
+
+		if (m_flStartRequestTime < Plat_FloatTime() - timeout) {
+			if (m_pCurrentList)
+			{
+				if (m_pCurrentList->ServerCount() < 1)
+					if (m_pCurrentList->m_pResponseTarget)
+						m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eNoServersListedOnMasterServer);
+					else;
+				else
+					m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eServerResponded);
+			}
+			StopRefresh();
+		}
+	}
+
+	if (m_nThreadCount == 1)
+	{
+		m_pServerCommunication->RunFrame();
+
+		m_pMasterSocket->Frame();
+
+		if (!m_bRefreshing)
+			return;
+
+		if (m_pCurrentList)
+			m_pCurrentList->RunFrame();
+
+		float timeout = ((m_pCurrentList == m_pMainList) ?
+			MAIN_LIST_REFRESH_TIMEOUT : LIST_REFRESH_TIMEOUT);
+
+		if (m_flStartRequestTime < Plat_FloatTime() - timeout) {
+			if (m_pCurrentList)
+			{
+				if (m_pCurrentList->ServerCount() < 1)
+					if (m_pCurrentList->m_pResponseTarget)
+						m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eNoServersListedOnMasterServer);
+					else;
+				else
+					m_pCurrentList->m_pResponseTarget->RefreshComplete(k_eServerResponded);
+			}
+			StopRefresh();
+		}
+	}
+}
+
+/*
+ * Purpose: Request server list from the master server
+*/
 void CServersInfo::RequestInternetServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
@@ -226,7 +287,9 @@ void CServersInfo::RequestInternetServerList(const char* gamedir, IServerRefresh
 	}
 }
 
-// Request LAN Server List
+/*
+ * Purpose: Request LAN Server List
+*/
 void CServersInfo::RequestLANServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
@@ -252,7 +315,9 @@ void CServersInfo::RequestLANServerList(const char* gamedir, IServerRefreshRespo
 	}
 }
 
-// Request Favorites List
+/*
+ * Purpose: Request favorites list
+*/
 void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
@@ -269,7 +334,9 @@ void CServersInfo::RequestFavoritesServerList(const char* gamedir, IServerRefres
 	m_pFavoritesList->StartRefresh();
 }
 
-// Request History List
+/*
+ * Purpose: Request history list
+*/
 void CServersInfo::RequestHistoryServerList(const char* gamedir, IServerRefreshResponse* response) {
 	if (!response || !gamedir)
 		return;
@@ -286,7 +353,9 @@ void CServersInfo::RequestHistoryServerList(const char* gamedir, IServerRefreshR
 	m_pHistoryList->StartRefresh();
 }
 
-// Stop refreshing current list
+/*
+ * Purpose: Stop refreshing current list
+*/
 void CServersInfo::StopRefresh() {
 	if (!m_bRefreshing)
 		return;
@@ -340,20 +409,101 @@ void CServersInfo::RemoveHistoryServer(uint32 unIP, uint16 usPort) {
 	m_pHistoryList->RemoveServer(id);
 }
 
-// Query info about single server (TODO!)
+/*
+ * Purpose: Query info about a single server
+*/
 void CServersInfo::PingServer(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
 	int handle = m_pServerCommunication->QueryServerInfo(netadr_t(unIP, usPort), response);
 }
 
+/*
+ * Purpose: Query information about players on this server
+*/
 void CServersInfo::PlayerDetails(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
 	int handle = m_pServerCommunication->QueryPlayerDetails(netadr_t(unIP, usPort), response);
 }
 
+/*
+ * Purpose: Query server rules
+*/
 void CServersInfo::ServerRules(uint32 unIP, uint16 usPort, IServerQueryResponse* response) {
 	int handle = m_pServerCommunication->QueryServerRules(netadr_t(unIP, usPort), response);
 }
-// Internal functions //
 
+/*
+ * MultiThreading change callback
+*/
+void CServersInfo::MultiThreadingChangeCallback(
+	IConVar* pConVar, const char* pOldValue, float flOldValue) {
+
+	if (!g_pServersInfo)
+		return;
+
+	if (sb_serversinfo_threads.GetInt() < 2)
+		return;
+
+	ConVarRef var(pConVar);
+
+	if (atoi(pOldValue) == var.GetInt())
+		return;
+
+	g_pServersInfo->Shutdown();
+	g_pServersInfo->Initialize();
+}
+
+/*
+ * ThreadCount change callback
+*/
+void CServersInfo::ThreadCountChangeCallback(
+	IConVar* pConVar, const char* pOldValue, float flOldValue) {
+
+	if (!g_pServersInfo)
+		return;
+
+	ConVarRef var(pConVar);
+
+	if (!sb_serversinfo_multithreading.GetBool())
+	{
+		var.SetValue(1);
+		return;
+	}
+
+	if (atoi(pOldValue) == var.GetInt())
+		return;
+
+	g_pServersInfo->Shutdown();
+	g_pServersInfo->Initialize();
+}
+
+/*
+ * Helper function that creates all threads
+*/
+void CServersInfo::CreateAllThreads()
+{
+	bool enableMultiThreading = sb_serversinfo_multithreading.GetBool();
+	m_nThreadCount = sb_serversinfo_threads.GetInt();
+
+	if (enableMultiThreading && m_nThreadCount > 1)
+	{
+		for (int i = 0; i < m_nThreadCount; i++)
+		{
+			m_hThreads[i] = (ThreadHandle_t)
+				CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Thread, (void*)i, 0, 0);
+		}
+
+		return;
+	}
+
+	m_nThreadCount = 1;
+	int id = 0;
+
+	m_hThreads[0] = (ThreadHandle_t)
+		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Thread, (void*)0, 0, 0);
+}
+
+/*
+ * Add master server to the master list
+*/
 void CServersInfo::AddMasterServer(const netadr_t& adr) {
 	if (!adr.IsValid() || !adr.IsBaseAdrValid())
 		return;
@@ -369,6 +519,9 @@ void CServersInfo::AddMasterServer(const netadr_t& adr) {
 	m_vecMasterAddresses.AddToTail(adr);
 }
 
+/*
+ * Add master server to the master list
+*/
 void CServersInfo::AddMasterServers(const CUtlVector<netadr_t>& vec) {
 
 	FOR_EACH_VEC(vec, i)
@@ -380,7 +533,9 @@ void CServersInfo::AddMasterServers(const CUtlVector<netadr_t>& vec) {
 	}
 }
 
-// Use default master addresses
+/*
+ * Use default master servers
+*/
 void CServersInfo::UseDefaultMasters() 
 {
 	netadr_t adr;
@@ -398,11 +553,10 @@ void CServersInfo::UseDefaultMasters()
 	}
 }
 
-// Request server list from masterserver
+/*
+ * Request server list from master server
+*/
 void CServersInfo::RequestServerList(const netadr_t& adr) {
-	if (!m_bRefreshing)
-		return;
-
 	// reset request time
 	m_flStartRequestTime = Plat_FloatTime();
 
@@ -421,8 +575,11 @@ void CServersInfo::RequestServerList(const netadr_t& adr) {
 	m_pMasterSocket->Send(adr, msg);
 }
 
-// Process server list
-void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg) {
+/*
+ * Process server list
+*/
+void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg)
+{
 	if (!m_bRefreshing)
 		return;
 
@@ -431,24 +588,25 @@ void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg) {
 
 	int i = 0;
 
-	while (i < msg.m_nDataBytes)
+	while (i < msg.m_nDataBytes) 
 	{
 		serveritem_t server{};
 		server.m_NetAdr = netadr_t(unIP, usPort);
 
-		// Add this server to server list
+		// Add this server to server list 
 		unsigned id = m_pMainList->AddNewServer(server);
-		// Add to refresh list
+
+		// Add to refresh list 
 		m_pMainList->AddServerToRefreshList(id);
 
-		// Next ip & port
+		// Next ip & port 
 		unIP = ntohl(msg.ReadLong());
 		usPort = ntohs(msg.ReadWord());
 
-		if (!msg.IsOverflowed()) {
+		if (!msg.IsOverflowed())
+		{
 			gLastAdr.SetIPAndPort(unIP, usPort);
 		}
-
 		i += 6;
 	}
 
@@ -457,12 +615,13 @@ void CServersInfo::ProcessServerList(const netadr_t& from, bf_read& msg) {
 		RequestServerList(from);
 	}
 
-	// Start Refreshing the list
+	// Start Refreshing the list 
 	m_pMainList->StartRefresh();
-
 }
 
-// CMsgHandler
+/*
+ * CMsgHandler
+*/
 bool CServersInfo::Process(const netadr_t& from, bf_read& msg) {
 
 	char c = msg.ReadByte();
