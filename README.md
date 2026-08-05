@@ -1,6 +1,8 @@
 ## CSSv34 Engine
 
-### MOVING TO NEW ENGINE, THIS BRANCH IS OUTDATED!!!
+### MOVING TO NEW ENGINE, THIS REPOSITORY IS OUTDATED
+### PLEASE HEAD TO [cssv34-client](https://github.com/sl1mshady-cs/cssv34-client)
+
 This project is aimed to improve the leaked Source 2007 code, to make it more stable and to make it compatible with v34 servers.
 
 #### Sources:
