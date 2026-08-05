@@ -230,7 +230,7 @@ static ConVar s_cl_class("cl_class", "default", FCVAR_USERINFO|FCVAR_ARCHIVE, "D
 
 // ClientMod API
 static ConVar clientmod_major_version("~clientmod", "3.0", FCVAR_USERINFO | FCVAR_DEVELOPMENTONLY);
-static ConVar clientmod_version("_client_version", "3.0.1.1837", FCVAR_USERINFO | FCVAR_DEVELOPMENTONLY);
+static ConVar clientmod_version("_client_version", "3.0.1.1943", FCVAR_USERINFO | FCVAR_DEVELOPMENTONLY);
 static ConVar clientmod_connectmethod("_connectmethod", "8", FCVAR_USERINFO | FCVAR_DEVELOPMENTONLY);
 
 // Physics system

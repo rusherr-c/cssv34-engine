@@ -1287,6 +1287,10 @@ const char *GetUserIDString( const USERID_t& id )
 
 	idstr[ 0 ] = 0;
 
+	// new id implementation: [letter:1:W]
+	CSteamID newID;
+	newID.SetFromSteam2((TSteamGlobalUserID*)&id.uid.steamid, k_EUniverseDev);
+	newID.Render();
 	switch ( id.idtype )
 	{
 	case IDTYPE_STEAM:
@@ -1294,20 +1298,21 @@ const char *GetUserIDString( const USERID_t& id )
 			TSteamGlobalUserID nullID;
 			Q_memset( &nullID, 0, sizeof( TSteamGlobalUserID ) );
 
-			if ( Steam3Server().BLanOnly() && !Q_memcmp( &id.uid.steamid, &nullID, sizeof( TSteamGlobalUserID ) ) ) 
+			if ( Steam3Server().BLanOnly() && !V_memcmp( &id.uid.steamid, &nullID, sizeof( TSteamGlobalUserID ) ) ) 
 			{
 				strcpy( idstr, "STEAM_ID_LAN" );
 			}
-			else if ( !Q_memcmp( &id.uid.steamid, &nullID, sizeof( TSteamGlobalUserID ) ))
+			else if ( !V_memcmp( &id.uid.steamid, &nullID, sizeof( TSteamGlobalUserID ) ))
 			{
 				strcpy( idstr, "STEAM_ID_PENDING" );
 			}
 			else
 			{			
-				Q_snprintf( idstr, sizeof( idstr ) - 1, "STEAM_%u:%u:%u", (SteamInstanceID_t)id.uid.steamid.m_SteamInstanceID, 
-													(unsigned int)((SteamLocalUserID_t)id.uid.steamid.m_SteamLocalUserID.Split.High32bits), 
-													(unsigned int)((SteamLocalUserID_t)id.uid.steamid.m_SteamLocalUserID.Split.Low32bits ));			
-				idstr[ sizeof( idstr ) - 1 ] = '\0';
+				//V_snprintf( idstr, sizeof( idstr ) - 1, "STEAM_%u:%u:%u", (SteamInstanceID_t)id.uid.steamid.m_SteamInstanceID, 
+				//									(unsigned int)((SteamLocalUserID_t)id.uid.steamid.m_SteamLocalUserID.Split.High32bits), 
+				//									(unsigned int)((SteamLocalUserID_t)id.uid.steamid.m_SteamLocalUserID.Split.Low32bits ));			
+				//idstr[sizeof(idstr) - 1] = '\0';
+				V_sprintf_safe(idstr, "%s", newID.Render());
 			}
 		}
 		break;		

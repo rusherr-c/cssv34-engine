@@ -65,6 +65,19 @@ extern IXboxSystem *g_pXboxSystem;
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+#define STATUS_COLUMN_LENGTH_LINEPREFIX	1
+#define STATUS_COLUMN_LENGTH_USERID		6
+#define STATUS_COLUMN_LENGTH_USERID_STR	"6"
+#define STATUS_COLUMN_LENGTH_NAME		19
+#define STATUS_COLUMN_LENGTH_STEAMID	19
+#define STATUS_COLUMN_LENGTH_TIME		9
+#define STATUS_COLUMN_LENGTH_PING		4
+#define STATUS_COLUMN_LENGTH_PING_STR	"4"
+#define STATUS_COLUMN_LENGTH_LOSS		4
+#define STATUS_COLUMN_LENGTH_LOSS_STR	"4"
+#define STATUS_COLUMN_LENGTH_STATE		6
+#define STATUS_COLUMN_LENGTH_ADDR		21
+
 #define STEAM_PREFIX "STEAM_"
 
 #ifndef SWDS
@@ -82,6 +95,46 @@ ConVar host_map( "host_map", "", 0, "Current map name." );
 
 ConVar voice_recordtofile("voice_recordtofile", "0", 0, "Record mic data and decompressed voice data into 'voice_micdata.wav' and 'voice_decompressed.wav'");
 ConVar voice_inputfromfile("voice_inputfromfile", "0", 0, "Get voice input from 'voice_input.wav' rather than from the microphone.");
+
+class CStatusLineBuilder
+{
+public:
+	CStatusLineBuilder() { Reset(); }
+	void Reset() { m_curPosition = 0; m_szLine[0] = '\0'; }
+	void AddColumnText(const char* pszText, unsigned int columnWidth)
+	{
+		size_t len = strlen(m_szLine);
+
+		if (m_curPosition > len)
+		{
+			for (size_t i = len; i < m_curPosition; i++)
+			{
+				m_szLine[i] = ' ';
+			}
+			m_szLine[m_curPosition] = '\0';
+		}
+		else if (len != 0)
+		{
+			// There is always at least one space between columns.
+			m_szLine[len] = ' ';
+			m_szLine[len + 1] = '\0';
+		}
+
+		V_strncat(m_szLine, pszText, sizeof(m_szLine));
+		m_curPosition += columnWidth + 1;
+	}
+
+	void InsertEmptyColumn(unsigned int columnWidth)
+	{
+		m_curPosition += columnWidth + 1;
+	}
+
+	const char* GetLine() { return m_szLine; }
+
+private:
+	size_t m_curPosition;
+	char m_szLine[512];
+};
 
 // Globals
 int	gHostSpawnCount = 0;
@@ -214,33 +267,37 @@ void Host_Status_PrintClient( IClient *client, bool bShowAddress, void (*print) 
 	INetChannelInfo *nci = client->GetNetChannel();
 
 	const char *state = "challenging";
-
 	if ( client->IsActive() )
 		state = "active";
 	else if ( client->IsSpawned() )
 		state = "spawning";
 	else if ( client->IsConnected() )
 		state = "connecting";
-	
+
+	CStatusLineBuilder builder;
+	builder.AddColumnText( "#", STATUS_COLUMN_LENGTH_LINEPREFIX );
+	builder.AddColumnText( va( "%" STATUS_COLUMN_LENGTH_USERID_STR "i", client->GetUserID() ), STATUS_COLUMN_LENGTH_USERID );
+	builder.AddColumnText( va( "\"%s\"", client->GetClientName() ), STATUS_COLUMN_LENGTH_NAME );
+	builder.AddColumnText( client->GetNetworkIDString(), STATUS_COLUMN_LENGTH_STEAMID );
+
 	if ( nci != NULL )
 	{
-		print( "# %2i \"%s\" %s %s %i %i %s", 
-			client->GetUserID(), client->GetClientName(), client->GetNetworkIDString(), COM_FormatSeconds( nci->GetTimeConnected() ),
-			(int)(1000.0f*nci->GetAvgLatency( FLOW_OUTGOING )), (int)(100.0f*nci->GetAvgLoss(FLOW_INCOMING)), state );
-
-		if ( bShowAddress ) 
-		{
-			print( " %s", nci->GetAddress() );
-		}
+		builder.AddColumnText( COM_FormatSeconds( nci->GetTimeConnected() ), STATUS_COLUMN_LENGTH_TIME );
+		builder.AddColumnText( va( "%" STATUS_COLUMN_LENGTH_PING_STR "i", (int)(1000.0f*nci->GetAvgLatency( FLOW_OUTGOING )) ), STATUS_COLUMN_LENGTH_PING );
+		builder.AddColumnText( va( "%" STATUS_COLUMN_LENGTH_LOSS_STR "i", (int)(100.0f*nci->GetAvgLoss(FLOW_INCOMING)) ), STATUS_COLUMN_LENGTH_LOSS );
+		builder.AddColumnText( state, STATUS_COLUMN_LENGTH_STATE );
+		if ( bShowAddress )
+			builder.AddColumnText( nci->GetAddress(), STATUS_COLUMN_LENGTH_ADDR );
 	}
 	else
 	{
-		print( "#%2i \"%s\" %s %s", 
-			client->GetUserID(), client->GetClientName(), client->GetNetworkIDString(), state );
+		builder.InsertEmptyColumn( STATUS_COLUMN_LENGTH_TIME );
+		builder.InsertEmptyColumn( STATUS_COLUMN_LENGTH_PING );
+		builder.InsertEmptyColumn( STATUS_COLUMN_LENGTH_LOSS );
+		builder.AddColumnText( state, STATUS_COLUMN_LENGTH_STATE );
 	}
-	
-	print( "\n" );
 
+	print( "%s\n", builder.GetLine() );
 }
 
 void Host_Client_Printf(const char *fmt, ...)
@@ -255,27 +312,41 @@ void Host_Client_Printf(const char *fmt, ...)
 	host_client->ClientPrintf( "%s", string );
 }
 
+#define LIMIT_PER_CLIENT_COMMAND_EXECUTION_ONCE_PER_INTERVAL(seconds) \
+	{ \
+		static float g_flLastTime__Limit[ABSOLUTE_PLAYER_LIMIT] = { 0.0f }; /* we don't have access to any of the three MAX_PLAYERS #define's here unfortunately */ \
+		int playerindex = cmd_clientslot; \
+		if ( playerindex >= 0 && playerindex < (ARRAYSIZE(g_flLastTime__Limit)) && realtime - g_flLastTime__Limit[playerindex] > (seconds) ) \
+		{ \
+			g_flLastTime__Limit[playerindex] = realtime; \
+		} \
+		else \
+		{ \
+			return; \
+		} \
+	}
+
 //-----------------------------------------------------------------------------
 // Host_Status_f
 //-----------------------------------------------------------------------------
-CON_COMMAND( status, "Display map and connection status." )
+CON_COMMAND(status, "Display map and connection status.")
 {
-	IClient	*client;
+	IClient* client;
 	int j;
-	void (*print) (const char *fmt, ...);
+	void (*print) (const char* fmt, ...);
 
 #if defined( _X360 )
 	Vector org;
 	QAngle ang;
-	const char *pName;
+	const char* pName;
 
-	if ( cl.IsActive() )
+	if (cl.IsActive())
 	{
 		pName = cl.m_szLevelNameShort;
 		org = MainViewOrigin();
-		VectorAngles( MainViewForward(), ang );
-		IClientEntity *localPlayer = entitylist->GetClientEntity( cl.m_nPlayerSlot + 1 );
-		if ( localPlayer )
+		VectorAngles(MainViewForward(), ang);
+		IClientEntity* localPlayer = entitylist->GetClientEntity(cl.m_nPlayerSlot + 1);
+		if (localPlayer)
 		{
 			org = localPlayer->GetAbsOrigin();
 		}
@@ -292,40 +363,40 @@ CON_COMMAND( status, "Display map and connection status." )
 	mapInfo.position[0] = org[0];
 	mapInfo.position[1] = org[1];
 	mapInfo.position[2] = org[2];
-	mapInfo.angle[0]    = ang[0];
-	mapInfo.angle[1]    = ang[1];
-	mapInfo.angle[2]    = ang[2];
-	mapInfo.build       = build_number();
-	mapInfo.skill       = skill.GetInt();
+	mapInfo.angle[0] = ang[0];
+	mapInfo.angle[1] = ang[1];
+	mapInfo.angle[2] = ang[2];
+	mapInfo.build = build_number();
+	mapInfo.skill = skill.GetInt();
 
 	// generate the qualified path where .sav files are expected to be written
 	char savePath[MAX_PATH];
-	V_snprintf( savePath, sizeof( savePath ), "%s", saverestore->GetSaveDir() );
-	V_StripTrailingSlash( savePath );
-	g_pFileSystem->RelativePathToFullPath( savePath, "MOD", mapInfo.savePath, sizeof( mapInfo.savePath ) );
-	V_FixSlashes( mapInfo.savePath );
+	V_snprintf(savePath, sizeof(savePath), "%s", saverestore->GetSaveDir());
+	V_StripTrailingSlash(savePath);
+	g_pFileSystem->RelativePathToFullPath(savePath, "MOD", mapInfo.savePath, sizeof(mapInfo.savePath));
+	V_FixSlashes(mapInfo.savePath);
 
-	if ( pName[0] )
+	if (pName[0])
 	{
 		// generate the qualified path from where the map was loaded
 		char mapPath[MAX_PATH];
-		Q_snprintf( mapPath, sizeof( mapPath ), "maps/%s.360.bsp", pName );
-		g_pFileSystem->GetLocalPath( mapPath, mapInfo.mapPath, sizeof( mapInfo.mapPath ) );
-		Q_FixSlashes( mapInfo.mapPath );
+		Q_snprintf(mapPath, sizeof(mapPath), "maps/%s.360.bsp", pName);
+		g_pFileSystem->GetLocalPath(mapPath, mapInfo.mapPath, sizeof(mapInfo.mapPath));
+		Q_FixSlashes(mapInfo.mapPath);
 	}
 	else
 	{
 		mapInfo.mapPath[0] = '\0';
 	}
 
-	XBX_rMapInfo( &mapInfo );
+	XBX_rMapInfo(&mapInfo);
 #endif
 
-	if ( cmd_source == src_command )
+	if (cmd_source == src_command)
 	{
-		if ( !sv.IsActive() )
+		if (!sv.IsActive())
 		{
-			Cmd_ForwardToServer( args );
+			Cmd_ForwardToServer(args);
 			return;
 		}
 		print = ConMsg;
@@ -333,79 +404,135 @@ CON_COMMAND( status, "Display map and connection status." )
 	else
 	{
 		print = Host_Client_Printf;
+
+		// limit this to once per 5 seconds
+		LIMIT_PER_CLIENT_COMMAND_EXECUTION_ONCE_PER_INTERVAL(5.0);
 	}
 
 	// ============================================================
 	// Server status information.
-	print( "hostname: %s\n", host_name.GetString() );
+	print("hostname: %s\n", host_name.GetString());
 
-	const char *pchSecureReasonString = "";
+	const char* pchSecureReasonString = "";
+	const char* pchUniverse = "";
 	bool bGSSecure = Steam3Server().BSecure();
-	if ( !bGSSecure && Steam3Server().BWantsSecure() )
+	if (!bGSSecure && Steam3Server().BWantsSecure())
 	{
-		if ( Steam3Server().BLoggedOn() )
+		if (Steam3Server().BLoggedOn())
 		{
-			pchSecureReasonString = "(secure mode enabled, connected to Steam3)";
+			pchSecureReasonString = " (secure mode enabled, connected to Steam3)";
 		}
 		else
 		{
-			pchSecureReasonString = "(secure mode enabled, disconnected from Steam3)";
+			pchSecureReasonString = " (secure mode enabled, disconnected from Steam3)";
 		}
 	}
 
-	print("version : %s/%d %d %s %s\n", GetSteamInfIDVersionInfo().szVersionString , PROTOCOL_VERSION, build_number(), bGSSecure ? "secure" : "insecure", pchSecureReasonString);
-	
-	if ( NET_IsMultiplayer() )
+	pchUniverse = "(" GIT_BRANCH ")";
+
+	print("version : %s/%d %d %s%s%s\n", GetSteamInfIDVersionInfo().szVersionString,
+		PROTOCOL_VERSION, build_number(), bGSSecure ? "secure" : "insecure", pchSecureReasonString, pchUniverse);
+
+	if (NET_IsMultiplayer())
 	{
-		print( "udp/ip  :  %s:%i\n", net_local_adr.ToString(true), sv.GetUDPPort() );
+		print("udp/ip  : %s:%i\n", net_local_adr.ToString(true), sv.GetUDPPort());
+
+		if (!Steam3Server().BLanOnly())
+		{
+			if (Steam3Server().BLoggedOn())
+				print("steamid : %s (%llu)\n", Steam3Server().GetGSSteamID().Render(), Steam3Server().GetGSSteamID().ConvertToUint64());
+			else
+				print("steamid : not logged in\n");
+		}
 	}
 
-	print( "map     : %s at: %d x, %d y, %d z\n", sv.GetMapName(), (int)MainViewOrigin()[0], (int)MainViewOrigin()[1], (int)MainViewOrigin()[2]);
-
-	if ( hltv && hltv->IsActive() )
+	// Check if this game uses server registration, then output status
+	ConVarRef sv_registration_successful("sv_registration_successful", true);
+	if (sv_registration_successful.IsValid())
 	{
-		print( "sourcetv:  port %i, delay %.1fs\n", hltv->GetUDPPort(), hltv->GetDirector()->GetDelay() );
+		CUtlString sExtraInfo;
+		ConVarRef sv_registration_message("sv_registration_message", true);
+		if (sv_registration_message.IsValid())
+		{
+			const char* msg = sv_registration_message.GetString();
+			if (msg && *msg)
+			{
+				sExtraInfo.Format("  (%s)", msg);
+			}
+		}
+
+		if (sv_registration_successful.GetBool())
+		{
+			print("account : logged in%s\n", sExtraInfo.String());
+		}
+		else
+		{
+			print("account : not logged in%s\n", sExtraInfo.String());
+		}
+	}
+
+	print("map     : %s at: %d x, %d y, %d z\n", sv.GetMapName(), (int)MainViewOrigin()[0], (int)MainViewOrigin()[1], (int)MainViewOrigin()[2]);
+	static ConVarRef sv_tags("sv_tags");
+	print("tags    : %s\n", sv_tags.GetString());
+
+	if (hltv && hltv->IsActive())
+	{
+		print("sourcetv:  port %i, delay %.1fs\n", hltv->GetUDPPort(), hltv->GetDirector()->GetDelay());
 	}
 
 	int players = sv.GetNumClients();
+	int nBots = sv.GetNumFakeClients();
+	int nHumans = players - nBots;
 
-	print( "players : %i (%i max)\n\n", players, sv.GetMaxClients() );
+	print("players : %i humans, %i bots (%i max)\n", nHumans, nBots, sv.GetMaxClients());
 	// ============================================================
 
-	// Early exit for this server.
-	if ( args.ArgC() == 2 )
-	{
-		if ( !Q_stricmp( args[1], "short" ) )
-		{
-			for ( j=0 ; j < sv.GetClientCount() ; j++ )
-			{
-				client = sv.GetClient( j );
+	print("edicts  : %d used of %d max\n", sv.num_edicts, sv.max_edicts);
 
-				if ( !client->IsActive() )
+	// Early exit for this server.
+	if (args.ArgC() == 2)
+	{
+		if (!Q_stricmp(args[1], "short"))
+		{
+			for (j = 0; j < sv.GetClientCount(); j++)
+			{
+				client = sv.GetClient(j);
+
+				if (!client->IsActive())
 					continue;
 
-				print( "#%i - %s\n" , j + 1, client->GetClientName() );
+				print("#%i - %s\n", j + 1, client->GetClientName());
 			}
 			return;
 		}
 	}
 
 	// the header for the status rows
-	print( "# userid name uniqueid connected ping loss state" );
+	// print( "# userid %-19s %-19s connected ping loss state%s\n", "name", "uniqueid", cmd_source == src_command ? "  adr" : "" );
+	CStatusLineBuilder header;
+	header.AddColumnText("#", STATUS_COLUMN_LENGTH_LINEPREFIX);
+	header.AddColumnText("userid", STATUS_COLUMN_LENGTH_USERID);
+	header.AddColumnText("name", STATUS_COLUMN_LENGTH_NAME);
+	header.AddColumnText("uniqueid", STATUS_COLUMN_LENGTH_STEAMID);
+	header.AddColumnText("connected", STATUS_COLUMN_LENGTH_TIME);
+	header.AddColumnText("ping", STATUS_COLUMN_LENGTH_PING);
+	header.AddColumnText("loss", STATUS_COLUMN_LENGTH_LOSS);
+	header.AddColumnText("state", STATUS_COLUMN_LENGTH_STATE);
 	if (cmd_source == src_command)
 	{
-		print( " adr" ); 
+		header.AddColumnText("adr", STATUS_COLUMN_LENGTH_ADDR);
 	}
-	print( "\n" );
 
-	for ( j=0 ; j < sv.GetClientCount() ; j++ )
+	print("%s\n", header.GetLine());
+
+	for (j = 0; j < sv.GetClientCount(); j++)
 	{
-		client = sv.GetClient( j );
+		client = sv.GetClient(j);
 
-		if ( !client->IsConnected() )
+		if (!client->IsConnected())
 			continue; // not connected yet, maybe challenging
-		
-		Host_Status_PrintClient( client, (cmd_source == src_command), print );
+
+		Host_Status_PrintClient(client, (cmd_source == src_command), print);
 	}
 }
 

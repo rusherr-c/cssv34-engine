@@ -1,5 +1,6 @@
 ## CSSv34 Engine
 
+### MOVING TO NEW ENGINE, THIS BRANCH IS OUTDATED!!!
 This project is aimed to improve the leaked Source 2007 code, to make it more stable and to make it compatible with v34 servers.
 
 #### Sources:
