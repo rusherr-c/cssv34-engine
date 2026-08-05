@@ -20,6 +20,28 @@ EXPOSE_SINGLE_INTERFACE_GLOBALVAR( CInputSystem, IInputSystem,
 						INPUTSYSTEM_INTERFACE_VERSION, g_InputSystem );
 
 
+#if defined( WIN32 ) && !defined( _X360 )
+typedef BOOL(WINAPI* RegisterRawInputDevices_t)
+(
+	PCRAWINPUTDEVICE pRawInputDevices,
+	UINT uiNumDevices,
+	UINT cbSize
+	);
+
+typedef UINT(WINAPI* GetRawInputData_t)
+(
+	HRAWINPUT hRawInput,
+	UINT uiCommand,
+	LPVOID pData,
+	PUINT pcbSize,
+	UINT cbSizeHeader
+	);
+
+RegisterRawInputDevices_t pfnRegisterRawInputDevices;
+GetRawInputData_t pfnGetRawInputData;
+#endif
+
+
 //-----------------------------------------------------------------------------
 // Constructor, destructor
 //-----------------------------------------------------------------------------
@@ -38,6 +60,7 @@ CInputSystem::CInputSystem()
 	m_PrimaryUserId = INVALID_USER_ID;
 	m_uiMouseWheel = 0;
 	m_bXController = false;
+	m_bRawInputSupported = false;
 	Assert( (MAX_JOYSTICKS + 7) >> 3 << sizeof(unsigned short) ); 
 
 	m_pXInputDLL = NULL;
@@ -49,6 +72,12 @@ CInputSystem::~CInputSystem()
 	{
 		Sys_UnloadModule( m_pXInputDLL );
 		m_pXInputDLL = NULL;
+	}
+
+	if (m_pRawInputDLL)
+	{
+		Sys_UnloadModule(m_pRawInputDLL);
+		m_pRawInputDLL = NULL;
 	}
 }
 
@@ -93,6 +122,18 @@ InitReturnVal_t CInputSystem::Init()
 	{
 		m_bXController = true;
 		joy_xcontroller_found.SetValue( 1 );
+	}
+
+	// Check if this version of windows supports raw mouse input (later than win2k)
+	m_bRawInputSupported = false;
+
+	CSysModule* m_pRawInputDLL = Sys_LoadModule("USER32.dll");
+	if (m_pRawInputDLL)
+	{
+		pfnRegisterRawInputDevices = (RegisterRawInputDevices_t)GetProcAddress((HMODULE)m_pRawInputDLL, "RegisterRawInputDevices");
+		pfnGetRawInputData = (GetRawInputData_t)GetProcAddress((HMODULE)m_pRawInputDLL, "GetRawInputData");
+		if (pfnRegisterRawInputDevices && pfnGetRawInputData)
+			m_bRawInputSupported = true;
 	}
 
 	return INIT_OK; 
@@ -152,6 +193,25 @@ void CInputSystem::AttachToWindow( void* hWnd )
 	m_ChainedWndProc = (WNDPROC)GetWindowLongPtr( (HWND)hWnd, GWLP_WNDPROC );
 	SetWindowLongPtr( (HWND)hWnd, GWLP_WNDPROC, (LONG_PTR)InputSystemWindowProc );
 	m_hAttachedHWnd = (HWND)hWnd;
+
+	// register to read raw mouse input
+
+#if !defined(HID_USAGE_PAGE_GENERIC)
+#define HID_USAGE_PAGE_GENERIC         ((USHORT) 0x01)
+#endif
+#if !defined(HID_USAGE_GENERIC_MOUSE)
+#define HID_USAGE_GENERIC_MOUSE        ((USHORT) 0x02)
+#endif
+
+	if (m_bRawInputSupported)
+	{
+		RAWINPUTDEVICE Rid[1];
+		Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+		Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
+		Rid[0].dwFlags = RIDEV_INPUTSINK;
+		Rid[0].hwndTarget = g_InputSystem.m_hAttachedHWnd; // GetHhWnd;
+		pfnRegisterRawInputDevices(Rid, ARRAYSIZE(Rid), sizeof(Rid[0]));
+	}
 
 	// New window, clear input state
 	ClearInputState();
@@ -223,6 +283,7 @@ void CInputSystem::ResetInputState()
 	ReleaseAllButtons();
 	ZeroAnalogState( 0, ANALOG_CODE_LAST - 1 );
 	memset( m_appXKeys, 0, XUSER_MAX_COUNT * XK_MAX_KEYS * sizeof(appKey_t) );
+	m_mouseRawAccumX = m_mouseRawAccumY = 0;
 }
 
 
@@ -962,6 +1023,26 @@ LRESULT CInputSystem::WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 			UpdateMouseButtonState( nButtonMask );
 		}
  		break;
+#if defined( PLATFORM_WINDOWS_PC )
+	case WM_INPUT:
+	{
+		if (m_bRawInputSupported)
+		{
+			UINT dwSize = 40;
+			static BYTE lpb[40];
+
+			pfnGetRawInputData((HRAWINPUT)lParam, RID_INPUT, lpb, &dwSize, sizeof(RAWINPUTHEADER));
+
+			RAWINPUT* raw = (RAWINPUT*)lpb;
+			if (raw->header.dwType == RIM_TYPEMOUSE)
+			{
+				m_mouseRawAccumX += raw->data.mouse.lLastX;
+				m_mouseRawAccumY += raw->data.mouse.lLastY;
+			}
+		}
+	}
+	break;
+#endif
 	}
 
 	// Can't put this in the case statement, it's not constant
@@ -978,4 +1059,26 @@ LRESULT CInputSystem::WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lP
 	}
 
 	return ChainWindowMessage( hwnd, uMsg, wParam, lParam );
+}
+
+
+bool CInputSystem::GetRawMouseAccumulators(int& accumX, int& accumY)
+{
+#if defined( USE_SDL )
+
+	if (m_pLauncherMgr)
+	{
+		m_pLauncherMgr->GetMouseDelta(accumX, accumY, false);
+		return true;
+	}
+	return false;
+
+#else
+
+	accumX = m_mouseRawAccumX;
+	accumY = m_mouseRawAccumY;
+	m_mouseRawAccumX = m_mouseRawAccumY = 0;
+	return m_bRawInputSupported;
+
+#endif
 }

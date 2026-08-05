@@ -903,6 +903,7 @@ void CBaseGamesPage::RulesResponded(netadr_t& address, const char* pchRule, cons
 		// Add tags
 		if (!strcmp(pchRule, "sv_tags")) {
 			kv->SetString("Tags", pchValue);
+			//return;
 		}
 
 		// Simulate tags
@@ -920,16 +921,6 @@ void CBaseGamesPage::RulesResponded(netadr_t& address, const char* pchRule, cons
 		if ((strstr(pchRule, "zr") || strstr(pchRule, "zombie")))
 			AppendTag(tags, "zombiemod");
 
-		if (strstr(pchRule, "quickdefuse") ||
-			strstr(pchRule, "revival") ||
-			strstr(pchRule, "c4_timer"))
-		{
-			AppendTag(tags, "public");
-		}
-
-		if (strstr(pchRule, "infinitejumping"))
-			AppendTag(tags, "autobhop");
-
 		if (strlen(tags) > 1)
 			kv->SetString("Tags", tags);
 
@@ -943,11 +934,6 @@ void CBaseGamesPage::RulesResponded(netadr_t& address, const char* pchRule, cons
 		else if (!strcmp(pchRule, "SMAC_Ultr@_version")) {
 			kv->SetString("SecureName", "SMAC Ultr@");
 		}
-		else if (!strcmp(pchRule, "clientmod_private")) {
-			if (!strcmp(pchValue, "1"))
-				kv->SetString("SecureName", "ClientMod");
-		}
-	
 	}
 }
 

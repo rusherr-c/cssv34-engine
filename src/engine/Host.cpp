@@ -130,7 +130,7 @@ void CL_SetPagedPoolInfo();
 extern char	*CM_EntityString( void );
 extern ConVar host_map;
 extern ConVar sv_cheats;
-int g_iSteamAppID;
+extern int g_iSteamAppID;
 
 #define OPTIONS_DIR "cfg"
 
@@ -3486,7 +3486,6 @@ void Host_Init( bool bDedicated )
 
 	// Mark DLL as active
 	//	eng->SetNextState( InEditMode() ? IEngine::DLL_PAUSED : IEngine::DLL_ACTIVE );
-	g_iSteamAppID = GetSteamInfIDVersionInfo().AppID;
 
 	// Deal with Gore Settings
 	Host_CheckGore();

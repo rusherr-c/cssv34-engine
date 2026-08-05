@@ -189,6 +189,9 @@ void CSteam3::Activate()
 		m_QueryPort = m_usPort;
 	}*/
 
+	if (!g_iSteamAppID)
+		g_iSteamAppID = 240;
+
 #ifndef NO_STEAM
 	if ( !SteamGameServer_Init( 
 			m_unIP, 

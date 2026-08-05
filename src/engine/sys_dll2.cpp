@@ -84,6 +84,7 @@ IBik *bik = NULL;
 extern CreateInterfaceFn g_ClientFactory;
 #endif
 
+int g_iSteamAppID;
 static SteamInfVersionInfo_t g_SteamInfIDVersionInfo;
 const SteamInfVersionInfo_t& GetSteamInfIDVersionInfo()
 {
@@ -126,7 +127,7 @@ enum eSteamInfoInit
 	eSteamInfo_Partial,
 	eSteamInfo_Initialized
 };
-static eSteamInfoInit Sys_TryInitSteamInfo(void* pvAPI, SteamInfVersionInfo_t& VerInfo, const char* pchMod, const char* pchBaseDir, bool bDedicated)
+static eSteamInfoInit Sys_TryInitSteamInfo( void *pvAPI, SteamInfVersionInfo_t& VerInfo, const char *pchMod, const char *pchBaseDir, bool bDedicated )
 {
 	static eSteamInfoInit initState = eSteamInfo_Uninitialized;
 
@@ -137,115 +138,115 @@ static eSteamInfoInit Sys_TryInitSteamInfo(void* pvAPI, SteamInfVersionInfo_t& V
 	// Initialize with some defaults.
 	VerInfo.ClientVersion = 0;
 	VerInfo.ServerVersion = 0;
-	V_strcpy_safe(VerInfo.szVersionString, "1.0.1.0");
-	V_strcpy_safe(VerInfo.szProductString, "hl2");
+	V_strcpy_safe( VerInfo.szVersionString, "valve" );
+	V_strcpy_safe( VerInfo.szProductString, "1.0.1.0" );
 	VerInfo.AppID = k_uAppIdInvalid;
 	VerInfo.ServerAppID = k_uAppIdInvalid;
 
 	// Filesystem may or may not be up
 	CUtlBuffer infBuf;
 	bool bFoundInf = false;
-	if (g_pFileSystem)
+	if ( g_pFileSystem )
 	{
 		FileHandle_t fh;
-		fh = g_pFileSystem->Open("steam.inf", "rb", "GAME");
-		bFoundInf = fh && g_pFileSystem->ReadToBuffer(fh, infBuf);
+		fh = g_pFileSystem->Open( "steam.inf", "rb", "GAME" );
+		bFoundInf = fh && g_pFileSystem->ReadToBuffer( fh, infBuf );
 	}
 
-	if (!bFoundInf)
+	if ( !bFoundInf )
 	{
 		// We may try to load the steam.inf BEFORE we turn on the filesystem, so use raw filesystem API's here.
-		char szFullPath[MAX_PATH] = { 0 };
-		char szModSteamInfPath[MAX_PATH] = { 0 };
-		V_ComposeFileName(pchMod, "steam.inf", szModSteamInfPath, sizeof(szModSteamInfPath));
-		V_MakeAbsolutePath(szFullPath, sizeof(szFullPath), szModSteamInfPath, pchBaseDir);
+		char szFullPath[ MAX_PATH ] = { 0 };
+		char szModSteamInfPath[ MAX_PATH ] = { 0 };
+		V_ComposeFileName( pchMod, "steam.inf", szModSteamInfPath, sizeof( szModSteamInfPath ) );
+		V_MakeAbsolutePath( szFullPath, sizeof( szFullPath ), szModSteamInfPath, pchBaseDir );
 
 		// Try opening steam.inf
 		FILE* fp;
 		fopen_s(&fp, szFullPath, "rb");
-		if (fp)
+		if ( fp )
 		{
 			// Read steam.inf data.
-			fseek(fp, 0, SEEK_END);
-			size_t bufsize = ftell(fp);
-			fseek(fp, 0, SEEK_SET);
+			fseek( fp, 0, SEEK_END );
+			size_t bufsize = ftell( fp );
+			fseek( fp, 0, SEEK_SET );
 
-			infBuf.EnsureCapacity(bufsize + 1);
+			infBuf.EnsureCapacity( bufsize + 1 );
 
-			size_t iBytesRead = fread(infBuf.Base(), 1, bufsize, fp);
-			((char*)infBuf.Base())[iBytesRead] = 0;
-			infBuf.SeekPut(CUtlBuffer::SEEK_CURRENT, iBytesRead + 1);
-			fclose(fp);
+			size_t iBytesRead = fread( infBuf.Base(), 1, bufsize, fp );
+			((char *)infBuf.Base())[iBytesRead] = 0;
+			infBuf.SeekPut( CUtlBuffer::SEEK_CURRENT, iBytesRead + 1 );
+			fclose( fp );
 
-			bFoundInf = (iBytesRead == bufsize);
+			bFoundInf = ( iBytesRead == bufsize );
 		}
 	}
 
-	if (bFoundInf)
+	if ( bFoundInf )
 	{
-		const char* pbuf = (const char*)infBuf.Base();
-		while (1)
+		const char *pbuf = (const char*)infBuf.Base();
+		while ( 1 )
 		{
-			pbuf = COM_Parse(pbuf);
-			if (!pbuf || !com_token[0])
+			pbuf = COM_Parse( pbuf );
+			if ( !pbuf || !com_token[ 0 ] )
 				break;
 
-			if (!Q_strnicmp(com_token, VERSION_KEY, Q_strlen(VERSION_KEY)))
+			if ( !Q_strnicmp( com_token, VERSION_KEY, Q_strlen( VERSION_KEY ) ) )
 			{
-				V_strcpy_safe(VerInfo.szVersionString, com_token + Q_strlen(VERSION_KEY));
-				VerInfo.ClientVersion = atoi(VerInfo.szVersionString);
+				V_strcpy_safe( VerInfo.szVersionString, com_token + Q_strlen( VERSION_KEY ) );
+				VerInfo.ClientVersion = atoi( VerInfo.szVersionString );
 			}
-			else if (!Q_strnicmp(com_token, PRODUCT_KEY, Q_strlen(PRODUCT_KEY)))
+			else if ( !Q_strnicmp( com_token, PRODUCT_KEY, Q_strlen( PRODUCT_KEY ) ) )
 			{
-				V_strcpy_safe(VerInfo.szProductString, com_token + Q_strlen(PRODUCT_KEY));
+				V_strcpy_safe( VerInfo.szProductString, com_token + Q_strlen( PRODUCT_KEY ) );
 			}
-			else if (!Q_strnicmp(com_token, SERVER_VERSION_KEY, Q_strlen(SERVER_VERSION_KEY)))
+			else if ( !Q_strnicmp( com_token, SERVER_VERSION_KEY, Q_strlen( SERVER_VERSION_KEY ) ) )
 			{
-				VerInfo.ServerVersion = atoi(com_token + Q_strlen(SERVER_VERSION_KEY));
+				VerInfo.ServerVersion = atoi( com_token + Q_strlen( SERVER_VERSION_KEY ) );
 			}
-			else if (!Q_strnicmp(com_token, APPID_KEY, Q_strlen(APPID_KEY)))
+			else if ( !Q_strnicmp( com_token, APPID_KEY, Q_strlen( APPID_KEY ) ) )
 			{
-				VerInfo.AppID = atoi(com_token + Q_strlen(APPID_KEY));
+				VerInfo.AppID = atoi( com_token + Q_strlen( APPID_KEY ) );
 			}
-			else if (!Q_strnicmp(com_token, SERVER_APPID_KEY, Q_strlen(SERVER_APPID_KEY)))
+			else if ( !Q_strnicmp( com_token, SERVER_APPID_KEY, Q_strlen( SERVER_APPID_KEY ) ) )
 			{
-				VerInfo.ServerAppID = atoi(com_token + Q_strlen(SERVER_APPID_KEY));
+				VerInfo.ServerAppID = atoi( com_token + Q_strlen( SERVER_APPID_KEY ) );
 			}
 		}
 
 		// If we found a steam.inf we're as good as we're going to get, but don't tell callers we're fully initialized
 		// if it doesn't at least have an AppID
-		initState = (VerInfo.AppID != k_uAppIdInvalid) ? eSteamInfo_Initialized : eSteamInfo_Partial;
+		initState = ( VerInfo.AppID != k_uAppIdInvalid ) ? eSteamInfo_Initialized : eSteamInfo_Partial;
 	}
-	else if (!bDedicated)
+	else if ( !bDedicated )
 	{
 		// Opening steam.inf failed - try to open gameinfo.txt and read in just SteamAppId from that.
 		// (gameinfo.txt lacks the dedicated server steamid, so we'll just have to live until filesystem init to setup
 		// breakpad there when we hit this case)
-		char szModGameinfoPath[MAX_PATH] = { 0 };
-		char szFullPath[MAX_PATH] = { 0 };
-		V_ComposeFileName(pchMod, "gameinfo.txt", szModGameinfoPath, sizeof(szModGameinfoPath));
-		V_MakeAbsolutePath(szFullPath, sizeof(szFullPath), szModGameinfoPath, pchBaseDir);
+		char szModGameinfoPath[ MAX_PATH ] = { 0 };
+		char szFullPath[ MAX_PATH ] = { 0 };
+		V_ComposeFileName( pchMod, "gameinfo.txt", szModGameinfoPath, sizeof( szModGameinfoPath ) );
+		V_MakeAbsolutePath( szFullPath, sizeof( szFullPath ), szModGameinfoPath, pchBaseDir );
 
 		// Try opening gameinfo.txt
 		FILE* fp;
 		fopen_s(&fp, szFullPath, "rb");
-		if (fp)
+		if( fp )
 		{
-			fseek(fp, 0, SEEK_END);
-			size_t bufsize = ftell(fp);
-			fseek(fp, 0, SEEK_SET);
+			fseek( fp, 0, SEEK_END );
+			size_t bufsize = ftell( fp );
+			fseek( fp, 0, SEEK_SET );
 
-			char* buffer = (char*)_alloca(bufsize + 1);
+			char *buffer = ( char * )_alloca( bufsize + 1 );
 
-			size_t iBytesRead = fread(buffer, 1, bufsize, fp);
-			buffer[iBytesRead] = 0;
-			fclose(fp);
+			size_t iBytesRead = fread( buffer, 1, bufsize, fp );
+			buffer[ iBytesRead ] = 0;
+			fclose( fp );
 
-			KeyValuesAD pkvGameInfo("gameinfo");
-			if (pkvGameInfo->LoadFromBuffer("gameinfo.txt", buffer))
+			KeyValuesAD pkvGameInfo( "gameinfo" );
+			if ( pkvGameInfo->LoadFromBuffer( "gameinfo.txt", buffer ) )
 			{
-				VerInfo.AppID = (AppId_t)pkvGameInfo->GetInt("FileSystem/SteamAppId", k_uAppIdInvalid);
+				VerInfo.AppID = (AppId_t)pkvGameInfo->GetInt( "FileSystem/SteamAppId", k_uAppIdInvalid );
 			}
 		}
 
@@ -253,29 +254,30 @@ static eSteamInfoInit Sys_TryInitSteamInfo(void* pvAPI, SteamInfVersionInfo_t& V
 	}
 
 	// In partial state the ServerAppID might be unknown, but if we found the full steam.inf and it's not set, it shares AppID.
-	if (initState == eSteamInfo_Initialized && VerInfo.ServerAppID == k_uAppIdInvalid)
+	if ( initState == eSteamInfo_Initialized && VerInfo.ServerAppID == k_uAppIdInvalid )
 		VerInfo.ServerAppID = VerInfo.AppID;
 
 #if !defined(_X360)
-	if (VerInfo.AppID)
+	if ( VerInfo.AppID )
 	{
 		// steamclient.dll doesn't know about steam.inf files in mod folder,
 		// it accepts a steam_appid.txt in the root directory if the game is
 		// not started through Steam. So we create one there containing the
 		// current AppID
 		FILE* fh;
-		//fopen_s(&fh, "steam_appid.txt", "wb");
-		if (fh)
+		fopen_s(&fh, "steam_appid.txt", "wb");
+		if ( fh  )
 		{
-			char strAppID[512];
-			sprintf(strAppID, "%u\n", VerInfo.AppID);
-			//fwrite(strAppID, sizeof(strAppID) + 1, 1, fh);
+			char strAppID[32];
+			sprintf(strAppID, "%u", VerInfo.AppID);
+			int len = strnlen(strAppID, 32);
 
-			//fclose(fh);
+			fwrite( strAppID, len, 1, fh );
+			fclose( fh );
 		}
 	}
-
 #endif // !_X360
+
 	return initState;
 }
 
@@ -733,6 +735,8 @@ void CEngineAPI::SetStartupInfo( StartupInfo_t &info )
 			Warning("Failed to find steam.inf or equivalent steam info. May not have proper information to connect to Steam.\n");
 		}
 	}
+
+	g_iSteamAppID = GetSteamInfIDVersionInfo().AppID;
 }
 
 

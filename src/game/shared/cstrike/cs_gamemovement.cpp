@@ -589,8 +589,27 @@ void CCSGameMovement::ReduceTimers( void )
 	BaseClass::ReduceTimers();
 }
 
-ConVar sv_enablebunnyhopping("sv_enablebunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY);
-ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY); // ref: csgo
+void BhopCvarsChangeCallback(IConVar* var, const char* pOldValue, float flOldValue);
+
+ConVar sv_enablebunnyhopping("sv_enablebunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "", BhopCvarsChangeCallback);
+ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "", BhopCvarsChangeCallback); // ref: csgo
+
+ConVar se_autobunnyhopping("se_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_DEVELOPMENTONLY, "", BhopCvarsChangeCallback);
+ConVar se_disablebunnyhopping("se_disablebunnyhopping", "1", FCVAR_REPLICATED | FCVAR_DEVELOPMENTONLY, "", BhopCvarsChangeCallback);
+
+void BhopCvarsChangeCallback(IConVar* var, const char* pOldValue, float flOldValue)
+{
+	ConVarRef ref(var);
+
+	if (!strcmp(var->GetName(), "sv_enablebunnyhopping"))
+		se_disablebunnyhopping.SetValue(!ref.GetBool());
+	else if (!strcmp(var->GetName(), "sv_autobunnyhopping"))
+		se_autobunnyhopping.SetValue(ref.GetBool());
+	else if (!strcmp(var->GetName(), "se_disablebunnyhopping"))
+		sv_enablebunnyhopping.SetValue(!ref.GetBool());
+	else if (!strcmp(var->GetName(), "se_autobunnyhopping"))
+		sv_autobunnyhopping.SetValue(ref.GetBool());
+}
 
 // Only allow bunny jumping up to 1.1x server / player maxspeed setting
 #define BUNNYJUMP_MAX_SPEED_FACTOR 1.4f

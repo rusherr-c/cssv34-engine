@@ -860,9 +860,19 @@ $Project "vaudio_speex"
 	"engine\voice_codecs\speex\vaudio_speex.vpc" [$WIN32]
 }
 
+$Project "vaudio_opus"
+{
+	"engine\voice_codecs\opus\vaudio_opus.vpc" [$WIN32]
+}
+
 $Project "libspeex"
 {
 	"thirdparty\libspeex\libspeex.vpc"
+}
+
+$Project "libopus"
+{
+	"thirdparty\libopus\libopus.vpc"
 }
 
 //$Project "splitskybox"

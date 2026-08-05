@@ -37,6 +37,7 @@ $Project "Dedicated"
 		}
 		$File	"filesystem.cpp"
 		$File	"$SRCDIR\public\filesystem_init.cpp"
+		$File	"$SRCDIR\public\registry.cpp"
 		$File	"$SRCDIR\common\netapi.cpp"
 		$File	"$SRCDIR\common\SteamAppStartup.cpp"
 		$File	"sys_common.cpp"
