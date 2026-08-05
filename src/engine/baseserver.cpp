@@ -1,4 +1,4 @@
-//========= Copyright © 1996-2005, Valve Corporation, All rights reserved. ============//
+ï»¿//========= Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ============//
 //
 // Purpose: 
 //
@@ -29,7 +29,7 @@
 #include "quakedef.h"
 #include "host.h"
 #include "netmessages.h"
-#include "master.h"
+#include "sv_master.h"
 #include "sys.h"
 #include "framesnapshot.h"
 #include "sv_packedentities.h"
@@ -68,15 +68,86 @@
 // machine, not the Steam servers).
 #define MASTER_SERVER_UPDATE_INTERVAL		2.0
 
+// Steam has a matching one in matchmakingtypes.h
+#define MAX_TAG_STRING_LENGTH		128
+
+int SortServerTags(char* const* p1, char* const* p2)
+{
+	return (Q_strcmp(*p1, *p2) > 0);
+}
+
+static void ServerTagsCleanUp(void)
+{
+	CUtlVector<char*> TagList;
+	ConVarRef sv_tags("sv_tags");
+	if (sv_tags.IsValid())
+	{
+		int i;
+		char tmptags[MAX_TAG_STRING_LENGTH];
+		tmptags[0] = '\0';
+
+		V_SplitString(sv_tags.GetString(), ",", TagList);
+
+		// make a pass on the tags to eliminate preceding whitespace and empty tags
+		for (i = 0; i < TagList.Count(); i++)
+		{
+			if (i > 0)
+			{
+				Q_strncat(tmptags, ",", MAX_TAG_STRING_LENGTH);
+			}
+
+			char* pChar = TagList[i];
+			while (*pChar && *pChar == ' ')
+			{
+				pChar++;
+			}
+
+			// make sure we don't have an empty string (all spaces or ,,)
+			if (*pChar)
+			{
+				Q_strncat(tmptags, pChar, MAX_TAG_STRING_LENGTH);
+			}
+		}
+
+		// reset our lists and sort the tags
+		TagList.PurgeAndDeleteElements();
+		V_SplitString(tmptags, ",", TagList);
+		TagList.Sort(SortServerTags);
+		tmptags[0] = '\0';
+
+		// create our new, sorted list of tags
+		for (i = 0; i < TagList.Count(); i++)
+		{
+			if (i > 0)
+			{
+				Q_strncat(tmptags, ",", MAX_TAG_STRING_LENGTH);
+			}
+
+			Q_strncat(tmptags, TagList[i], MAX_TAG_STRING_LENGTH);
+		}
+
+		// set our convar and purge our list
+		sv_tags.SetValue(tmptags);
+		TagList.PurgeAndDeleteElements();
+	}
+}
+
 static void SvTagsChangeCallback(IConVar* pConVar, const char* pOldValue, float flOldValue)
 {
+	// We're going to modify the sv_tags convar here, which will cause this to be called again. Prevent recursion.
+	static bool bTagsChangeCallback = false;
+	if (bTagsChangeCallback)
+		return;
+
+	bTagsChangeCallback = true;
+
+	ServerTagsCleanUp();
+
 	ConVarRef var(pConVar);
-#ifndef NO_STEAM
-	if (SteamGameServer())
-	{
-		SteamGameServer()->GSSetGameType(var.GetString());
-	}
-#endif
+
+	sv.RecalculateTags();
+
+	bTagsChangeCallback = false;
 }
 
 ConVar			sv_region( "sv_region","-1", FCVAR_NONE, "The region of the world to report this server in." );
@@ -94,8 +165,12 @@ ConVar			sv_allow_color_correction( "sv_allow_color_correction", "1", FCVAR_REPL
 #define MAX_TAG_STRING_LENGTH		128
 
 extern CNetworkStringTableContainer *networkStringTableContainerServer;
+extern char gpszVersionString[32];
 extern int g_iSteamAppID;
 extern ConVar sv_stressbots;
+
+extern char gpszVersionString[32];
+extern char gpszProductString[32];
 
 int g_CurGameServerID = 1;
 
@@ -111,43 +186,22 @@ bool AllowDebugDedicatedServerOutsideSteam()
 }
 
 
-static void SetMasterServerKeyValue(ISteamMasterServerUpdater* pUpdater, IConVar* pConVar)
+static void SetMasterServerKeyValue( ISteamMasterServerUpdater *pUpdater, IConVar *pConVar )
 {
-	ConVarRef var(pConVar);
-#ifndef NO_STEAM
-	// For protected cvars, don't send the string
-	if (var.IsFlagSet(FCVAR_PROTECTED))
-	{
-		// If it has a value string and the string is not "none"
-		if ((strlen(var.GetString()) > 0) &&
-			stricmp(var.GetString(), "none"))
-		{
-			pUpdater->SetKeyValue(var.GetName(), "1");
-		}
-		else
-		{
-			pUpdater->SetKeyValue(var.GetName(), "0");
-		}
-	}
-	else
-	{
-		pUpdater->SetKeyValue(var.GetName(), var.GetString());
-	}
+	ConVarRef var( pConVar );
 
-	if (SteamGameServer())
-	{
-		sv.RecalculateTags();
-	}
-#endif
+	sv.RecalculateTags();
 }
 
 
-static void ServerNotifyVarChangeCallback(IConVar* pConVar, const char* pOldValue, float flOldValue)
+static void ServerNotifyVarChangeCallback( IConVar *pConVar, const char *pOldValue, float flOldValue )
 {
-	if (!pConVar->IsFlagSet(FCVAR_NOTIFY))
+	if ( !pConVar->IsFlagSet( FCVAR_NOTIFY ) )
 		return;
-
-	sv.BroadcastPrintf("NOTIFY: Server cvar %s changed its value. (previous %s) \n", pConVar->GetName(), pOldValue);
+#ifndef NO_STEAM
+	SetMasterServerKeyValue( 0, pConVar );
+#endif
+	
 }
 
 
@@ -540,7 +594,6 @@ bool CBaseServer::ValidInfoChallenge( netadr_t & adr, const char *nugget )
 
 bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 {
-
 	bf_read msg = packet->message;	// handy shortcut 
 
 	char c = msg.ReadChar();
@@ -611,6 +664,11 @@ bool CBaseServer::ProcessConnectionlessPacket(netpacket_t * packet)
 							
 		default:
 		{
+			CGameServer *pThis = NULL;
+			if ( !IsHLTV() )
+				pThis = (CGameServer*)this;
+				
+			master->HandleUnknown( packet, this, pThis );
 		}
 		break;
 	}
@@ -1673,12 +1731,19 @@ bool CBaseServer::ShouldUpdateMasterServer()
 
 void CBaseServer::CheckMasterServerRequestRestart()
 {
-
+	// Connection was rejected by the HLMaster (out of date version)
+	/// ...
 }
 
 
 void CBaseServer::UpdateMasterServer()
 {
+#ifndef NO_STEAM
+	if ( !ShouldUpdateMasterServer() )
+		return;
+
+	master->CheckHeartbeat( this );
+	
 	// Only update every so often.
 	double flCurTime = Plat_FloatTime();
 	if ( flCurTime - m_flLastMasterServerUpdateTime < MASTER_SERVER_UPDATE_INTERVAL )
@@ -1686,37 +1751,23 @@ void CBaseServer::UpdateMasterServer()
 
 	m_flLastMasterServerUpdateTime = flCurTime;
 
-
-	ForwardPacketsFromMasterServerUpdater();
 	CheckMasterServerRequestRestart();
-	
 
 	if ( NET_IsDedicated() && sv_region.GetInt() == -1 )
     {
 		sv_region.SetValue( 255 ); // HACK!HACK! undo me once we want to enforce regions
 
-        //Log_Printf( "You must set sv_region in your server.cfg or use +sv_region on the command line\n" );
-		//Con_Printf( "You must set sv_region in your server.cfg or use +sv_region on the command line\n" );
-        //Cbuf_AddText( "quit\n" );
-        //return;
+		Msg( "You must set sv_region in your server.cfg or use +sv_region on the command line\n" );
     }
 
 	static bool bUpdateMasterServers = !CommandLine()->FindParm( "-nomaster" );
 	if ( !bUpdateMasterServers )
 		return;
 
-	bool bActive = IsActive() && IsMultiplayer();
-	if ( serverGameDLL && serverGameDLL->ShouldHideServer() )
-		bActive = false;
-	
-
-	if ( !bActive )
-		return;
-
 	UpdateMasterServerRules();
 	UpdateMasterServerPlayers();
 	UpdateMasterServerBasicData();
-
+#endif
 }
 
 
@@ -1724,7 +1775,7 @@ void CBaseServer::UpdateMasterServerRules()
 {
 #ifndef NO_STEAM
 	// Only do this if the rules vars are dirty.
-	if (!m_bMasterServerRulesDirty)
+	if ( !m_bMasterServerRulesDirty )
 		return;
 	
 	// Need to respond with game directory, game name, and any server variables that have been set that
@@ -1738,6 +1789,8 @@ void CBaseServer::UpdateMasterServerRules()
 		ConVar *pConVar = dynamic_cast< ConVar* >( var );
 		if ( !pConVar )
 			continue;
+
+		SetMasterServerKeyValue( 0, pConVar );
 	}
 
 	if ( SteamGameServer() )
@@ -1753,15 +1806,12 @@ void CBaseServer::UpdateMasterServerRules()
 
 void CBaseServer::UpdateMasterServerBasicData()
 {
-
+#ifndef NO_STEAM
+	unsigned short nMaxReportedClients = GetMaxClients();
+	if ( sv_visiblemaxplayers.GetInt() > 0 && sv_visiblemaxplayers.GetInt() < GetMaxClients() )
+		nMaxReportedClients = sv_visiblemaxplayers.GetInt();
+#endif
 }
-
-
-void CBaseServer::ForwardPacketsFromMasterServerUpdater()
-{
-
-}
-
 
 /*
 =================
@@ -1959,6 +2009,13 @@ void CBaseServer::Shutdown( void )
 
 	// clear everthing
 	Clear();
+
+#ifndef _XBOX
+#ifndef NO_STEAM
+
+	master->ShutdownConnection( this );
+#endif
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -2222,8 +2279,14 @@ struct convar_tags_t
 convar_tags_t convars_to_check_for_tags[] =
 {
 	{ "mp_friendlyfire", "friendlyfire" },
+	{ "bot_quota", "bots" },
+	{ "sv_nostats", "nostats" },
+	{ "mp_startmoney", "startmoney" },
+	{ "sv_allowminmodels", "nominmodels" },
+	{ "sv_enablebunnyhopping", "bunnyhopping" },
 	{ "mp_stalemate_enable", "suddendeath" },
 	{ "sv_gravity", "gravity" },
+	{ "sv_cheats", "cheats" },
 	{ "tf_birthday", "birthday" },
 	{ "mp_respawnwavetime", "respawntimes" },
 	{ "sv_alltalk", "alltalk" },

@@ -1,4 +1,4 @@
-//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
+ï»¿//===== Copyright ï¿½ 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose: 
 //
@@ -22,7 +22,7 @@
 #include "cdll_int.h"
 #include "eiface.h"
 #include "sv_main.h"
-#include "master.h"
+#include "sv_master.h"
 #include "sv_log.h"
 #include "shadowmgr.h"
 #include "zone.h"
@@ -114,7 +114,7 @@
 #include "xbox/xbox_win32stubs.h"
 #include "audio_pch.h"
 #endif
-#undef time
+
 
 #include "ixboxsystem.h"
 extern IXboxSystem *g_pXboxSystem;
@@ -130,7 +130,7 @@ void CL_SetPagedPoolInfo();
 extern char	*CM_EntityString( void );
 extern ConVar host_map;
 extern ConVar sv_cheats;
-int g_iSteamAppID;
+extern int g_iSteamAppID;
 
 #define OPTIONS_DIR "cfg"
 
@@ -711,7 +711,7 @@ void Host_Error (const char *error, ...)
 
 #ifndef SWDS
 	// Reenable screen updates
-	SCR_EndLoadingPlaque();		
+	SCR_EndLoadingPlaque ();		
 #endif
 	ConMsg( "\nHost_Error: %s\n\n", string );
 
@@ -1302,9 +1302,7 @@ void Host_ShutdownServer( void )
 {
 	if ( !sv.IsActive() )
 		return;
-#ifndef NOMASTER
-	master->ShutdownConnection();
-#endif
+
 	// clear structures
 #if !defined( SWDS )
 	g_pShadowMgr->LevelShutdown();
@@ -2455,8 +2453,7 @@ void Host_ShowIPCCallCount()
 		ISteamClient *pSteamClient = SteamClient();
 		if ( pSteamClient )
 		{
-			//callCount = pSteamClient->GetIPCCallCount();
-			//callCount = (uint32)SteamGameServer_GetIPCCallCount();
+			callCount = (uint32)SteamGameServer_GetIPCCallCount();
 		}
 		else
 		{
@@ -3019,6 +3016,40 @@ void Host_RunFrame( float time )
 //-----------------------------------------------------------------------------
 bool IsLowViolence_Secure()
 {
+#ifndef NO_STEAM
+	if ( !IsX360() && SteamApps() )
+	{
+		//
+		// Check country of purchase.
+		//
+		char szCountry[80];
+		szCountry[0] = '\0';
+
+		// Determine violence settings based on the country of purchase.		
+		int nSuccess = SteamApps()->GetAppData( g_iSteamAppID, "country", szCountry, sizeof(szCountry) );
+		if ( nSuccess <= 0 )
+		{
+			return false;
+		}	
+
+		// Germany gets low violence.
+		if ( !Q_stricmp( szCountry, "de" ) )
+		{
+			return true;
+		}
+	}
+	else if ( IsX360() )
+	{
+		// Low violence for the 360 is enabled by the presence of a file.
+		if ( g_pFileSystem->FileExists( "cfg/violence.cfg" ) )
+		{
+			return true;
+		}
+		
+		return false;
+	}
+#endif
+		
 	return false;
 }
 
@@ -3383,9 +3414,8 @@ void Host_Init( bool bDedicated )
 	}
 
 	// Allow master server interface to register its commands
-#ifndef NOMASTER
 	TRACEINIT( master->Init(), master->Shutdown() );
-#endif
+
 	TRACEINIT( g_Log.Init(), g_Log.Shutdown() );
 
 	TRACEINIT( HLTV_Init(), HLTV_Shutdown() );
@@ -3456,8 +3486,7 @@ void Host_Init( bool bDedicated )
 
 	// Mark DLL as active
 	//	eng->SetNextState( InEditMode() ? IEngine::DLL_PAUSED : IEngine::DLL_ACTIVE );
-	g_iSteamAppID = GetSteamInfIDVersionInfo().AppID;
-	
+
 	// Deal with Gore Settings
 	Host_CheckGore();
 
@@ -3725,6 +3754,13 @@ void Host_Changelevel( bool loadfromsavedgame, const char *mapname, const char *
 	saverestore->FinishAsyncSave();
 #endif
 
+	if ( master && master->RestartOnLevelChange() )
+	{
+		Cbuf_Clear();
+		Cbuf_AddText( "quit\n" );
+		return;
+	}
+
 	if ( sv.RestartOnLevelChange() )
 	{
 		Cbuf_Clear();
@@ -3977,7 +4013,6 @@ void Host_FreeToLowMark( bool server )
 //-----------------------------------------------------------------------------
 void Host_Shutdown(void)
 {
-	Plat_DebugString("Host_Shutdown\n");
 	if ( host_checkheap )
 	{
 #ifdef _WIN32
@@ -4083,9 +4118,8 @@ void Host_Shutdown(void)
 
 	TRACESHUTDOWN( g_GameEventManager.Shutdown() );
 
-#ifndef NOMASTER
 	TRACESHUTDOWN( master->Shutdown() );
-#endif
+
 	TRACESHUTDOWN( sv.Shutdown() );
 
 	TRACESHUTDOWN( NET_Shutdown() );

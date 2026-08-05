@@ -1180,7 +1180,8 @@ void CServerGameDLL::Think( bool finalTick )
 	}
 }
 
-void CServerGameDLL::OnQueryCvarValueFinished( QueryCvarCookie_t iCookie, edict_t *pPlayerEntity, EQueryCvarValueStatus eStatus, const char *pCvarName, const char *pCvarValue )
+void CServerGameDLL::OnQueryCvarValueFinished(
+	QueryCvarCookie_t iCookie, edict_t* pPlayerEntity, EQueryCvarValueStatus eStatus, const char* pCvarName, const char* pCvarValue)
 {
 }
 
@@ -2788,7 +2789,6 @@ void CServerGameClients::GetBugReportInfo( char *buf, int buflen )
 void CServerGameClients::NetworkIDValidated( const char *pszUserName, const char *pszNetworkID )
 {
 }
-
 
 //-----------------------------------------------------------------------------
 // Purpose: 

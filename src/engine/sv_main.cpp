@@ -1,4 +1,4 @@
-//===== Copyright � 1996-2005, Valve Corporation, All rights reserved. ======//
+﻿//===== Copyright © 1996-2005, Valve Corporation, All rights reserved. ======//
 //
 // Purpose:
 //
@@ -16,7 +16,7 @@
 #include "vox.h"
 #include "EngineSoundInternal.h"
 #include "checksum_engine.h"
-#include "master.h"
+#include "sv_master.h"
 #include "host.h"
 #include "keys.h"
 #include "vengineserver_impl.h"
@@ -156,6 +156,17 @@ static void SV_Pure_f( const CCommand &args )
 	Msg( "--------------------------------------------------------\n" );
 }
 
+void SE_VoiceOpus_ChangeCallback(IConVar* var, const char* pOldValue, float flOldValue)
+{
+	extern ConVar sv_voicecodec;
+	ConVarRef ref(var);
+
+	if (ref.GetBool() == true)
+		sv_voicecodec.SetValue("vaudio_opus");
+	else
+		sv_voicecodec.SetValue("vaudio_speex");
+}
+
 static ConCommand sv_pure( "sv_pure", SV_Pure_f, "Show user data." );
 
 ConVar	sv_pure_kick_clients( "sv_pure_kick_clients", "1", 0, "If set to 1, the server will kick clients with mismatching files. Otherwise, it will issue a warning to the client." );
@@ -170,9 +181,11 @@ static	ConVar	sv_pausable( "sv_pausable","0", FCVAR_NOTIFY, "Is the server pausa
 static	ConVar	sv_contact( "sv_contact", "", FCVAR_NOTIFY, "Contact email for server sysop" );
 static	ConVar	sv_cacheencodedents("sv_cacheencodedents", "1", 0, "If set to 1, does an optimization to prevent extra SendTable_Encode calls.");
 		ConVar	sv_voicecodec("sv_voicecodec", "vaudio_speex", 0, "Specifies which voice codec DLL to use in a game. Set to the name of the DLL without the extension.");
+		ConVar  se_voice_opus("se_voice_opus", "0", FCVAR_REPLICATED, "Activate the opus voice codec on the client.", SE_VoiceOpus_ChangeCallback);
+		
 static	ConVar	sv_voiceenable( "sv_voiceenable", "1", FCVAR_ARCHIVE|FCVAR_NOTIFY ); // set to 0 to disable all voice forwarding.
 		ConVar  sv_downloadurl( "sv_downloadurl", "", FCVAR_REPLICATED, "Location from which clients can download missing files" );
-		ConVar  sv_consistency( "sv_consistency", "0", FCVAR_REPLICATED, "Whether the server enforces file consistency for critical files" );
+		ConVar  sv_consistency( "sv_consistency", "1", FCVAR_REPLICATED, "Whether the server enforces file consistency for critical files" );
 		ConVar	sv_maxreplay("sv_maxreplay", "0", 0, "Maximum replay time in seconds", true, 0, true, 15 );
 
 ConVar  sv_mincmdrate( "sv_mincmdrate", "0", FCVAR_REPLICATED, "This sets the minimum value for cl_cmdrate. 0 == unlimited." );
@@ -535,7 +548,10 @@ CON_COMMAND( user, "Show user data." )
 
 		if ( ( cl->GetPlayerSlot()== uid ) || !Q_strcmp( cl->GetClientName(), args[1]) )
 		{
-			ConMsg ("TODO: SV_User_f.\n");
+			ConMsg("SV_User_f\n");
+			Msg("Client %s [%s]:\n", cl->GetClientName(), cl->GetNetworkIDString());
+			Msg("CM%s (%s), connectMethod %s", cl->GetUserSetting("~clientmod"), cl->GetUserSetting("_client_version"),
+				cl->GetUserSetting("_connectmethod"));
 			return;
 		}
 	}
@@ -1791,9 +1807,9 @@ bool SV_ActivateServer()
 
 	// Heartbeat the master server in case we turned SrcTV on or off.
 	Steam3Server().SendUpdatedServerDetails();
-#ifndef NOMASTER
-		master->Heartbeat_f();
-#endif
+		
+	master->Heartbeat_f();
+
 	COM_TimestampedLog( "SV_ActivateServer(finished)" );
 
 	return true;

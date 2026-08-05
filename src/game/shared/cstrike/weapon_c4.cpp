@@ -108,6 +108,8 @@ END_PREDICTION_DATA()
 		PrecacheVGuiScreen( "c4_panel" );
 
 		engine->ForceModelBounds( PLANTED_C4_MODEL, Vector( -7, -13, -3 ), Vector( 9, 12, 11 ) );
+
+		PrecacheParticleSystem("bomb_explosion_huge");
 	}
 
 	void CPlantedC4::GetControlPanelInfo( int nPanelIndex, const char *&pPanelName )

@@ -26,6 +26,8 @@
 
 extern bool g_bMovementOptimizations;
 
+ConVar sv_enableboost("sv_enableboost", "1", FCVAR_REPLICATED | FCVAR_NOTIFY, "Allow boost exploits");
+
 class CCSGameMovement : public CGameMovement
 {
 public:
@@ -36,6 +38,7 @@ public:
 	virtual void ProcessMovement( CBasePlayer *pPlayer, CMoveData *pMove );
 	virtual bool CanAccelerate();
 	virtual bool CheckJumpButton( void );
+	virtual void PreventBunnyJumping( void );
 	virtual void ReduceTimers( void );
 	virtual void WalkMove( void );
 	virtual void AirMove( void );
@@ -586,6 +589,51 @@ void CCSGameMovement::ReduceTimers( void )
 	BaseClass::ReduceTimers();
 }
 
+void BhopCvarsChangeCallback(IConVar* var, const char* pOldValue, float flOldValue);
+
+ConVar sv_enablebunnyhopping("sv_enablebunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "", BhopCvarsChangeCallback);
+ConVar sv_autobunnyhopping("sv_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_NOTIFY, "", BhopCvarsChangeCallback); // ref: csgo
+
+ConVar se_autobunnyhopping("se_autobunnyhopping", "0", FCVAR_REPLICATED | FCVAR_DEVELOPMENTONLY, "", BhopCvarsChangeCallback);
+ConVar se_disablebunnyhopping("se_disablebunnyhopping", "1", FCVAR_REPLICATED | FCVAR_DEVELOPMENTONLY, "", BhopCvarsChangeCallback);
+
+void BhopCvarsChangeCallback(IConVar* var, const char* pOldValue, float flOldValue)
+{
+	ConVarRef ref(var);
+
+	if (!strcmp(var->GetName(), "sv_enablebunnyhopping"))
+		se_disablebunnyhopping.SetValue(!ref.GetBool());
+	else if (!strcmp(var->GetName(), "sv_autobunnyhopping"))
+		se_autobunnyhopping.SetValue(ref.GetBool());
+	else if (!strcmp(var->GetName(), "se_disablebunnyhopping"))
+		sv_enablebunnyhopping.SetValue(!ref.GetBool());
+	else if (!strcmp(var->GetName(), "se_autobunnyhopping"))
+		sv_autobunnyhopping.SetValue(ref.GetBool());
+}
+
+// Only allow bunny jumping up to 1.1x server / player maxspeed setting
+#define BUNNYJUMP_MAX_SPEED_FACTOR 1.4f
+
+// taken from TF2 but changed BUNNYJUMP_MAX_SPEED_FACTOR from 1.1 to 1.0
+void CCSGameMovement::PreventBunnyJumping()
+{
+	// Speed at which bunny jumping is limited
+	float maxscaledspeed = BUNNYJUMP_MAX_SPEED_FACTOR * player->m_flMaxspeed;
+	if (maxscaledspeed <= 0.0f)
+		return;
+
+	// Current player speed
+	float spd = mv->m_vecVelocity.Length();
+
+	if (spd <= maxscaledspeed)
+		return;
+
+	// Apply this cropping fraction to velocity
+	float fraction = (maxscaledspeed / spd);
+	fraction = max(0.8f, fraction);
+
+	mv->m_vecVelocity *= fraction;
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: 
@@ -637,8 +685,13 @@ bool CCSGameMovement::CheckJumpButton( void )
 		return false;		// in air, so no effect
 	}
 
-	if ( mv->m_nOldButtons & IN_JUMP )
+	if ( !sv_autobunnyhopping.GetBool() && mv->m_nOldButtons & IN_JUMP )
 		return false;		// don't pogo stick
+
+	if (!sv_enablebunnyhopping.GetBool())
+	{
+		PreventBunnyJumping();
+	}
 
 	// In the air now.
 	SetGroundEntity( NULL );

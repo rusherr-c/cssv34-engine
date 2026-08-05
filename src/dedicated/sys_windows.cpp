@@ -11,6 +11,7 @@
 
 #include <windows.h> 
 #include <stdio.h>
+#include <direct.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <eh.h>
@@ -37,6 +38,7 @@
 #include "vphysics_interface.h"
 #include "filesystem.h"
 #include "steam/steam_api.h"
+#include "iregistry.h"
 
 extern CTextConsoleWin32 console;
 extern bool g_bVGui;
@@ -286,14 +288,14 @@ bool CSys::LoadModules( CDedicatedAppSystemGroup *pAppSystemGroup )
 bool NET_Init( void )
 {
 	// Startup winock
-	WORD version = MAKEWORD( 1, 1 );
+	WORD version = MAKEWORD( 2, 2 );
 	WSADATA wsaData;
 
 	int err = WSAStartup( version, &wsaData );
 	if ( err != 0 )
 	{
 		char msg[ 256 ];
-		Q_snprintf( msg, sizeof( msg ), "Winsock 1.1 unavailable...\n" );
+		Q_snprintf( msg, sizeof( msg ), "Winsock 2.2 unavailable...\n" );
 		sys->Printf( "%s", msg );
 		Plat_DebugString( msg );
 		return false;
@@ -352,9 +354,63 @@ static char *GetBaseDir( const char *pszBuffer )
 
 void MiniDumpFunction( unsigned int nExceptionCode, EXCEPTION_POINTERS *pException )
 {
-#ifndef NO_STEAM
-	SteamAPI_WriteMiniDump( nExceptionCode, pException, 0 );
-#endif
+
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Figure out if Steam is running, then load the steam dlls
+//-----------------------------------------------------------------------------
+void TryToLoadSteamDLLs()
+{
+	// Fix multiple values in registry
+	IRegistry* steam_registry = InstanceRegistry("Steam\\ActiveProcess");
+
+	char steamClientPath[MAX_PATH];
+	char* ret = getcwd(steamClientPath, MAX_PATH);
+	if (!ret) // failed!
+		return;
+
+	strcat(steamClientPath, "\\bin\\steamclient.dll");
+	Msg("%s\n", steamClientPath);
+
+	// This is set by steamclient.dll,
+	// which is in bin/steamclient.dll. But steam can override this values,
+	// causing steamclient.dll to crash. So there is a quick fix
+	steam_registry->WriteInt("pid", GetCurrentProcessId());
+	steam_registry->WriteString("SteamClientDll", steamClientPath);
+
+	// release our registry
+	ReleaseInstancedRegistry(steam_registry);
+
+	// This can also crash the game
+	registry->WriteInt("AutoConfigVersion", 1);
+	registry->WriteInt("DXLevel_V1", 0); // 0 = default (means 95)
+
+	// Load steam.dll module
+	HMODULE hSteamDLL = LoadLibrary("Steam.dll");
+	if (!hSteamDLL)
+	{
+		Warning("Failed loading Steam.dll\n");
+		DebuggerBreakIfDebugging();
+	}
+
+	// Load & Init steam_api
+	HMODULE hSteamAPIDLL = LoadLibrary("steam_api.dll");
+	if (hSteamAPIDLL)
+	{
+		decltype(SteamAPI_Init)* pInitSteamAPI = 0;
+		pInitSteamAPI = (decltype(pInitSteamAPI))GetProcAddress((HMODULE)hSteamAPIDLL, "SteamAPI_Init");
+
+		if (!pInitSteamAPI)
+			return;
+
+		pInitSteamAPI();
+	}
+	else
+	{
+		Warning("Failed loading steam_api.dll\n");
+		DebuggerBreakIfDebugging();
+	}
 }
 
 extern "C" __declspec(dllexport) int DedicatedMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow )

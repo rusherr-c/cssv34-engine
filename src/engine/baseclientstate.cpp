@@ -34,7 +34,6 @@
 #include "server.h"
 #include "steam/steam_api.h"
 #include "SteamIDConfig.h"
-#include "master.h"
 //#include "matchmaking.h"
 
 // memdbgon must be the last include file in a .cpp file!!!

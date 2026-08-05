@@ -52,14 +52,14 @@ void CLanGames::OnTick()
 //-----------------------------------------------------------------------------
 // Purpose: returns true if the game list supports the specified ui elements
 //-----------------------------------------------------------------------------
-bool CLanGames::SupportsItem(IGameList::InterfaceItem_e item)
+bool CLanGames::SupportsItem(InterfaceItem_e item)
 {
 	switch (item)
 	{
 	case FILTERS:
-	case GETNEWLIST:
 		return true;
 
+	case GETNEWLIST:
 	default:
 		return false;
 	}
@@ -117,17 +117,15 @@ void CLanGames::CheckRetryRequest()
 //-----------------------------------------------------------------------------
 // Purpose: called when a server response has timed out, remove it
 //-----------------------------------------------------------------------------
-void CLanGames::ServerFailedToRespond( int iServer )
+void CLanGames::ServerFailedToRespond( serveritem_t& server )
 {
-	int iServerMap = m_mapServers.Find( iServer );
-	if ( iServerMap != m_mapServers.InvalidIndex() )
-		RemoveServer( m_mapServers[ iServerMap ] );
+	// NOTE: this is unused
 }
 
 //-----------------------------------------------------------------------------
 // Purpose: called when the current refresh list is complete
 //-----------------------------------------------------------------------------
-void CLanGames::RefreshComplete( NServerResponse response )
+void CLanGames::RefreshComplete( EMasterServerResponse response )
 {
 	SetRefreshing( false );
 	m_pGameList->SortList();

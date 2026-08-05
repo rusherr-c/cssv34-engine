@@ -22,15 +22,15 @@ public:
 	~CHistoryGames();
 
 	// favorites list, loads/saves into keyvalues
-	void LoadHistoryList();
-
+	void LoadHistoryList(KeyValues* historyData);
+	void SaveHistoryList(KeyValues* historyData);
 
 	// IGameList handlers
 	// returns true if the game list supports the specified ui elements
-	virtual bool SupportsItem(IGameList::InterfaceItem_e item);
+	virtual bool SupportsItem(InterfaceItem_e item);
 
 	// called when the current refresh list is complete
-	virtual void RefreshComplete( NServerResponse response );
+	virtual void RefreshComplete( EMasterServerResponse response );
 
 	void SetRefreshOnReload() { m_bRefreshOnListReload = true; }
 

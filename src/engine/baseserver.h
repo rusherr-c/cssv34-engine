@@ -186,7 +186,6 @@ protected:
 	void			UpdateMasterServerRules();
 	virtual void	UpdateMasterServerPlayers() {}
 	void			UpdateMasterServerBasicData();
-	void			ForwardPacketsFromMasterServerUpdater();
 
 	void SetRestartOnLevelChange(bool state)  { m_bRestartOnLevelChange = state; }
 

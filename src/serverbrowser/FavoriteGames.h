@@ -23,14 +23,15 @@ public:
 	~CFavoriteGames();
 
 	// favorites list, loads/saves into keyvalues
-	void LoadFavoritesList();
+	void LoadFavoritesList(KeyValues* favoritesData);
+	void SaveFavoritesList(KeyValues* favoritesData);
 	
 	// IGameList handlers
 	// returns true if the game list supports the specified ui elements
-	virtual bool SupportsItem(IGameList::InterfaceItem_e item);
+	virtual bool SupportsItem(InterfaceItem_e item);
 
 	// called when the current refresh list is complete
-	virtual void RefreshComplete( NServerResponse response );
+	virtual void RefreshComplete( EMasterServerResponse response );
 
 	// passed from main server browser window instead of messages
 	void OnConnectToGame();

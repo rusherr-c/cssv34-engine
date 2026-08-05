@@ -49,7 +49,11 @@ $Project "ServerBrowser"
 		$File	"VACBannedConnRefusedDialog.h"
 
 		$File	"QuickListPanel.cpp"
-		$File 	"$SRCDIR\public\serversinfo.cpp"
+		$File	"ServerDetailsMsgHandler.cpp"
+		$File 	"ServerList.cpp"
+		$File	"ServerCommunication.cpp"
+		$File 	"ServersInfo.cpp"
+		$File 	"Socket.cpp"
 	
 		$File	"$SRCDIR\public\vgui_controls\vgui_controls.cpp"
 		{
@@ -86,6 +90,12 @@ $Project "ServerBrowser"
 		$File	"QuickListPanel.h"
 
 		//$File	"$SRCDIR\common\ServerBrowser\blacklisted_server_manager.h"
+		$File	"IServerRefreshResponse.h"
+		$File	"ServerDetailsMsgHandler.h"
+		$File 	"ServerList.h"
+		$File	"ServerCommunication.h"
+		$File 	"ServersInfo.h"
+		$File 	"Socket.h"
 	}
 
 	$Folder	"Resource Files"
@@ -103,5 +113,6 @@ $Project "ServerBrowser"
 		$Lib	tier3
 		$Lib	vgui_controls
 		$Lib	mathlib
+		$Lib	"$LIBCOMMON/vc7/bzip2"
 	}
 }

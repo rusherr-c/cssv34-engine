@@ -685,11 +685,14 @@ bool PlayerNameNotSetYet( const char *pszName )
 
 	return false;
 }
+
 void ClientModeShared::FireGameEvent(IGameEvent* event)
 {
 	CBaseHudChat* hudChat = (CBaseHudChat*)GET_HUDELEMENT(CHudChat);
 
 	const char* eventname = event->GetName();
+
+	hudChat->ChatPrintf(0, CHAT_FILTER_NONE, "\x05\\ Event received!\n");
 
 	if (Q_strcmp("player_connect", eventname) == 0)
 	{

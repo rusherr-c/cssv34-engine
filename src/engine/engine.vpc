@@ -322,25 +322,6 @@ $Project "engine"
 		//$File	"matchmakingshared.cpp"
 		//$File	"matchmakingmigrate.cpp"
 		$File	"MaterialProxyFactory.cpp"
-		$File	"masterserver.cpp" [!$NOMASTER]
-		$File	"master_lanservers.cpp" [!$NOMASTER]
-		$File	"master_favoriteservers.cpp" [!$NOMASTER]
-		$File	"master_historyservers.cpp" [!$NOMASTER]
-		$File	"master_serverqueries.cpp" \
-			"master_monitoringservers.cpp"
-		{
-			$Configuration
-			{
-				$Compiler
-				{
-					// Omg i dont believe im doing this
-					// This will be disabled in future, when i would have time to fix some issues
-					$EnableC++Exceptions	"Yes With SEH Exceptions (/EHa)"
-				}
-			}
-		}
-		$File	"master_nethandler.cpp" [!$NOMASTER]
-		$File	"$SRCDIR\public\serversinfo.cpp"
 		$File	"mem_fgets.cpp"
 		$File	"mod_vis.cpp"
 		$File	"ModelInfo.cpp"
@@ -748,7 +729,6 @@ $Project "engine"
 		$File	"logofile_shared.h"
 		$File	"lowpassstream.h"
 		$File	"MapReslistGenerator.h"
-		$File	"master.h"
 		$File	"MaterialBuckets.h"
 		$File	"MaterialProxyFactory.h"
 		$File	"mem.h"
@@ -812,6 +792,7 @@ $Project "engine"
 		$File	"sv_log.h"
 		$File	"sv_logofile.h"
 		$File	"sv_main.h"
+		$File	"sv_master.h"
 		$File	"sv_packedentities.h"
 		$File	"sv_plugin.h"
 		$File	"sv_precache.h"

@@ -1258,7 +1258,6 @@ CON_COMMAND_F( setang_exact, "Snap player eyes and orientation to specified pitc
 #endif
 }
 
-
 //------------------------------------------------------------------------------
 // Sets client to notarget mode.
 //------------------------------------------------------------------------------

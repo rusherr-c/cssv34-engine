@@ -85,7 +85,7 @@ public:
 
 	virtual void *GetHapticsInterfaceAddress() const { return NULL; }
 	virtual void SetNovintPure( bool bPure ) {}
-	virtual bool GetRawMouseAccumulators( int& accumX, int& accumY ) { return false; }
+	virtual bool GetRawMouseAccumulators( int& accumX, int& accumY );
 	virtual void SetConsoleTextMode( bool bConsoleTextMode ) {}
 
 	// Windows proc
@@ -285,10 +285,15 @@ private:
 	xdevice_t	m_XDevices[ XUSER_MAX_COUNT ];
 	int			m_PrimaryUserId;
 
+	// raw mouse input
+	bool m_bRawInputSupported;
+	int	 m_mouseRawAccumX, m_mouseRawAccumY;
+
 	// For the 'SleepUntilInput' feature
 	HANDLE m_hEvent;
 
 	CSysModule   *m_pXInputDLL;
+	CSysModule   *m_pRawInputDLL;
 };
 
 #endif // INPUTSYSTEM_H

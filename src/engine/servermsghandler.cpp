@@ -36,7 +36,6 @@
 #include "r_decal.h"
 #include "materialsystem/imaterial.h"
 #include "EngineSoundInternal.h"
-#include "master.h"
 #include "ivideomode.h"
 #include "download.h"
 #include "GameUI/IGameUI.h"

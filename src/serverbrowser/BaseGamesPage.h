@@ -11,8 +11,9 @@
 #pragma once
 #endif
 
+#include <mutex>
+#include <thread>
 #include "tier1/utldict.h"
-#include "serversinfo.h"
 
 class CBaseGamesPage;
 
@@ -66,10 +67,12 @@ public:
 	virtual void OnCursorExited();
 };
 
-struct serverping_t
+struct servermaps_t
 {
-	int	m_nPing;
-	int	iPanelIndex;
+	const char *pOriginalName;
+	const char *pFriendlyName;
+	int			iPanelIndex;
+	bool		bOnDisk;
 };
 
 struct gametypes_t
@@ -81,7 +84,8 @@ struct gametypes_t
 //-----------------------------------------------------------------------------
 // Purpose: Base property page for all the games lists (internet/favorites/lan/etc.)
 //-----------------------------------------------------------------------------
-class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public IServerListResponse //, public ISteamMatchmakingPingResponse
+class CBaseGamesPage : public vgui::PropertyPage, public IGameList, public IServerRefreshResponse,
+	public IServerQueryResponse
 {
 	DECLARE_CLASS_SIMPLE( CBaseGamesPage, vgui::PropertyPage );
 
@@ -101,14 +105,15 @@ public:
 	{
 		k_nColumn_Password = 0,
 		k_nColumn_Secure = 1,
-		k_nColumn_Name = 2,
-		k_nColumn_IPAddr = 3,
-		k_nColumn_GameDesc = 4,
-		k_nColumn_Players = 5,
-		k_nColumn_Bots = 6,
-		k_nColumn_Map = 7,
-		k_nColumn_Tags = 8,
+		k_nColumn_AntiCheat = 2,
+		k_nColumn_Name = 3,
+		k_nColumn_IPAddr = 4,
+		k_nColumn_GameDesc = 5,
+		k_nColumn_Players = 6,
+		k_nColumn_Bots = 7,
+		k_nColumn_Map = 8,
 		k_nColumn_Ping = 9,
+		k_nColumn_Tags = 10,
 	};
 
 	CBaseGamesPage( vgui::Panel *parent, const char *name, EPageType eType, const char *pCustomResFilename=NULL);
@@ -118,7 +123,7 @@ public:
 	virtual void ApplySchemeSettings(vgui::IScheme *pScheme);
 
 	// gets information about specified server
-	virtual newgameserver_t *GetServer(unsigned int serverID);
+	virtual serveritem_t *GetServer(unsigned int serverID);
 	virtual const char *GetConnectCode();
 
 	uint32 GetServerFilters( MatchMakingKeyValuePair_t **pFilters );
@@ -142,7 +147,7 @@ public:
 
 	virtual void UpdateDerivedLayouts( void );
 	
-	void		PrepareQuickListMap( newgameserver_t *server, int iListID );
+	void		PrepareQuickListMap( const char *pMapName, int iListID );
 	void		SelectQuickListServers( void );
 	vgui::Panel *GetActiveList( void );
 	virtual bool IsQuickListButtonChecked()
@@ -170,15 +175,15 @@ protected:
 	// updates server count UI
 	void UpdateStatus();
 
-	// ISteamMatchmakingServerListResponse callbacks
-	virtual void ServerResponded( newgameserver_t &server );
-	virtual void RefreshComplete( NServerResponse response );
+	// IServerRefreshResponse callbacks
+	virtual void ServerResponded( serveritem_t& server );
+	virtual void ServerFailedToRespond( serveritem_t& server );
+	virtual void RefreshComplete( EMasterServerResponse response ) = 0;
 
-	// ISteamMatchmakingPingResponse callbacks
-	//virtual void ServerResponded( gameserveritem_t &server );
-	//virtual void ServerFailedToRespond() {}
-
-	virtual void ServerResponded( int iServer, gameserveritem_t *pServerItem );
+	// IServerQueryResponse callbacks for server rules
+	virtual void RulesResponded(netadr_t& address, const char* pchRule, const char* pchValue);
+	virtual void RulesFailedToRespond();
+	virtual void RulesRefreshComplete();
 
 	// Removes server from list
 	void RemoveServer( serverdisplay_t &server );
@@ -188,10 +193,10 @@ protected:
 
 	// filtering methods
 	// returns true if filters passed; false if failed
-	virtual bool CheckPrimaryFilters( newgameserver_t &server);
-	virtual bool CheckSecondaryFilters( newgameserver_t &server );
-	virtual bool CheckTagFilter( newgameserver_t &server ) { return true; }
-	virtual bool CheckWorkshopFilter( newgameserver_t &server ) { return true; }
+	virtual bool CheckPrimaryFilters( serveritem_t &server);
+	virtual bool CheckSecondaryFilters( serveritem_t &server );
+	virtual bool CheckTagFilter( serveritem_t &server ) { return true; }
+	virtual bool CheckWorkshopFilter( serveritem_t &server ) { return true; }
 	virtual int GetInvalidServerListID();
 
 	virtual void OnSaveFilter(KeyValues *filter);
@@ -235,13 +240,13 @@ protected:
 	CUtlMap<int, serverdisplay_t> m_mapServers;
 	CUtlMap<netadr_t, int> m_mapServerIP;
 
-	CUtlVector<newgameserver_t> m_serversInfo;
+	CUtlVector<serveritem_t> m_vecServers;
 
 	CUtlVector<MatchMakingKeyValuePair_t> m_vecServerFilters;
 	CUtlDict< CQuickListMapServerList, int > m_quicklistserverlist;
 	int m_iServerRefreshCount;
-	CUtlVector<serverping_t> m_vecServersFound;
-	
+	CUtlVector< servermaps_t > m_vecMapNamesFound;
+
 	EPageType m_eMatchMakingType;
 	int m_hRequest;
 
@@ -316,6 +321,7 @@ private:
 	bool m_bFilterNoEmptyServers;
 	bool m_bFilterNoPasswordedServers;
 	int m_iSecureFilter;
+	int m_iServersBlacklisted;
 	bool m_bFilterReplayServers;
 
 	CGameID m_iLimitToAppID;

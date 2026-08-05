@@ -16,6 +16,7 @@ CFavoriteGames::CFavoriteGames(vgui::Panel *parent) :
 	CBaseGamesPage(parent, "FavoriteGames", eFavoritesServer )
 {
 	m_bRefreshOnListReload = false;
+	ivgui()->AddTickSignal(GetVPanel());
 }
 
 //-----------------------------------------------------------------------------
@@ -26,22 +27,36 @@ CFavoriteGames::~CFavoriteGames()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose: loads favorites list from disk
 //-----------------------------------------------------------------------------
-void CFavoriteGames::LoadFavoritesList()
+void CFavoriteGames::LoadFavoritesList(KeyValues* favoritesData)
 {
-	/*
-	if ()
+	// load in favorites
+	for (KeyValues* dat = favoritesData->GetFirstSubKey(); dat != NULL; dat = dat->GetNextKey())
 	{
-		// set empty message
-		m_pGameList->SetEmptyListText("#ServerBrowser_NoFavoriteServers");
-	}
-	else
-	{
-		m_pGameList->SetEmptyListText("#ServerBrowser_NoInternetGamesResponded");
+		serveritem_t server;
+		memset(&server, 0, sizeof(server));
 
+		const char* addr = dat->GetString("address");
+		server.m_NetAdr.SetFromString(addr, true); // do a dns lookup
+		server.m_nPlayers = 0;
+		V_strncpy(server.m_szServerName, dat->GetString("name"), sizeof(server.m_szServerName));
+		V_strncpy(server.m_szMap, dat->GetString("map"), sizeof(server.m_szMap));
+		V_strncpy(server.m_szGameDir, dat->GetString("gamedir"), sizeof(server.m_szGameDir));
+		server.m_nPlayers = dat->GetInt("players");
+		server.m_nMaxPlayers = dat->GetInt("maxplayers");
+
+		// add to list
+		BaseClass::ServerResponded(server);
+
+		// next, add to serversinfo (this is neccessary because serversinfo does refresh thing)
+		g_pServersInfo->AddFavoriteServer(server.m_NetAdr.GetIPHostByteOrder(), server.m_NetAdr.GetPort());
 	}
-	*/
+
+	// set empty message
+	m_pGameList->SetEmptyListText("#ServerBrowser_NoFavoriteServers");
+
+	// refresh this list
 	if (m_bRefreshOnListReload)
 	{
 		m_bRefreshOnListReload = false;
@@ -50,9 +65,34 @@ void CFavoriteGames::LoadFavoritesList()
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: saves the current list of servers to the favorites section of the data file
+//-----------------------------------------------------------------------------
+void CFavoriteGames::SaveFavoritesList(KeyValues* favoritesData)
+{
+	favoritesData->Clear();
+
+	// loop through all the servers writing them into the doc
+	for (int i = 0; i < m_vecServers.Count(); i++)
+	{
+		serveritem_t& server = *GetServer(i);
+		if (server.m_bDoNotRefresh)
+			continue;
+
+		KeyValues* dat = favoritesData->CreateNewKey();
+
+		dat->SetString("name", server.m_szServerName);
+		dat->SetString("gamedir", server.m_szGameDir);
+		dat->SetInt("players", server.m_nPlayers);
+		dat->SetInt("maxplayers", server.m_nMaxPlayers);
+		dat->SetString("map", server.m_szMap);
+		dat->SetString("address", server.m_NetAdr.ToString());
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: returns true if the game list supports the specified ui elements
 //-----------------------------------------------------------------------------
-bool CFavoriteGames::SupportsItem(IGameList::InterfaceItem_e item)
+bool CFavoriteGames::SupportsItem(InterfaceItem_e item)
 {
 	switch (item)
 	{
@@ -61,7 +101,7 @@ bool CFavoriteGames::SupportsItem(IGameList::InterfaceItem_e item)
 		return true;
 
 	case ADDCURRENTSERVER:
-		return true;
+		return !IsSteam() && BFiltersVisible();
 	
 	case GETNEWLIST:
 	default:
@@ -73,10 +113,10 @@ bool CFavoriteGames::SupportsItem(IGameList::InterfaceItem_e item)
 //-----------------------------------------------------------------------------
 // Purpose: called when the current refresh list is complete
 //-----------------------------------------------------------------------------
-void CFavoriteGames::RefreshComplete( NServerResponse response )
+void CFavoriteGames::RefreshComplete(EMasterServerResponse response)
 {
 	SetRefreshing(false);
-	if ( response == nNoServersListedOnMasterServer )
+	if (response == k_eNoServersListedOnMasterServer)
 	{
 		// set empty message
 		m_pGameList->SetEmptyListText("#ServerBrowser_NoFavoriteServers");
@@ -88,7 +128,7 @@ void CFavoriteGames::RefreshComplete( NServerResponse response )
 	}
 	m_pGameList->SortList();
 
-	BaseClass::RefreshComplete( response );
+	BaseClass::RefreshComplete(response);
 }
 
 //-----------------------------------------------------------------------------
@@ -122,8 +162,7 @@ void CFavoriteGames::OnOpenContextMenu(int itemID)
 //-----------------------------------------------------------------------------
 void CFavoriteGames::OnRemoveFromFavorites()
 {
-
-	if (!SteamMatchmakingServers() || !SteamMatchmaking())
+	if (!g_pServersInfo)
 		return;
 
 	// iterate the selection
@@ -132,7 +171,7 @@ void CFavoriteGames::OnRemoveFromFavorites()
 		int itemID = m_pGameList->GetSelectedItem(iGame);
 		int serverID = m_pGameList->GetItemData(itemID)->userData;
 
-		newgameserver_t* pServer = GetServer(serverID);
+		serveritem_t* pServer = GetServer(serverID);
 
 		if (pServer)
 		{
@@ -162,9 +201,9 @@ void CFavoriteGames::OnAddServerByName()
 //-----------------------------------------------------------------------------
 void CFavoriteGames::OnAddCurrentServer()
 {
-	newgameserver_t *pConnected = ServerBrowserDialog().GetCurrentConnectedServer();
+	serveritem_t* pConnected = ServerBrowserDialog().GetCurrentConnectedServer();
 
-	if ( pConnected )
+	if (pConnected)
 	{
 		g_pServersInfo->AddFavoriteServer(pConnected->m_NetAdr.GetIPHostByteOrder(), pConnected->m_NetAdr.GetPort());
 		m_bRefreshOnListReload = true;

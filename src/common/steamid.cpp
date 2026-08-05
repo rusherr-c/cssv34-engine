@@ -143,9 +143,13 @@ bool CSteamID::SetFromSteam2String( const char *pchSteam2ID, EUniverse eUniverse
 //			code, this code returns a pointer to a static buffer and is NOT thread-safe.
 // Output:  buffer with rendered Steam ID
 //-----------------------------------------------------------------------------
-char * CSteamID::Render() const
+char* CSteamID::Render() const
 {
-	const int k_cBufLen = 255;
+	// longest length of returned string is k_cBufLen
+	//	[A:%u:%u:%u]
+	//	 %u == 10 * 3 + 6 == 36, plus terminator == 37
+	const int k_cBufLen = 37;
+
 	const int k_cBufs = 4;	// # of static bufs to use (so people can compose output with multiple calls to Render() )
 	static char rgchBuf[k_cBufs][k_cBufLen];
 	static int nBuf = 0;
@@ -155,23 +159,55 @@ char * CSteamID::Render() const
 
 	if ( k_EAccountTypeAnonGameServer == GetEAccountType() )
 	{
-		Q_snprintf( pchBuf, k_cBufLen, "[A-%u:%u(%u)]", GetEUniverse(), GetAccountID(), GetUnAccountInstance() );
+		V_snprintf( pchBuf, k_cBufLen, "[A:%u:%u:%u]", GetEUniverse(), GetAccountID(), GetUnAccountInstance() );
 	}
 	else if ( k_EAccountTypeGameServer == GetEAccountType() )
 	{
-		Q_snprintf( pchBuf, k_cBufLen, "[G-%u:%u]", GetEUniverse(), GetAccountID() );
+		V_snprintf( pchBuf, k_cBufLen, "[G:%u:%u]", GetEUniverse(), GetAccountID() );
 	}
 	else if ( k_EAccountTypeMultiseat == GetEAccountType() )
 	{
-		Q_snprintf( pchBuf, k_cBufLen, "[%u:%u(%u%)]", GetEUniverse(), GetAccountID(), GetUnAccountInstance() );
+		V_snprintf( pchBuf, k_cBufLen, "[M:%u:%u:%u]", GetEUniverse(), GetAccountID(), GetUnAccountInstance() );
 	} 
 	else if ( k_EAccountTypePending == GetEAccountType() )
 	{
-		Q_snprintf( pchBuf, k_cBufLen, "[%u:%u(pending)]", GetEUniverse(), GetAccountID() );
+		V_snprintf( pchBuf, k_cBufLen, "[P:%u:%u]", GetEUniverse(), GetAccountID() );
 	} 
+	else if ( k_EAccountTypeContentServer == GetEAccountType() )
+	{
+		V_snprintf( pchBuf, k_cBufLen, "[C:%u:%u]", GetEUniverse(), GetAccountID() );
+	}
+	else if ( k_EAccountTypeClan == GetEAccountType())
+	{
+		// 'g' for "group"
+		V_snprintf( pchBuf, k_cBufLen, "[g:%u:%u]", GetEUniverse(), GetAccountID() );
+	}
+	else if ( k_EAccountTypeChat == GetEAccountType())
+	{
+		if ( GetUnAccountInstance() & k_EChatInstanceFlagClan)
+		{
+			V_snprintf( pchBuf, k_cBufLen, "[c:%u:%u]", GetEUniverse(), GetAccountID() );
+		}
+		else if ( GetUnAccountInstance() & k_EChatInstanceFlagLobby )
+		{
+			V_snprintf( pchBuf, k_cBufLen, "[L:%u:%u]", GetEUniverse(), GetAccountID() );
+		}
+		else // Anon chat
+		{
+			V_snprintf( pchBuf, k_cBufLen, "[T:%u:%u]", GetEUniverse(), GetAccountID() );
+		}
+	}
+	else if ( k_EAccountTypeInvalid == GetEAccountType() )
+	{
+		V_snprintf( pchBuf, k_cBufLen, "[I:%u:%u]", GetEUniverse(), GetAccountID() );
+	}
+	else if ( k_EAccountTypeIndividual == GetEAccountType() )
+	{
+		V_snprintf( pchBuf, k_cBufLen, "[U:%u:%u]", GetEUniverse(), GetAccountID() );
+	}
 	else
 	{
-		Q_snprintf( pchBuf, k_cBufLen, "[%u:%u]", GetEUniverse(), GetAccountID() );
+		V_snprintf( pchBuf, k_cBufLen, "[i:%u:%u]", GetEUniverse(), GetAccountID() );
 	}
 	return pchBuf;
 }
